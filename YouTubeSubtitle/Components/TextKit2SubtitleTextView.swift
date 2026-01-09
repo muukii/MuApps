@@ -17,6 +17,45 @@ extension NSAttributedString.Key {
   static let wordEndTime = NSAttributedString.Key("wordEndTime")
 }
 
+// MARK: - Cue Action Attachment
+
+/// Custom text attachment that displays an action icon at the end of each cue.
+/// Uses image-based approach for reliability (NSTextAttachmentViewProvider has known issues).
+final class CueActionAttachment: NSTextAttachment {
+  /// Cue ID for identifying which cue this attachment belongs to
+  nonisolated(unsafe) var cueID: Int = 0
+  /// Original cue text for action handling
+  nonisolated(unsafe) var cueText: String = ""
+
+  convenience init(cueID: Int, cueText: String, font: UIFont) {
+    self.init()
+    self.cueID = cueID
+    self.cueText = cueText
+
+    // Create image from SF Symbol
+    let iconSize = font.pointSize * 0.9
+    let config = UIImage.SymbolConfiguration(pointSize: iconSize, weight: .medium)
+    let image = UIImage(systemName: "ellipsis.circle", withConfiguration: config)?
+      .withTintColor(.secondaryLabel, renderingMode: .alwaysOriginal)
+    self.image = image
+
+    // Adjust bounds to align with text baseline
+    if let image {
+      let yOffset = (font.capHeight - image.size.height) / 2
+      self.bounds = CGRect(x: 0, y: yOffset, width: image.size.width, height: image.size.height)
+    }
+  }
+
+  @available(*, unavailable)
+  nonisolated required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  nonisolated override init(data contentData: Data?, ofType uti: String?) {
+    super.init(data: contentData, ofType: uti)
+  }
+}
+
 // MARK: - TextKit2 Subtitle Text View
 
 /// UIViewRepresentable that displays all subtitles in a single UITextView using TextKit2.
@@ -192,6 +231,12 @@ struct TextKit2SubtitleTextView: UIViewRepresentable {
       }
 
       result.append(cueAttr)
+
+      // Add action button attachment after cue text
+      let attachment = CueActionAttachment(cueID: cue.id, cueText: cueText, font: font)
+      let attachmentString = NSAttributedString(attachment: attachment)
+      result.append(NSAttributedString(string: " "))  // Space before button
+      result.append(attachmentString)
 
       // Add paragraph separator (except for last cue)
       if cueIndex < cues.count - 1 {
@@ -417,6 +462,7 @@ struct TextKit2SubtitleTextView: UIViewRepresentable {
 
     init(onAction: @escaping (SubtitleAction) -> Void) {
       self.onAction = onAction
+      super.init()
     }
 
     // MARK: - Tap Handling
@@ -461,6 +507,17 @@ struct TextKit2SubtitleTextView: UIViewRepresentable {
 
       // Convert to offset
       let offset = textContentStorage.offset(from: textContentStorage.documentRange.location, to: location)
+
+      // Check if tapped on an attachment (action button)
+      let storage = textView.textStorage
+      if offset < storage.length {
+        let attributes = storage.attributes(at: offset, effectiveRange: nil)
+        if let attachment = attributes[.attachment] as? CueActionAttachment {
+          // Tapped on action button - show actions for this cue
+          onAction(.showSelectionActions(text: attachment.cueText, context: attachment.cueText))
+          return
+        }
+      }
 
       // Check if tapped on a word with timing
       if let wordRange = wordRanges.first(where: { NSLocationInRange(offset, $0.nsRange) }) {
