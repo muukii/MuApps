@@ -311,6 +311,8 @@ enum Settings {
   struct ExperimentalFeaturesSection: SwiftUI.View {
     var body: some SwiftUI.View {
       Section {
+        SubtitleDisplayPicker()
+
         NavigationLink {
           VocabularyListView()
         } label: {
@@ -347,6 +349,30 @@ enum Settings {
         Text("Experimental")
       } footer: {
         Text("Features under development. Live Transcription requires iOS 26+ and physical device.")
+      }
+    }
+  }
+
+  struct SubtitleDisplayPicker: SwiftUI.View {
+    @AppStorage("subtitleDisplayType") private var subtitleDisplayType: SubtitleDisplayType = .cellBased
+
+    var body: some SwiftUI.View {
+      Picker(selection: $subtitleDisplayType) {
+        ForEach(SubtitleDisplayType.allCases) { type in
+          Text(type.displayName).tag(type)
+        }
+      } label: {
+        Label {
+          VStack(alignment: .leading, spacing: 2) {
+            Text("Subtitle Display")
+            Text(subtitleDisplayType == .cellBased ? "Per-cue cells with individual scrolling" : "Single continuous text view")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        } icon: {
+          Image(systemName: "text.alignleft")
+            .foregroundStyle(.teal)
+        }
       }
     }
   }

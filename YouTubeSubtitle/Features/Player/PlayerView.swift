@@ -49,6 +49,7 @@ struct PlayerView: View {
 
   // Settings
   @AppStorage("autoTranscribeEnabled") private var autoTranscribeEnabled: Bool = true
+  @AppStorage("subtitleDisplayType") private var subtitleDisplayType: SubtitleDisplayType = .cellBased
 
   // Playback position state
   @State private var savePositionTask: Task<Void, Never>?
@@ -278,7 +279,8 @@ struct PlayerView: View {
 
   private var subtitleSection: some View {
     VStack(alignment: .leading, spacing: 0) {
-      SubtitleListViewContainer(
+      SubtitleDisplayView(
+        displayType: subtitleDisplayType,
         model: model,
         cues: currentSubtitles?.cues ?? [],
         isLoading: isLoadingTranscripts,
