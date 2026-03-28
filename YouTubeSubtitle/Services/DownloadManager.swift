@@ -5,7 +5,6 @@
 //  Created by Hiroshi Kimura on 2025/12/05.
 //
 
-@preconcurrency import BackgroundTasks
 import Foundation
 import SwiftData
 import TypedIdentifier
@@ -140,11 +139,19 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
 
 // MARK: - Download Manager
 
-/// Manages video downloads using BGContinuedProcessingTask for background execution.
-/// Progress is automatically displayed in Live Activity.
+/// Manages video downloads using BackgroundTaskManager for background execution.
+/// Progress is automatically displayed in Live Activity via BGContinuedProcessingTask.
 @Observable
 @MainActor
 final class DownloadManager: Sendable {
+
+  // MARK: - Types
+
+  /// Wrapper for safely passing MainActor-isolated references across concurrency boundaries.
+  private final class SendableRef<T: AnyObject>: @unchecked Sendable {
+    weak var value: T?
+    init(_ value: T) { self.value = value }
+  }
 
   // MARK: - Observable State
 
@@ -157,16 +164,13 @@ final class DownloadManager: Sendable {
   // MARK: - Constants
 
   /// Static task identifier registered in Info.plist
-  private static let taskIdentifier = "app.muukii.verse.download"
+  private static let taskIdentifierPrefix = "app.muukii.verse.download"
 
   // MARK: - Private Properties
 
-  private let scheduler = BGTaskScheduler.shared
   private let modelContainer: ModelContainer
-  private var activeTask: BGContinuedProcessingTask?
   private var downloadTasks: [TypedIdentifier<VideoItem>: Task<Void, Never>] = [:]
   private var urlSessionTasks: [TypedIdentifier<VideoItem>: URLSessionDownloadTask] = [:]
-  private var isTaskRegistered = false
 
   // MARK: - Initialization
 
@@ -218,13 +222,29 @@ final class DownloadManager: Sendable {
     )
     pendingItemIDs.append(itemID)
 
-    // Try to submit BGTask, fall back to foreground download if unavailable
-    do {
-      try submitTask(for: itemID)
-    } catch {
-      // BGTask unavailable (e.g., simulator), run foreground download
-      print("BGTask unavailable, falling back to foreground download: \(error)")
-      startDownload(itemID: itemID, bgTask: nil)
+    // Schedule background task using BackgroundTaskManager
+    let videoTitle = item.title ?? "Downloading video"
+    let subtitle = "YouTube: \(videoID)"
+    let selfRef = SendableRef(self)
+
+    let scheduled = BackgroundTaskManager.shared.scheduleContinued(
+      identifier: Self.taskIdentifierPrefix + ".\(itemID.raw.uuidString)",
+      configuration: .init(title: videoTitle, subtitle: subtitle)
+    ) { context in
+      await MainActor.run {
+        guard let manager = selfRef.value else { return }
+        manager.startDownload(itemID: itemID, taskContext: context)
+      }
+      // Wait for the download task to complete
+      if let task = await MainActor.run(body: { selfRef.value?.downloadTasks[itemID] }) {
+        await task.value
+      }
+    }
+
+    if !scheduled {
+      // BackgroundTaskManager scheduling failed, run foreground download
+      print("BackgroundTaskManager scheduling failed, running foreground download")
+      startDownload(itemID: itemID, taskContext: nil)
     }
 
     return itemID
@@ -378,79 +398,34 @@ final class DownloadManager: Sendable {
       }
     }
 
-    // Submit tasks for all pending downloads
-    for itemID in pendingItemIDs {
-      do {
-        try submitTask(for: itemID)
-      } catch {
-        // BGTask unavailable, fall back to foreground download
-        print("BGTask unavailable for restored download, falling back to foreground: \(error)")
-        startDownload(itemID: itemID, bgTask: nil)
-        break // Only start one foreground download at a time
+    // Schedule background tasks for all pending downloads
+    let selfRef = SendableRef(self)
+    for item in pendingItems {
+      let itemID = item.typedID
+      let videoTitle = item.title ?? "Downloading video"
+      let subtitle = "YouTube: \(item.videoID)"
+
+      let scheduled = BackgroundTaskManager.shared.scheduleContinued(
+        identifier: Self.taskIdentifierPrefix + ".\(itemID.raw.uuidString)",
+        configuration: .init(title: videoTitle, subtitle: subtitle)
+      ) { context in
+        await MainActor.run {
+          guard let manager = selfRef.value else { return }
+          manager.startDownload(itemID: itemID, taskContext: context)
+        }
+        // Wait for the download task to complete
+        if let task = await MainActor.run(body: { selfRef.value?.downloadTasks[itemID] }) {
+          await task.value
+        }
+      }
+
+      if !scheduled {
+        // BackgroundTaskManager scheduling failed, run foreground download
+        print("BackgroundTaskManager scheduling failed for restored download, running foreground")
+        startDownload(itemID: itemID, taskContext: nil)
+        break  // Only start one foreground download at a time
       }
     }
-  }
-
-  // MARK: - BGTask Management
-
-  /// Handle the background task for a specific download.
-  private func handleBackgroundTask(_ task: BGContinuedProcessingTask, itemID: TypedIdentifier<VideoItem>) async {
-    // Track active task
-    activeTask = task
-
-    // Set up expiration handler
-    var wasExpired = false
-    task.expirationHandler = { [weak self] in
-      wasExpired = true
-      Task { @MainActor in
-        self?.downloadTasks[itemID]?.cancel()
-      }
-    }
-
-    // Configure progress reporting for Live Activity
-    task.progress.totalUnitCount = 100
-
-    // Execute download
-    startDownload(itemID: itemID, bgTask: task, checkExpired: { wasExpired })
-
-    // Wait for download to complete
-    await downloadTasks[itemID]?.value
-
-    // Cleanup
-    activeTask = nil
-    task.setTaskCompleted(success: true)
-
-    // Remove from pending
-    pendingItemIDs.removeAll { $0 == itemID }
-  }
-
-  /// Submit a task request for a specific download.
-  private func submitTask(for itemID: TypedIdentifier<VideoItem>) throws {
-    guard let progress = activeDownloads[itemID] else { return }
-
-    let fullIdentifier = Self.taskIdentifier + ".\(itemID.raw.uuidString)"
-
-    // Dynamically register handler for this specific task identifier
-    scheduler.register(forTaskWithIdentifier: fullIdentifier, using: nil) { @Sendable [weak self] task in
-      guard let bgTask = task as? BGContinuedProcessingTask else { return }
-
-      Task { @MainActor [weak self, bgTask] in
-        await self?.handleBackgroundTask(bgTask, itemID: itemID)
-      }
-    }
-
-    // Use video title if available, otherwise generic title
-    let title = progress.videoTitle ?? "Downloading video"
-    let subtitle = "YouTube: \(progress.videoID)"
-
-    let request = BGContinuedProcessingTaskRequest(
-      identifier: fullIdentifier,
-      title: title,
-      subtitle: subtitle
-    )
-    request.strategy = .queue
-
-    try scheduler.submit(request)
   }
 
   // MARK: - Unified Download Execution
@@ -458,15 +433,13 @@ final class DownloadManager: Sendable {
   /// Start a download task (unified for both foreground and BGTask).
   private func startDownload(
     itemID: TypedIdentifier<VideoItem>,
-    bgTask: BGContinuedProcessingTask?,
-    checkExpired: @escaping () -> Bool = { false }
+    taskContext: BackgroundTaskManager.TaskContext?
   ) {
     let downloadTask = Task { [weak self] in
       guard let self else { return }
       await self.performDownload(
         itemID: itemID,
-        bgTask: bgTask,
-        checkExpired: checkExpired
+        taskContext: taskContext
       )
     }
     downloadTasks[itemID] = downloadTask
@@ -475,8 +448,7 @@ final class DownloadManager: Sendable {
   /// Perform the download (unified for both foreground and BGTask).
   private func performDownload(
     itemID: TypedIdentifier<VideoItem>,
-    bgTask: BGContinuedProcessingTask?,
-    checkExpired: @escaping () -> Bool
+    taskContext: BackgroundTaskManager.TaskContext?
   ) async {
 
     // Fetch item
@@ -513,8 +485,7 @@ final class DownloadManager: Sendable {
         videoID: item.videoID,
         fileExtension: fileExtension,
         itemID: itemID,
-        bgTask: bgTask,
-        checkExpired: checkExpired
+        taskContext: taskContext
       )
 
       // Mark as completed
@@ -537,8 +508,8 @@ final class DownloadManager: Sendable {
       downloadTasks.removeValue(forKey: itemID)
 
       // Process next in queue (only for foreground downloads)
-      if bgTask == nil, let nextID = pendingItemIDs.first {
-        startDownload(itemID: nextID, bgTask: nil)
+      if taskContext == nil, let nextID = pendingItemIDs.first {
+        startDownload(itemID: nextID, taskContext: nil)
       }
 
     } catch is CancellationError {
@@ -564,8 +535,7 @@ final class DownloadManager: Sendable {
     videoID: YouTubeContentID,
     fileExtension: String,
     itemID: TypedIdentifier<VideoItem>,
-    bgTask: BGContinuedProcessingTask?,
-    checkExpired: @escaping () -> Bool
+    taskContext: BackgroundTaskManager.TaskContext?
   ) async throws -> URL {
 
     // Prepare destination file path
@@ -602,7 +572,7 @@ final class DownloadManager: Sendable {
     for await event in eventStream {
       // Check for cancellation or expiration
       try Task.checkCancellation()
-      if checkExpired() {
+      if taskContext?.isCancelled ?? false {
         downloadTask.cancel()
         throw DownloadError.taskExpired
       }
@@ -617,10 +587,11 @@ final class DownloadManager: Sendable {
           let fraction = update.fractionCompleted
 
           // Update Live Activity progress (if BGTask)
-          if let bgTask {
-            bgTask.progress.completedUnitCount = Int64(fraction * 100)
-            bgTask.updateTitle("Downloading video", subtitle: "\(Int(fraction * 100))%")
-          }
+          taskContext?.reportProgress(fraction)
+          taskContext?.updateLiveActivity(
+            title: "Downloading video",
+            subtitle: "\(Int(fraction * 100))%"
+          )
 
           // Update observable state on main thread
           updateProgress(itemID: itemID, fraction: fraction, state: .downloading)

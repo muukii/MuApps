@@ -14,6 +14,7 @@ struct YouTubeSubtitleApp: App {
 
   let modelContainer: ModelContainer
   let downloadManager: DownloadManager
+  let transcriptionManager: OnDeviceTranscriptionManager
 
   init() {
     // Configure audio session for video playback (allows audio in silent mode)
@@ -34,14 +35,22 @@ struct YouTubeSubtitleApp: App {
     do {
       modelContainer = try ModelContainer(for: schema)
       self.downloadManager = DownloadManager(modelContainer: modelContainer)
+      self.transcriptionManager = OnDeviceTranscriptionManager(
+        modelContainer: modelContainer,
+        downloadManager: downloadManager
+      )
     } catch {
       // Migration failed - delete existing database and retry
       print("ModelContainer creation failed: \(error). Deleting database and retrying...")
       Self.deleteSwiftDataStore()
-      
+
       do {
         modelContainer = try ModelContainer(for: schema)
         self.downloadManager = DownloadManager(modelContainer: modelContainer)
+        self.transcriptionManager = OnDeviceTranscriptionManager(
+          modelContainer: modelContainer,
+          downloadManager: downloadManager
+        )
       } catch {
         fatalError("Failed to create ModelContainer after database reset: \(error)")
       }
@@ -78,5 +87,6 @@ struct YouTubeSubtitleApp: App {
     .defaultSize(width: 800, height: 600)
     .modelContainer(modelContainer)
     .environment(downloadManager)
+    .environment(transcriptionManager)
   }
 }
