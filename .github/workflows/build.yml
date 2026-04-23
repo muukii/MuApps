@@ -32,16 +32,16 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
-      # - name: Install dependencies with Tuist
-      #   run: tuist install
+      - name: Install dependencies with Tuist
+        run: tuist install
 
-      # - name: Generate Xcode project with Tuist
-      #   run: tuist generate
+      - name: Generate Xcode workspace with Tuist
+        run: tuist generate --no-open
 
       - name: Build iOS
         run: |
           set -o pipefail && xcodebuild \
-            -project Verse.xcodeproj \
+            -workspace MuApps.xcworkspace \
             -scheme Verse \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \

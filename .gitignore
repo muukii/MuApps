@@ -92,7 +92,8 @@ vendor
 
 .claude/settings.local.json
 
-# Tuist
+# Tuist generated artifacts
 Derived/
-Verse-tuist.xcodeproj/
-Verse-tuist.xcworkspace/
+MuApps.xcworkspace/
+Apps/*/*.xcodeproj/
+Apps/*/Derived/

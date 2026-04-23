@@ -57,11 +57,11 @@ jobs:
         with:
           xcode-version: ${{ inputs.xcode-version }}
 
-      # - name: Install dependencies with Tuist
-      #   run: tuist install
+      - name: Install dependencies with Tuist
+        run: tuist install
 
-      # - name: Generate Xcode project with Tuist
-      #   run: tuist generate
+      - name: Generate Xcode workspace with Tuist
+        run: tuist generate --no-open
 
       - name: Setup App Store Connect API Key
         env:
@@ -78,7 +78,7 @@ jobs:
           set -o pipefail
 
           xcodebuild archive \
-            -project Verse.xcodeproj \
+            -workspace MuApps.xcworkspace \
             -scheme "${{ inputs.scheme }}" \
             -configuration "${{ inputs.configuration }}" \
             -destination "generic/platform=iOS" \

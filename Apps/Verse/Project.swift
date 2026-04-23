@@ -24,7 +24,7 @@ let appInfoPlist: InfoPlist = .extendingDefault(with: [
 // MARK: - Project
 
 let project = Project(
-  name: "Verse-tuist",
+  name: "Verse",
   organizationName: AppConstants.organizationName,
   settings: .settings(
     base: .base,
@@ -42,8 +42,8 @@ let project = Project(
       bundleId: AppConstants.appBundleId,
       deploymentTargets: .app,
       infoPlist: appInfoPlist,
-      buildableFolders: ["YouTubeSubtitle"],
-      entitlements: .file(path: "YouTubeSubtitle/YouTubeSubtitle.entitlements"),
+      buildableFolders: ["Sources"],
+      entitlements: .file(path: "Sources/YouTubeSubtitle.entitlements"),
       dependencies: [
         // Internal target
         .target(name: "Components"),
@@ -62,8 +62,8 @@ let project = Project(
       settings: .settings(
         base: .appTarget,
         configurations: [
-          .debug(name: "Debug", xcconfig: "Tuist/xcconfig/Version.xcconfig"),
-          .release(name: "Release", xcconfig: "Tuist/xcconfig/Version.xcconfig"),
+          .debug(name: "Debug", xcconfig: "xcconfig/Version.xcconfig"),
+          .release(name: "Release", xcconfig: "xcconfig/Version.xcconfig"),
         ]
       )
     ),

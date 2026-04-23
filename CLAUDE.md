@@ -4,40 +4,82 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-YouTubeSubtitle is a SwiftUI-based multi-platform application targeting iOS and macOS.
+`MuApps` is a Tuist-managed monorepo that hosts multiple iOS apps under `Apps/`. `Verse` is the primary app (SwiftUI-based YouTube subtitle viewer / learning tool). `HelloWorld` is a minimal scaffold that serves as the template for new apps.
 
-> **Note**: Tuist is NOT yet adopted in this project. Use standard Xcode commands for building.
+## Workspace Layout
+
+```
+Workspace.swift              # Tuist workspace (lists projects under Apps/)
+Tuist.swift                  # Tuist config
+Tuist/
+  Package.swift              # Shared external SPM dependencies (all apps)
+  ProjectDescriptionHelpers/ # Shared Project.swift helpers (AppConstants, settings)
+Apps/
+  Verse/                     # Main app
+    Project.swift
+    Sources/                 # Swift sources (incl. YouTubeSubtitle.entitlements)
+    Components/              # App-local Components framework target
+    Info.plist
+    xcconfig/Version.xcconfig
+  HelloWorld/                # Scaffold app — copy this to bootstrap a new app
+    Project.swift
+    Sources/
+Shared/                      # Shared modules shared across apps (currently empty)
+  Project.swift              # Add cross-app framework targets here
+Packages/                    # Local SPM packages
+```
+
+### Adding a Shared Module
+
+When a module needs to be shared between apps:
+
+1. Create `Shared/<ModuleName>/` and put Swift sources there
+2. Add a `.target(...)` entry in `Shared/Project.swift` (see the template comment at the top)
+3. Register `Shared` in `Workspace.swift`'s `projects` array (first time only)
+4. In the consuming app's `Project.swift`, add `.project(target: "<ModuleName>", path: "../../Shared")` to `dependencies`
+5. Run `tuist generate`
 
 ## Build Commands
 
-### Building the project
+Always run `tuist install` and `tuist generate` before building (the `.xcworkspace` and per-app `.xcodeproj` are gitignored).
+
+### Generate the workspace
 ```bash
-xcodebuild -scheme YouTubeSubtitle -destination 'platform=iOS Simulator,name=iPhone 16' build
+tuist install
+tuist generate
+```
+
+### Building an app
+```bash
+xcodebuild -workspace MuApps.xcworkspace -scheme Verse -destination 'platform=iOS Simulator,name=iPhone 16' build
+xcodebuild -workspace MuApps.xcworkspace -scheme HelloWorld -destination 'platform=iOS Simulator,name=iPhone 16' build
 ```
 
 ### Running tests
 ```bash
-xcodebuild -scheme YouTubeSubtitle -destination 'platform=iOS Simulator,name=iPhone 16' test
+xcodebuild -workspace MuApps.xcworkspace -scheme Verse -destination 'platform=iOS Simulator,name=iPhone 16' test
 ```
 
 ### Opening in Xcode
 ```bash
-open YouTubeSubtitle.xcodeproj
+open MuApps.xcworkspace
 ```
 
-## Project Structure
+## Adding a New App
 
-- `YouTubeSubtitle/YouTubeSubtitleApp.swift` - Main app entry point with `@main`
-- `YouTubeSubtitle/ContentView.swift` - Root SwiftUI view
-- `YouTubeSubtitle.xcodeproj/` - Xcode project configuration
+1. Copy `Apps/HelloWorld/` to `Apps/<NewApp>/` and rename sources.
+2. Update `bundleId` and `name` in its `Project.swift`.
+3. Add the new directory to `Workspace.swift`'s `projects` array.
+4. Run `tuist generate`.
+
+Shared external SPM dependencies: add to `Tuist/Package.swift` and reference via `.external(name: ...)` in the app's `Project.swift`. Shared manifest helpers (settings, constants): extend `Tuist/ProjectDescriptionHelpers/Project+Templates.swift`.
 
 ## Development Notes
 
 - Uses SwiftUI as the UI framework
-- Target platforms: iOS and macOS
-- Single scheme: `YouTubeSubtitle`
-- Default build configurations: Debug and Release
-- Dependencies are managed via Swift Package Manager (SPM)
+- Target platforms: iOS (see `DeploymentTargets.app` in helpers)
+- Dependencies are managed via Swift Package Manager through Tuist
+- Each app owns its own sources under `Apps/<App>/`; frameworks shared across apps are a future refactor (currently `Components` is Verse-local)
 
 ## Documentation Policy
 

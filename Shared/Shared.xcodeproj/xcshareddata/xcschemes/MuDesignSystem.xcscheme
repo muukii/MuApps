@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "2620"
-   version = "1.7">
+   LastUpgradeVersion = "1010"
+   version = "1.3">
    <BuildAction
       parallelizeBuildables = "YES"
-      buildImplicitDependencies = "YES"
-      buildArchitectures = "Automatic">
+      buildImplicitDependencies = "YES">
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"
@@ -15,10 +14,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "B0FAE6762EDC249B008493F1"
-               BuildableName = "Verse.app"
-               BlueprintName = "Verse"
-               ReferencedContainer = "container:Verse.xcodeproj">
+               BlueprintIdentifier = "F80A2D14357A1FB11FC04E1E"
+               BuildableName = "MuDesignSystem.framework"
+               BlueprintName = "MuDesignSystem"
+               ReferencedContainer = "container:Shared.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -28,7 +27,9 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
-      shouldAutocreateTestPlan = "YES">
+      disableMainThreadChecker = "YES">
+      <Testables>
+      </Testables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
@@ -40,16 +41,15 @@
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
       allowLocationSimulation = "YES">
-      <BuildableProductRunnable
-         runnableDebuggingMode = "0">
+      <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "B0FAE6762EDC249B008493F1"
-            BuildableName = "Verse.app"
-            BlueprintName = "Verse"
-            ReferencedContainer = "container:Verse.xcodeproj">
+            BlueprintIdentifier = "F80A2D14357A1FB11FC04E1E"
+            BuildableName = "MuDesignSystem.framework"
+            BlueprintName = "MuDesignSystem"
+            ReferencedContainer = "container:Shared.xcodeproj">
          </BuildableReference>
-      </BuildableProductRunnable>
+      </MacroExpansion>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -57,16 +57,15 @@
       savedToolIdentifier = ""
       useCustomWorkingDirectory = "NO"
       debugDocumentVersioning = "YES">
-      <BuildableProductRunnable
-         runnableDebuggingMode = "0">
+      <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "B0FAE6762EDC249B008493F1"
-            BuildableName = "Verse.app"
-            BlueprintName = "Verse"
-            ReferencedContainer = "container:Verse.xcodeproj">
+            BlueprintIdentifier = "F80A2D14357A1FB11FC04E1E"
+            BuildableName = "MuDesignSystem.framework"
+            BlueprintName = "MuDesignSystem"
+            ReferencedContainer = "container:Shared.xcodeproj">
          </BuildableReference>
-      </BuildableProductRunnable>
+      </MacroExpansion>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">
