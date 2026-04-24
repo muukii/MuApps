@@ -85,7 +85,7 @@ Shared external SPM dependencies: add to `Tuist/Package.swift` and reference via
 
 ### When to Update SPECIFICATION.md
 
-**IMPORTANT**: Whenever you make functional changes to the application, you MUST update `Docs/SPECIFICATION.md` to reflect those changes.
+**IMPORTANT**: Whenever you make functional changes to the application, you MUST update `docs/SPECIFICATION.md` to reflect those changes.
 
 Update the specification when:
 - Adding new features (UI components, screens, functionality)
@@ -102,7 +102,7 @@ Do NOT update for:
 
 ### How to Update
 
-1. Read the current specification: `Docs/SPECIFICATION.md`
+1. Read the current specification: `docs/SPECIFICATION.md`
 2. Identify the relevant section(s) that need updates
 3. Make precise changes that:
    - Describe WHAT the feature does (user perspective)
@@ -114,5 +114,5 @@ Do NOT update for:
 
 After completing any feature implementation or modification:
 1. Ask yourself: "Does this change affect what users can do or see?"
-2. If YES → Update `Docs/SPECIFICATION.md`
+2. If YES → Update `docs/SPECIFICATION.md`
 3. If NO → Document in comments/commit message why spec wasn't updated

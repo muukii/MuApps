@@ -1,0 +1,243 @@
+name: Deploy Ad Hoc OTA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: Verse
+  BUNDLE_IDENTIFIER: app.muukii.verse
+  RELEASE_TAG: adhoc-latest
+  IPA_NAME: Verse.ipa
+  MANIFEST_NAME: manifest.plist
+
+# Required repository secrets:
+#   - ASC_TEAM_KEY_ID
+#   - ASC_TEAM_KEY_CONTENT
+#   - ASC_TEAM_ISSUER_ID
+#   - TEAM_ID
+
+jobs:
+  deploy:
+    name: Build and Publish OTA Assets
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install mise
+        uses: jdx/mise-action@v2
+        with:
+          install: true
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.2'
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install dependencies with Tuist
+        run: tuist install
+
+      - name: Generate Xcode workspace with Tuist
+        run: tuist generate --no-open
+
+      - name: Setup App Store Connect API Key
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_TEAM_KEY_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_TEAM_KEY_CONTENT }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/private_keys
+          printf '%s' "$ASC_KEY_CONTENT" > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          echo "API Key configured"
+
+      - name: Archive app
+        run: |
+          set -euo pipefail
+
+          xcodebuild archive \
+            -workspace MuApps.xcworkspace \
+            -scheme "$APP_NAME" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "./build/${APP_NAME}.xcarchive" \
+            -skipMacroValidation \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      - name: Embed entitlements for export
+        run: |
+          set -euo pipefail
+
+          APP_PATH="./build/${APP_NAME}.xcarchive/Products/Applications/${APP_NAME}.app"
+          ENTITLEMENTS_FILE="Apps/${APP_NAME}/Sources/YouTubeSubtitle.entitlements"
+
+          if [ -f "$ENTITLEMENTS_FILE" ]; then
+            codesign --entitlements "$ENTITLEMENTS_FILE" --force --sign "-" "$APP_PATH"
+            echo "Entitlements embedded successfully"
+          else
+            echo "No entitlements file found at $ENTITLEMENTS_FILE"
+          fi
+
+      - name: Create ExportOptions.plist
+        env:
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ./build/export
+          cat > ./build/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>release-testing</string>
+              <key>destination</key>
+              <string>export</string>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>teamID</key>
+              <string>$TEAM_ID</string>
+              <key>stripSwiftSymbols</key>
+              <true/>
+              <key>manageAppVersionAndBuildNumber</key>
+              <false/>
+              <key>thinning</key>
+              <string>&lt;none&gt;</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Export IPA
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_TEAM_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_TEAM_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+
+          xcodebuild -exportArchive \
+            -archivePath "./build/${APP_NAME}.xcarchive" \
+            -exportPath "./build/export" \
+            -exportOptionsPlist ./build/ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            | xcbeautify --renderer github-actions
+
+          IPA_PATH="$(find ./build/export -maxdepth 1 -name '*.ipa' -print -quit)"
+          if [ -z "$IPA_PATH" ]; then
+            echo "No IPA was exported"
+            exit 1
+          fi
+
+          mkdir -p ./build/release
+          cp "$IPA_PATH" "./build/release/${IPA_NAME}"
+
+      - name: Generate manifest.plist
+        run: |
+          set -euo pipefail
+
+          APP_PATH="./build/${APP_NAME}.xcarchive/Products/Applications/${APP_NAME}.app"
+          APP_INFO_PLIST="${APP_PATH}/Info.plist"
+          RELEASE_BASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          IPA_URL="${RELEASE_BASE_URL}/${IPA_NAME}"
+
+          BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_INFO_PLIST")"
+          BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO_PLIST")"
+          SHORT_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO_PLIST")"
+          TITLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$APP_INFO_PLIST" 2>/dev/null || printf '%s' "$APP_NAME")"
+
+          if [ "$BUNDLE_ID" != "$BUNDLE_IDENTIFIER" ]; then
+            echo "Unexpected bundle identifier: $BUNDLE_ID"
+            exit 1
+          fi
+
+          cat > "./build/release/${MANIFEST_NAME}" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>items</key>
+              <array>
+                  <dict>
+                      <key>assets</key>
+                      <array>
+                          <dict>
+                              <key>kind</key>
+                              <string>software-package</string>
+                              <key>url</key>
+                              <string>${IPA_URL}</string>
+                          </dict>
+                      </array>
+                      <key>metadata</key>
+                      <dict>
+                          <key>bundle-identifier</key>
+                          <string>${BUNDLE_ID}</string>
+                          <key>bundle-version</key>
+                          <string>${BUNDLE_VERSION}</string>
+                          <key>kind</key>
+                          <string>software</string>
+                          <key>subtitle</key>
+                          <string>${SHORT_VERSION} (${BUNDLE_VERSION})</string>
+                          <key>title</key>
+                          <string>${TITLE}</string>
+                      </dict>
+                  </dict>
+              </array>
+          </dict>
+          </plist>
+          EOF
+
+          plutil -lint "./build/release/${MANIFEST_NAME}"
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          RELEASE_NOTES="$(mktemp)"
+          cat > "$RELEASE_NOTES" <<EOF
+          Ad Hoc OTA assets for the latest manually published Verse build.
+
+          Install page:
+          https://muukii.github.io/Verse.app/install.html
+
+          Direct manifest:
+          https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${MANIFEST_NAME}
+          EOF
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --title "Ad Hoc Latest" \
+              --notes-file "$RELEASE_NOTES"
+          else
+            gh release create "$RELEASE_TAG" \
+              --title "Ad Hoc Latest" \
+              --notes-file "$RELEASE_NOTES"
+          fi
+
+          gh release upload "$RELEASE_TAG" \
+            "./build/release/${IPA_NAME}" \
+            "./build/release/${MANIFEST_NAME}" \
+            --clobber
+
+      - name: Upload workflow artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adhoc-ota-assets
+          path: ./build/release/
+          retention-days: 7
