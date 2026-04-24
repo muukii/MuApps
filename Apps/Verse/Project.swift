@@ -50,7 +50,6 @@ let project = Project(
 
         // External SPM dependencies
         .external(name: "YouTubeKit"),
-        .external(name: "YoutubeTranscript"),
         .external(name: "ObjectEdge"),
         .external(name: "SwiftUIRingSlider"),
         .external(name: "TypedIdentifier"),

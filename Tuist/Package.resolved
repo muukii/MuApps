@@ -1,6 +1,60 @@
 {
-  "originHash" : "9ec23f549f24a10bd4231e91d9aacf7a8737ef6813d5f1d5b86c8301da47a63a",
+  "originHash" : "3f1a7c53b01587d8d09419b50f894471a20cb3b10c9a6453bc3a0e631cacda1c",
   "pins" : [
+    {
+      "identity" : "avif.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/awxkee/avif.swift",
+      "state" : {
+        "revision" : "82ef6ff1051e25f8944d2ad8aee148ae79e90986",
+        "version" : "1.7.0"
+      }
+    },
+    {
+      "identity" : "libaom.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/awxkee/libaom.swift.git",
+      "state" : {
+        "revision" : "83e08f0eb34bf6ef95a82d15f4cfbbc2d70deeb2",
+        "version" : "1.1.2"
+      }
+    },
+    {
+      "identity" : "libdav1d.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/awxkee/libdav1d.swift.git",
+      "state" : {
+        "revision" : "56f7037e7af7646f1d02bdcd16f5032e9d66e4d1",
+        "version" : "1.2.0"
+      }
+    },
+    {
+      "identity" : "libsvtav1enc.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/awxkee/libsvtav1enc.swift",
+      "state" : {
+        "revision" : "551a675778aa0dda6d23653ef3d0fc37a8d33c08",
+        "version" : "1.1.0"
+      }
+    },
+    {
+      "identity" : "libwebp-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/awxkee/libwebp-ios.git",
+      "state" : {
+        "revision" : "46b42251e665d520a4d842d48e8d5bcac9399942",
+        "version" : "1.2.0"
+      }
+    },
+    {
+      "identity" : "libyuv.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/awxkee/libyuv.swift.git",
+      "state" : {
+        "revision" : "810842f196c65b77a39c2f32080225166b0e8f87",
+        "version" : "1.1.0"
+      }
+    },
     {
       "identity" : "nuke",
       "kind" : "remoteSourceControl",
@@ -56,15 +110,6 @@
       }
     },
     {
-      "identity" : "swift-youtube-transcript",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/spaceman1412/swift-youtube-transcript",
-      "state" : {
-        "revision" : "e6fb610ee78d5dff8c8c81589875d43cbc9ef856",
-        "version" : "1.0.0"
-      }
-    },
-    {
       "identity" : "swiftui-async-multiplex-image",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/FluidGroup/swiftui-async-multiplex-image",
@@ -114,8 +159,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/alexeichhorn/YouTubeKit",
       "state" : {
-        "revision" : "481c8e3a924ccad893197bdc4577424fae952853",
-        "version" : "0.4.0"
+        "revision" : "65be95dbb1dbd749499e0638871568c823822276",
+        "version" : "0.4.8"
       }
     }
   ],

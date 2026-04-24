@@ -2,7 +2,7 @@
 
 ## Overview
 
-Verse (project name: YouTubeSubtitle) is a SwiftUI app for iOS and macOS that lets users watch YouTube videos with synced subtitles, navigation tools, and on-device language assistance.
+Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that lets users watch YouTube videos with synced subtitles, navigation tools, and on-device language assistance.
 
 ### Target Users
 - Language learners (English, Japanese, and other subtitle languages)
@@ -43,9 +43,9 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iOS and macOS that le
 ### 2. Subtitles
 
 #### 2.1 Retrieval and Caching
-- Auto-fetch YouTube transcripts on load (language auto-detected by YouTube)
 - Cached subtitles stored locally per history item
-- On-device transcription (SpeechAnalyzer) when captions are unavailable
+- Auto-generate subtitles on load with on-device transcription when enabled and no suitable cached subtitles exist
+- On-device transcription (SpeechAnalyzer) can enhance cached/imported subtitles with word timing data
 - Manual subtitle import from files (SRT, VTT, SBV, CSV, LRC, TTML)
 
 #### 2.2 Display
@@ -154,12 +154,14 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iOS and macOS that le
 - History list with thumbnails, metadata, and playback progress bars
 - Toolbar: Sort menu (Manual/Last Played/Date Added), Edit (for reordering in Manual mode only), Settings
 - Bottom bar: Paste URL, Browse YouTube
+- iPad layout uses a split view with a persistent history sidebar and a dedicated detail pane for playback
 - Edit mode: drag handles for reordering history items (Manual sort mode only)
 - Context menu: Add to Playlist
 
 ### URL Input Sheet (URLInputSheet)
 - URL field with live metadata preview
 - "Open Video" primary action
+- On iPad, sheet content is centered in a narrower form-width layout for easier scanning
 
 ### YouTube Browser (YouTubeWebView)
 - Web view with back/forward/reload
@@ -172,6 +174,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iOS and macOS that le
 - Subtitle list with tracking toggle
 - Playback controls: scrubber, speed, seek, loop, A-B setup
 - Toolbar: subtitle management, on-device transcribe, download (if enabled)
+- On iPad, the player, subtitle reader, and controls stay centered within a readable-width column
 
 ### Settings (SettingsView)
 - Apple Intelligence status for Word Explanations
@@ -187,12 +190,14 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iOS and macOS that le
 - Accent color used for current subtitle and word highlights
 - Tracking toggle: filled icon when enabled, outlined when disabled
 - Subtitle row timestamp pill for quick seek
+- Selected videos in the iPad sidebar use a tinted rounded highlight
 
 ### Interactions
 - Auto-tracking stops on manual scroll or selection
 - Swipe actions for translate/explain
 - Context menus for subtitle actions and step mode
 - Sheets use medium/large detents on iOS
+- On iPad, selecting a history item updates the detail pane in place instead of pushing a full-screen navigation stack
 
 ## Data and Storage
 - SwiftData local storage only (no cloud sync)
@@ -213,7 +218,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iOS and macOS that le
 - Subtitle search and filtering
 - Improved channel/author metadata
 - Dedicated subtitle library management
-- Expanded iPad/macOS layout optimizations
+- Additional iPad and macOS large-screen layout refinements
 
 ---
 
@@ -251,3 +256,41 @@ VoiceRecorder is a simple SwiftUI utility app for recording one voice clip at a 
 - Only the latest temporary recording is retained.
 - AirPods microphone selection depends on iOS exposing the Bluetooth HFP input route.
 - iOS controls the final output route; the app displays the route and encourages connecting headphones before monitor mode.
+
+---
+
+# PhotosOrganizer - Product Specification
+
+## Overview
+
+PhotosOrganizer is a SwiftUI utility app for iPhone and iPad that scans the user's photo library, surfaces image file sizes, and converts selected images to HEIF or AVIF to reduce storage usage.
+
+## Core Features
+
+### Photo Library Access
+- Requests read/write Photo Library permission on launch.
+- Supports full and limited library authorization.
+- Shows a denied-access state when Photos permission is unavailable.
+
+### Photo Browser
+- Displays user-library image assets in a three-column grid.
+- Loads thumbnail previews with network access enabled for iCloud-backed photos.
+- Shows file-size badges after resource sizes are loaded.
+- Sorts images by creation date or file size from the toolbar menu.
+
+### Photo Detail
+- Shows a large preview for the selected image.
+- Displays metadata including file size, dimensions, filename, format identifier, creation date, photo subtype, and location when available.
+- Presents conversion controls from the detail screen.
+
+### Conversion
+- Converts selected images to HEIF or AVIF.
+- Offers a quality slider from 10% to 85%.
+- Previews converted size, saved bytes, and reduction percentage before saving.
+- Saves converted images back to Photos while preserving creation date, location, and favorite state.
+
+## Platform and Integrations
+- Target platforms: iPhone and iPad.
+- Minimum deployment target: iOS 26.2.
+- Uses PhotoKit for library access and writes.
+- Uses ImageIO for HEIF encoding and `avif.swift` for AVIF encoding.

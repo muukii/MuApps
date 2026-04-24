@@ -75,6 +75,8 @@ struct URLInputSheet: View {
       Spacer()
     }
     .padding(20)
+    .frame(maxWidth: 560)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     .navigationTitle("Enter URL")
     #if os(iOS)
       .navigationBarTitleDisplayMode(.inline)

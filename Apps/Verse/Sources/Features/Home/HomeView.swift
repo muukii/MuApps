@@ -8,6 +8,9 @@
 import SwiftUI
 import SwiftData
 import AppIntents
+#if os(iOS)
+import UIKit
+#endif
 
 enum HistorySortOption: String, CaseIterable, Identifiable {
   case manual = "Manual"
@@ -27,6 +30,7 @@ enum HistorySortOption: String, CaseIterable, Identifiable {
 
 struct HomeView: View {
   @Environment(\.modelContext) private var modelContext
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @Environment(VideoItemService.self) private var historyService
   @Environment(VocabularyService.self) private var vocabularyService
   @Environment(DownloadManager.self) private var downloadManager
@@ -69,119 +73,23 @@ struct HomeView: View {
     }
   }
 
+  private var usesSplitViewLayout: Bool {
+    #if os(iOS)
+    UIDevice.current.userInterfaceIdiom == .pad && horizontalSizeClass == .regular
+    #else
+    false
+    #endif
+  }
+
   var body: some View {
-    NavigationStack {
-      Group {
-        // History List
-        if history.isEmpty {
-          ContentUnavailableView {
-            Label("Verse", systemImage: "captions.bubble.fill")
-          } description: {
-            Text("Watch YouTube videos with synced subtitles.\nPaste a URL or browse YouTube to get started.")
-          } actions: {
-            Button {
-              loadDemoVideo()
-            } label: {
-              Label("Try Demo Video", systemImage: "play.circle")
-            }
-            .buttonStyle(.bordered)
-          }
-        } else {
-          List {
-            ForEach(history) { item in
-              Button {
-                selectedVideoItem = item
-              } label: {
-                VideoItemCell(
-                  video: item,
-                  namespace: heroNamespace,
-                  downloadManager: downloadManager,
-                  showTimestamp: true
-                )
-              }
-              .buttonStyle(.plain)
-              .contextMenu {
-                Button {
-                  videoToAddToPlaylist = item
-                } label: {
-                  Label("Add to Playlist", systemImage: "text.badge.plus")
-                }
-              }
-            }
-            .onDelete { indexSet in
-              Task {
-                for index in indexSet {
-                  let item = history[index]
-                  try? await historyService.deleteHistoryItem(item)
-                }
-              }
-            }
-            .onMove { source, destination in
-              // Only allow manual reordering in manual sort mode
-              guard sortOption == .manual else { return }
-              guard let sourceIndex = source.first else { return }
-              try? historyService.moveHistoryItem(from: sourceIndex, to: destination)
-            }
-          }
-          .listStyle(.inset)
-        }
+    Group {
+      if usesSplitViewLayout {
+        splitViewLayout
+      } else {
+        compactLayout
       }
-      .navigationTitle("")
-      .toolbar {
-        // Top toolbar - Settings
-        ToolbarItem(placement: .topBarLeading) {
-          Button {
-            showSettings = true
-          } label: {
-            Label("Settings", systemImage: "gear")
-          }
-        }
-
-        // Top toolbar - Sort menu
-        ToolbarItem(placement: .topBarTrailing) {
-          if !history.isEmpty {
-            Menu {
-              Picker("Sort by", selection: $sortOption) {
-                ForEach(HistorySortOption.allCases) { option in
-                  Label(option.rawValue, systemImage: option.systemImage)
-                    .tag(option)
-                }
-              }
-              .pickerStyle(.inline)
-            } label: {
-              Label("Sort", systemImage: sortOption.systemImage)
-            }
-          }
-        }
-
-        // Top toolbar - Edit mode for reordering (only in manual mode)
-        ToolbarItem(placement: .primaryAction) {
-          if !history.isEmpty && sortOption == .manual {
-            EditButton()
-          }
-        }
-        // Bottom toolbar - Main actions
-        ToolbarItemGroup(placement: .bottomBar) {
-          Button {
-            showURLInput = true
-          } label: {
-            Label("Paste URL", systemImage: "link")
-          }
-
-          Spacer()
-
-          Button {
-            showWebView = true
-          } label: {
-            Label("Browse YouTube", systemImage: "safari")
-          }
-        }
-      }
-      .navigationDestination(item: $selectedVideoItem) { videoItem in
-        PlayerView(videoItem: videoItem)
-          .navigationTransition(.zoom(sourceID: videoItem.videoID, in: heroNamespace))
-      }
-      .sheet(isPresented: $showWebView) {
+    }
+    .sheet(isPresented: $showWebView) {
         NavigationStack {
           YouTubeWebView { videoID in
             Task {
@@ -212,38 +120,270 @@ struct HomeView: View {
             }
           }
         }
-      }
-      .onChange(of: deepLinkManager.pendingVideoID) { _, newVideoID in
-        if let videoID = newVideoID {
-          // Fetch the VideoItem for this videoID
-          let videoIDRaw = videoID.rawValue
-          let descriptor = FetchDescriptor<VideoItem>(
-            predicate: #Predicate { $0._videoID == videoIDRaw }
-          )
-          if let item = try? modelContext.fetch(descriptor).first {
-            selectedVideoItem = item
-          }
-          deepLinkManager.pendingVideoID = nil
+    }
+    .onChange(of: deepLinkManager.pendingVideoID) { _, newVideoID in
+      if let videoID = newVideoID {
+        // Fetch the VideoItem for this videoID
+        let videoIDRaw = videoID.rawValue
+        let descriptor = FetchDescriptor<VideoItem>(
+          predicate: #Predicate { $0._videoID == videoIDRaw }
+        )
+        if let item = try? modelContext.fetch(descriptor).first {
+          selectedVideoItem = item
         }
-      }
-      .sheet(isPresented: $showSettings) {
-        SettingsView()
-          .environment(vocabularyService)
-          .environment(historyService)
-      }
-      .fittingSheet(isPresented: $showURLInput) {
-        URLInputSheet { urlText in
-          loadURL(urlText)
-        }
-      }
-      .sheet(item: $videoToAddToPlaylist) { video in
-        AddToPlaylistSheet(video: video)
-      }
-      .task {
-        // Initialize sort orders for existing items (migration)
-        try? historyService.initializeSortOrders()
+        deepLinkManager.pendingVideoID = nil
       }
     }
+    .sheet(isPresented: $showSettings) {
+      SettingsView()
+        .environment(vocabularyService)
+        .environment(historyService)
+    }
+    .fittingSheet(isPresented: $showURLInput) {
+      URLInputSheet { urlText in
+        loadURL(urlText)
+      }
+    }
+    .sheet(item: $videoToAddToPlaylist) { video in
+      AddToPlaylistSheet(video: video)
+    }
+    .onChange(of: history.map { $0.videoID.rawValue }) { _, ids in
+      if let selectedVideoItem, !ids.contains(selectedVideoItem.videoID.rawValue) {
+        self.selectedVideoItem = history.first
+      } else if usesSplitViewLayout && self.selectedVideoItem == nil {
+        self.selectedVideoItem = history.first
+      }
+    }
+    .task {
+      // Initialize sort orders for existing items (migration)
+      try? historyService.initializeSortOrders()
+      if usesSplitViewLayout, selectedVideoItem == nil {
+        selectedVideoItem = history.first
+      }
+    }
+  }
+
+  private var compactLayout: some View {
+    NavigationStack {
+      historyContent(showsSelection: false)
+        .navigationTitle("")
+        .toolbar {
+          topToolbarContent
+          ToolbarItemGroup(placement: .bottomBar) {
+            Button {
+              showURLInput = true
+            } label: {
+              Label("Paste URL", systemImage: "link")
+            }
+
+            Spacer()
+
+            Button {
+              showWebView = true
+            } label: {
+              Label("Browse YouTube", systemImage: "safari")
+            }
+          }
+        }
+        .navigationDestination(item: $selectedVideoItem) { videoItem in
+          playerDestination(for: videoItem)
+        }
+    }
+  }
+
+  private var splitViewLayout: some View {
+    NavigationSplitView {
+      historyContent(showsSelection: true)
+        .navigationTitle("Verse")
+        .navigationSplitViewColumnWidth(min: 320, ideal: 360, max: 420)
+        .toolbar {
+          topToolbarContent
+        }
+        .safeAreaInset(edge: .bottom) {
+          splitViewActionBar
+        }
+    } detail: {
+      detailContent
+    }
+    .navigationSplitViewStyle(.balanced)
+  }
+
+  @ViewBuilder
+  private func historyContent(showsSelection: Bool) -> some View {
+    if history.isEmpty {
+      ContentUnavailableView {
+        Label("Verse", systemImage: "captions.bubble.fill")
+      } description: {
+        Text("Watch YouTube videos with synced subtitles.\nPaste a URL or browse YouTube to get started.")
+      } actions: {
+        Button {
+          loadDemoVideo()
+        } label: {
+          Label("Try Demo Video", systemImage: "play.circle")
+        }
+        .buttonStyle(.bordered)
+      }
+    } else {
+      List {
+        ForEach(history) { item in
+          historyRow(for: item, showsSelection: showsSelection)
+        }
+        .onDelete { indexSet in
+          Task {
+            for index in indexSet {
+              let item = history[index]
+              try? await historyService.deleteHistoryItem(item)
+            }
+          }
+        }
+        .onMove { source, destination in
+          // Only allow manual reordering in manual sort mode
+          guard sortOption == .manual else { return }
+          guard let sourceIndex = source.first else { return }
+          try? historyService.moveHistoryItem(from: sourceIndex, to: destination)
+        }
+      }
+      .listStyle(.inset)
+    }
+  }
+
+  private func historyRow(for item: VideoItem, showsSelection: Bool) -> some View {
+    let isSelected = showsSelection && selectedVideoItem?.videoID.rawValue == item.videoID.rawValue
+
+    return Button {
+      selectedVideoItem = item
+    } label: {
+      VideoItemCell(
+        video: item,
+        namespace: heroNamespace,
+        downloadManager: downloadManager,
+        showTimestamp: true
+      )
+      .padding(.horizontal, showsSelection ? 10 : 0)
+      .padding(.vertical, showsSelection ? 6 : 0)
+      .background {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+          .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+          .overlay {
+            if isSelected {
+              RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.2), lineWidth: 1)
+            }
+          }
+      }
+    }
+    .buttonStyle(.plain)
+    .contextMenu {
+      Button {
+        videoToAddToPlaylist = item
+      } label: {
+        Label("Add to Playlist", systemImage: "text.badge.plus")
+      }
+    }
+    .listRowInsets(
+      EdgeInsets(
+        top: showsSelection ? 4 : 0,
+        leading: 0,
+        bottom: showsSelection ? 4 : 0,
+        trailing: 0
+      )
+    )
+    .listRowSeparator(showsSelection ? .hidden : .visible)
+    .listRowBackground(Color.clear)
+  }
+
+  @ToolbarContentBuilder
+  private var topToolbarContent: some ToolbarContent {
+    ToolbarItem(placement: .topBarLeading) {
+      Button {
+        showSettings = true
+      } label: {
+        Label("Settings", systemImage: "gear")
+      }
+    }
+
+    ToolbarItem(placement: .topBarTrailing) {
+      if !history.isEmpty {
+        Menu {
+          Picker("Sort by", selection: $sortOption) {
+            ForEach(HistorySortOption.allCases) { option in
+              Label(option.rawValue, systemImage: option.systemImage)
+                .tag(option)
+            }
+          }
+          .pickerStyle(.inline)
+        } label: {
+          Label("Sort", systemImage: sortOption.systemImage)
+        }
+      }
+    }
+
+    ToolbarItem(placement: .primaryAction) {
+      if !history.isEmpty && sortOption == .manual {
+        EditButton()
+      }
+    }
+  }
+
+  private var splitViewActionBar: some View {
+    VStack(spacing: 0) {
+      Divider()
+      HStack(spacing: 12) {
+        Button {
+          showURLInput = true
+        } label: {
+          Label("Paste URL", systemImage: "link")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+
+        Button {
+          showWebView = true
+        } label: {
+          Label("Browse YouTube", systemImage: "safari")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+      }
+      .padding(.horizontal, 16)
+      .padding(.top, 12)
+      .padding(.bottom, 16)
+      .background(.bar)
+    }
+  }
+
+  @ViewBuilder
+  private var detailContent: some View {
+    if let selectedVideoItem {
+      PlayerView(videoItem: selectedVideoItem)
+        .id(selectedVideoItem.videoID.rawValue)
+    } else {
+      ContentUnavailableView {
+        Label("Select a Video", systemImage: "play.rectangle")
+      } description: {
+        Text("Choose a video from your history or add a new one to start watching with synced subtitles.")
+      } actions: {
+        Button {
+          showURLInput = true
+        } label: {
+          Label("Paste URL", systemImage: "link")
+        }
+        .buttonStyle(.borderedProminent)
+
+        Button {
+          showWebView = true
+        } label: {
+          Label("Browse YouTube", systemImage: "safari")
+        }
+        .buttonStyle(.bordered)
+      }
+    }
+  }
+
+  private func playerDestination(for videoItem: VideoItem) -> some View {
+    PlayerView(videoItem: videoItem)
+      .id(videoItem.videoID.rawValue)
+      .navigationTransition(.zoom(sourceID: videoItem.videoID, in: heroNamespace))
   }
   
   private func loadURL(_ urlText: String) {

@@ -9,9 +9,11 @@ import AVKit
 import ObjectEdge
 import SwiftData
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 import TipKit
 import YouTubeKit
-import YoutubeTranscript
 import Translation
 
 struct PlayerView: View {
@@ -19,14 +21,15 @@ struct PlayerView: View {
 
   @Environment(\.modelContext) private var modelContext
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @Environment(DownloadManager.self) private var downloadManager
   @Environment(VideoItemService.self) private var historyService
   @ObjectEdge private var model = PlayerModel()
 
   // Subtitle state
   @State private var currentSubtitles: Subtitle?
-  @State private var isLoadingTranscripts: Bool = false
-  @State private var transcriptError: String?
+  @State private var isLoadingSubtitles: Bool = false
+  @State private var subtitleError: String?
 
   // Sheet state
   @State private var showDownloadView: Bool = false
@@ -57,6 +60,22 @@ struct PlayerView: View {
 
   // Computed property to access videoID from the entity
   private var videoID: YouTubeContentID { videoItem.videoID }
+
+  private var usesWideLayout: Bool {
+    #if os(iOS)
+    UIDevice.current.userInterfaceIdiom == .pad && horizontalSizeClass == .regular
+    #else
+    false
+    #endif
+  }
+
+  private var playerContentMaxWidth: CGFloat? {
+    usesWideLayout ? 1080 : nil
+  }
+
+  private var readableContentMaxWidth: CGFloat? {
+    usesWideLayout ? 960 : nil
+  }
 
   /// Returns true when transcription is actively in progress (preparing or transcribing)
   /// Used to prevent interactive dismissal of the sheet during processing
@@ -91,7 +110,10 @@ struct PlayerView: View {
       ZStack {
 
         VStack {
-          VideoPlayerSection(controller: controller)
+          VideoPlayerSection(
+            controller: controller,
+            maxWidth: playerContentMaxWidth
+          )
             .compositingGroup()
             .animation(.smooth) {              
               $0.opacity(isPlayerCollapsed ? 0 : 1)
@@ -134,6 +156,8 @@ struct PlayerView: View {
             
             PlayerControls(model: model)
           }
+          .frame(maxWidth: readableContentMaxWidth)
+          .frame(maxWidth: .infinity)
           .background(
             UnevenRoundedRectangle(
               topLeadingRadius: 24,
@@ -223,7 +247,7 @@ struct PlayerView: View {
       ProgressView()
         .onAppear {
           model.loadVideo(videoItem: videoItem)
-          fetchTranscripts(videoID: videoID)
+          loadSubtitles(videoID: videoID)
         }
     }
   }
@@ -236,7 +260,7 @@ struct PlayerView: View {
         if model.localFileURL == nil {
           OnDeviceTranscribeButton(
             phase: transcriptionButtonPhase,
-            action: { startBackgroundTranscription() }
+            action: { startBackgroundTranscription(showLoadingState: currentSubtitles?.cues.isEmpty ?? true) }
           )
           .popoverTip(TranscribeTip())
         }
@@ -283,8 +307,8 @@ struct PlayerView: View {
         displayType: subtitleDisplayType,
         model: model,
         cues: currentSubtitles?.cues ?? [],
-        isLoading: isLoadingTranscripts,
-        error: transcriptError,
+        isLoading: isLoadingSubtitles,
+        error: subtitleError,
         onAction: { action in
           switch action {
           case .tap(let time):
@@ -337,9 +361,9 @@ struct PlayerView: View {
 
   // MARK: - Private Methods
 
-  private func fetchTranscripts(videoID: YouTubeContentID) {
-    isLoadingTranscripts = true
-    transcriptError = nil
+  private func loadSubtitles(videoID: YouTubeContentID) {
+    isLoadingSubtitles = true
+    subtitleError = nil
     currentSubtitles = nil
 
     Task {
@@ -354,49 +378,23 @@ struct PlayerView: View {
          !cached.cues.isEmpty {
         await MainActor.run {
           currentSubtitles = cached
-          isLoadingTranscripts = false
+          isLoadingSubtitles = false
 
-          // Auto-start on-device transcription if needed (no word timings yet)
-          if autoTranscribeEnabled && needsOnDeviceTranscription(cached) && model.localFileURL == nil {
-            startBackgroundTranscription()
+          // Auto-start on-device transcription if needed to add word timings.
+          if autoTranscribeEnabled && needsOnDeviceTranscription(cached) {
+            startBackgroundTranscription(showLoadingState: false)
           }
         }
         return
       }
 
-      // Fetch from network
-      do {
-        let config = TranscriptConfig(lang: nil)
-        let fetchedTranscripts = try await YoutubeTranscript.fetchTranscript(
-          for: videoID.rawValue,
-          config: config
-        )
-
-        let subtitles = fetchedTranscripts.toSubtitle()
-
-        // Save to cache
-        try? historyService.updateCachedSubtitles(videoID: videoID, subtitles: subtitles)
-
-        await MainActor.run {
-          currentSubtitles = subtitles
-          isLoadingTranscripts = false
-
-          // Auto-start on-device transcription after YouTube subtitles are loaded
-          if autoTranscribeEnabled && needsOnDeviceTranscription(subtitles) && model.localFileURL == nil {
-            startBackgroundTranscription()
-          }
+      await MainActor.run {
+        guard autoTranscribeEnabled else {
+          isLoadingSubtitles = false
+          return
         }
-      } catch {
-        await MainActor.run {
-          transcriptError = error.localizedDescription
-          isLoadingTranscripts = false
 
-          // Auto-start on-device transcription when YouTube captions are not available
-          // Only if no local file exists (on-device transcription downloads the video)
-          if autoTranscribeEnabled && model.localFileURL == nil {
-            startBackgroundTranscription()
-          }
-        }
+        startBackgroundTranscription(showLoadingState: true)
       }
     }
   }
@@ -436,18 +434,73 @@ struct PlayerView: View {
   }
 
   /// Starts on-device transcription in the background (download + transcribe)
-  private func startBackgroundTranscription() {
+  private func startBackgroundTranscription(showLoadingState: Bool) {
+    guard !onDeviceTranscribeViewModel.phase.isProcessing, !isTranscribing else { return }
+
+    if showLoadingState {
+      isLoadingSubtitles = true
+      subtitleError = nil
+    }
+
+    if let fileURL = model.localFileURL {
+      startBackgroundLocalTranscription(fileURL: fileURL, showLoadingState: showLoadingState)
+      return
+    }
+
     Task {
       do {
         let subtitles = try await onDeviceTranscribeViewModel.startTranscription(
           videoID: videoID,
           downloadManager: downloadManager
         )
-        currentSubtitles = subtitles
-        transcriptError = nil
-        try? historyService.updateCachedSubtitles(videoID: videoID, subtitles: subtitles)
+
+        await MainActor.run {
+          currentSubtitles = subtitles
+          subtitleError = nil
+          isLoadingSubtitles = false
+          try? historyService.updateCachedSubtitles(videoID: videoID, subtitles: subtitles)
+        }
       } catch {
-        // Error is already captured in viewModel.phase
+        await MainActor.run {
+          isLoadingSubtitles = false
+          if showLoadingState {
+            subtitleError = error.localizedDescription
+          }
+        }
+      }
+    }
+  }
+
+  private func startBackgroundLocalTranscription(fileURL: URL, showLoadingState: Bool) {
+    isTranscribing = true
+    transcriptionState = .idle
+
+    Task {
+      do {
+        let subtitles = try await TranscriptionService.shared.transcribe(
+          fileURL: fileURL,
+          locale: onDeviceTranscribeViewModel.configuration.transcriptionLocale
+        ) { state in
+          transcriptionState = state
+        }
+
+        await MainActor.run {
+          currentSubtitles = subtitles
+          subtitleError = nil
+          isLoadingSubtitles = false
+          isTranscribing = false
+          transcriptionState = .completed
+          try? historyService.updateCachedSubtitles(videoID: videoID, subtitles: subtitles)
+        }
+      } catch {
+        await MainActor.run {
+          isLoadingSubtitles = false
+          isTranscribing = false
+          transcriptionState = .failed(error.localizedDescription)
+          if showLoadingState {
+            subtitleError = error.localizedDescription
+          }
+        }
       }
     }
   }
@@ -540,6 +593,7 @@ extension PlayerView {
 
   struct VideoPlayerSection: View {
     let controller: PlayerController
+    let maxWidth: CGFloat?
 
     var body: some View {
       Group {
@@ -551,8 +605,10 @@ extension PlayerView {
         }
       }
       .aspectRatio(16 / 9, contentMode: .fit)
+      .frame(maxWidth: maxWidth)
       .clipShape(RoundedRectangle(cornerRadius: 12))
       .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+      .frame(maxWidth: .infinity)
       .padding(.horizontal, 16)
       .padding(.top, 16)
     }
@@ -827,4 +883,3 @@ enum PlaybackSource {
   .environment(downloadManager)
   .environment(historyService)
 }
-

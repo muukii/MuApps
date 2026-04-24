@@ -80,7 +80,7 @@ enum Settings {
       } header: {
         Text("Transcription")
       } footer: {
-        Text("Automatically transcribe videos when YouTube subtitles don't have word timing.")
+        Text("Automatically generate subtitles from video audio when cached subtitles are missing or don't include word timing.")
       }
     }
 

@@ -6,27 +6,9 @@
 //
 
 import Foundation
-import YoutubeTranscript
 
-/// Adapter for converting between YouTube transcripts and Subtitle format
+/// Adapter for converting between subtitle file formats and the app's Subtitle model
 struct SubtitleAdapter {
-
-  // MARK: - YouTube Transcript -> Subtitle Conversion
-
-  /// Convert YouTube TranscriptResponse array to Subtitle format
-  /// Note: YouTube transcripts don't have word-level timing, so wordTimings will be nil
-  static func toSubtitle(_ transcripts: [TranscriptResponse]) -> Subtitle {
-    let cues = transcripts.enumerated().map { index, transcript in
-      Subtitle.Cue(
-        id: index + 1,
-        startTime: transcript.offset,
-        endTime: transcript.offset + transcript.duration,
-        text: transcript.text,
-        wordTimings: nil  // YouTube doesn't provide word-level timing
-      )
-    }
-    return Subtitle(cues)
-  }
 
   // MARK: - File Format Encoding
 

@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import YoutubeTranscript
 
 /// Manager for persisting and loading subtitles
 @MainActor
@@ -42,16 +41,6 @@ final class SubtitleStorage {
 
     let content = try SubtitleAdapter.encode(subtitles, format: format)
     try content.write(to: fileURL, atomically: true, encoding: .utf8)
-  }
-
-  /// Save subtitles from YouTube transcripts
-  func saveFromYouTube(
-    _ transcripts: [TranscriptResponse],
-    videoID: YouTubeContentID,
-    format: SubtitleFormat
-  ) throws {
-    let subtitles = SubtitleAdapter.toSubtitle(transcripts)
-    try save(subtitles, videoID: videoID, format: format)
   }
 
   // MARK: - Load Subtitles
