@@ -214,3 +214,40 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iOS and macOS that le
 - Improved channel/author metadata
 - Dedicated subtitle library management
 - Expanded iPad/macOS layout optimizations
+
+---
+
+# VoiceRecorder - Product Specification
+
+## Overview
+
+VoiceRecorder is a simple SwiftUI utility app for recording one voice clip at a time, replaying it immediately, and optionally monitoring the live microphone signal through headphones with an adjustable delay.
+
+## Core Features
+
+### 1. Microphone Selection
+- Lists available audio input devices from `AVAudioSession`, including the device microphone, headset microphones, USB inputs, and Bluetooth HFP inputs such as AirPods when available.
+- The selected input is used for normal recording.
+- The app shows the selected input, active input route, and current output route.
+
+### 2. One-Clip Recording
+- Records to a temporary AAC `.m4a` file.
+- Starting a new recording replaces the previous clip.
+- No recording history or persistent library is shown.
+- The recording screen shows elapsed time and a live input level meter.
+
+### 3. Immediate Playback
+- The latest clip can be played as soon as recording stops.
+- Playback shows the latest clip duration and a progress indicator.
+- Playback uses the current system audio output route.
+
+### 4. Delay Monitor
+- Provides a live delayed monitoring mode using `AVAudioEngine` and `AVAudioUnitDelay`.
+- Delay is adjustable from 0.15 seconds to 2.0 seconds.
+- Monitor mode forces the input to Device Microphone.
+- The delayed signal is sent to the current headphone output route; the UI warns the user when headphones or AirPods are not connected to avoid feedback.
+
+## Limitations
+- Only the latest temporary recording is retained.
+- AirPods microphone selection depends on iOS exposing the Bluetooth HFP input route.
+- iOS controls the final output route; the app displays the route and encourages connecting headphones before monitor mode.
