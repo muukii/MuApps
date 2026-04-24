@@ -1,3 +1,15 @@
+# MuApps - Distribution Specification
+
+## Ad Hoc OTA Install Page
+- Pushes to the `main` branch run the Ad Hoc workflow automatically; manual runs can still publish all apps or a selected app from `main`.
+- The workflow exports Ad Hoc IPAs for Verse, Tone, PhotosOrganizer, VoiceRecorder, and HelloWorld.
+- Builds are published to the single `adhoc-latest` GitHub release so the release list does not grow per branch.
+- GitHub Pages serves `docs/install.html` as the shared install page for the latest `main` Ad Hoc builds.
+- Each app has its own install action backed by an `itms-services` manifest in the `adhoc-latest` GitHub release.
+- Installs require a registered iPhone included in the Apple Developer Ad Hoc provisioning profile.
+
+---
+
 # Verse (YouTubeSubtitle) - Product Specification
 
 ## Overview

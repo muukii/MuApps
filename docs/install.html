@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Install Verse</title>
+    <title>Install MuApps</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -13,37 +13,69 @@
         color: CanvasText;
       }
 
+      * {
+        box-sizing: border-box;
+      }
+
       body {
         margin: 0;
         min-height: 100vh;
-        display: grid;
-        place-items: center;
       }
 
-      main {
-        width: min(100% - 48px, 420px);
-        text-align: center;
+      .page {
+        width: min(100% - 40px, 720px);
+        margin: 0 auto;
+        padding: 48px 0;
+      }
+
+      .intro {
+        margin-bottom: 28px;
       }
 
       h1 {
-        margin: 0 0 12px;
+        margin: 0 0 10px;
         font-size: 2rem;
         font-weight: 700;
         letter-spacing: 0;
       }
 
+      h2 {
+        margin: 0 0 4px;
+        font-size: 1.1rem;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+
       p {
-        margin: 0 0 28px;
+        margin: 0;
         color: color-mix(in srgb, CanvasText 68%, Canvas);
         line-height: 1.5;
+      }
+
+      ul {
+        display: grid;
+        gap: 12px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      li {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 16px;
+        align-items: center;
+        padding: 16px;
+        border: 1px solid color-mix(in srgb, CanvasText 16%, Canvas);
+        border-radius: 8px;
       }
 
       a {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-height: 52px;
-        width: min(100%, 260px);
+        min-height: 44px;
+        min-width: 112px;
         border-radius: 8px;
         background: #007aff;
         color: white;
@@ -54,13 +86,67 @@
       a:active {
         transform: translateY(1px);
       }
+
+      @media (max-width: 520px) {
+        .page {
+          width: min(100% - 28px, 720px);
+          padding: 32px 0;
+        }
+
+        li {
+          grid-template-columns: 1fr;
+        }
+
+        a {
+          width: 100%;
+        }
+      }
     </style>
   </head>
   <body>
-    <main>
-      <h1>Verse</h1>
-      <p>Install the latest Ad Hoc build on a registered iPhone.</p>
-      <a href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fgithub.com%2Fmuukii%2FMuApps%2Freleases%2Fdownload%2Fadhoc-latest%2Fmanifest.plist">Install</a>
-    </main>
+    <div class="page">
+      <div class="intro">
+        <h1>MuApps</h1>
+        <p>Install the latest main branch Ad Hoc builds on a registered iPhone.</p>
+      </div>
+
+      <ul>
+        <li>
+          <div>
+            <h2>Verse</h2>
+            <p>YouTube subtitle viewer and language learning tool.</p>
+          </div>
+          <a href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fgithub.com%2Fmuukii%2FMuApps%2Freleases%2Fdownload%2Fadhoc-latest%2FVerse-manifest.plist">Install</a>
+        </li>
+        <li>
+          <div>
+            <h2>Tone</h2>
+            <p>Shadowing practice app with audio, subtitles, and recording.</p>
+          </div>
+          <a href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fgithub.com%2Fmuukii%2FMuApps%2Freleases%2Fdownload%2Fadhoc-latest%2FTone-manifest.plist">Install</a>
+        </li>
+        <li>
+          <div>
+            <h2>PhotosOrganizer</h2>
+            <p>Photo library size browser and image conversion utility.</p>
+          </div>
+          <a href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fgithub.com%2Fmuukii%2FMuApps%2Freleases%2Fdownload%2Fadhoc-latest%2FPhotosOrganizer-manifest.plist">Install</a>
+        </li>
+        <li>
+          <div>
+            <h2>Voice Recorder</h2>
+            <p>One-clip voice recording with delayed headphone monitoring.</p>
+          </div>
+          <a href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fgithub.com%2Fmuukii%2FMuApps%2Freleases%2Fdownload%2Fadhoc-latest%2FVoiceRecorder-manifest.plist">Install</a>
+        </li>
+        <li>
+          <div>
+            <h2>HelloWorld</h2>
+            <p>Minimal scaffold app used to bootstrap new MuApps apps.</p>
+          </div>
+          <a href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fgithub.com%2Fmuukii%2FMuApps%2Freleases%2Fdownload%2Fadhoc-latest%2FHelloWorld-manifest.plist">Install</a>
+        </li>
+      </ul>
+    </div>
   </body>
 </html>

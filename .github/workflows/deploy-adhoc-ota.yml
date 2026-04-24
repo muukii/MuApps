@@ -1,17 +1,34 @@
 name: Deploy Ad Hoc OTA
+run-name: Deploy Ad Hoc OTA (${{ inputs.app || 'all' }}) from ${{ github.ref_name }}
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
+    inputs:
+      app:
+        description: App to publish
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - Verse
+          - Tone
+          - PhotosOrganizer
+          - VoiceRecorder
+          - HelloWorld
 
 permissions:
   contents: write
 
+concurrency:
+  group: adhoc-ota-main
+  cancel-in-progress: true
+
 env:
-  APP_NAME: Verse
-  BUNDLE_IDENTIFIER: app.muukii.verse
   RELEASE_TAG: adhoc-latest
-  IPA_NAME: Verse.ipa
-  MANIFEST_NAME: manifest.plist
 
 # Required repository secrets:
 #   - ASC_TEAM_KEY_ID
@@ -25,6 +42,15 @@ jobs:
     runs-on: macos-26
 
     steps:
+      - name: Require main branch
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "::error::Ad Hoc OTA publishing is restricted to the main branch."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -47,6 +73,35 @@ jobs:
       - name: Generate Xcode workspace with Tuist
         run: tuist generate --no-open
 
+      - name: Select apps
+        run: |
+          set -euo pipefail
+
+          mkdir -p ./build
+          requested_app="${{ inputs.app || 'all' }}"
+
+          {
+            printf 'Verse\tapp.muukii.verse\tVerse.ipa\tVerse-manifest.plist\n'
+            printf 'Tone\tapp.muukii.tone\tTone.ipa\tTone-manifest.plist\n'
+            printf 'PhotosOrganizer\tapp.muukii.PhotosOrganizer\tPhotosOrganizer.ipa\tPhotosOrganizer-manifest.plist\n'
+            printf 'VoiceRecorder\tapp.muukii.voicerecorder\tVoiceRecorder.ipa\tVoiceRecorder-manifest.plist\n'
+            printf 'HelloWorld\tapp.muukii.helloworld\tHelloWorld.ipa\tHelloWorld-manifest.plist\n'
+          } > ./build/all-adhoc-apps.tsv
+
+          if [ "$requested_app" = "all" ]; then
+            cp ./build/all-adhoc-apps.tsv ./build/adhoc-apps.tsv
+          else
+            awk -F '\t' -v app="$requested_app" '$1 == app { print }' ./build/all-adhoc-apps.tsv > ./build/adhoc-apps.tsv
+          fi
+
+          if [ ! -s ./build/adhoc-apps.tsv ]; then
+            echo "No app selected for: $requested_app"
+            exit 1
+          fi
+
+          echo "Selected apps:"
+          cut -f 1 ./build/adhoc-apps.tsv
+
       - name: Setup App Store Connect API Key
         env:
           ASC_KEY_ID: ${{ secrets.ASC_TEAM_KEY_ID }}
@@ -58,36 +113,107 @@ jobs:
           printf '%s' "$ASC_KEY_CONTENT" > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
           echo "API Key configured"
 
-      - name: Archive app
+      - name: Archive apps
         run: |
           set -euo pipefail
 
-          xcodebuild archive \
-            -workspace MuApps.xcworkspace \
-            -scheme "$APP_NAME" \
-            -configuration Release \
-            -destination "generic/platform=iOS" \
-            -archivePath "./build/${APP_NAME}.xcarchive" \
-            -skipMacroValidation \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            | xcbeautify --renderer github-actions
+          while IFS=$'\t' read -r app_name bundle_identifier ipa_name manifest_name; do
+            echo "::group::Archive ${app_name}"
+            xcodebuild archive \
+              -workspace MuApps.xcworkspace \
+              -scheme "$app_name" \
+              -configuration Release \
+              -destination "generic/platform=iOS" \
+              -archivePath "./build/${app_name}.xcarchive" \
+              -skipMacroValidation \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              | xcbeautify --renderer github-actions
+            echo "::endgroup::"
+          done < ./build/adhoc-apps.tsv
 
-      - name: Embed entitlements for export
+      - name: Ad hoc sign archived products before export
         run: |
           set -euo pipefail
 
-          APP_PATH="./build/${APP_NAME}.xcarchive/Products/Applications/${APP_NAME}.app"
-          ENTITLEMENTS_FILE="Apps/${APP_NAME}/Sources/YouTubeSubtitle.entitlements"
+          find_entitlements() {
+            local app_name="$1"
+            local target_name="$2"
 
-          if [ -f "$ENTITLEMENTS_FILE" ]; then
-            codesign --entitlements "$ENTITLEMENTS_FILE" --force --sign "-" "$APP_PATH"
-            echo "Entitlements embedded successfully"
-          else
-            echo "No entitlements file found at $ENTITLEMENTS_FILE"
-          fi
+            if [ -f "Apps/${app_name}/Derived/Entitlements/${target_name}.entitlements" ]; then
+              printf '%s\n' "Apps/${app_name}/Derived/Entitlements/${target_name}.entitlements"
+              return
+            fi
+
+            if [ -f "Apps/${app_name}/Sources/${target_name}.entitlements" ]; then
+              printf '%s\n' "Apps/${app_name}/Sources/${target_name}.entitlements"
+              return
+            fi
+
+            if [ "$target_name" = "Verse" ] && [ -f "Apps/Verse/Sources/YouTubeSubtitle.entitlements" ]; then
+              printf '%s\n' "Apps/Verse/Sources/YouTubeSubtitle.entitlements"
+              return
+            fi
+
+            return 1
+          }
+
+          sign_product() {
+            local product_path="$1"
+            local entitlements_file="$2"
+            local product_name
+            product_name="$(basename "$product_path")"
+
+            if [ -n "$entitlements_file" ] && [ -f "$entitlements_file" ]; then
+              codesign --entitlements "$entitlements_file" --force --sign "-" "$product_path"
+              echo "Signed ${product_name} with entitlements: ${entitlements_file}"
+            else
+              codesign --force --sign "-" "$product_path"
+              echo "Signed ${product_name} without additional entitlements"
+            fi
+          }
+
+          sign_nested_code() {
+            local container_path="$1"
+
+            if [ -d "${container_path}/Frameworks" ]; then
+              for framework_path in "${container_path}"/Frameworks/*.framework; do
+                [ -d "$framework_path" ] || continue
+                sign_product "$framework_path" ""
+              done
+
+              for dylib_path in "${container_path}"/Frameworks/*.dylib; do
+                [ -f "$dylib_path" ] || continue
+                sign_product "$dylib_path" ""
+              done
+            fi
+          }
+
+          while IFS=$'\t' read -r app_name bundle_identifier ipa_name manifest_name; do
+            app_path="./build/${app_name}.xcarchive/Products/Applications/${app_name}.app"
+
+            if [ ! -d "$app_path" ]; then
+              echo "App not found in archive: $app_path"
+              exit 1
+            fi
+
+            if [ -d "${app_path}/PlugIns" ]; then
+              for extension_path in "${app_path}"/PlugIns/*.appex; do
+                [ -d "$extension_path" ] || continue
+
+                extension_name="$(basename "$extension_path" .appex)"
+                extension_entitlements="$(find_entitlements "$app_name" "$extension_name" || true)"
+                sign_nested_code "$extension_path"
+                sign_product "$extension_path" "$extension_entitlements"
+              done
+            fi
+
+            app_entitlements="$(find_entitlements "$app_name" "$app_name" || true)"
+            sign_nested_code "$app_path"
+            sign_product "$app_path" "$app_entitlements"
+          done < ./build/adhoc-apps.tsv
 
       - name: Create ExportOptions.plist
         env:
@@ -119,52 +245,63 @@ jobs:
           </plist>
           EOF
 
-      - name: Export IPA
+      - name: Export IPAs
         env:
           ASC_KEY_ID: ${{ secrets.ASC_TEAM_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_TEAM_ISSUER_ID }}
         run: |
           set -euo pipefail
 
-          xcodebuild -exportArchive \
-            -archivePath "./build/${APP_NAME}.xcarchive" \
-            -exportPath "./build/export" \
-            -exportOptionsPlist ./build/ExportOptions.plist \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            | xcbeautify --renderer github-actions
-
-          IPA_PATH="$(find ./build/export -maxdepth 1 -name '*.ipa' -print -quit)"
-          if [ -z "$IPA_PATH" ]; then
-            echo "No IPA was exported"
-            exit 1
-          fi
-
           mkdir -p ./build/release
-          cp "$IPA_PATH" "./build/release/${IPA_NAME}"
 
-      - name: Generate manifest.plist
+          while IFS=$'\t' read -r app_name bundle_identifier ipa_name manifest_name; do
+            export_path="./build/export/${app_name}"
+            rm -rf "$export_path"
+            mkdir -p "$export_path"
+
+            echo "::group::Export ${app_name}"
+            xcodebuild -exportArchive \
+              -archivePath "./build/${app_name}.xcarchive" \
+              -exportPath "$export_path" \
+              -exportOptionsPlist ./build/ExportOptions.plist \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+              -authenticationKeyID "$ASC_KEY_ID" \
+              -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+              | xcbeautify --renderer github-actions
+            echo "::endgroup::"
+
+            ipa_path="$(find "$export_path" -maxdepth 1 -name '*.ipa' -print -quit)"
+            if [ -z "$ipa_path" ]; then
+              echo "No IPA was exported for ${app_name}"
+              exit 1
+            fi
+
+            cp "$ipa_path" "./build/release/${ipa_name}"
+          done < ./build/adhoc-apps.tsv
+
+      - name: Generate OTA manifests
         run: |
           set -euo pipefail
 
-          APP_PATH="./build/${APP_NAME}.xcarchive/Products/Applications/${APP_NAME}.app"
-          APP_INFO_PLIST="${APP_PATH}/Info.plist"
-          RELEASE_BASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
-          IPA_URL="${RELEASE_BASE_URL}/${IPA_NAME}"
+          release_base_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
 
-          BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_INFO_PLIST")"
-          BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_INFO_PLIST")"
-          SHORT_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_INFO_PLIST")"
-          TITLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$APP_INFO_PLIST" 2>/dev/null || printf '%s' "$APP_NAME")"
+          while IFS=$'\t' read -r app_name bundle_identifier ipa_name manifest_name; do
+            app_path="./build/${app_name}.xcarchive/Products/Applications/${app_name}.app"
+            app_info_plist="${app_path}/Info.plist"
+            ipa_url="${release_base_url}/${ipa_name}"
 
-          if [ "$BUNDLE_ID" != "$BUNDLE_IDENTIFIER" ]; then
-            echo "Unexpected bundle identifier: $BUNDLE_ID"
-            exit 1
-          fi
+            bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_info_plist")"
+            bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_info_plist")"
+            short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_info_plist" 2>/dev/null || printf '%s' '1.0')"
+            title="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$app_info_plist" 2>/dev/null || printf '%s' "$app_name")"
 
-          cat > "./build/release/${MANIFEST_NAME}" <<EOF
+            if [ "$bundle_id" != "$bundle_identifier" ]; then
+              echo "Unexpected bundle identifier for ${app_name}: ${bundle_id}"
+              exit 1
+            fi
+
+            cat > "./build/release/${manifest_name}" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -178,21 +315,21 @@ jobs:
                               <key>kind</key>
                               <string>software-package</string>
                               <key>url</key>
-                              <string>${IPA_URL}</string>
+                              <string>${ipa_url}</string>
                           </dict>
                       </array>
                       <key>metadata</key>
                       <dict>
                           <key>bundle-identifier</key>
-                          <string>${BUNDLE_ID}</string>
+                          <string>${bundle_id}</string>
                           <key>bundle-version</key>
-                          <string>${BUNDLE_VERSION}</string>
+                          <string>${bundle_version}</string>
                           <key>kind</key>
                           <string>software</string>
                           <key>subtitle</key>
-                          <string>${SHORT_VERSION} (${BUNDLE_VERSION})</string>
+                          <string>${short_version} (${bundle_version})</string>
                           <key>title</key>
-                          <string>${TITLE}</string>
+                          <string>${title}</string>
                       </dict>
                   </dict>
               </array>
@@ -200,7 +337,8 @@ jobs:
           </plist>
           EOF
 
-          plutil -lint "./build/release/${MANIFEST_NAME}"
+            plutil -lint "./build/release/${manifest_name}"
+          done < ./build/adhoc-apps.tsv
 
       - name: Publish release assets
         env:
@@ -208,36 +346,50 @@ jobs:
         run: |
           set -euo pipefail
 
-          RELEASE_NOTES="$(mktemp)"
-          cat > "$RELEASE_NOTES" <<EOF
-          Ad Hoc OTA assets for the latest manually published Verse build.
+          release_notes="$(mktemp)"
+          cat > "$release_notes" <<EOF
+          Ad Hoc OTA assets for the latest main branch MuApps builds.
 
           Install page:
           https://muukii.github.io/MuApps/install.html
 
-          Direct manifest:
-          https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${MANIFEST_NAME}
+          Updated in this run:
           EOF
+
+          while IFS=$'\t' read -r app_name bundle_identifier ipa_name manifest_name; do
+            printf -- '- %s: https://github.com/%s/releases/download/%s/%s\n' \
+              "$app_name" \
+              "$GITHUB_REPOSITORY" \
+              "$RELEASE_TAG" \
+              "$manifest_name" >> "$release_notes"
+          done < ./build/adhoc-apps.tsv
 
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" \
               --title "Ad Hoc Latest" \
-              --notes-file "$RELEASE_NOTES"
+              --notes-file "$release_notes"
           else
             gh release create "$RELEASE_TAG" \
               --title "Ad Hoc Latest" \
-              --notes-file "$RELEASE_NOTES"
+              --notes-file "$release_notes"
           fi
 
+          release_assets=()
+          while IFS=$'\t' read -r app_name bundle_identifier ipa_name manifest_name; do
+            release_assets+=("./build/release/${ipa_name}")
+            release_assets+=("./build/release/${manifest_name}")
+          done < ./build/adhoc-apps.tsv
+
           gh release upload "$RELEASE_TAG" \
-            "./build/release/${IPA_NAME}" \
-            "./build/release/${MANIFEST_NAME}" \
+            "${release_assets[@]}" \
             --clobber
 
-      - name: Upload workflow artifacts
+      - name: Upload workflow artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: adhoc-ota-assets
-          path: ./build/release/
+          path: |
+            ./build/release/
+            ./build/adhoc-apps.tsv
           retention-days: 7
