@@ -213,7 +213,7 @@ jobs:
           Ad Hoc OTA assets for the latest manually published Verse build.
 
           Install page:
-          https://muukii.github.io/Verse.app/install.html
+          https://muukii.github.io/MuApps/install.html
 
           Direct manifest:
           https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${MANIFEST_NAME}
