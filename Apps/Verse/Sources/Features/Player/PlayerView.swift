@@ -9,9 +9,6 @@ import AVKit
 import ObjectEdge
 import SwiftData
 import SwiftUI
-#if os(iOS)
-import UIKit
-#endif
 import TipKit
 import YouTubeKit
 import Translation
@@ -22,6 +19,7 @@ struct PlayerView: View {
   @Environment(\.modelContext) private var modelContext
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+  @Environment(\.verticalSizeClass) private var verticalSizeClass
   @Environment(DownloadManager.self) private var downloadManager
   @Environment(VideoItemService.self) private var historyService
   @ObjectEdge private var model = PlayerModel()
@@ -62,11 +60,7 @@ struct PlayerView: View {
   private var videoID: YouTubeContentID { videoItem.videoID }
 
   private var usesWideLayout: Bool {
-    #if os(iOS)
-    UIDevice.current.userInterfaceIdiom == .pad && horizontalSizeClass == .regular
-    #else
-    false
-    #endif
+    horizontalSizeClass == .regular && verticalSizeClass == .regular
   }
 
   private var playerContentMaxWidth: CGFloat? {
