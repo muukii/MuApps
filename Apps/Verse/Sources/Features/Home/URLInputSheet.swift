@@ -6,8 +6,6 @@
 //
 
 import SwiftUI
-import AsyncMultiplexImage
-import AsyncMultiplexImage_Nuke
 
 struct URLInputSheet: View {
   @Environment(\.dismiss) private var dismiss
@@ -115,11 +113,23 @@ struct URLInputSheet: View {
         // Thumbnail
         if let thumbnailURLString = metadata.thumbnailURL,
            let thumbnailURL = URL(string: thumbnailURLString) {
-          AsyncMultiplexImageNuke(
-            imageRepresentation: .remote(.init(constant: thumbnailURL))
-          )
-          .aspectRatio(contentMode: .fill)
+          AsyncImage(url: thumbnailURL) { phase in
+            switch phase {
+            case .success(let image):
+              image
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+            case .failure:
+              thumbnailPlaceholder
+            case .empty:
+              ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            @unknown default:
+              thumbnailPlaceholder
+            }
+          }
           .frame(width: 100, height: 56)
+          .background(Color.gray.opacity(0.2))
           .clipShape(RoundedRectangle(cornerRadius: 8))
         }
 
@@ -144,6 +154,15 @@ struct URLInputSheet: View {
       .background(Color.gray.opacity(0.1))
       .clipShape(RoundedRectangle(cornerRadius: 12))
     }
+  }
+
+  private var thumbnailPlaceholder: some View {
+    Rectangle()
+      .fill(Color.gray.opacity(0.3))
+      .overlay {
+        Image(systemName: "play.rectangle")
+          .foregroundStyle(.white)
+      }
   }
 
   // MARK: - Private Methods

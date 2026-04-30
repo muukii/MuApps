@@ -26,6 +26,9 @@ let avifDependencyHeaderSearchPaths: ProjectDescription.SettingValue = .array([
 let packageSettings = PackageSettings(
   productTypes: [:],
   targetSettings: [
+    "ObjectEdge": .settings(base: [
+      "MACOSX_DEPLOYMENT_TARGET": "14.0",
+    ]),
     "avifc": .settings(base: [
       "HEADER_SEARCH_PATHS": avifDependencyHeaderSearchPaths,
     ]),

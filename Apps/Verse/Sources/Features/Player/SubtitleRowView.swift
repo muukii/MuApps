@@ -7,7 +7,11 @@
 
 import CoreMedia
 import SwiftUI
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
 import UIKit
+#endif
 
 // MARK: - Subtitle Row View
 
@@ -51,30 +55,7 @@ struct SubtitleRowView: View {
         }
         .buttonStyle(.plain)
 
-        // Text content with selection and word tap support
-        SelectableSubtitleTextView(
-          content: .init(
-            text: cue.decodedText,
-            wordTimings: cue.wordTimings,
-            startTime: cue.startTime,
-            endTime: cue.endTime
-          ),
-          highlightTime: highlightTime,
-          font: .systemFont(ofSize: 18, weight: .bold, width: .standard),
-          textColor: .tintColor,
-          playedTextColor: .tintColor,
-          unplayedTextColor: .tintColor.withAlphaComponent(0.4),
-          lineSpacing: 10,
-          playbackTime: currentTime.value,
-          onExplain: { selectedText in
-            onAction(.explainSelection(selectedText))
-          },
-          onShowActions: { selectedText in
-            onAction(.showSelectionActions(selectedText))
-          }
-        )
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        subtitleText
 
         menu
       }
@@ -84,6 +65,43 @@ struct SubtitleRowView: View {
     .id(cue.id)
     .animation(.snappy, value: isCurrent)
     .foregroundStyle(.tint)
+  }
+
+  @ViewBuilder
+  private var subtitleText: some View {
+    #if os(iOS)
+      // Text content with selection and word tap support
+      SelectableSubtitleTextView(
+        content: .init(
+          text: cue.decodedText,
+          wordTimings: cue.wordTimings,
+          startTime: cue.startTime,
+          endTime: cue.endTime
+        ),
+        highlightTime: highlightTime,
+        font: .systemFont(ofSize: 18, weight: .bold, width: .standard),
+        textColor: .tintColor,
+        playedTextColor: .tintColor,
+        unplayedTextColor: .tintColor.withAlphaComponent(0.4),
+        lineSpacing: 10,
+        playbackTime: currentTime.value,
+        onExplain: { selectedText in
+          onAction(.explainSelection(selectedText))
+        },
+        onShowActions: { selectedText in
+          onAction(.showSelectionActions(selectedText))
+        }
+      )
+      .fixedSize(horizontal: false, vertical: true)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    #else
+      Text(cue.decodedText)
+        .font(.system(size: 18, weight: .bold))
+        .foregroundStyle(isCurrent ? Color.accentColor : Color.secondary)
+        .lineSpacing(10)
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    #endif
   }
 
   private var menu: some View {
@@ -106,11 +124,13 @@ struct SubtitleRowView: View {
         Label("Explain", systemImage: "sparkles")
       }
 
-      Button {
-        onAction(.translate)
-      } label: {
-        Label("Translate", systemImage: "character.book.closed")
-      }
+      #if os(iOS)
+        Button {
+          onAction(.translate)
+        } label: {
+          Label("Translate", systemImage: "character.book.closed")
+        }
+      #endif
 
       Divider()
 

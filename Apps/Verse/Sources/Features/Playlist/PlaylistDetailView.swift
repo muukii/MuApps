@@ -9,7 +9,6 @@ import SwiftData
 struct PlaylistDetailView: View {
   @Bindable var playlist: Playlist
   @Environment(VideoItemService.self) private var historyService
-  @Environment(\.editMode) private var editMode
 
   @State private var selectedVideoItem: VideoItem?
   @State private var showRenameAlert: Bool = false
@@ -29,9 +28,11 @@ struct PlaylistDetailView: View {
     }
     .navigationTitle(playlist.name)
     .toolbar {
+#if os(iOS)
       ToolbarItem(placement: .primaryAction) {
         EditButton()
       }
+#endif
       ToolbarItem(placement: .secondaryAction) {
         Button {
           newName = playlist.name

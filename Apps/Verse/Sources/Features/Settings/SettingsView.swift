@@ -86,17 +86,25 @@ enum Settings {
 
     private var siriAndShortcutsSection: some SwiftUI.View {
       Group {
-        Section {
-          SiriTipView(intent: OpenYouTubeVideoIntent())
-        } header: {
-          Text("Siri")
-        } footer: {
-          Text("Use Siri to quickly open YouTube videos with subtitles.")
-        }
+        #if os(iOS)
+          Section {
+            SiriTipView(intent: OpenYouTubeVideoIntent())
+          } header: {
+            Text("Siri")
+          } footer: {
+            Text("Use Siri to quickly open YouTube videos with subtitles.")
+          }
+        #endif
 
         Section {
+#if os(iOS)
           ShortcutsLink()
             .shortcutsLinkStyle(.automaticOutline)
+#else
+          Link(destination: URL(string: "shortcuts://")!) {
+            Label("Open Shortcuts", systemImage: "link")
+          }
+#endif
         } header: {
           Text("Shortcuts")
         } footer: {
@@ -335,6 +343,7 @@ enum Settings {
           )
         }
 
+#if os(iOS)
         NavigationLink {
           RealtimeTranscriptionView()
         } label: {
@@ -345,10 +354,15 @@ enum Settings {
             color: .purple
           )
         }
+#endif
       } header: {
         Text("Experimental")
       } footer: {
+#if os(iOS)
         Text("Features under development. Live Transcription requires iOS 26+ and physical device.")
+#else
+        Text("Features under development.")
+#endif
       }
     }
   }

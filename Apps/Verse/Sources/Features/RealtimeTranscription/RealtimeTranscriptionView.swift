@@ -10,6 +10,9 @@ import SwiftData
 import SwiftUI
 import Translation
 
+#if os(iOS)
+import Speech
+
 /// Sample view demonstrating real-time microphone transcription using SpeechAnalyzer (iOS 26+)
 struct RealtimeTranscriptionView: View {
   @Environment(\.modelContext) private var modelContext
@@ -389,3 +392,5 @@ private struct ExplainSheet: View {
     RealtimeTranscriptionView()
   }
 }
+
+#endif

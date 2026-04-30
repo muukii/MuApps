@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import UIKit
 import ObjectEdge
 
 // MARK: - TextSelection Model
@@ -51,7 +50,11 @@ struct SelectionActionSheet: View {
       )
     }
     .safeAreaPadding(.top, 20)
+#if os(iOS)
     .listStyle(.insetGrouped)
+#else
+    .listStyle(.inset)
+#endif
     .presentationDetents([.medium, .large])
     .presentationDragIndicator(.automatic)
     .sheet(isPresented: $showVocabulary) {

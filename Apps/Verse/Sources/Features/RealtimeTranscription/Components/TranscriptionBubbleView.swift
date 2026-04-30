@@ -8,6 +8,8 @@
 import CoreMedia
 import SwiftUI
 
+#if os(iOS)
+
 // MARK: - TranscriptionDisplayable Protocol
 
 /// Protocol for types that can be displayed in a transcription bubble
@@ -50,3 +52,5 @@ struct TranscriptionBubbleView<Item: TranscriptionDisplayable>: View {
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
+
+#endif

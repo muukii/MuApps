@@ -1,6 +1,4 @@
 import SwiftUI
-import AsyncMultiplexImage
-import AsyncMultiplexImage_Nuke
 
 // MARK: - VideoItemCell
 
@@ -74,29 +72,45 @@ struct VideoItemCell: View {
   private var thumbnailView: some View {
     if let thumbnailURLString = video.thumbnailURL,
        let thumbnailURL = URL(string: thumbnailURLString) {
-      AsyncMultiplexImageNuke(
-        imageRepresentation: .remote(.init(constant: thumbnailURL))
-      )
-      .aspectRatio(contentMode: .fill)
+      AsyncImage(url: thumbnailURL) { phase in
+        switch phase {
+        case .success(let image):
+          image
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+        case .failure:
+          thumbnailPlaceholder
+        case .empty:
+          ProgressView()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        @unknown default:
+          thumbnailPlaceholder
+        }
+      }
       .frame(width: thumbnailSize.width, height: thumbnailSize.height)
+      .background(Color.gray.opacity(0.2))
       .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
       .overlay(alignment: .bottom) {
         playbackProgressBar
       }
     } else {
-      Rectangle()
-        .fill(Color.gray.opacity(0.3))
+      thumbnailPlaceholder
         .frame(width: thumbnailSize.width, height: thumbnailSize.height)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        .overlay {
-          Image(systemName: "play.rectangle")
-            .foregroundStyle(.white)
-            .font(.title)
-        }
         .overlay(alignment: .bottom) {
           playbackProgressBar
         }
     }
+  }
+
+  private var thumbnailPlaceholder: some View {
+    Rectangle()
+      .fill(Color.gray.opacity(0.3))
+      .overlay {
+        Image(systemName: "play.rectangle")
+          .foregroundStyle(.white)
+          .font(.title)
+      }
   }
 
   // MARK: - Playback Progress Bar
@@ -202,11 +216,15 @@ private struct MatchedTransitionModifier: ViewModifier {
   let namespace: Namespace.ID?
 
   func body(content: Content) -> some View {
+#if os(iOS)
     if let namespace = namespace {
       content.matchedTransitionSource(id: id, in: namespace)
     } else {
       content
     }
+#else
+    content
+#endif
   }
 }
 

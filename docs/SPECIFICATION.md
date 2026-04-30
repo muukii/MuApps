@@ -14,7 +14,7 @@
 
 ## Overview
 
-Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that lets users watch YouTube videos with synced subtitles, navigation tools, and on-device language assistance.
+Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone, iPad, and native macOS that lets users watch YouTube videos with synced subtitles, navigation tools, and on-device language assistance.
 
 ### Target Users
 - Language learners (English, Japanese, and other subtitle languages)
@@ -45,7 +45,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
   - Loop entire video, or A-B section if repeat points are set
 - A-B repeat:
   - Set A/B from subtitle menu or repeat setup UI
-  - Ring slider controls for precise A/B times
+  - Slider controls for precise A/B times
 - Collapse/expand player to focus on subtitles
 - Resume playback from last saved position
   - Auto-saves position every 30 seconds during playback
@@ -105,6 +105,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
   - Structured generation for meaning, examples, and notes
   - Part of speech detection
 - System Translation for subtitle lines and words
+  - Subtitle-line Translate actions are shown on iPhone and iPad; Mac hides them in the native macOS build because the system translation presentation is not wired there
 
 ### 4. History and Library
 
@@ -147,9 +148,11 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Local playback with source switching
 - Delete downloaded files
 - UI hidden in Release builds; downloads still used internally for transcription
+- iPhone and iPad use background processing where available; Mac performs downloads in the foreground
 
 ### 6. External Integrations
 - Siri and Shortcuts: "Open YouTube Video" intent
+  - Mac keeps Shortcuts access through a link to the Shortcuts app and hides Siri tip UI because `SiriTipView` is unavailable there
 - Deep link handling for YouTube URLs
 - In-app YouTube browser (with iOS sign-in flow)
 
@@ -158,6 +161,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Word tap for translation/explanation
 - Shareable session transcript
 - Session history with detail view and export
+- Hidden on Mac because the live microphone transcription flow is iOS-only
 
 ## Screen Layout
 
@@ -166,14 +170,14 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - History list with thumbnails, metadata, and playback progress bars
 - Toolbar: Sort menu (Manual/Last Played/Date Added), Edit (for reordering in Manual mode only), Settings
 - Bottom bar: Paste URL, Browse YouTube
-- iPad layout uses a split view with a persistent history sidebar and a dedicated detail pane for playback; the detail pane shows a "Select a Video" prompt until the user chooses an item
+- iPad and Mac layout uses a split view with a persistent history sidebar and a dedicated detail pane for playback; the detail pane shows a "Select a Video" prompt until the user chooses an item
 - Edit mode: drag handles for reordering history items (Manual sort mode only)
 - Context menu: Add to Playlist
 
 ### URL Input Sheet (URLInputSheet)
 - URL field with live metadata preview
 - "Open Video" primary action
-- On iPad, sheet content is centered in a narrower form-width layout for easier scanning
+- On iPad and Mac, sheet content is centered in a narrower form-width layout for easier scanning
 
 ### YouTube Browser (YouTubeWebView)
 - Web view with back/forward/reload
@@ -186,14 +190,14 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Subtitle list with tracking toggle
 - Playback controls: scrubber, speed, seek, loop, A-B setup
 - Toolbar: subtitle management, on-device transcribe, download (if enabled)
-- On iPad, the player, subtitle reader, and controls stay centered within a readable-width column
+- On iPad and Mac, the player, subtitle reader, and controls stay centered within a readable-width column
 
 ### Settings (SettingsView)
 - Apple Intelligence status for Word Explanations
 - Apple Intelligence status for Vocabulary Auto-Fill
-- Siri and Shortcuts tips
+- Siri and Shortcuts tips on iPhone and iPad; Shortcuts link on Mac
 - Data: Clear History (with confirmation dialog)
-- Experimental: Vocabulary, Playlists, Live Transcription
+- Experimental: Vocabulary, Playlists; Live Transcription on iPhone and iPad
 - Debug-only feature flags
 
 ## UI/UX Specifications
@@ -202,14 +206,14 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Accent color used for current subtitle and word highlights
 - Tracking toggle: filled icon when enabled, outlined when disabled
 - Subtitle row timestamp pill for quick seek
-- Selected videos in the iPad sidebar use a tinted rounded highlight
+- Selected videos in the iPad and Mac sidebar use a tinted rounded highlight
 
 ### Interactions
 - Auto-tracking stops on manual scroll or selection
-- Swipe actions for translate/explain
+- Swipe actions for translate/explain on iPhone and iPad; Mac hides the translate swipe action
 - Context menus for subtitle actions and step mode
 - Sheets use medium/large detents on iOS
-- On iPad, selecting a history item updates the detail pane in place instead of pushing a full-screen navigation stack
+- On iPad and Mac, selecting a history item updates the detail pane in place instead of pushing a full-screen navigation stack
 
 ## Data and Storage
 - SwiftData local storage only (no cloud sync)
@@ -223,6 +227,8 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Download UI disabled in Release builds
 - On-device and live transcription require iOS 26+ physical device
 - Apple Intelligence features (word explanations, vocabulary auto-fill) require supported device and enabled system setting
+- Native Mac support uses SwiftUI/AppKit fallbacks for web video playback, subtitle text, and external browser presentation
+- System Translation presentation, live transcription, and UIKit/TextKit word-tap subtitle rendering are iPhone/iPad-only; Mac keeps selectable subtitle text and Explain menus where available
 
 ## Future Enhancements
 - CloudKit sync for history, playlists, and vocabulary

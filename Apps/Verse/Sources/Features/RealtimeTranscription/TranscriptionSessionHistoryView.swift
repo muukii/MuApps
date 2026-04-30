@@ -8,6 +8,8 @@
 import SwiftData
 import SwiftUI
 
+#if os(iOS)
+
 /// View displaying the history of transcription sessions
 struct TranscriptionSessionHistoryView: View {
   @Environment(\.modelContext) private var modelContext
@@ -319,3 +321,5 @@ struct TranscriptionSessionDetailView: View {
   TranscriptionSessionHistoryView()
     .modelContainer(for: [TranscriptionSession.self, TranscriptionEntry.self])
 }
+
+#endif

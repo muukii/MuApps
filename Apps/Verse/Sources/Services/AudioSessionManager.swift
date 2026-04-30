@@ -5,10 +5,13 @@
 //  Created by Claude on 2025/12/05.
 //
 
+#if os(iOS)
 import AVFoundation
+#endif
+import Observation
 
-/// Manages AVAudioSession configuration for the app.
-/// Configures audio session to allow video playback even when device is in silent mode.
+/// Manages platform audio configuration for the app.
+/// On iOS, configures AVAudioSession to allow video playback even when device is in silent mode.
 @Observable
 final class AudioSessionManager: Sendable {
   static let shared = AudioSessionManager()
@@ -21,6 +24,7 @@ final class AudioSessionManager: Sendable {
   }
 
   private func configureAudioSession() {
+#if os(iOS)
     let audioSession = AVAudioSession.sharedInstance()
 
     do {
@@ -42,5 +46,8 @@ final class AudioSessionManager: Sendable {
       configurationError = error
       print("[AudioSessionManager] Failed to configure audio session: \(error.localizedDescription)")
     }
+#else
+    isConfigured = true
+#endif
   }
 }

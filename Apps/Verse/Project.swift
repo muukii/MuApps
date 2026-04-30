@@ -37,10 +37,10 @@ let project = Project(
     // MARK: - Main App Target
     .target(
       name: "Verse",
-      destinations: .app,
+      destinations: .nativeMacApp,
       product: .app,
       bundleId: AppConstants.appBundleId,
-      deploymentTargets: .app,
+      deploymentTargets: .nativeMacApp,
       infoPlist: appInfoPlist,
       buildableFolders: ["Sources"],
       entitlements: .file(path: "Sources/YouTubeSubtitle.entitlements"),
@@ -51,15 +51,12 @@ let project = Project(
         // External SPM dependencies
         .external(name: "YouTubeKit"),
         .external(name: "ObjectEdge"),
-        .external(name: "SwiftUIRingSlider"),
         .external(name: "TypedIdentifier"),
-        .external(name: "AsyncMultiplexImage"),
-        .external(name: "AsyncMultiplexImage-Nuke"),
         .external(name: "StateGraph"),
         .external(name: "Algorithms"),
       ],
       settings: .settings(
-        base: .appTarget,
+        base: .nativeMacAppTarget,
         configurations: [
           .debug(name: "Debug", xcconfig: "xcconfig/Version.xcconfig"),
           .release(name: "Release", xcconfig: "xcconfig/Version.xcconfig"),
@@ -70,15 +67,15 @@ let project = Project(
     // MARK: - Components Framework Target
     .target(
       name: "Components",
-      destinations: .app,
+      destinations: .nativeMacApp,
       product: .staticFramework,
       bundleId: "app.muukii.Components",
-      deploymentTargets: .app,
+      deploymentTargets: .nativeMacApp,
       infoPlist: .default,
       buildableFolders: ["Components"],
       dependencies: [],
       settings: .settings(
-        base: .frameworkTarget,
+        base: .nativeMacFrameworkTarget,
         configurations: [
           .debug(name: "Debug"),
           .release(name: "Release"),

@@ -9,6 +9,24 @@ import SwiftData
 import SwiftUI
 import YouTubeKit
 
+private extension Color {
+  static var verseGroupedBackground: Color {
+#if os(iOS)
+    Color(.systemGroupedBackground)
+#else
+    Color(nsColor: .windowBackgroundColor)
+#endif
+  }
+
+  static var verseSecondaryGroupedBackground: Color {
+#if os(iOS)
+    Color(.secondarySystemGroupedBackground)
+#else
+    Color(nsColor: .controlBackgroundColor)
+#endif
+  }
+}
+
 struct DownloadView: View {
   let videoID: YouTubeContentID
 
@@ -101,7 +119,7 @@ struct DownloadView: View {
       // Bottom Button
       downloadButton
     }
-    .background(Color(.systemGroupedBackground))
+    .background(Color.verseGroupedBackground)
     .navigationTitle("Download")
     #if os(iOS)
       .navigationBarTitleDisplayMode(.inline)
@@ -224,7 +242,7 @@ struct DownloadView: View {
           }
         }
         .padding(16)
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(Color.verseSecondaryGroupedBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
 
       case .completed, .alreadyDownloaded:
@@ -287,7 +305,7 @@ struct DownloadView: View {
           Spacer()
         }
         .padding(16)
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(Color.verseSecondaryGroupedBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
 
       case .transcribing(let progress):
@@ -381,7 +399,7 @@ struct DownloadView: View {
       .disabled(!canDownload)
       .padding(20)
     }
-    .background(Color(.systemGroupedBackground))
+    .background(Color.verseGroupedBackground)
   }
 
   private var downloadButtonTitle: String {
@@ -541,7 +559,7 @@ private struct QualityOptionRow: View {
       .padding(16)
       .background(
         RoundedRectangle(cornerRadius: 12)
-          .fill(Color(.secondarySystemGroupedBackground))
+          .fill(Color.verseSecondaryGroupedBackground)
       )
       .overlay(
         RoundedRectangle(cornerRadius: 12)

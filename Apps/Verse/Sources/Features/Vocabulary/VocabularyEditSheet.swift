@@ -72,7 +72,9 @@ struct VocabularyEditSheet: View {
         Section {
           HStack {
             TextField("Word or phrase", text: $term)
+#if os(iOS)
               .textInputAutocapitalization(.never)
+#endif
 
             Button {
               Task {

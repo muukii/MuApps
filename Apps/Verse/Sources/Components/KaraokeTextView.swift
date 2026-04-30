@@ -6,6 +6,8 @@
 //  Uses TextKit2 for advanced text layout and supports word-level timing.
 //
 
+#if os(iOS)
+
 import CoreMedia
 import NaturalLanguage
 import SwiftUI
@@ -782,3 +784,4 @@ extension KaraokeTextView: UIGestureRecognizerDelegate {
     true
   }
 }
+#endif

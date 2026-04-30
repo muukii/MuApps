@@ -159,8 +159,10 @@ final class TranscriptionEntry: TypedIdentifiable {
 
 // MARK: - TranscriptionDisplayable Conformance
 
+#if os(iOS)
 extension TranscriptionEntry: TranscriptionDisplayable {
   var displayText: String { text }
   var displayWordTimings: [Subtitle.WordTiming]? { wordTimings.isEmpty ? nil : wordTimings }
   var displayFormattedTime: String { formattedTime }
 }
+#endif

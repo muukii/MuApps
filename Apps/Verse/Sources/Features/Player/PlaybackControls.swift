@@ -7,7 +7,6 @@
 
 import Components
 import SwiftUI
-import SwiftUIRingSlider
 import TipKit
 
 // MARK: - PlayerControls
@@ -542,9 +541,13 @@ extension PlayerControls {
       }
 
       private var ringBinding: Binding<Double> {
-        Binding(
-          get: { value ?? 0 },
-          set: { value = $0 }
+        let maximum = max(1, duration)
+        return Binding(
+          get: {
+            guard let value else { return 0 }
+            return max(0, min(1, value / maximum))
+          },
+          set: { value = max(0, min(1, $0)) * maximum }
         )
       }
 
@@ -556,25 +559,15 @@ extension PlayerControls {
           Text(timeText)
             .font(.system(.caption, design: .rounded, weight: .medium))
 
-          RingSlider(
+          TouchSlider(
+            direction: .horizontal,
             value: ringBinding,
-            stride: 0.25,
-            valueRange: 0...max(1, duration),
-            primaryTickMark: {
-              RoundedRectangle(cornerRadius: 8)
-                .frame(width: 2)
-                .foregroundStyle(.primary)
-                .padding(.vertical, 10)
-            },
-            secondaryTickMark: {
-              RoundedRectangle(cornerRadius: 8)
-                .frame(width: 2)
-                .foregroundStyle(.secondary)
-                .padding(.vertical, 15)
-            }
+            speed: 0.5,
+            foregroundColor: .primary.opacity(0.8),
+            backgroundColor: .secondary.opacity(0.2),
+            cornerRadius: 8
           )
-          .frame(height: 60)
-          .foregroundStyle(.primary)
+          .frame(width: 120, height: 16)
 
           HStack(spacing: 8) {
            

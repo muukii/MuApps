@@ -197,7 +197,7 @@ struct PlayerView: View {
         .presentationDragIndicator(isTranscriptionInProgress ? .hidden : .visible)
         .interactiveDismissDisabled(isTranscriptionInProgress)
       }
-      .translationPresentation(
+      .verseTranslationPresentation(
         isPresented: Binding(
           get: { selectedCueForTranslation != nil },
           set: { if !$0 { selectedCueForTranslation = nil } }
@@ -318,7 +318,9 @@ struct PlayerView: View {
             // Redirect to SelectionActionSheet
             selectionForActionSheet = TextSelection(text: cue.decodedText, context: buildContextForCue(cue))
           case .translate(let cue):
-            selectedCueForTranslation = cue
+            #if os(iOS)
+              selectedCueForTranslation = cue
+            #endif
           case .explainSelection(let text, let context):
             // Redirect to SelectionActionSheet
             selectionForActionSheet = TextSelection(text: text, context: context)
@@ -836,6 +838,20 @@ private struct CircularProgressView: View {
         .foregroundStyle(.blue)
     }
     .frame(width: 22, height: 22)
+  }
+}
+
+private extension View {
+  @ViewBuilder
+  func verseTranslationPresentation(
+    isPresented: Binding<Bool>,
+    text: String
+  ) -> some View {
+    #if os(iOS)
+      translationPresentation(isPresented: isPresented, text: text)
+    #else
+      self
+    #endif
   }
 }
 

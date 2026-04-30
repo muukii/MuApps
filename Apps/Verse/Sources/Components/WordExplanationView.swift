@@ -8,6 +8,8 @@
 import SwiftUI
 #if os(iOS)
 import SafariServices
+#elseif os(macOS)
+import AppKit
 #endif
 
 // MARK: - Gemini URL Builder
@@ -63,6 +65,25 @@ struct SafariView: UIViewControllerRepresentable {
 
   func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {
     // No updates needed
+  }
+}
+#elseif os(macOS)
+/// macOS fallback that opens Gemini in the default browser.
+struct SafariView: View {
+  let url: URL
+
+  var body: some View {
+    ContentUnavailableView {
+      Label("Opened in Browser", systemImage: "safari")
+    } description: {
+      Text(url.absoluteString)
+    } actions: {
+      Link("Open Again", destination: url)
+    }
+    .frame(minWidth: 420, minHeight: 260)
+    .onAppear {
+      NSWorkspace.shared.open(url)
+    }
   }
 }
 #endif
@@ -335,12 +356,16 @@ struct WordExplanationView: View {
         .textCase(nil)
     }
 
-    WordExplanationView(
-      service: .init(),
-      text: "serendipity",
-      context: "It was pure serendipity that we met.",
-      geminiURL: $geminiURL
-    )
-  }
-  .listStyle(.insetGrouped)
+  WordExplanationView(
+    service: .init(),
+    text: "serendipity",
+    context: "It was pure serendipity that we met.",
+    geminiURL: $geminiURL
+  )
+}
+#if os(iOS)
+.listStyle(.insetGrouped)
+#else
+.listStyle(.inset)
+#endif
 }

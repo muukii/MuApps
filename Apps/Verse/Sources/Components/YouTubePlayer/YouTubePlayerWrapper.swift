@@ -42,7 +42,8 @@ struct YouTubeVideoPlayer: View {
 
 // MARK: - YouTubeVideoPlayerRepresentable
 
-/// UIViewRepresentable wrapper for YouTubePlayerWebView
+/// Platform representable wrapper for YouTubePlayerWebView
+#if os(iOS)
 private struct YouTubeVideoPlayerRepresentable: UIViewRepresentable {
   let controller: YouTubeVideoPlayerController
 
@@ -54,6 +55,19 @@ private struct YouTubeVideoPlayerRepresentable: UIViewRepresentable {
     // No updates needed - controller manages the webView
   }
 }
+#elseif os(macOS)
+private struct YouTubeVideoPlayerRepresentable: NSViewRepresentable {
+  let controller: YouTubeVideoPlayerController
+
+  func makeNSView(context: Context) -> YouTubePlayerWebView {
+    controller.webView
+  }
+
+  func updateNSView(_ nsView: YouTubePlayerWebView, context: Context) {
+    // No updates needed - controller manages the webView
+  }
+}
+#endif
 
 // MARK: - YouTubeVideoPlayerController
 

@@ -14,12 +14,18 @@ public extension DeploymentTargets {
   static let app: DeploymentTargets = .multiplatform(
     iOS: "26.1"
   )
+
+  static let nativeMacApp: DeploymentTargets = .multiplatform(
+    iOS: "26.1",
+    macOS: "26.1"
+  )
 }
 
 // MARK: - Destinations
 
 public extension Destinations {
   static let app: Destinations = [.iPhone, .iPad]
+  static let nativeMacApp: Destinations = [.iPhone, .iPad, .mac]
 }
 
 // MARK: - Base Settings
@@ -52,6 +58,10 @@ public extension SettingsDictionary {
     "LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]": "$(inherited) @executable_path/../Frameworks",
   ])
 
+  static let nativeMacAppTarget: SettingsDictionary = appTarget.merging([
+    "SUPPORTS_MACCATALYST": "NO",
+  ])
+
   static let frameworkTarget: SettingsDictionary = base.merging([
     "BUILD_LIBRARY_FOR_DISTRIBUTION": "YES",
     "SKIP_INSTALL": "YES",
@@ -60,6 +70,10 @@ public extension SettingsDictionary {
     "ALLOW_TARGET_PLATFORM_SPECIALIZATION": "YES",
     "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
     "TARGETED_DEVICE_FAMILY": "1,2,7",
+  ])
+
+  static let nativeMacFrameworkTarget: SettingsDictionary = frameworkTarget.merging([
+    "SUPPORTS_MACCATALYST": "NO",
   ])
 }
 

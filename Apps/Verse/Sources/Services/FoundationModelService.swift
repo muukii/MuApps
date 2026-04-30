@@ -214,6 +214,16 @@ final class FoundationModelService {
       return "The content violates safety guidelines."
     case .unsupportedLanguageOrLocale:
       return "The language or locale is not supported."
+    case .unsupportedGuide:
+      return "The requested structured response is not supported."
+    case .decodingFailure:
+      return "The language model response could not be decoded. Please try again."
+    case .rateLimited:
+      return "The language model is currently rate limited. Please try again shortly."
+    case .concurrentRequests:
+      return "Another language model request is already running. Please try again shortly."
+    case .refusal:
+      return "The language model declined to answer this request."
     @unknown default:
       return "An unknown error occurred: \(error)"
     }

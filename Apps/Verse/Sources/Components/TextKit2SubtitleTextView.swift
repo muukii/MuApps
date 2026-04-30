@@ -9,6 +9,7 @@ import SwiftUI
 
 // MARK: - TextKit2SubtitleTextView
 
+#if os(iOS)
 /// UIViewRepresentable that wraps KaraokeTextView for SwiftUI usage.
 /// Provides a thin interface between SwiftUI and the pure UIKit karaoke text view.
 struct TextKit2SubtitleTextView: UIViewRepresentable {
@@ -78,3 +79,51 @@ struct TextKit2SubtitleTextView: UIViewRepresentable {
     var lastCues: [Subtitle.Cue] = []
   }
 }
+#else
+/// Native macOS fallback for the TextKit2 subtitle mode.
+/// The iOS implementation is UIKit/TextKit-backed; macOS keeps the same action surface with SwiftUI text.
+struct TextKit2SubtitleTextView: View {
+  let cues: [Subtitle.Cue]
+  let currentTimeValue: Double
+  let currentCueID: Subtitle.Cue.ID?
+  @Binding var isTrackingEnabled: Bool
+  let onAction: (SubtitleAction) -> Void
+
+  var body: some View {
+    List(cues) { cue in
+      HStack(alignment: .top, spacing: 8) {
+        Button {
+          onAction(.tap(time: cue.startTime))
+        } label: {
+          RoundedRectangle(cornerRadius: 8)
+            .frame(width: 30)
+            .foregroundStyle(.quinary)
+        }
+        .buttonStyle(.plain)
+
+        Text(cue.decodedText)
+          .font(.system(size: 18, weight: .bold))
+          .foregroundStyle(cue.id == currentCueID ? Color.accentColor : Color.secondary)
+          .lineSpacing(10)
+          .textSelection(.enabled)
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+        Menu {
+          Button {
+            onAction(.showSelectionActions(text: cue.decodedText, context: cue.decodedText))
+          } label: {
+            Label("Explain", systemImage: "sparkles")
+          }
+        } label: {
+          Image(systemName: "ellipsis")
+            .frame(width: 32, height: 24)
+        }
+        .buttonStyle(.plain)
+      }
+      .id(cue.id)
+      .listRowSeparator(.hidden)
+    }
+    .listStyle(.plain)
+  }
+}
+#endif

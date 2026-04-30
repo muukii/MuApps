@@ -5,6 +5,8 @@
 //  Created by Claude on 2025/12/10.
 //
 
+#if os(iOS)
+
 import CoreMedia
 import NaturalLanguage
 import SwiftUI
@@ -497,3 +499,4 @@ enum WordBoundary {
   }
   .padding()
 }
+#endif

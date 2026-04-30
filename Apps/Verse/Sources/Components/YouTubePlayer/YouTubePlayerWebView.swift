@@ -65,7 +65,9 @@ final class YouTubePlayerWebView: WKWebView {
     let configuration = WKWebViewConfiguration()
 
     // Allow inline playback (required for iOS)
+    #if os(iOS)
     configuration.allowsInlineMediaPlayback = true
+    #endif
     configuration.mediaTypesRequiringUserActionForPlayback = []
 
     // Use non-persistent data store to avoid caching issues
@@ -100,6 +102,7 @@ final class YouTubePlayerWebView: WKWebView {
   }
 
   private func setupWebView() {
+    #if os(iOS)
     // Transparent background
     isOpaque = false
     backgroundColor = .clear
@@ -108,10 +111,13 @@ final class YouTubePlayerWebView: WKWebView {
     // Disable scrolling (video player handles its own interaction)
     scrollView.isScrollEnabled = false
     scrollView.bounces = false
+    #elseif os(macOS)
+    setValue(false, forKey: "drawsBackground")
+    #endif
 
     // Enable Safari Web Inspector in debug builds
     #if DEBUG
-    if #available(iOS 16.4, *) {
+    if #available(iOS 16.4, macOS 13.3, *) {
       isInspectable = true
     }
     #endif

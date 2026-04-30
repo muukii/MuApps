@@ -248,33 +248,52 @@ struct HomeView: View {
 
   @ToolbarContentBuilder
   private var topToolbarContent: some ToolbarContent {
+#if os(iOS)
     ToolbarItem(placement: .topBarLeading) {
-      Button {
-        showSettings = true
-      } label: {
-        Label("Settings", systemImage: "gear")
-      }
+      settingsToolbarButton
     }
 
     ToolbarItem(placement: .topBarTrailing) {
-      if !history.isEmpty {
-        Menu {
-          Picker("Sort by", selection: $sortOption) {
-            ForEach(HistorySortOption.allCases) { option in
-              Label(option.rawValue, systemImage: option.systemImage)
-                .tag(option)
-            }
-          }
-          .pickerStyle(.inline)
-        } label: {
-          Label("Sort", systemImage: sortOption.systemImage)
-        }
-      }
+      sortToolbarMenu
     }
 
     ToolbarItem(placement: .primaryAction) {
       if !history.isEmpty && sortOption == .manual {
         EditButton()
+      }
+    }
+#else
+    ToolbarItem(placement: .primaryAction) {
+      settingsToolbarButton
+    }
+
+    ToolbarItem(placement: .secondaryAction) {
+      sortToolbarMenu
+    }
+#endif
+  }
+
+  private var settingsToolbarButton: some View {
+    Button {
+      showSettings = true
+    } label: {
+      Label("Settings", systemImage: "gear")
+    }
+  }
+
+  @ViewBuilder
+  private var sortToolbarMenu: some View {
+    if !history.isEmpty {
+      Menu {
+        Picker("Sort by", selection: $sortOption) {
+          ForEach(HistorySortOption.allCases) { option in
+            Label(option.rawValue, systemImage: option.systemImage)
+              .tag(option)
+          }
+        }
+        .pickerStyle(.inline)
+      } label: {
+        Label("Sort", systemImage: sortOption.systemImage)
       }
     }
   }
@@ -333,10 +352,16 @@ struct HomeView: View {
     }
   }
 
+  @ViewBuilder
   private func playerDestination(for videoItem: VideoItem) -> some View {
+#if os(iOS)
     PlayerView(videoItem: videoItem)
       .id(videoItem.videoID.rawValue)
       .navigationTransition(.zoom(sourceID: videoItem.videoID, in: heroNamespace))
+#else
+    PlayerView(videoItem: videoItem)
+      .id(videoItem.videoID.rawValue)
+#endif
   }
   
   private func loadURL(_ urlText: String) {

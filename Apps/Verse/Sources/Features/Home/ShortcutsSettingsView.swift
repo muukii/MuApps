@@ -14,17 +14,25 @@ struct ShortcutsSettingsView: View {
   var body: some View {
     NavigationStack {
       List {
-        Section {
-          SiriTipView(intent: OpenYouTubeVideoIntent())
-        } header: {
-          Text("Open Video")
-        } footer: {
-          Text("Use Siri to quickly open YouTube videos with subtitles.")
-        }
+        #if os(iOS)
+          Section {
+            SiriTipView(intent: OpenYouTubeVideoIntent())
+          } header: {
+            Text("Open Video")
+          } footer: {
+            Text("Use Siri to quickly open YouTube videos with subtitles.")
+          }
+        #endif
 
         Section {
+#if os(iOS)
           ShortcutsLink()
             .shortcutsLinkStyle(.automaticOutline)
+#else
+          Link(destination: URL(string: "shortcuts://")!) {
+            Label("Open Shortcuts", systemImage: "link")
+          }
+#endif
         } header: {
           Text("Shortcuts App")
         } footer: {

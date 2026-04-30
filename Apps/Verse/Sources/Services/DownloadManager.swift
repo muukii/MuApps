@@ -5,11 +5,19 @@
 //  Created by Hiroshi Kimura on 2025/12/05.
 //
 
+#if os(iOS)
 @preconcurrency import BackgroundTasks
+#endif
 import Foundation
 import SwiftData
 import TypedIdentifier
 import YouTubeKit
+
+#if os(iOS)
+private typealias BackgroundDownloadTask = BGContinuedProcessingTask
+#else
+private typealias BackgroundDownloadTask = Never
+#endif
 
 // MARK: - Download State (for UI)
 
@@ -140,8 +148,8 @@ private final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegat
 
 // MARK: - Download Manager
 
-/// Manages video downloads using BGContinuedProcessingTask for background execution.
-/// Progress is automatically displayed in Live Activity.
+/// Manages video downloads using BGContinuedProcessingTask where available.
+/// macOS falls back to foreground downloads because BGContinuedProcessingTask is unavailable.
 @Observable
 @MainActor
 final class DownloadManager: Sendable {
@@ -161,12 +169,14 @@ final class DownloadManager: Sendable {
 
   // MARK: - Private Properties
 
-  private let scheduler = BGTaskScheduler.shared
   private let modelContainer: ModelContainer
-  private var activeTask: BGContinuedProcessingTask?
   private var downloadTasks: [TypedIdentifier<VideoItem>: Task<Void, Never>] = [:]
   private var urlSessionTasks: [TypedIdentifier<VideoItem>: URLSessionDownloadTask] = [:]
+  #if os(iOS)
+  private let scheduler = BGTaskScheduler.shared
+  private var activeTask: BGContinuedProcessingTask?
   private var isTaskRegistered = false
+  #endif
 
   // MARK: - Initialization
 
@@ -218,14 +228,18 @@ final class DownloadManager: Sendable {
     )
     pendingItemIDs.append(itemID)
 
-    // Try to submit BGTask, fall back to foreground download if unavailable
-    do {
-      try submitTask(for: itemID)
-    } catch {
-      // BGTask unavailable (e.g., simulator), run foreground download
-      print("BGTask unavailable, falling back to foreground download: \(error)")
+    #if os(iOS)
+      // Try to submit BGTask, fall back to foreground download if unavailable
+      do {
+        try submitTask(for: itemID)
+      } catch {
+        // BGTask unavailable (e.g., simulator), run foreground download
+        print("BGTask unavailable, falling back to foreground download: \(error)")
+        startDownload(itemID: itemID, bgTask: nil)
+      }
+    #else
       startDownload(itemID: itemID, bgTask: nil)
-    }
+    #endif
 
     return itemID
   }
@@ -378,21 +392,28 @@ final class DownloadManager: Sendable {
       }
     }
 
-    // Submit tasks for all pending downloads
-    for itemID in pendingItemIDs {
-      do {
-        try submitTask(for: itemID)
-      } catch {
-        // BGTask unavailable, fall back to foreground download
-        print("BGTask unavailable for restored download, falling back to foreground: \(error)")
-        startDownload(itemID: itemID, bgTask: nil)
-        break // Only start one foreground download at a time
+    #if os(iOS)
+      // Submit tasks for all pending downloads
+      for itemID in pendingItemIDs {
+        do {
+          try submitTask(for: itemID)
+        } catch {
+          // BGTask unavailable, fall back to foreground download
+          print("BGTask unavailable for restored download, falling back to foreground: \(error)")
+          startDownload(itemID: itemID, bgTask: nil)
+          break // Only start one foreground download at a time
+        }
       }
-    }
+    #else
+      if let itemID = pendingItemIDs.first {
+        startDownload(itemID: itemID, bgTask: nil)
+      }
+    #endif
   }
 
   // MARK: - BGTask Management
 
+  #if os(iOS)
   /// Handle the background task for a specific download.
   private func handleBackgroundTask(_ task: BGContinuedProcessingTask, itemID: TypedIdentifier<VideoItem>) async {
     // Track active task
@@ -452,13 +473,14 @@ final class DownloadManager: Sendable {
 
     try scheduler.submit(request)
   }
+  #endif
 
   // MARK: - Unified Download Execution
 
   /// Start a download task (unified for both foreground and BGTask).
   private func startDownload(
     itemID: TypedIdentifier<VideoItem>,
-    bgTask: BGContinuedProcessingTask?,
+    bgTask: BackgroundDownloadTask?,
     checkExpired: @escaping () -> Bool = { false }
   ) {
     let downloadTask = Task { [weak self] in
@@ -475,7 +497,7 @@ final class DownloadManager: Sendable {
   /// Perform the download (unified for both foreground and BGTask).
   private func performDownload(
     itemID: TypedIdentifier<VideoItem>,
-    bgTask: BGContinuedProcessingTask?,
+    bgTask: BackgroundDownloadTask?,
     checkExpired: @escaping () -> Bool
   ) async {
 
@@ -564,7 +586,7 @@ final class DownloadManager: Sendable {
     videoID: YouTubeContentID,
     fileExtension: String,
     itemID: TypedIdentifier<VideoItem>,
-    bgTask: BGContinuedProcessingTask?,
+    bgTask: BackgroundDownloadTask?,
     checkExpired: @escaping () -> Bool
   ) async throws -> URL {
 
@@ -616,11 +638,13 @@ final class DownloadManager: Sendable {
 
           let fraction = update.fractionCompleted
 
-          // Update Live Activity progress (if BGTask)
-          if let bgTask {
-            bgTask.progress.completedUnitCount = Int64(fraction * 100)
-            bgTask.updateTitle("Downloading video", subtitle: "\(Int(fraction * 100))%")
-          }
+          #if os(iOS)
+            // Update Live Activity progress (if BGTask)
+            if let bgTask {
+              bgTask.progress.completedUnitCount = Int64(fraction * 100)
+              bgTask.updateTitle("Downloading video", subtitle: "\(Int(fraction * 100))%")
+            }
+          #endif
 
           // Update observable state on main thread
           updateProgress(itemID: itemID, fraction: fraction, state: .downloading)

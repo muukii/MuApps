@@ -9,7 +9,9 @@ import CoreMedia
 import Speech
 import SwiftUI
 import Translation
+#if os(iOS)
 import UIKit
+#endif
 
 // MARK: - Subtitle List View Container
 
@@ -204,14 +206,16 @@ private struct SubtitleScrollContent: View {
         .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
-        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-          Button {
-            onAction(.translate(cue: cue))
-          } label: {
-            Label("Translate", systemImage: "character.book.closed")
+        #if os(iOS)
+          .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button {
+              onAction(.translate(cue: cue))
+            } label: {
+              Label("Translate", systemImage: "character.book.closed")
+            }
+            .tint(.blue)
           }
-          .tint(.blue)
-        }
+        #endif
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
           Button {
             onAction(.explain(cue: cue))

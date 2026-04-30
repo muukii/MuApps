@@ -1,3 +1,5 @@
+#if os(iOS)
+
 import Foundation
 @preconcurrency import AVFoundation
 import Speech
@@ -329,3 +331,5 @@ final class RealtimeTranscriptionViewModel {
     audioLevel = db
   }
 }
+
+#endif
