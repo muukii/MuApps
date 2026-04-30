@@ -6,6 +6,7 @@ let workspace = Workspace(
     "Apps/Verse",
     "Apps/HelloWorld",
     "Apps/VoiceRecorder",
+    "Apps/HearAugment",
     "Apps/PhotosOrganizer",
     "Apps/Tone",
     "Shared",
