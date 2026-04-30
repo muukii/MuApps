@@ -2,7 +2,7 @@
 
 ## Ad Hoc OTA Install Page
 - Pushes to the `main` branch run the Ad Hoc workflow automatically; manual runs can still publish all apps or a selected app from `main`.
-- The workflow exports Ad Hoc IPAs for Verse, Tone, PhotosOrganizer, PolyReader, VoiceRecorder, and HelloWorld.
+- The workflow exports Ad Hoc IPAs for Verse, Tone, PhotosOrganizer, HearAugment, PolyReader, VoiceRecorder, and HelloWorld.
 - Builds are published to the single `adhoc-latest` GitHub release so the release list does not grow per branch.
 - GitHub Pages serves `docs/install.html` as the shared install page for the latest `main` Ad Hoc builds.
 - Each app has its own install action backed by an `itms-services` manifest in the `adhoc-latest` GitHub release.
@@ -166,7 +166,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - History list with thumbnails, metadata, and playback progress bars
 - Toolbar: Sort menu (Manual/Last Played/Date Added), Edit (for reordering in Manual mode only), Settings
 - Bottom bar: Paste URL, Browse YouTube
-- iPad layout uses a split view with a persistent history sidebar and a dedicated detail pane for playback
+- iPad layout uses a split view with a persistent history sidebar and a dedicated detail pane for playback; the detail pane shows a "Select a Video" prompt until the user chooses an item
 - Edit mode: drag handles for reordering history items (Manual sort mode only)
 - Context menu: Add to Playlist
 
@@ -231,6 +231,71 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Improved channel/author metadata
 - Dedicated subtitle library management
 - Additional iPad and macOS large-screen layout refinements
+
+---
+
+# HearAugment - Product Specification
+
+## Overview
+
+HearAugment is a SwiftUI iPhone and iPad audio AR prototype inspired by real-time environmental sound filtering apps. It listens through the device microphone, processes the live signal with editable effect chains, and plays the result through the current headphone route.
+
+## Core Features
+
+### 1. Live Listening
+- Requests microphone permission on launch.
+- Uses `AVAudioEngine` for audio-session hosting, microphone tap input, and output.
+- Microphone frames are passed through an Objective-C++ bridge into a C++ low-level float ring buffer and rendered by `AVAudioSourceNode`.
+- The render callback runs a custom C++ sample-by-sample serial effect chain instead of standard EQ, delay, reverb, or dynamics Audio Units.
+- The C++ ring buffer uses a single-producer/single-consumer atomic index design so the steady-state render path avoids mutex locking.
+- The C++ input ring keeps about 2.5 seconds of microphone frames as underrun protection; this capacity is separate from the low-latency input tap buffer.
+- The source node renders a stereo float format so mono microphone input can feed stereo processors such as panning, ping-pong delay, stereo reverb, and width effects.
+- Shows current listening state, elapsed listening time, selected chain, enabled effect count, and any audio-session errors.
+- Stops live listening automatically when the app enters the background.
+
+### 2. Serial Effect Chains
+- Provides built-in chain presets such as Clean Leveler, Focus Stack, Wide Room, Tape Accelerator, Reverse Bloom, Mod Lab, Lo-Fi Tunnel, Motion Field, Divergence Bloom, Gravity Tail, and Tape Riser.
+- Each preset is a serial list of effect nodes. Users can add nodes, remove nodes, enable or disable nodes, and move nodes up or down to change the processing order.
+- The effect library includes high pass, low pass, tilt EQ, presence EQ, compressor, noise gate, soft clip, wave folder, bit crusher, tremolo, ring mod, panner, auto pan, vibrato, chorus, flanger, phaser, slap delay, accelerating delay, tape riser delay, ping-pong delay, reverse grains, room reverb, stereo reverb, shimmer, comb resonator, space widener, long bloom, and converge bloom.
+- Reverb is implemented in C++ with feedback comb filters and all-pass diffusion. Stereo reverb uses separate left/right tanks with cross-feed and width processing.
+- Long Bloom uses a longer C++ feedback-comb and all-pass tank to make tails continue for several seconds before decaying.
+- Converge Bloom opens the tail into a wide stereo side field while residual energy is strong, then progressively collapses it back toward the center as the tail fades.
+- Accelerating Delay uses a geometric multi-tap echo pattern where later taps are closer together, making repeats feel faster over time.
+- Tape Riser Delay behaves like a tape delay with discrete long-spaced echoes whose repeat interval multiplies down toward a short target; each repeat raises its delay-line read speed above realtime, so the echoes accelerate and audibly rise in pitch as they converge.
+- Reverse uses double-buffered C++ reverse grains and can smear the reversed signal with an additional delay line.
+- Chain and parameter changes apply immediately while listening.
+- The Chain Intensity slider scales every node's amount before the chain is sent to C++.
+- Output slider controls the engine's main mixer output level.
+
+### 3. Buffer Control
+- The Buffer panel lets users choose the requested microphone tap buffer size before starting live listening.
+- Available buffer sizes are 128, 256, 512, and 1024 frames.
+- 256 frames is the default balanced setting, matching the original input tap behavior.
+- Larger buffers request longer `AVAudioSession` I/O durations and can improve stability for heavy chains at the cost of additional latency.
+- The selected buffer size is stored in `UserDefaults` and reused on the next launch.
+- Buffer size changes are disabled while listening is active because the input tap and audio session must be recreated to apply them.
+
+### 4. Custom Presets
+- The Effect Chain panel includes a preset name field and Save button.
+- Saving stores the current chain as a custom preset in `UserDefaults`.
+- Custom presets appear alongside built-in presets and can be selected later.
+- Custom presets can be deleted from the preset card context menu.
+
+### 5. Audio Route
+- Lists available audio input devices from `AVAudioSession`.
+- Allows input selection while listening is stopped.
+- Shows selected input, active input route, and output route.
+- Warns when headphones or AirPods are not connected to reduce feedback risk.
+
+### 6. Hearing Safety
+- The UI states that users should start with low device volume.
+- The app is presented as a creative audio AR prototype, not a medical hearing device.
+
+## Limitations
+- No recording, session history, cloud sync, or background listening yet.
+- The chain can contain up to 16 editable nodes in the UI and the C++ engine clamps incoming chains to 24 nodes.
+- Final input/output routing is controlled by iOS and connected hardware.
+- The app is not intended to diagnose, treat, or compensate for hearing loss.
 
 ---
 

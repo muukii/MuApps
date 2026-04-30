@@ -1,7 +1,6 @@
 import AppIntents
 import Foundation
-import Combine
-import SwiftUI
+import Observation
 
 struct OpenYouTubeVideoIntent: AppIntent {
   static let title: LocalizedStringResource = "Open YouTube Video"
@@ -23,11 +22,12 @@ struct OpenYouTubeVideoIntent: AppIntent {
 }
 
 // DeepLinkを管理するシングルトン
+@Observable
 @MainActor
-final class DeepLinkManager: ObservableObject {
+final class DeepLinkManager {
   static let shared = DeepLinkManager()
 
-  @Published var pendingVideoID: YouTubeContentID?
+  var pendingVideoID: YouTubeContentID?
 
   private init() {}
 

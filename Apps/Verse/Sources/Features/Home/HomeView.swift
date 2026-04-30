@@ -8,9 +8,7 @@
 import SwiftUI
 import SwiftData
 import AppIntents
-#if os(iOS)
-import UIKit
-#endif
+import TypedIdentifier
 
 enum HistorySortOption: String, CaseIterable, Identifiable {
   case manual = "Manual"
@@ -30,18 +28,17 @@ enum HistorySortOption: String, CaseIterable, Identifiable {
 
 struct HomeView: View {
   @Environment(\.modelContext) private var modelContext
-  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @Environment(VideoItemService.self) private var historyService
   @Environment(VocabularyService.self) private var vocabularyService
   @Environment(DownloadManager.self) private var downloadManager
   @Query(sort: \VideoItem.sortOrder) private var allHistory: [VideoItem]
 
-  @State private var selectedVideoItem: VideoItem?
+  @State private var selectedVideoItemID: VideoItem.TypedID?
   @State private var showWebView: Bool = false
   @State private var showSettings: Bool = false
   @State private var showURLInput: Bool = false
   @State private var videoToAddToPlaylist: VideoItem?
-  @ObservedObject private var deepLinkManager = DeepLinkManager.shared
+  private let deepLinkManager = DeepLinkManager.shared
   @AppStorage("historySortOption") private var sortOption: HistorySortOption = .manual
 
   @Namespace private var heroNamespace
@@ -73,22 +70,13 @@ struct HomeView: View {
     }
   }
 
-  private var usesSplitViewLayout: Bool {
-    #if os(iOS)
-    UIDevice.current.userInterfaceIdiom == .pad && horizontalSizeClass == .regular
-    #else
-    false
-    #endif
+  private var selectedVideoItem: VideoItem? {
+    guard let selectedVideoItemID else { return nil }
+    return history.first { $0.typedID == selectedVideoItemID }
   }
 
   var body: some View {
-    Group {
-      if usesSplitViewLayout {
-        splitViewLayout
-      } else {
-        compactLayout
-      }
-    }
+    rootLayout
     .sheet(isPresented: $showWebView) {
         NavigationStack {
           YouTubeWebView { videoID in
@@ -103,7 +91,7 @@ struct HomeView: View {
                 predicate: #Predicate { $0._videoID == videoIDRaw }
               )
               if let item = try? modelContext.fetch(descriptor).first {
-                selectedVideoItem = item
+                selectedVideoItemID = item.typedID
               }
             }
             showWebView = false
@@ -129,7 +117,7 @@ struct HomeView: View {
           predicate: #Predicate { $0._videoID == videoIDRaw }
         )
         if let item = try? modelContext.fetch(descriptor).first {
-          selectedVideoItem = item
+          selectedVideoItemID = item.typedID
         }
         deepLinkManager.pendingVideoID = nil
       }
@@ -147,60 +135,27 @@ struct HomeView: View {
     .sheet(item: $videoToAddToPlaylist) { video in
       AddToPlaylistSheet(video: video)
     }
-    .onChange(of: history.map { $0.videoID.rawValue }) { _, ids in
-      if let selectedVideoItem, !ids.contains(selectedVideoItem.videoID.rawValue) {
-        self.selectedVideoItem = history.first
-      } else if usesSplitViewLayout && self.selectedVideoItem == nil {
-        self.selectedVideoItem = history.first
+    .onChange(of: history.map(\.typedID)) { _, ids in
+      if let selectedVideoItemID, !ids.contains(selectedVideoItemID) {
+        self.selectedVideoItemID = nil
       }
     }
     .task {
       // Initialize sort orders for existing items (migration)
       try? historyService.initializeSortOrders()
-      if usesSplitViewLayout, selectedVideoItem == nil {
-        selectedVideoItem = history.first
-      }
     }
   }
 
-  private var compactLayout: some View {
-    NavigationStack {
-      historyContent(showsSelection: false)
-        .navigationTitle("")
-        .toolbar {
-          topToolbarContent
-          ToolbarItemGroup(placement: .bottomBar) {
-            Button {
-              showURLInput = true
-            } label: {
-              Label("Paste URL", systemImage: "link")
-            }
-
-            Spacer()
-
-            Button {
-              showWebView = true
-            } label: {
-              Label("Browse YouTube", systemImage: "safari")
-            }
-          }
-        }
-        .navigationDestination(item: $selectedVideoItem) { videoItem in
-          playerDestination(for: videoItem)
-        }
-    }
-  }
-
-  private var splitViewLayout: some View {
+  private var rootLayout: some View {
     NavigationSplitView {
-      historyContent(showsSelection: true)
+      historyContent
         .navigationTitle("Verse")
         .navigationSplitViewColumnWidth(min: 320, ideal: 360, max: 420)
         .toolbar {
           topToolbarContent
         }
         .safeAreaInset(edge: .bottom) {
-          splitViewActionBar
+          historyActionBar
         }
     } detail: {
       detailContent
@@ -209,7 +164,7 @@ struct HomeView: View {
   }
 
   @ViewBuilder
-  private func historyContent(showsSelection: Bool) -> some View {
+  private var historyContent: some View {
     if history.isEmpty {
       ContentUnavailableView {
         Label("Verse", systemImage: "captions.bubble.fill")
@@ -224,9 +179,9 @@ struct HomeView: View {
         .buttonStyle(.bordered)
       }
     } else {
-      List {
+      List(selection: $selectedVideoItemID) {
         ForEach(history) { item in
-          historyRow(for: item, showsSelection: showsSelection)
+          historyRow(for: item)
         }
         .onDelete { indexSet in
           Task {
@@ -247,20 +202,18 @@ struct HomeView: View {
     }
   }
 
-  private func historyRow(for item: VideoItem, showsSelection: Bool) -> some View {
-    let isSelected = showsSelection && selectedVideoItem?.videoID.rawValue == item.videoID.rawValue
+  private func historyRow(for item: VideoItem) -> some View {
+    let isSelected = selectedVideoItemID == item.typedID
 
-    return Button {
-      selectedVideoItem = item
-    } label: {
+    return NavigationLink(value: item.typedID) {
       VideoItemCell(
         video: item,
         namespace: heroNamespace,
         downloadManager: downloadManager,
         showTimestamp: true
       )
-      .padding(.horizontal, showsSelection ? 10 : 0)
-      .padding(.vertical, showsSelection ? 6 : 0)
+      .padding(.horizontal, 10)
+      .padding(.vertical, 6)
       .background {
         RoundedRectangle(cornerRadius: 16, style: .continuous)
           .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
@@ -273,6 +226,7 @@ struct HomeView: View {
       }
     }
     .buttonStyle(.plain)
+    .tag(item.typedID)
     .contextMenu {
       Button {
         videoToAddToPlaylist = item
@@ -282,13 +236,13 @@ struct HomeView: View {
     }
     .listRowInsets(
       EdgeInsets(
-        top: showsSelection ? 4 : 0,
+        top: 4,
         leading: 0,
-        bottom: showsSelection ? 4 : 0,
+        bottom: 4,
         trailing: 0
       )
     )
-    .listRowSeparator(showsSelection ? .hidden : .visible)
+    .listRowSeparator(.hidden)
     .listRowBackground(Color.clear)
   }
 
@@ -325,7 +279,7 @@ struct HomeView: View {
     }
   }
 
-  private var splitViewActionBar: some View {
+  private var historyActionBar: some View {
     VStack(spacing: 0) {
       Divider()
       HStack(spacing: 12) {
@@ -355,8 +309,7 @@ struct HomeView: View {
   @ViewBuilder
   private var detailContent: some View {
     if let selectedVideoItem {
-      PlayerView(videoItem: selectedVideoItem)
-        .id(selectedVideoItem.videoID.rawValue)
+      playerDestination(for: selectedVideoItem)
     } else {
       ContentUnavailableView {
         Label("Select a Video", systemImage: "play.rectangle")
@@ -402,7 +355,7 @@ struct HomeView: View {
         )
         if let item = try? modelContext.fetch(descriptor).first {
           await MainActor.run {
-            selectedVideoItem = item
+            selectedVideoItemID = item.typedID
           }
         }
       }
@@ -421,7 +374,7 @@ struct HomeView: View {
       )
       if let item = try? modelContext.fetch(descriptor).first {
         await MainActor.run {
-          selectedVideoItem = item
+          selectedVideoItemID = item.typedID
         }
       }
     }
