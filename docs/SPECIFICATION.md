@@ -8,6 +8,14 @@
 - Each app has its own install action backed by an `itms-services` manifest in the `adhoc-latest` GitHub release.
 - Installs require a registered iPhone included in the Apple Developer Ad Hoc provisioning profile.
 
+## App Store Connect Deployment
+- The App Store Connect workflow manages deploys for Verse, Tone, and AmbientLight.
+- Pushes to the `main` branch keep the previous default behavior and upload Verse.
+- Manual workflow runs can choose Verse, Tone, AmbientLight, or all configured apps.
+- Deployable apps are listed in `.github/appstore-apps.json` with their scheme, project path, Xcode version, and macOS runner.
+- If `all` is selected, apps whose project path does not exist on the current branch are skipped with a notice; selecting a missing app directly fails the run with a clear error.
+- The shared deploy workflow installs Tuist dependencies, generates the workspace, archives the selected scheme, signs the archived app and nested extensions with discovered entitlements, then exports and uploads to App Store Connect using the repository App Store Connect API key secrets.
+
 ---
 
 # Verse (YouTubeSubtitle) - Product Specification

@@ -90,29 +90,92 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | xcbeautify
 
-      - name: Embed entitlements
+      - name: Ad hoc sign archived products before export
+        env:
+          APP_NAME: ${{ inputs.scheme }}
+          PROVIDED_ENTITLEMENTS_PATH: ${{ inputs.entitlements-path }}
         run: |
-          set -e
+          set -euo pipefail
 
-          # Find the app in the archive
-          APP_PATH="./build/${{ inputs.scheme }}.xcarchive/Products/Applications/${{ inputs.scheme }}.app"
+          find_entitlements() {
+            local app_name="$1"
+            local target_name="$2"
 
-          # Use provided path or auto-detect
-          if [ -n "${{ inputs.entitlements-path }}" ]; then
-            ENTITLEMENTS_FILE="${{ inputs.entitlements-path }}"
-            echo "Using specified entitlements file: $ENTITLEMENTS_FILE"
-          else
-            ENTITLEMENTS_FILE=$(find . -name "*.entitlements" -type f | head -n 1)
-            echo "Auto-detected entitlements file: $ENTITLEMENTS_FILE"
+            if [ -n "$PROVIDED_ENTITLEMENTS_PATH" ] && [ "$target_name" = "$app_name" ]; then
+              printf '%s\n' "$PROVIDED_ENTITLEMENTS_PATH"
+              return
+            fi
+
+            if [ -f "Apps/${app_name}/Derived/Entitlements/${target_name}.entitlements" ]; then
+              printf '%s\n' "Apps/${app_name}/Derived/Entitlements/${target_name}.entitlements"
+              return
+            fi
+
+            if [ -f "Apps/${app_name}/Sources/${target_name}.entitlements" ]; then
+              printf '%s\n' "Apps/${app_name}/Sources/${target_name}.entitlements"
+              return
+            fi
+
+            if [ "$target_name" = "Verse" ] && [ -f "Apps/Verse/Sources/YouTubeSubtitle.entitlements" ]; then
+              printf '%s\n' "Apps/Verse/Sources/YouTubeSubtitle.entitlements"
+              return
+            fi
+
+            return 1
+          }
+
+          sign_product() {
+            local product_path="$1"
+            local entitlements_file="$2"
+            local product_name
+            product_name="$(basename "$product_path")"
+
+            if [ -n "$entitlements_file" ] && [ -f "$entitlements_file" ]; then
+              codesign --entitlements "$entitlements_file" --force --sign "-" "$product_path"
+              echo "Signed ${product_name} with entitlements: ${entitlements_file}"
+            else
+              codesign --force --sign "-" "$product_path"
+              echo "Signed ${product_name} without additional entitlements"
+            fi
+          }
+
+          sign_nested_code() {
+            local container_path="$1"
+
+            if [ -d "${container_path}/Frameworks" ]; then
+              for framework_path in "${container_path}"/Frameworks/*.framework; do
+                [ -d "$framework_path" ] || continue
+                sign_product "$framework_path" ""
+              done
+
+              for dylib_path in "${container_path}"/Frameworks/*.dylib; do
+                [ -f "$dylib_path" ] || continue
+                sign_product "$dylib_path" ""
+              done
+            fi
+          }
+
+          app_path="./build/${APP_NAME}.xcarchive/Products/Applications/${APP_NAME}.app"
+
+          if [ ! -d "$app_path" ]; then
+            echo "App not found in archive: $app_path"
+            exit 1
           fi
 
-          if [ -n "$ENTITLEMENTS_FILE" ] && [ -f "$ENTITLEMENTS_FILE" ]; then
-            # Apply ad-hoc signature with entitlements
-            codesign --entitlements "$ENTITLEMENTS_FILE" --force --sign "-" "$APP_PATH"
-            echo "Entitlements embedded successfully"
-          else
-            echo "No entitlements file found, skipping embedding"
+          if [ -d "${app_path}/PlugIns" ]; then
+            for extension_path in "${app_path}"/PlugIns/*.appex; do
+              [ -d "$extension_path" ] || continue
+
+              extension_name="$(basename "$extension_path" .appex)"
+              extension_entitlements="$(find_entitlements "$APP_NAME" "$extension_name" || true)"
+              sign_nested_code "$extension_path"
+              sign_product "$extension_path" "$extension_entitlements"
+            done
           fi
+
+          app_entitlements="$(find_entitlements "$APP_NAME" "$APP_NAME" || true)"
+          sign_nested_code "$app_path"
+          sign_product "$app_path" "$app_entitlements"
 
       - name: Create ExportOptions.plist
         env:

@@ -1,0 +1,25 @@
+{
+  "apps": [
+    {
+      "name": "Verse",
+      "scheme": "Verse",
+      "project_path": "Apps/Verse/Project.swift",
+      "xcode_version": "26.2",
+      "macos_runner": "macos-26"
+    },
+    {
+      "name": "Tone",
+      "scheme": "Tone",
+      "project_path": "Apps/Tone/Project.swift",
+      "xcode_version": "26.2",
+      "macos_runner": "macos-26"
+    },
+    {
+      "name": "AmbientLight",
+      "scheme": "AmbientLight",
+      "project_path": "Apps/AmbientLight/Project.swift",
+      "xcode_version": "26.2",
+      "macos_runner": "macos-26"
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+name: Deploy to App Store Connect
+run-name: Deploy to App Store Connect (${{ github.event.inputs.app || 'Verse' }}) from ${{ github.ref_name }}
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      app:
+        description: App to deploy
+        required: true
+        default: Verse
+        type: choice
+        options:
+          - Verse
+          - Tone
+          - AmbientLight
+          - all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appstoreconnect-${{ github.ref_name }}-${{ github.event.inputs.app || 'Verse' }}
+  cancel-in-progress: false
+
+# Available secrets in this repository:
+#   Team API Key (currently used):
+#     - ASC_TEAM_KEY_ID: API Key ID
+#     - ASC_TEAM_KEY_CONTENT: API Key .p8 file content
+#     - ASC_TEAM_ISSUER_ID: Issuer ID
+#
+#   Individual API Key (alternative):
+#     - ASC_INDIVIDUAL_KEY_ID: API Key ID
+#     - ASC_INDIVIDUAL_KEY_CONTENT: API Key .p8 file content
+#     - ASC_INDIVIDUAL_ISSUER_ID: Issuer ID
+#
+#   Common:
+#     - TEAM_ID: Apple Developer Team ID
+
+jobs:
+  select-apps:
+    name: Select apps
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select apps
+        id: select
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          requested_app="${{ github.event.inputs.app || 'Verse' }}"
+          configured_apps="$(jq -c --arg requested_app "$requested_app" '
+            if $requested_app == "all" then
+              .apps
+            else
+              [.apps[] | select(.name == $requested_app)]
+            end
+          ' .github/appstore-apps.json)"
+
+          if [ "$configured_apps" = "[]" ]; then
+            echo "::error::No App Store Connect deploy configuration found for ${requested_app}."
+            exit 1
+          fi
+
+          selected_apps="[]"
+          while IFS= read -r app_config; do
+            app_name="$(jq -r '.name' <<< "$app_config")"
+            project_path="$(jq -r '.project_path' <<< "$app_config")"
+
+            if [ -f "$project_path" ]; then
+              selected_apps="$(jq -c --argjson app_config "$app_config" '. + [$app_config]' <<< "$selected_apps")"
+            elif [ "$requested_app" = "all" ]; then
+              echo "::notice::Skipping ${app_name}: ${project_path} does not exist on this branch."
+            else
+              echo "::error::${app_name} is configured for App Store Connect deploy, but ${project_path} does not exist on this branch."
+              exit 1
+            fi
+          done < <(jq -c '.[]' <<< "$configured_apps")
+
+          if [ "$selected_apps" = "[]" ]; then
+            echo "::error::No deployable apps were found on this branch."
+            exit 1
+          fi
+
+          echo "Selected apps:"
+          jq -r '.[].name' <<< "$selected_apps"
+
+          matrix="$(jq -c '{include: .}' <<< "$selected_apps")"
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy ${{ matrix.name }}
+    needs: select-apps
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.select-apps.outputs.matrix) }}
+    uses: ./.github/workflows/reusable-ios-appstoreconnect.yml
+    with:
+      scheme: ${{ matrix.scheme }}
+      xcode-version: ${{ matrix.xcode_version }}
+      macos-runner: ${{ matrix.macos_runner }}
+    secrets:
+      ASC_KEY_ID: ${{ secrets.ASC_TEAM_KEY_ID }}
+      ASC_KEY_CONTENT: ${{ secrets.ASC_TEAM_KEY_CONTENT }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_TEAM_ISSUER_ID }}
+      TEAM_ID: ${{ secrets.TEAM_ID }}
