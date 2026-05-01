@@ -4,7 +4,6 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
-  @Environment(\.scenePhase) private var scenePhase
   @State private var viewModel = HearAugmentViewModel()
 
   var body: some View {
@@ -29,16 +28,11 @@ struct ContentView: View {
       .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
         viewModel.refreshAudioRoute()
       }
-      .onChange(of: scenePhase) { _, newPhase in
-        if newPhase == .background {
-          viewModel.stopListening()
-        }
-      }
     }
   }
 }
 
-private struct ListeningPanel: View {
+fileprivate struct ListeningPanel: View {
   let viewModel: HearAugmentViewModel
 
   var body: some View {
@@ -155,7 +149,7 @@ private struct ListeningPanel: View {
   }
 }
 
-private struct PresetGrid: View {
+fileprivate struct PresetGrid: View {
   let viewModel: HearAugmentViewModel
 
   private let columns = [
@@ -176,7 +170,7 @@ private struct PresetGrid: View {
   }
 }
 
-private struct PresetButton: View {
+fileprivate struct PresetButton: View {
   let viewModel: HearAugmentViewModel
   let preset: AudioEffectChainPreset
 
@@ -228,18 +222,21 @@ private struct PresetButton: View {
     }
     .buttonStyle(.plain)
     .contextMenu {
-      if preset.kind == .custom {
+      switch preset.kind {
+      case .custom:
         Button(role: .destructive) {
           viewModel.deleteCustomPreset(id: preset.id)
         } label: {
           Label("Delete", systemImage: "trash")
         }
+      case .builtIn:
+        EmptyView()
       }
     }
   }
 }
 
-private struct EffectChainPanel: View {
+fileprivate struct EffectChainPanel: View {
   let viewModel: HearAugmentViewModel
   @State private var customPresetName = ""
 
@@ -319,7 +316,7 @@ private struct EffectChainPanel: View {
   }
 }
 
-private struct SoloBadge: View {
+fileprivate struct SoloBadge: View {
   let viewModel: HearAugmentViewModel
 
   var body: some View {
@@ -344,7 +341,7 @@ private struct SoloBadge: View {
   }
 }
 
-private struct EffectDragPreview: View {
+fileprivate struct EffectDragPreview: View {
   let node: AudioEffectNode
   let accent: Color
 
@@ -364,7 +361,7 @@ private struct EffectDragPreview: View {
   }
 }
 
-private struct BypassControlsRow: View {
+fileprivate struct BypassControlsRow: View {
   let viewModel: HearAugmentViewModel
   @State private var isComparePressed = false
   @State private var savedBypassState = false
@@ -419,7 +416,7 @@ private struct BypassControlsRow: View {
   }
 }
 
-private struct EffectRow: View {
+fileprivate struct EffectRow: View {
   let viewModel: HearAugmentViewModel
   let node: AudioEffectNode
   let index: Int
@@ -481,14 +478,22 @@ private struct EffectRow: View {
         parameterSlider(
           title: node.type.parameterAName,
           value: doubleBinding(\.parameterA),
-          displayValue: percentText(node.parameterA)
+          displayValue: node.type.parameterADisplay(value: node.parameterA)
         )
 
         parameterSlider(
           title: node.type.parameterBName,
           value: doubleBinding(\.parameterB),
-          displayValue: percentText(node.parameterB)
+          displayValue: node.type.parameterBDisplay(value: node.parameterB)
         )
+
+        if let parameterCName = node.type.parameterCName {
+          parameterSlider(
+            title: parameterCName,
+            value: doubleBinding(\.parameterC),
+            displayValue: node.type.parameterCDisplay(value: node.parameterC)
+          )
+        }
 
         Button(role: .destructive) {
           viewModel.removeEffect(id: node.id)
@@ -579,7 +584,7 @@ private struct EffectRow: View {
   }
 }
 
-private struct TuningPanel: View {
+fileprivate struct TuningPanel: View {
   let viewModel: HearAugmentViewModel
 
   var body: some View {
@@ -618,7 +623,7 @@ private struct TuningPanel: View {
   }
 }
 
-private struct BufferPanel: View {
+fileprivate struct BufferPanel: View {
   let viewModel: HearAugmentViewModel
 
   var body: some View {
@@ -664,7 +669,7 @@ private struct BufferPanel: View {
   }
 }
 
-private struct InputPanel: View {
+fileprivate struct InputPanel: View {
   let viewModel: HearAugmentViewModel
 
   var body: some View {
@@ -712,7 +717,7 @@ private struct InputPanel: View {
   }
 }
 
-private struct SafetyPanel: View {
+fileprivate struct SafetyPanel: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       sectionTitle("Hearing Safety", systemImage: "ear")
@@ -778,7 +783,7 @@ private func hearAugmentColor(for accentName: String) -> Color {
   }
 }
 
-private extension View {
+fileprivate extension View {
   func sectionSurface() -> some View {
     self
       .padding(16)

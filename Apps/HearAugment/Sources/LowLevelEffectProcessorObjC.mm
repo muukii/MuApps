@@ -27,12 +27,14 @@
                       amounts:(NSArray<NSNumber *> *)amounts
                   parametersA:(NSArray<NSNumber *> *)parametersA
                   parametersB:(NSArray<NSNumber *> *)parametersB
+                  parametersC:(NSArray<NSNumber *> *)parametersC
                        enabled:(NSArray<NSNumber *> *)enabled {
   const NSUInteger count = std::min({
     effectTypes.count,
     amounts.count,
     parametersA.count,
     parametersB.count,
+    parametersC.count,
     enabled.count,
   });
 
@@ -45,6 +47,7 @@
     descriptor.amount = amounts[index].floatValue;
     descriptor.parameterA = parametersA[index].floatValue;
     descriptor.parameterB = parametersB[index].floatValue;
+    descriptor.parameterC = parametersC[index].floatValue;
     descriptor.enabled = enabled[index].boolValue;
     chain.push_back(descriptor);
   }

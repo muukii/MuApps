@@ -396,7 +396,7 @@ final class HearAugmentViewModel {
     try session.setCategory(
       .playAndRecord,
       mode: .measurement,
-      options: [.allowBluetoothHFP, .allowBluetoothA2DP]
+      options: [.allowBluetoothA2DP]
     )
     try session.setActive(true)
   }
@@ -405,7 +405,7 @@ final class HearAugmentViewModel {
     try session.setCategory(
       .playAndRecord,
       mode: .measurement,
-      options: [.allowBluetoothHFP, .allowBluetoothA2DP]
+      options: [.allowBluetoothA2DP]
     )
     try? session.setPreferredSampleRate(48_000)
     try? session.setPreferredIOBufferDuration(
@@ -429,6 +429,7 @@ final class HearAugmentViewModel {
     }
     let parametersA = effectChain.map { NSNumber(value: Float(min(max($0.parameterA, 0), 1))) }
     let parametersB = effectChain.map { NSNumber(value: Float(min(max($0.parameterB, 0), 1))) }
+    let parametersC = effectChain.map { NSNumber(value: Float(min(max($0.parameterC, 0), 1))) }
     let soloed = soloedEffectIDs
     let bypassed = isBypassed
     let enabled = effectChain.map { node -> NSNumber in
@@ -448,6 +449,7 @@ final class HearAugmentViewModel {
       amounts: amounts,
       parametersA: parametersA,
       parametersB: parametersB,
+      parametersC: parametersC,
       enabled: enabled
     )
     engine?.mainMixerNode.outputVolume = Float(outputLevel)

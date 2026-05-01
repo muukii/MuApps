@@ -12,6 +12,7 @@ struct EffectDescriptor {
   float amount = 0.0f;
   float parameterA = 0.0f;
   float parameterB = 0.0f;
+  float parameterC = 0.5f;
   bool enabled = true;
 };
 

@@ -32,6 +32,7 @@ nonisolated enum AudioEffectType: Int, CaseIterable, Identifiable, Codable, Hash
   case longBloom
   case convergingBloom
   case tapeRiserDelay
+  case stereoDelay
 
   var id: Int {
     rawValue
@@ -97,6 +98,8 @@ nonisolated enum AudioEffectType: Int, CaseIterable, Identifiable, Codable, Hash
       return "Long Bloom"
     case .convergingBloom:
       return "Converge Bloom"
+    case .stereoDelay:
+      return "Stereo Delay"
     }
   }
 
@@ -160,6 +163,8 @@ nonisolated enum AudioEffectType: Int, CaseIterable, Identifiable, Codable, Hash
       return "Long expanding decay"
     case .convergingBloom:
       return "Wide tail returns center"
+    case .stereoDelay:
+      return "L/R offset feedback echo"
     }
   }
 
@@ -223,6 +228,8 @@ nonisolated enum AudioEffectType: Int, CaseIterable, Identifiable, Codable, Hash
       return "sparkles"
     case .convergingBloom:
       return "arrow.down.forward.and.arrow.up.backward.circle"
+    case .stereoDelay:
+      return "rectangle.split.2x1"
     }
   }
 
@@ -244,7 +251,7 @@ nonisolated enum AudioEffectType: Int, CaseIterable, Identifiable, Codable, Hash
       return "Rate"
     case .panner:
       return "Position"
-    case .slapDelay, .acceleratingDelay, .tapeRiserDelay, .pingPongDelay:
+    case .slapDelay, .acceleratingDelay, .tapeRiserDelay, .pingPongDelay, .stereoDelay:
       return "Time"
     case .reverse:
       return "Grain"
@@ -285,12 +292,12 @@ nonisolated enum AudioEffectType: Int, CaseIterable, Identifiable, Codable, Hash
       return "Depth"
     case .phaser:
       return "Feedback"
-    case .slapDelay, .pingPongDelay:
+    case .slapDelay, .pingPongDelay, .stereoDelay:
       return "Feedback"
     case .acceleratingDelay:
       return "Acceleration"
     case .tapeRiserDelay:
-      return "Rise"
+      return "Feedback"
     case .reverse:
       return "Smear"
     case .roomReverb, .stereoReverb, .shimmer, .longBloom:
@@ -302,6 +309,77 @@ nonisolated enum AudioEffectType: Int, CaseIterable, Identifiable, Codable, Hash
     case .convergingBloom:
       return "Gravity"
     }
+  }
+
+  var parameterAFormat: ParameterDisplayFormat {
+    switch self {
+    case .slapDelay:
+      return .milliseconds(lower: 55, upper: 520)
+    case .acceleratingDelay:
+      return .milliseconds(lower: 160, upper: 900)
+    case .pingPongDelay:
+      return .milliseconds(lower: 85, upper: 720)
+    case .tapeRiserDelay:
+      return .milliseconds(lower: 50, upper: 1000)
+    case .stereoDelay:
+      return .milliseconds(lower: 50, upper: 800)
+    case .reverse:
+      return .milliseconds(lower: 80, upper: 1050)
+    default:
+      return .percent
+    }
+  }
+
+  var parameterBFormat: ParameterDisplayFormat {
+    switch self {
+    case .reverse:
+      return .milliseconds(lower: 12, upper: 260)
+    default:
+      return .percent
+    }
+  }
+
+  func parameterADisplay(value: Double) -> String {
+    parameterAFormat.format(value: value)
+  }
+
+  func parameterBDisplay(value: Double) -> String {
+    parameterBFormat.format(value: value)
+  }
+
+  var parameterCName: String? {
+    switch self {
+    case .tapeRiserDelay:
+      return "Rise"
+    case .stereoDelay:
+      return "Spread"
+    default:
+      return nil
+    }
+  }
+
+  var defaultParameterC: Double {
+    switch self {
+    case .tapeRiserDelay:
+      return 0.5
+    case .stereoDelay:
+      return 0.6
+    default:
+      return 0.5
+    }
+  }
+
+  var parameterCFormat: ParameterDisplayFormat {
+    switch self {
+    case .tapeRiserDelay:
+      return .semitones(lower: 0.5, upper: 12.0)
+    default:
+      return .percent
+    }
+  }
+
+  func parameterCDisplay(value: Double) -> String {
+    parameterCFormat.format(value: value)
   }
 
   var defaultAmount: Double {
@@ -326,6 +404,8 @@ nonisolated enum AudioEffectType: Int, CaseIterable, Identifiable, Codable, Hash
       return 0.48
     case .slapDelay, .acceleratingDelay, .tapeRiserDelay, .pingPongDelay:
       return 0.52
+    case .stereoDelay:
+      return 0.6
     case .reverse:
       return 0.62
     case .roomReverb, .stereoReverb, .shimmer:
@@ -391,6 +471,8 @@ nonisolated enum AudioEffectType: Int, CaseIterable, Identifiable, Codable, Hash
       return 0.82
     case .convergingBloom:
       return 0.74
+    case .stereoDelay:
+      return 0.42
     }
   }
 
@@ -450,6 +532,8 @@ nonisolated enum AudioEffectType: Int, CaseIterable, Identifiable, Codable, Hash
       return 0.48
     case .convergingBloom:
       return 0.64
+    case .stereoDelay:
+      return 0.55
     }
   }
 }
@@ -461,6 +545,7 @@ nonisolated struct AudioEffectNode: Identifiable, Codable, Hashable, Sendable {
   var amount: Double
   var parameterA: Double
   var parameterB: Double
+  var parameterC: Double
 
   init(
     id: UUID = UUID(),
@@ -468,7 +553,8 @@ nonisolated struct AudioEffectNode: Identifiable, Codable, Hashable, Sendable {
     isEnabled: Bool = true,
     amount: Double? = nil,
     parameterA: Double? = nil,
-    parameterB: Double? = nil
+    parameterB: Double? = nil,
+    parameterC: Double? = nil
   ) {
     self.id = id
     self.type = type
@@ -476,6 +562,22 @@ nonisolated struct AudioEffectNode: Identifiable, Codable, Hashable, Sendable {
     self.amount = amount ?? type.defaultAmount
     self.parameterA = parameterA ?? type.defaultParameterA
     self.parameterB = parameterB ?? type.defaultParameterB
+    self.parameterC = parameterC ?? type.defaultParameterC
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, type, isEnabled, amount, parameterA, parameterB, parameterC
+  }
+
+  init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.id = try container.decode(UUID.self, forKey: .id)
+    self.type = try container.decode(AudioEffectType.self, forKey: .type)
+    self.isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+    self.amount = try container.decode(Double.self, forKey: .amount)
+    self.parameterA = try container.decode(Double.self, forKey: .parameterA)
+    self.parameterB = try container.decode(Double.self, forKey: .parameterB)
+    self.parameterC = try container.decodeIfPresent(Double.self, forKey: .parameterC) ?? type.defaultParameterC
   }
 }
 
@@ -666,3 +768,26 @@ nonisolated struct AudioEffectChainPreset: Identifiable, Codable, Hashable, Send
     )
   }
 }
+
+// MARK: - Parameter Display Format
+
+nonisolated enum ParameterDisplayFormat: Sendable {
+  case percent
+  case milliseconds(lower: Double, upper: Double)
+  case semitones(lower: Double, upper: Double)
+
+  func format(value: Double) -> String {
+    let clamped = min(max(value, 0), 1)
+    switch self {
+    case .percent:
+      return "\(Int((clamped * 100).rounded()))%"
+    case .milliseconds(let lower, let upper):
+      let ms = Int((lower + (upper - lower) * clamped).rounded())
+      return "\(ms) ms"
+    case .semitones(let lower, let upper):
+      let st = lower + (upper - lower) * clamped
+      return String(format: "%.1f st", st)
+    }
+  }
+}
+

@@ -42,6 +42,7 @@ enum EffectType {
   effectLongBloom = 27,
   effectConvergingBloom = 28,
   effectTapeRiserDelay = 29,
+  effectStereoDelay = 30,
 };
 
 float clampFloat(float value, float lower, float upper) {
@@ -547,14 +548,8 @@ struct ChannelEffectState {
   float lfoPhase = 0.0f;
   float secondaryPhase = pi * 0.5f;
   float crushSample = 0.0f;
-  float tapeDelayTime = 0.35f;
-  float tapeFeedbackSample = 0.0f;
-  float tapeInputEnvelope = 0.0f;
-  float tapeRepeatInterval = 0.8f;
-  float tapeRepeatCountdown = 0.8f;
-  float tapeEchoEnvelope = 0.0f;
-  float tapeReadDelaySamples = 48000.0f;
-  float tapeReadSpeed = 1.0f;
+  float tapeGrainPhaseA = 0.0f;
+  float tapeGrainPhaseB = 0.5f;
   int crushCounter = 0;
   FractionalDelayLine delayA;
   FractionalDelayLine delayB;
@@ -585,14 +580,8 @@ struct ChannelEffectState {
     gateGain = 1.0f;
     dampingSample = 0.0f;
     crushSample = 0.0f;
-    tapeDelayTime = 0.35f;
-    tapeFeedbackSample = 0.0f;
-    tapeInputEnvelope = 0.0f;
-    tapeRepeatInterval = 0.8f;
-    tapeRepeatCountdown = 0.8f;
-    tapeEchoEnvelope = 0.0f;
-    tapeReadDelaySamples = 48000.0f;
-    tapeReadSpeed = 1.0f;
+    tapeGrainPhaseA = 0.0f;
+    tapeGrainPhaseB = 0.5f;
     crushCounter = 0;
     delayA.reset();
     delayB.reset();
@@ -725,7 +714,7 @@ std::vector<EffectDescriptor> sanitizedChain(const std::vector<EffectDescriptor>
     next.amount = normalized(next.amount);
     next.parameterA = normalized(next.parameterA);
     next.parameterB = normalized(next.parameterB);
-    if (next.type < effectHighPass || next.type > effectTapeRiserDelay) {
+    if (next.type < effectHighPass || next.type > effectStereoDelay) {
       continue;
     }
     sanitized.push_back(next);
@@ -935,6 +924,9 @@ struct LowLevelEffectEngine::Impl {
       break;
     case effectTapeRiserDelay:
       processTapeRiserDelay(runtime, descriptor);
+      break;
+    case effectStereoDelay:
+      processStereoDelay(runtime, descriptor);
       break;
     case effectPingPongDelay:
       processPingPongDelay(runtime, descriptor);
@@ -1214,60 +1206,100 @@ struct LowLevelEffectEngine::Impl {
   }
 
   void processTapeRiserDelay(EffectRuntime &runtime, const EffectDescriptor &descriptor) {
-    const float startInterval = lerp(0.58f, 2.45f, descriptor.parameterA);
-    const float endInterval = lerp(0.24f, 0.045f, descriptor.parameterB);
-    const float intervalMultiplier = lerp(0.88f, 0.52f, descriptor.parameterB);
-    const float pitchDepth = lerp(0.35f, 1.25f, descriptor.parameterB);
-    const float feedback = lerp(0.34f, 0.88f, descriptor.amount);
-    const float wetGain = descriptor.amount * 0.92f;
-    const float echoDecay = std::exp(-1.0f / (lerp(0.28f, 0.72f, descriptor.parameterA) * sampleRate));
-    const float deltaTime = 1.0f / sampleRate;
-    const float endDelaySamples = endInterval * sampleRate;
+    // Feedback delay where the feedback path is pitch-shifted upward via a 2-grain
+    // crossfade. Each loop through the delay = +delayTime in time, +pitchSemitones in
+    // pitch, ×feedback in level. With feedback near 0.7+ you get many audible repeats
+    // climbing in pitch.
+    //
+    // parameterA = Time (delay length, 50–1000 ms)
+    // parameterB = Feedback (0 → ~0.92, the residual control)
+    // parameterC = Rise (0.5 → 12 semitones up per loop)
+    const float delaySeconds = lerp(0.05f, 1.0f, descriptor.parameterA);
+    const float delaySamples = delaySeconds * sampleRate;
+    const float feedback = lerp(0.0f, 0.92f, descriptor.parameterB);
+    const float pitchSemitones = lerp(0.5f, 12.0f, descriptor.parameterC);
+    const float pitchRatio = std::pow(2.0f, pitchSemitones / 12.0f);
+    const float wetGain = descriptor.amount;
+    const float grainSeconds = 0.06f;
+    const float grainSamples = grainSeconds * sampleRate;
+    const float pitchSlope = pitchRatio - 1.0f;
+    const float minReadSamples = 1.5f;
 
     for (int channel = 0; channel < channelCount; ++channel) {
       auto &state = runtime.channels[channel];
       const float input = frameScratch[channel];
-      const float previousInputEnvelope = state.tapeInputEnvelope;
-      const float inputLevel = std::abs(input);
-      const float envelopeSpeed = inputLevel > previousInputEnvelope ? 0.018f : 0.0007f;
-      state.tapeInputEnvelope += (inputLevel - state.tapeInputEnvelope) * envelopeSpeed;
 
-      const float onsetThreshold = lerp(0.018f, 0.06f, descriptor.amount);
-      if (state.tapeInputEnvelope > onsetThreshold && previousInputEnvelope <= onsetThreshold * 0.62f) {
-        state.tapeRepeatInterval = startInterval;
-        state.tapeRepeatCountdown = startInterval;
-        state.tapeDelayTime = startInterval;
-        state.tapeEchoEnvelope = 0.0f;
-        state.tapeReadDelaySamples = startInterval * sampleRate;
-        state.tapeReadSpeed = 1.0f;
-      }
+      const float phaseA = state.tapeGrainPhaseA;
+      const float phaseB = state.tapeGrainPhaseB;
+      const float headA = phaseA * grainSamples;
+      const float headB = phaseB * grainSamples;
 
-      state.tapeRepeatInterval = clampFloat(state.tapeRepeatInterval, endInterval, startInterval);
-      state.tapeRepeatCountdown -= deltaTime;
-      if (state.tapeRepeatCountdown <= 0.0f) {
-        const float currentInterval = state.tapeRepeatInterval;
-        const float pitchRatio = std::pow(startInterval / std::max(currentInterval, endInterval), pitchDepth);
-        state.tapeEchoEnvelope = 1.0f;
-        state.tapeReadDelaySamples = currentInterval * sampleRate;
-        state.tapeReadSpeed = clampFloat(pitchRatio, 1.0f, 4.0f);
-        state.tapeDelayTime = currentInterval;
-        state.tapeRepeatInterval = std::max(endInterval, state.tapeRepeatInterval * intervalMultiplier);
-        state.tapeRepeatCountdown += state.tapeRepeatInterval;
-      }
+      // Hann window — two grains offset by half a period sum to ≈1.
+      const float windowA = 0.5f * (1.0f - std::cos(2.0f * pi * phaseA));
+      const float windowB = 0.5f * (1.0f - std::cos(2.0f * pi * phaseB));
 
-      const float wet = state.delayA.readSamples(state.tapeReadDelaySamples) * state.tapeEchoEnvelope;
-      if (state.tapeEchoEnvelope > 0.0f) {
-        state.tapeReadDelaySamples = std::max(endDelaySamples, state.tapeReadDelaySamples - (state.tapeReadSpeed - 1.0f));
-      }
-      state.tapeEchoEnvelope *= echoDecay;
-      if (state.tapeEchoEnvelope < 0.0004f) {
-        state.tapeEchoEnvelope = 0.0f;
-      }
+      // Each grain starts reading at delaySamples back and the read head advances at
+      // pitchRatio while the write head advances at 1 — so the apparent delay shrinks
+      // by (pitchRatio-1) per output sample within the grain.
+      const float readBackA = std::max(delaySamples - (pitchSlope * headA), minReadSamples);
+      const float readBackB = std::max(delaySamples - (pitchSlope * headB), minReadSamples);
 
-      state.tapeFeedbackSample += (wet - state.tapeFeedbackSample) * 0.52f;
-      state.delayA.write(input + (state.tapeFeedbackSample * feedback));
-      frameScratch[channel] = input + (state.tapeFeedbackSample * wetGain);
+      const float wetA = state.delayA.readSamples(readBackA) * windowA;
+      const float wetB = state.delayA.readSamples(readBackB) * windowB;
+      const float wet = wetA + wetB;
+
+      state.delayA.write(input + (wet * feedback));
+      frameScratch[channel] = input + (wet * wetGain);
+
+      // Advance grain phases; each grain wraps after grainSamples output samples.
+      const float phaseIncrement = 1.0f / grainSamples;
+      state.tapeGrainPhaseA += phaseIncrement;
+      if (state.tapeGrainPhaseA >= 1.0f) {
+        state.tapeGrainPhaseA -= 1.0f;
+      }
+      state.tapeGrainPhaseB += phaseIncrement;
+      if (state.tapeGrainPhaseB >= 1.0f) {
+        state.tapeGrainPhaseB -= 1.0f;
+      }
     }
+  }
+
+  void processStereoDelay(EffectRuntime &runtime, const EffectDescriptor &descriptor) {
+    // Independent L/R feedback delays whose times differ slightly so the wet image
+    // sits wider than the dry input. A small amount of cross-feed glues both sides
+    // together without collapsing the image.
+    //
+    // parameterA = Time (base delay, 50–800 ms)
+    // parameterB = Feedback (residual)
+    // parameterC = Spread (L/R time offset, 0–±20% of base)
+    const float baseDelay = lerp(0.05f, 0.80f, descriptor.parameterA);
+    const float feedback = lerp(0.0f, 0.82f, descriptor.parameterB);
+    const float spread = lerp(0.0f, 0.20f, descriptor.parameterC);
+    const float crossFeed = 0.18f;
+    const float wetGain = descriptor.amount;
+    const float delayLeft = std::max(baseDelay * (1.0f + spread), 0.005f);
+    const float delayRight = std::max(baseDelay * (1.0f - spread), 0.005f);
+
+    if (channelCount < 2) {
+      auto &state = runtime.channels[0];
+      const float input = frameScratch[0];
+      const float wet = state.delayA.readSeconds(baseDelay, sampleRate);
+      state.delayA.write(input + (wet * feedback));
+      frameScratch[0] = input + (wet * wetGain);
+      return;
+    }
+
+    auto &left = runtime.channels[0];
+    auto &right = runtime.channels[1];
+    const float inLeft = frameScratch[0];
+    const float inRight = frameScratch[1];
+    const float wetLeft = left.delayA.readSeconds(delayLeft, sampleRate);
+    const float wetRight = right.delayA.readSeconds(delayRight, sampleRate);
+
+    left.delayA.write(inLeft + ((wetLeft + wetRight * crossFeed) * feedback));
+    right.delayA.write(inRight + ((wetRight + wetLeft * crossFeed) * feedback));
+    frameScratch[0] = inLeft + (wetLeft * wetGain);
+    frameScratch[1] = inRight + (wetRight * wetGain);
   }
 
   void processPingPongDelay(EffectRuntime &runtime, const EffectDescriptor &descriptor) {

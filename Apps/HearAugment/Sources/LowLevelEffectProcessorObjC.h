@@ -13,6 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
                       amounts:(NSArray<NSNumber *> *)amounts
                   parametersA:(NSArray<NSNumber *> *)parametersA
                   parametersB:(NSArray<NSNumber *> *)parametersB
+                  parametersC:(NSArray<NSNumber *> *)parametersC
                        enabled:(NSArray<NSNumber *> *)enabled;
 
 - (void)writeInputBuffer:(AVAudioPCMBuffer *)buffer;

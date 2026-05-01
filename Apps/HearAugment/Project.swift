@@ -7,6 +7,7 @@ let hearAugmentInfoPlist: InfoPlist = .extendingDefault(with: [
   "LSApplicationCategoryType": "public.app-category.healthcare-fitness",
   "NSMicrophoneUsageDescription":
     "Hear Augment uses the microphone to process nearby sound in real time and play the filtered audio through headphones.",
+  "UIBackgroundModes": .array(["audio"]),
   "UILaunchScreen": .dictionary([:]),
 ])
 
@@ -28,12 +29,16 @@ let project = Project(
       bundleId: "app.muukii.hearaugment",
       deploymentTargets: .app,
       infoPlist: hearAugmentInfoPlist,
+      resources: [
+        "Resources/AppIcon.icon",
+      ],
       buildableFolders: ["Sources"],
       dependencies: [
         .project(target: "MuDesignSystem", path: "../../Shared"),
       ],
       settings: .settings(
         base: .appTarget.merging([
+          "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
           "CLANG_CXX_LANGUAGE_STANDARD": "gnu++17",
           "SWIFT_OBJC_BRIDGING_HEADER": "Sources/HearAugment-Bridging-Header.h",
         ]),
