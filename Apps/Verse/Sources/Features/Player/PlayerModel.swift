@@ -638,9 +638,7 @@ final class PlayerModel {
   func handleScenePhaseChange(to newPhase: ScenePhase) {
     guard let controller else { return }
 
-    // When entering background, pause all playback
-    // (Background audio mode has been removed to comply with App Store guidelines)
-    if newPhase == .background {
+    if newPhase == .background, playbackSource == .youtube {
       Task {
         await controller.pause()
         isPlaying = false

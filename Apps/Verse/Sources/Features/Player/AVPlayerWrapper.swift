@@ -41,7 +41,7 @@ final class LocalVideoPlayerController: VideoPlayerController, Sendable {
   private var errorObservation: NSKeyValueObservation?
 
   private(set) var playerStatus: AVPlayerItem.Status = .unknown
-  private(set) var playerError: Error?
+  private(set) var playerError: (any Error)?
 
   // MARK: - Initialization
 
@@ -49,6 +49,7 @@ final class LocalVideoPlayerController: VideoPlayerController, Sendable {
     let asset = AVURLAsset(url: url)
     let playerItem = AVPlayerItem(asset: asset)
     self.player = AVPlayer(playerItem: playerItem)
+    self.player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
 
     // Log the URL being played
     print("[LocalVideoPlayerController] Initializing with URL: \(url.path)")

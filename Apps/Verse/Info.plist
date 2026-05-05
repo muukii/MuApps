@@ -15,6 +15,7 @@
 	<string>This app uses speech recognition to convert your voice to text.</string>
 	<key>UIBackgroundModes</key>
 	<array>
+		<string>audio</string>
 		<string>processing</string>
 		<string>fetch</string>
 	</array>
