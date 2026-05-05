@@ -38,6 +38,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - In-app YouTube browser with "Open with Subtitles" action
 - Deep link and Shortcuts support for opening YouTube URLs
 - Local playback when a video has been downloaded (feature-flagged)
+- Downloaded local videos continue audio playback when the app moves to the background or the screen is locked
 
 #### 1.2 Playback Controls
 - Play/pause, time display, and scrubber

@@ -17,7 +17,7 @@ let appInfoPlist: InfoPlist = .extendingDefault(with: [
     "This app uses the microphone for real-time speech transcription.",
   "NSSpeechRecognitionUsageDescription":
     "This app uses speech recognition to convert your voice to text.",
-  "UIBackgroundModes": .array(["processing", "fetch"]),
+  "UIBackgroundModes": .array(["audio", "processing", "fetch"]),
   "UILaunchScreen": .dictionary([:]),
 ])
 
