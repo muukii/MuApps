@@ -6,7 +6,9 @@ let recorderInfoPlist: InfoPlist = .extendingDefault(with: [
   "ITSAppUsesNonExemptEncryption": false,
   "LSApplicationCategoryType": "public.app-category.utilities",
   "NSMicrophoneUsageDescription":
-    "This app uses the microphone to record voice clips and provide delayed headphone monitoring.",
+    "This app uses the microphone for live audio streaming and temporary live transcription.",
+  "NSSpeechRecognitionUsageDescription":
+    "This app uses speech recognition to show temporary live captions while streaming audio.",
   "UILaunchScreen": .dictionary([:]),
 ])
 

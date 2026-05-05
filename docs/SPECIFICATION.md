@@ -238,36 +238,45 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 
 ## Overview
 
-VoiceRecorder is a simple SwiftUI utility app for recording one voice clip at a time, replaying it immediately, and optionally monitoring the live microphone signal through headphones with an adjustable delay.
+VoiceRecorder is a simple SwiftUI utility app for continuously streaming the selected microphone input through the current audio output with an adjustable delay and temporary live transcription. The app does not save clips, keep a recording history, or provide playback of captured files.
 
 ## Core Features
 
 ### 1. Microphone Selection
 - Lists available audio input devices from `AVAudioSession`, including the device microphone, headset microphones, USB inputs, and Bluetooth HFP inputs such as AirPods when available.
-- The selected input is used for normal recording.
+- The selected input is used for live streaming.
 - The app shows the selected input, active input route, and current output route.
 
-### 2. One-Clip Recording
-- Records to a temporary AAC `.m4a` file.
-- Starting a new recording replaces the previous clip.
-- No recording history or persistent library is shown.
-- The recording screen shows elapsed time and a live input level meter.
+### 2. Live Streaming
+- Streams the selected microphone input through an `AVAudioEngine` graph.
+- Centers the live monitor path to a mono stream before output, so single-sided or multi-channel microphone input is heard from both ears.
+- No audio file is written to temporary or persistent storage.
+- The streaming screen uses a single-page console layout with a large central start/stop button, elapsed streaming time, and a live bar-style input level meter.
+- Streaming stops automatically when the app moves to the background.
 
-### 3. Immediate Playback
-- The latest clip can be played as soon as recording stops.
-- Playback shows the latest clip duration and a progress indicator.
-- Playback uses the current system audio output route.
-
-### 4. Delay Monitor
-- Provides a live delayed monitoring mode using `AVAudioEngine` and `AVAudioUnitDelay`.
+### 3. Adjustable Delay
+- Provides delayed live monitoring using `AVAudioUnitDelay`.
 - Delay is adjustable from 0.15 seconds to 2.0 seconds.
-- Monitor mode forces the input to Device Microphone.
+- Delay changes are applied to the active live stream.
 - The delayed signal is sent to the current headphone output route; the UI warns the user when headphones or AirPods are not connected to avoid feedback.
 
+### 4. Temporary Live Transcription
+- Uses Apple's SpeechAnalyzer/SpeechTranscriber APIs to transcribe the live microphone stream when speech recognition is available on the device.
+- Transcribed text is displayed only as temporary on-screen captions and is not persisted.
+- Caption items expire automatically after a short lifetime, so older text disappears first.
+- Expiring captions visually dissolve with a Metal shader that breaks the text into drifting smoke-like particles before removal.
+
+## Screen Layout
+- The app presents one primary page centered around a studio-console surface.
+- The page header shows the app name and a concise live-streaming tagline.
+- The console shows current status, output route, streaming controls, temporary live captions, microphone input details, and delay controls in a single vertical flow separated by dividers.
+- Error, permission, and headphone-feedback warnings appear as compact tinted banners above or inside the console.
+
 ## Limitations
-- Only the latest temporary recording is retained.
+- The app does not retain recordings and does not offer playback history.
+- Live transcription depends on SpeechAnalyzer availability, supported locale, and installed speech assets.
 - AirPods microphone selection depends on iOS exposing the Bluetooth HFP input route.
-- iOS controls the final output route; the app displays the route and encourages connecting headphones before monitor mode.
+- iOS controls the final output route; the app displays the route and encourages connecting headphones before streaming.
 
 ---
 

@@ -10,17 +10,19 @@ struct ContentView: View {
   var body: some View {
     NavigationStack {
       ScrollView {
-        VStack(alignment: .leading, spacing: 24) {
-          statusHeader
-          microphoneSection
-          recordingSection
-          playbackSection
-          monitorSection
+        VStack(spacing: 18) {
+          appHeader
+          AlertStack(viewModel: viewModel, openSettings: openSettings)
+          StudioConsole(viewModel: viewModel)
         }
-        .padding(20)
+        .frame(maxWidth: 560)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .frame(maxWidth: .infinity)
       }
-      .background(MuColors.background)
-      .navigationTitle("Voice Recorder")
+      .background(pageBackground)
+      .navigationTitle("")
+      .navigationBarTitleDisplayMode(.inline)
       .task {
         await viewModel.prepare()
       }
@@ -35,32 +37,59 @@ struct ContentView: View {
     }
   }
 
-  private var statusHeader: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      HStack(spacing: 12) {
-        Image(systemName: statusIcon)
-          .font(.system(size: 28, weight: .semibold))
-          .foregroundStyle(statusColor)
-          .frame(width: 38, height: 38)
+  private var pageBackground: some View {
+    LinearGradient(
+      colors: [
+        Color(.systemBackground),
+        Color(.secondarySystemBackground),
+      ],
+      startPoint: .top,
+      endPoint: .bottom
+    )
+    .ignoresSafeArea()
+  }
 
-        VStack(alignment: .leading, spacing: 3) {
-          Text(statusTitle)
-            .font(MuFonts.title())
-          Text(statusSubtitle)
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-        }
+  private var appHeader: some View {
+    HStack(spacing: 12) {
+      Image(systemName: "waveform")
+        .font(.system(size: 20, weight: .semibold))
+        .foregroundStyle(.white)
+        .frame(width: 42, height: 42)
+        .background(MuColors.primary, in: Circle())
 
-        Spacer(minLength: 0)
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Voice Recorder")
+          .font(.system(size: 28, weight: .bold, design: .rounded))
+          .lineLimit(1)
+          .minimumScaleFactor(0.8)
+        Text("Live input. Adjustable delay. No clips saved.")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
       }
 
-      if let errorMessage = viewModel.errorMessage {
-        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-          .font(.footnote)
-          .foregroundStyle(.red)
-      }
+      Spacer(minLength: 0)
+    }
+  }
 
-      if viewModel.isPermissionDenied {
+  private func openSettings() {
+    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+    UIApplication.shared.open(url)
+  }
+}
+
+private struct AlertStack: View {
+  let viewModel: VoiceRecorderViewModel
+  let openSettings: () -> Void
+
+  var body: some View {
+    if let errorMessage = viewModel.errorMessage {
+      StatusBanner(errorMessage, systemImage: "exclamationmark.triangle.fill", tint: .red)
+    }
+
+    if viewModel.isPermissionDenied {
+      VStack(alignment: .leading, spacing: 12) {
+        StatusBanner("Microphone permission is required.", systemImage: "mic.slash.fill", tint: .red)
+
         Button {
           openSettings()
         } label: {
@@ -71,10 +100,185 @@ struct ContentView: View {
       }
     }
   }
+}
 
-  private var microphoneSection: some View {
+private struct StudioConsole: View {
+  let viewModel: VoiceRecorderViewModel
+
+  var body: some View {
+    VStack(spacing: 20) {
+      ConsoleStatus(viewModel: viewModel)
+      StreamingDeck(viewModel: viewModel)
+
+      Divider()
+
+      TranscriptionDeck(viewModel: viewModel)
+
+      Divider()
+
+      MicrophoneDeck(viewModel: viewModel)
+
+      Divider()
+
+      DelayDeck(viewModel: viewModel)
+    }
+    .padding(18)
+    .frame(maxWidth: .infinity)
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+    )
+  }
+}
+
+private struct ConsoleStatus: View {
+  let viewModel: VoiceRecorderViewModel
+
+  var body: some View {
+    HStack(spacing: 12) {
+      Image(systemName: statusIcon)
+        .font(.system(size: 20, weight: .semibold))
+        .foregroundStyle(statusColor)
+        .frame(width: 42, height: 42)
+        .background(statusColor.opacity(0.12), in: Circle())
+
+      VStack(alignment: .leading, spacing: 3) {
+        Text(statusTitle)
+          .font(.headline)
+        Text(statusSubtitle)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+      }
+
+      Spacer(minLength: 0)
+
+      Text(viewModel.outputRouteName)
+        .font(.caption)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.primary.opacity(0.06), in: Capsule())
+    }
+  }
+}
+
+private struct StreamingDeck: View {
+  let viewModel: VoiceRecorderViewModel
+
+  var body: some View {
+    VStack(spacing: 18) {
+      StreamDurationHeader(viewModel: viewModel)
+      LiveInputLevelMeter(viewModel: viewModel)
+      StreamControlButton(viewModel: viewModel)
+    }
+  }
+}
+
+private struct StreamDurationHeader: View {
+  let viewModel: VoiceRecorderViewModel
+
+  var body: some View {
+    VStack(spacing: 4) {
+      Text(viewModel.isStreaming ? "Streaming" : "Ready")
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(statusColor)
+      Text(viewModel.streamDurationText)
+        .font(.system(size: 58, weight: .bold, design: .rounded))
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.72)
+    }
+  }
+}
+
+private struct LiveInputLevelMeter: View {
+  let viewModel: VoiceRecorderViewModel
+
+  var body: some View {
+    LevelMeter(
+      level: viewModel.audioLevel,
+      isActive: viewModel.isStreaming,
+      tint: statusColor
+    )
+  }
+}
+
+private struct StreamControlButton: View {
+  let viewModel: VoiceRecorderViewModel
+
+  var body: some View {
+    HStack(spacing: 18) {
+      Spacer(minLength: 0)
+
+      Button {
+        Task {
+          await viewModel.toggleStreaming()
+        }
+      } label: {
+        ZStack {
+          Circle()
+            .stroke(statusColor.opacity(0.18), lineWidth: 16)
+          Circle()
+            .fill(statusColor)
+            .shadow(color: statusColor.opacity(0.28), radius: 18, x: 0, y: 10)
+          Image(systemName: viewModel.isStreaming ? "stop.fill" : "dot.radiowaves.left.and.right")
+            .font(.system(size: 38, weight: .bold))
+            .foregroundStyle(.white)
+        }
+        .frame(width: 116, height: 116)
+      }
+      .buttonStyle(.plain)
+      .disabled(viewModel.isPermissionDenied)
+      .accessibilityLabel(viewModel.isStreaming ? "Stop Streaming" : "Start Streaming")
+
+      Spacer(minLength: 0)
+    }
+  }
+}
+
+private struct TranscriptionDeck: View {
+  let viewModel: VoiceRecorderViewModel
+
+  var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      sectionTitle("Microphone", systemImage: "mic")
+      DeckHeader("Transcript", systemImage: "text.bubble.fill", detail: viewModel.transcriptionStatus.displayText)
+
+      if viewModel.transcriptItems.isEmpty {
+        ZStack(alignment: .bottomLeading) {
+          Text(viewModel.transcriptionStatus.detailText)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 104, alignment: .bottomLeading)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+      } else {
+        ZStack(alignment: .bottomLeading) {
+          VStack(alignment: .leading, spacing: 8) {
+            ForEach(viewModel.transcriptItems.suffix(4)) { item in
+              DissolvingTranscriptText(item: item)
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 104, alignment: .bottomLeading)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+      }
+    }
+  }
+}
+
+private struct MicrophoneDeck: View {
+  let viewModel: VoiceRecorderViewModel
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      DeckHeader("Input", systemImage: "mic.fill", detail: viewModel.selectedInputName)
 
       Picker("Input", selection: inputSelection) {
         ForEach(viewModel.inputDevices) { device in
@@ -90,151 +294,59 @@ struct ContentView: View {
           .font(.footnote)
           .foregroundStyle(.secondary)
       } else {
-        routeRow(title: "Selected", value: viewModel.selectedInputName)
-        routeRow(title: "Active Input", value: viewModel.activeInputName)
-        routeRow(title: "Output", value: viewModel.outputRouteName)
+        RouteRow(title: "Active Input", value: viewModel.activeInputName)
+        RouteRow(title: "Output", value: viewModel.outputRouteName)
       }
     }
-    .sectionSurface()
   }
+}
 
-  private var recordingSection: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      sectionTitle("Record", systemImage: "record.circle")
+private struct DelayDeck: View {
+  let viewModel: VoiceRecorderViewModel
 
-      HStack(spacing: 20) {
-        Button {
-          Task {
-            await viewModel.toggleRecording()
-          }
-        } label: {
-          ZStack {
-            Circle()
-              .fill(viewModel.isRecording ? Color.red : MuColors.primary)
-            Image(systemName: viewModel.isRecording ? "stop.fill" : "mic.fill")
-              .font(.system(size: 34, weight: .bold))
-              .foregroundStyle(.white)
-          }
-          .frame(width: 88, height: 88)
-        }
-        .buttonStyle(.plain)
-        .disabled(viewModel.isPermissionDenied)
-
-        VStack(alignment: .leading, spacing: 8) {
-          Text(viewModel.isRecording ? "Recording" : "Ready")
-            .font(.headline)
-          Text(viewModel.recordingDurationText)
-            .font(.system(size: 36, weight: .bold, design: .rounded))
-            .monospacedDigit()
-
-          GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-              Capsule()
-                .fill(Color.secondary.opacity(0.18))
-              Capsule()
-                .fill(viewModel.isRecording ? Color.red : MuColors.primary)
-                .frame(width: max(proxy.size.width * CGFloat(viewModel.audioLevel), 4))
-            }
-          }
-          .frame(height: 8)
-        }
-      }
-    }
-    .sectionSurface()
-  }
-
-  private var playbackSection: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      sectionTitle("Playback", systemImage: "play.circle")
-
-      HStack(spacing: 12) {
-        Button {
-          viewModel.togglePlayback()
-        } label: {
-          Label(viewModel.isPlaying ? "Stop" : "Play", systemImage: viewModel.isPlaying ? "stop.fill" : "play.fill")
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .disabled(viewModel.hasRecording == false || viewModel.isRecording)
-
-        Text(viewModel.hasRecording ? viewModel.lastRecordingDurationText : "--:--")
-          .font(.system(.title3, design: .rounded, weight: .semibold))
-          .monospacedDigit()
-          .foregroundStyle(viewModel.hasRecording ? .primary : .secondary)
-      }
-
-      ProgressView(value: viewModel.playbackProgress)
-        .opacity(viewModel.hasRecording ? 1 : 0.35)
-    }
-    .sectionSurface()
-  }
-
-  private var monitorSection: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      sectionTitle("Delay Monitor", systemImage: "ear")
-
-      HStack {
-        Text("Delay")
-        Spacer()
-        Text(String(format: "%.2fs", viewModel.monitorDelay))
-          .monospacedDigit()
-          .foregroundStyle(.secondary)
-      }
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      DeckHeader("Delay", systemImage: "ear.fill", detail: String(format: "%.2fs", viewModel.monitorDelay))
 
       Slider(value: monitorDelayBinding, in: 0.15...2.0, step: 0.05)
 
-      Button {
-        Task {
-          await viewModel.toggleMonitoring()
-        }
-      } label: {
-        Label(
-          viewModel.isMonitoring ? "Stop Monitor" : "Start Monitor",
-          systemImage: viewModel.isMonitoring ? "stop.fill" : "ear.and.waveform"
-        )
-        .frame(maxWidth: .infinity)
-      }
-      .buttonStyle(.borderedProminent)
-      .disabled(viewModel.isRecording || viewModel.isPermissionDenied)
-
-      Label("Monitor mode uses Device Microphone and sends the delayed signal to the current headphone route.", systemImage: "info.circle")
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-
       if viewModel.isHeadphoneOutput == false {
-        Label("Connect headphones or AirPods before monitoring to avoid speaker feedback.", systemImage: "headphones")
+        StatusBanner(
+          "Connect headphones or AirPods before streaming to avoid speaker feedback.",
+          systemImage: "headphones",
+          tint: .orange
+        )
+      } else {
+        Label("Live stream uses the selected input and current headphone route.", systemImage: "info.circle")
           .font(.footnote)
-          .foregroundStyle(.orange)
+          .foregroundStyle(.secondary)
       }
     }
-    .sectionSurface()
   }
+}
 
+private extension MicrophoneDeck {
   private var inputSelection: Binding<String> {
     Binding(
       get: { viewModel.selectedInputID },
       set: { viewModel.selectInput(id: $0) }
     )
   }
+}
 
+private extension DelayDeck {
   private var monitorDelayBinding: Binding<Double> {
     Binding(
       get: { viewModel.monitorDelay },
       set: { viewModel.monitorDelay = $0 }
     )
   }
+}
 
+private extension ConsoleStatus {
   private var statusTitle: String {
-    if viewModel.isRecording {
-      return "Recording"
-    }
-
-    if viewModel.isPlaying {
-      return "Playing"
-    }
-
-    if viewModel.isMonitoring {
-      return "Monitoring"
+    if viewModel.isStreaming {
+      return "Streaming"
     }
 
     return "Ready"
@@ -245,51 +357,103 @@ struct ContentView: View {
       return "Microphone permission is required."
     }
 
-    if viewModel.isMonitoring {
-      return "Device microphone is forced in delay mode."
+    if viewModel.isStreaming {
+      return "Live input is flowing through the delay chain."
     }
 
-    if viewModel.hasRecording {
-      return "Last clip is ready to play."
-    }
-
-    return "Select a microphone and record a clip."
+    return "Select an input and start the live stream."
   }
 
   private var statusIcon: String {
-    if viewModel.isRecording {
-      return "record.circle.fill"
-    }
-
-    if viewModel.isPlaying {
-      return "play.circle.fill"
-    }
-
-    if viewModel.isMonitoring {
-      return "ear.fill"
+    if viewModel.isStreaming {
+      return "waveform.circle.fill"
     }
 
     return "waveform"
   }
 
   private var statusColor: Color {
-    if viewModel.isRecording {
-      return .red
-    }
-
-    if viewModel.isMonitoring {
-      return .orange
+    if viewModel.isStreaming {
+      return .green
     }
 
     return MuColors.primary
   }
+}
 
-  private func sectionTitle(_ title: String, systemImage: String) -> some View {
-    Label(title, systemImage: systemImage)
-      .font(.headline)
+private extension StreamDurationHeader {
+  private var statusColor: Color {
+    streamStatusColor(isStreaming: viewModel.isStreaming)
+  }
+}
+
+private extension LiveInputLevelMeter {
+  private var statusColor: Color {
+    streamStatusColor(isStreaming: viewModel.isStreaming)
+  }
+}
+
+private extension StreamControlButton {
+  private var statusColor: Color {
+    streamStatusColor(isStreaming: viewModel.isStreaming)
+  }
+}
+
+private struct DeckHeader: View {
+  let title: String
+  let systemImage: String
+  let detail: String
+
+  init(_ title: String, systemImage: String, detail: String) {
+    self.title = title
+    self.systemImage = systemImage
+    self.detail = detail
   }
 
-  private func routeRow(title: String, value: String) -> some View {
+  var body: some View {
+    HStack(spacing: 10) {
+      Label(title, systemImage: systemImage)
+        .font(.headline)
+
+      Spacer(minLength: 0)
+
+      Text(detail)
+        .font(.caption.weight(.semibold))
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.trailing)
+    }
+  }
+}
+
+private struct StatusBanner: View {
+  let text: String
+  let systemImage: String
+  let tint: Color
+
+  init(_ text: String, systemImage: String, tint: Color) {
+    self.text = text
+    self.systemImage = systemImage
+    self.tint = tint
+  }
+
+  var body: some View {
+    Label(text, systemImage: systemImage)
+      .font(.footnote)
+      .foregroundStyle(tint)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 10)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(tint.opacity(0.11), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+  }
+}
+
+private struct RouteRow: View {
+  let title: String
+  let value: String
+
+  var body: some View {
     HStack {
       Text(title)
         .foregroundStyle(.secondary)
@@ -299,19 +463,117 @@ struct ContentView: View {
     }
     .font(.footnote)
   }
+}
 
-  private func openSettings() {
-    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-    UIApplication.shared.open(url)
+private func streamStatusColor(isStreaming: Bool) -> Color {
+  if isStreaming {
+    return .green
+  }
+
+  return MuColors.primary
+}
+
+private struct LevelMeter: View {
+  let level: Float
+  let isActive: Bool
+  let tint: Color
+
+  private let barCount = 26
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 4) {
+      ForEach(0..<barCount, id: \.self) { index in
+        Capsule()
+          .fill(barFill(for: index))
+          .frame(maxWidth: .infinity)
+          .frame(height: barHeight(for: index))
+      }
+    }
+    .frame(height: 54)
+    .padding(.horizontal, 2)
+  }
+
+  private func barFill(for index: Int) -> Color {
+    guard isActive else {
+      return Color.secondary.opacity(0.22)
+    }
+
+    let threshold = Float(index + 1) / Float(barCount)
+    return threshold <= max(level, 0.08) ? tint : tint.opacity(0.18)
+  }
+
+  private func barHeight(for index: Int) -> CGFloat {
+    let progress = CGFloat(index) / CGFloat(max(barCount - 1, 1))
+    let envelope = 0.35 + (sin(progress * .pi * 3.6) + 1) * 0.24
+    let activity = CGFloat(isActive ? max(level, 0.12) : 0.18)
+    return 10 + (44 * min(max(envelope * activity + 0.18, 0.16), 1))
   }
 }
 
-private extension View {
-  func sectionSurface() -> some View {
-    self
-      .padding(16)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+private struct DissolvingTranscriptText: View {
+  let item: LiveTranscriptItem
+  @State private var isDissolving = false
+
+  var body: some View {
+    Group {
+      if isDissolving {
+        TimelineView(.animation) { context in
+          dissolvingText(now: context.date)
+        }
+      } else {
+        transcriptText
+          .accessibilityLabel(item.text)
+      }
+    }
+    .task(id: item.id) {
+      await waitForDissolve()
+    }
+  }
+
+  private func dissolvingText(now: Date) -> some View {
+    let progress = item.dissolveProgress(now: now)
+    let elapsed = Float(now.timeIntervalSince(item.createdAt))
+
+    return transcriptText
+      .visualEffect { content, geometry in
+        content
+          .layerEffect(
+            ShaderLibrary.smokeDissolve(
+              .float(Float(progress)),
+              .float(elapsed),
+              .float2(Float(geometry.size.width), Float(geometry.size.height))
+            ),
+            maxSampleOffset: CGSize(width: 24, height: 36)
+          )
+      }
+      .opacity(1 - (progress * 0.18))
+      .animation(.easeOut(duration: 0.25), value: progress)
+      .accessibilityLabel(item.text)
+  }
+
+  private func waitForDissolve() async {
+    let now = Date()
+    guard item.dissolveProgress(now: now) <= 0.01 else {
+      isDissolving = true
+      return
+    }
+
+    let lifetime = max(item.expiresAt.timeIntervalSince(item.createdAt), 0.1)
+    let dissolveStart = item.createdAt.addingTimeInterval(lifetime * 0.48)
+    let delay = max(dissolveStart.timeIntervalSince(now), 0)
+    try? await Task.sleep(for: .milliseconds(Int(delay * 1_000)))
+
+    guard Task.isCancelled == false else { return }
+    isDissolving = true
+  }
+
+  private var transcriptText: some View {
+    Text(item.text)
+      .font(.system(.title3, design: .rounded, weight: .semibold))
+      .lineLimit(3)
+      .multilineTextAlignment(.leading)
+      .padding(.vertical, 10)
+      .padding(.horizontal, 3)
   }
 }
 
