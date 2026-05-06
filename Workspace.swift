@@ -11,6 +11,7 @@ let workspace = Workspace(
     "Apps/AmbientLight",
     "Apps/PolyReader",
     "Apps/Tone",
+    "Apps/SafariReactor",
     "Shared",
   ]
 )

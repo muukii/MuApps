@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Safari Reactor Mock Player</title>
+    <link rel="stylesheet" href="../Sources/Extension/Resources/overlay.css">
+    <style>
+      body {
+        background: #07090c;
+        color: #fff;
+        font: 16px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+        margin: 0;
+      }
+
+      main {
+        display: grid;
+        gap: 18px;
+        margin: 0 auto;
+        max-width: 980px;
+        padding: 28px;
+      }
+
+      .player {
+        aspect-ratio: 16 / 9;
+        background:
+          linear-gradient(135deg, rgba(111, 231, 249, 0.2), transparent 35%),
+          linear-gradient(45deg, #1d2330, #0d1017);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        display: grid;
+        overflow: hidden;
+        place-items: center;
+        position: relative;
+      }
+
+      video {
+        height: 100%;
+        opacity: 0.001;
+        position: absolute;
+        width: 100%;
+      }
+
+      [data-sr-subtitle] {
+        bottom: 12%;
+        font-size: clamp(20px, 4vw, 42px);
+        font-weight: 800;
+        left: 8%;
+        position: absolute;
+        right: 8%;
+        text-align: center;
+        text-shadow: 0 3px 14px rgba(0, 0, 0, 0.85);
+      }
+
+      button {
+        appearance: none;
+        background: #f3f5f7;
+        border: 0;
+        border-radius: 6px;
+        color: #111820;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+        padding: 10px 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Safari Reactor Mock Player</h1>
+      <div class="player">
+        <video controls muted loop src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"></video>
+        <div data-sr-subtitle>Every investigation starts with a tiny visible signal.</div>
+      </div>
+      <button type="button" id="next">Next subtitle</button>
+    </main>
+
+    <script src="../Sources/Extension/Resources/content.js"></script>
+    <script>
+      const cues = [
+        "Every investigation starts with a tiny visible signal.",
+        "Keep the Netflix adapter thin and the learning tools portable.",
+        "The overlay should work before the real site gets involved.",
+        "Repeat the current cue, slow the video down, and keep reading."
+      ];
+
+      let index = 0;
+      const subtitle = document.querySelector("[data-sr-subtitle]");
+
+      function nextCue() {
+        index = (index + 1) % cues.length;
+        subtitle.textContent = cues[index];
+      }
+
+      document.getElementById("next").addEventListener("click", nextCue);
+      window.setInterval(nextCue, 3200);
+    </script>
+  </body>
+</html>

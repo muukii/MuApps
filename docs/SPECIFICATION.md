@@ -18,6 +18,45 @@
 
 ---
 
+# Safari Reactor - Product Specification
+
+## Overview
+
+Safari Reactor is an iPhone/iPad container app for a Safari Web Extension that experiments with Language Reactor-style learning tools on Netflix playback pages.
+
+## Core Features
+
+### 1. Safari Web Extension
+- Injects into `https://www.netflix.com/watch/*`.
+- Also injects into `localhost` and `127.0.0.1` pages for local development with a mock player.
+- Displays a floating overlay above the page without entering full screen.
+- Detects visible subtitle text from Netflix-like timed text containers or a development `[data-sr-subtitle]` element, including multi-line subtitles split across separate DOM nodes.
+- Captures detected subtitle cues into an in-memory transcript list with timestamps.
+- Allows tapping a transcript cue to seek back to that cue.
+- Provides first-milestone playback actions:
+  - Back 5 seconds
+  - Play/pause
+  - Repeat from the start time of the current detected subtitle
+  - Cycle playback speed through 0.75x, 1.0x, 1.25x, and 1.5x
+- Keeps the overlay enabled by default and does not expose a toolbar popup in the first milestone, avoiding Safari's extension popover path on iPad while playback behavior is being validated.
+
+### 2. Container App
+- Shows setup instructions for enabling the extension in Settings > Safari > Extensions.
+- Explains that the first milestone targets the normal Safari player, not full-screen playback.
+- Summarizes the current target page, milestone, and default overlay behavior.
+
+### 3. Development Mock
+- Includes `Apps/SafariReactor/Development/mock-player.html` as a local Netflix-like fixture.
+- The mock page reuses the production content script and stylesheet so overlay, subtitle detection, and playback controls can be developed before real Netflix/Safari verification.
+
+## Constraints
+- The extension does not download, export, or persist Netflix subtitle files.
+- Transcript capture is currently derived from observed page subtitles; direct Netflix subtitle payload extraction is a later milestone.
+- The first milestone keeps Netflix-specific behavior in the content script selector adapter and keeps learning overlay behavior site-independent.
+- Codex Desktop's in-app browser may not play Netflix DRM content, so real Netflix playback verification must happen in Safari on device or desktop Safari.
+
+---
+
 # Verse (YouTubeSubtitle) - Product Specification
 
 ## Overview

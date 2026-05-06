@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Safari Reactor Extension Target</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #111;
+        color: #f8f8f8;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at 18% 12%, rgba(229, 9, 20, 0.28), transparent 28rem),
+          radial-gradient(circle at 82% 74%, rgba(27, 127, 204, 0.24), transparent 30rem),
+          #111;
+      }
+
+      main {
+        width: min(960px, calc(100vw - 32px));
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: clamp(28px, 5vw, 48px);
+        letter-spacing: 0;
+      }
+
+      p {
+        margin: 0 0 24px;
+        color: rgba(255, 255, 255, 0.72);
+        line-height: 1.5;
+      }
+
+      .player {
+        position: relative;
+        overflow: hidden;
+        border-radius: 8px;
+        background: #000;
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+        aspect-ratio: 16 / 9;
+      }
+
+      video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .player-timedtext {
+        position: absolute;
+        left: 50%;
+        bottom: 11%;
+        width: min(760px, calc(100% - 48px));
+        transform: translateX(-50%);
+        color: #fff;
+        font-size: clamp(20px, 3.5vw, 38px);
+        font-weight: 700;
+        line-height: 1.28;
+        text-align: center;
+        text-shadow:
+          0 2px 3px rgba(0, 0, 0, 0.9),
+          0 0 12px rgba(0, 0, 0, 0.8);
+      }
+
+      .player-timedtext-text-container {
+        display: block;
+      }
+
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 8px;
+        background: #e50914;
+        color: #fff;
+        font: inherit;
+        font-weight: 700;
+        padding: 12px 16px;
+      }
+
+      .hint {
+        margin: 0;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Safari Reactor Extension Target</h1>
+      <p>This page intentionally does not load the Safari Reactor content script. The overlay should appear only when the Safari Web Extension injects it.</p>
+
+      <div class="player">
+        <video
+          controls
+          muted
+          loop
+          autoplay
+          playsinline
+          src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
+        ></video>
+        <div class="player-timedtext" data-uia="player-timedtext">
+          <div class="player-timedtext-text-container">Shadow these lines,</div>
+          <div class="player-timedtext-text-container">then tap Repeat to hear them again.</div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button type="button" id="next-cue">Next subtitle</button>
+        <p class="hint">Expected injected controls: Back 5s, Play/Pause, Repeat, Speed.</p>
+      </div>
+    </main>
+
+    <script>
+      const cues = [
+        ["Shadow these lines,", "then tap Repeat to hear them again."],
+        ["Safari Reactor should pin controls", "above the player."],
+        ["The test passes when the injected overlay appears", "without a page script."],
+      ];
+      let cueIndex = 0;
+      const subtitleLines = Array.from(document.querySelectorAll(".player-timedtext-text-container"));
+      document.getElementById("next-cue").addEventListener("click", () => {
+        cueIndex = (cueIndex + 1) % cues.length;
+        subtitleLines.forEach((line, index) => {
+          line.textContent = cues[cueIndex][index] || "";
+        });
+      });
+    </script>
+  </body>
+</html>

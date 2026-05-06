@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Safari Reactor",
+  "description": "A learning overlay for Netflix playback in Safari.",
+  "version": "0.1.0",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.netflix.com/watch/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": ["content.js"],
+      "css": ["overlay.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_icon": "toolbar-icon.svg"
+  },
+  "host_permissions": [
+    "https://www.netflix.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ]
+}
