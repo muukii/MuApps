@@ -55,10 +55,10 @@ struct PlayerControls: View {
 
     var body: some View {
       ProgressSection(
-        currentTime: model.currentTime,
         displayTime: model.displayTime,
         duration: model.duration,
-        onSeek: { model.seek(to: $0) }
+        onSeekPreview: { model.previewSliderSeek(to: $0) },
+        onSeek: { model.commitSliderSeek(to: $0) }
       )
     }
   }
@@ -70,9 +70,9 @@ extension PlayerControls {
   // MARK: - ProgressSection
 
   struct ProgressSection: View {
-    let currentTime: CurrentTime
     let displayTime: Double
     let duration: Double
+    let onSeekPreview: (Double) -> Void
     let onSeek: (Double) -> Void
 
     var body: some View {
@@ -86,12 +86,10 @@ extension PlayerControls {
       let normalizedValue = Binding<Double>(
         get: {
           guard duration > 0 else { return 0 }
-          return currentTime.value / duration
+          return max(0, min(1, displayTime / duration))
         },
         set: { newValue in
-          let clampedValue = max(0, min(1, newValue))
-          let seekTime = clampedValue * duration
-          onSeek(seekTime)
+          onSeek(seekTime(for: newValue))
         }
       )
 
@@ -99,10 +97,24 @@ extension PlayerControls {
         direction: .horizontal,
         value: normalizedValue,
         speed: 0.5,
+        continuous: false,
+        onEditingChanged: { isEditing in
+          if isEditing {
+            onSeekPreview(displayTime)
+          }
+        },
+        onValueChanged: { newValue in
+          onSeekPreview(seekTime(for: newValue))
+        },
         foregroundColor: .red,
         backgroundColor: Color.gray.opacity(0.3)
       )
       .frame(height: 16)
+    }
+
+    private func seekTime(for normalizedValue: Double) -> Double {
+      let clampedValue = max(0, min(1, normalizedValue))
+      return clampedValue * duration
     }
 
     private var timeDisplay: some View {

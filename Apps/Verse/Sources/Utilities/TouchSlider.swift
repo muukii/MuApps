@@ -10,21 +10,19 @@ import SwiftUI
 
 public struct TouchSlider: View {
 
-  private struct TrackingState: Equatable {
-    let beginProgress: Double
-  }
-
   var isTracking: Bool {
-    trackingState != nil
+    trackingStartProgress != nil
   }
 
-  @GestureState private var trackingState: TrackingState? = nil
+  @State private var trackingStartProgress: Double?
   @State private var draggingProgress: Double?
 
   @Binding var progress: Double
   public let speed: Double
   public let direction: Axis
   public let continuous: Bool
+  public let onEditingChanged: (Bool) -> Void
+  public let onValueChanged: (Double) -> Void
 
   private let foregroundColor: Color
   private let backgroundColor: Color
@@ -43,6 +41,8 @@ public struct TouchSlider: View {
     value: Binding<Double>,
     speed: Double = 1,
     continuous: Bool = true,
+    onEditingChanged: @escaping (Bool) -> Void = { _ in },
+    onValueChanged: @escaping (Double) -> Void = { _ in },
     foregroundColor: Color = Color(white: 0.5, opacity: 0.5),
     backgroundColor: Color = Color(white: 0.5, opacity: 0.5),
     cornerRadius: Double = .greatestFiniteMagnitude
@@ -51,6 +51,8 @@ public struct TouchSlider: View {
     self.direction = direction
     self.speed = speed
     self.continuous = continuous
+    self.onEditingChanged = onEditingChanged
+    self.onValueChanged = onValueChanged
     self.foregroundColor = foregroundColor
     self.backgroundColor = backgroundColor
     self.cornerRadius = cornerRadius
@@ -101,25 +103,19 @@ public struct TouchSlider: View {
       )
       .gesture(
         DragGesture(minimumDistance: 0)
-          .updating(
-            $trackingState,
-            body: { value, trackingState, transaction in
-
-              if trackingState == nil {
-                trackingState = .init(
-                  beginProgress: progress
-                )
-
-                #if os(iOS)
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                #endif
-              }
-            }
-          )
           .onChanged({ value in
 
-            guard let trackingState else {
-              return
+            let beginProgress: Double
+            if let trackingStartProgress {
+              beginProgress = trackingStartProgress
+            } else {
+              beginProgress = progress
+              trackingStartProgress = progress
+              onEditingChanged(true)
+
+              #if os(iOS)
+              UIImpactFeedbackGenerator(style: .light).impactOccurred()
+              #endif
             }
 
             let constantSpeedProgress = {
@@ -132,7 +128,8 @@ public struct TouchSlider: View {
             }()
 
             let progressChanges = constantSpeedProgress * speed
-            let newProgress = max(min(1, trackingState.beginProgress + progressChanges), 0)
+            let newProgress = max(min(1, beginProgress + progressChanges), 0)
+            onValueChanged(newProgress)
 
             if continuous {
               progress = newProgress
@@ -144,8 +141,10 @@ public struct TouchSlider: View {
           .onEnded { _ in
             if !continuous, let finalProgress = draggingProgress {
               progress = finalProgress
-              draggingProgress = nil
             }
+            draggingProgress = nil
+            trackingStartProgress = nil
+            onEditingChanged(false)
             #if os(iOS)
             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
             #endif

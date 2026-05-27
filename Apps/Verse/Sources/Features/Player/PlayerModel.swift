@@ -234,6 +234,12 @@ final class PlayerModel {
   /// Task for tracking playback time
   private var trackingTask: Task<Void, Never>?
 
+  /// Task for committing the final seek bar position to the player
+  private var sliderSeekTask: Task<Void, Never>?
+
+  /// Whether the final seek bar position is currently being applied
+  private var isApplyingSliderSeek: Bool = false
+
   /// Current playback source
   private(set) var playbackSource: PlaybackSource = .youtube
 
@@ -442,6 +448,7 @@ final class PlayerModel {
   func cleanup() {
     trackingTask?.cancel()
     trackingTask = nil
+    cancelPendingSliderSeek()
 
     if let controller {
       Task {
@@ -451,6 +458,36 @@ final class PlayerModel {
   }
 
   // MARK: - Playback Control
+
+  /// Updates the timeline preview while the user is dragging the seek bar.
+  func previewSliderSeek(to time: Double) {
+    dragTime = clampedPlaybackTime(time)
+    isDraggingSlider = true
+  }
+
+  /// Commits the seek bar position to the underlying player once dragging ends.
+  func commitSliderSeek(to time: Double) {
+    let seekTime = clampedPlaybackTime(time)
+    dragTime = seekTime
+    isDraggingSlider = false
+    currentTime.value = seekTime
+
+    guard let controller else { return }
+    isApplyingSliderSeek = true
+
+    sliderSeekTask?.cancel()
+    sliderSeekTask = Task { [weak self] in
+      await controller.seek(to: seekTime)
+      guard !Task.isCancelled else { return }
+
+      await MainActor.run {
+        guard let self else { return }
+        self.currentTime.value = seekTime
+        self.isApplyingSliderSeek = false
+        self.sliderSeekTask = nil
+      }
+    }
+  }
 
   /// Seeks to the specified time
   func seek(to time: Double) {
@@ -573,6 +610,7 @@ final class PlayerModel {
 
     // Cancel existing tracking task
     trackingTask?.cancel()
+    cancelPendingSliderSeek()
 
     // Stop current player before switching
     if let currentController = controller {
@@ -603,6 +641,7 @@ final class PlayerModel {
     guard playbackSource != .youtube else { return }
 
     trackingTask?.cancel()
+    cancelPendingSliderSeek()
 
     if let currentController = controller {
       Task {
@@ -620,6 +659,7 @@ final class PlayerModel {
     guard playbackSource != .local, let fileURL = localFileURL else { return }
 
     trackingTask?.cancel()
+    cancelPendingSliderSeek()
 
     if let currentController = controller {
       Task {
@@ -648,6 +688,20 @@ final class PlayerModel {
 
   // MARK: - Private Methods
 
+  private func clampedPlaybackTime(_ time: Double) -> Double {
+    guard duration > 0 else {
+      return max(0, time)
+    }
+    return min(max(0, time), duration)
+  }
+
+  private func cancelPendingSliderSeek() {
+    sliderSeekTask?.cancel()
+    sliderSeekTask = nil
+    isApplyingSliderSeek = false
+    isDraggingSlider = false
+  }
+
   private func startTrackingTime() {
     // Cancel any existing tracking task
     trackingTask?.cancel()
@@ -674,29 +728,33 @@ final class PlayerModel {
       while !Task.isCancelled {
         if let controller = self.controller {
           let timeValue = await controller.currentTime
-          self.currentTime.value = timeValue
+          if !self.isDraggingSlider && !self.isApplyingSliderSeek {
+            self.currentTime.value = timeValue
+          }
           self.isPlaying = controller.isPlaying
         }
 
-        // Check A-B repeat loop
-        if let loopStartTime = self.checkRepeatLoop() {
-          await self.controller?.seek(to: loopStartTime)
-        }
-        // Check if should stop at repeat end (when looping disabled)
-        else if let startTime = self.checkRepeatEndAndStop() {
-          await self.controller?.seek(to: startTime)
-          await self.controller?.pause()
-          self.isPlaying = false
-        }
-        // Check end-of-video loop
-        else if let loopStartTime = self.checkEndOfVideoLoop() {
-          await self.controller?.seek(to: loopStartTime)
-        }
-        // Check step mode stop
-        else if let cue = self.checkStepModeStop() {
-          self.lastStoppedCueID = cue.id
-          await self.controller?.pause()
-          self.isPlaying = false
+        if !self.isDraggingSlider && !self.isApplyingSliderSeek {
+          // Check A-B repeat loop
+          if let loopStartTime = self.checkRepeatLoop() {
+            await self.controller?.seek(to: loopStartTime)
+          }
+          // Check if should stop at repeat end (when looping disabled)
+          else if let startTime = self.checkRepeatEndAndStop() {
+            await self.controller?.seek(to: startTime)
+            await self.controller?.pause()
+            self.isPlaying = false
+          }
+          // Check end-of-video loop
+          else if let loopStartTime = self.checkEndOfVideoLoop() {
+            await self.controller?.seek(to: loopStartTime)
+          }
+          // Check step mode stop
+          else if let cue = self.checkStepModeStop() {
+            self.lastStoppedCueID = cue.id
+            await self.controller?.pause()
+            self.isPlaying = false
+          }
         }
 
         try? await Task.sleep(for: .milliseconds(100))
