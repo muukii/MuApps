@@ -15,8 +15,6 @@ import SwiftUI
 /// Each flag has a key for storage, display name for UI, and default value.
 enum FeatureFlag: String, CaseIterable, Identifiable {
   case downloadFeature = "featureFlag.downloadFeature"
-  // Future flags can be added here:
-  // case experimentalPlayer = "featureFlag.experimentalPlayer"
 
   var id: String { rawValue }
 
