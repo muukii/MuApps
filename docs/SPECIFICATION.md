@@ -16,6 +16,57 @@
 - If `all` is selected, apps whose project path does not exist on the current branch are skipped with a notice; selecting a missing app directly fails the run with a clear error.
 - The shared deploy workflow installs Tuist dependencies, generates the workspace, archives the selected scheme, signs the archived app and nested extensions with discovered entitlements, then exports and uploads to App Store Connect using the repository App Store Connect API key secrets.
 
+## Local Build Coverage
+- The pull request build workflow also builds CodexPet as an experimental simulator app.
+- CodexPet is not yet included in Ad Hoc OTA publishing or App Store Connect deployment.
+
+---
+
+# CodexPet - Product Specification
+
+## Overview
+
+CodexPet is an experimental SwiftUI app for previewing Codex Desktop custom pet sprite atlases on iPhone and iPad.
+
+## Core Features
+
+### 1. Bundled Codex Pets
+- Includes the local Mofu Monkey and Mofu Monkey Dot Codex pet atlases as app-bundled PNG spritesheets.
+- Uses the Codex custom pet atlas contract: 8 columns, 9 animation rows, and 192 x 208 pixel cells.
+- Provides a segmented picker for switching between the bundled soft plush and pixel-art variants.
+
+### 2. Sprite Animation Playback
+- Plays all Codex pet states: idle, running-right, running-left, waving, jumping, failed, waiting, running, and review.
+- Uses a SwiftUI timeline to select frames from the current animation row.
+- Applies smooth interpolation for the plush pet and nearest-neighbor interpolation for the pixel-art pet.
+
+### 3. Playground Motion
+- Shows the pet in a full-screen stage with state controls at the bottom.
+- Moves the pet horizontally for directional running states.
+- Adds vertical motion for jumping and subtle bobbing for stationary states.
+- Includes a playback speed slider from 0.25x to 2.0x.
+
+### 4. Widgets
+- Provides a WidgetKit extension named Codex Pet.
+- Supports Home Screen small and medium widgets, plus Lock Screen circular and rectangular accessory widgets.
+- Lets people configure the widget's bundled pet and pose from the widget edit sheet.
+- Renders a static representative frame for the selected pose because WidgetKit widgets are snapshot-driven rather than continuous animation surfaces.
+
+### 5. Web App
+- Provides a static web app under `Apps/CodexPet/Web/`.
+- Uses the same bundled Mofu Monkey and Mofu Monkey Dot sprite atlases as PNG assets.
+- Animates the pet by updating CSS sprite background positions from the 8 x 9 Codex pet atlas.
+- Detects transparent atlas cells in a canvas pass and excludes blank frames while keeping each visible frame's full 192 x 208 cell registration.
+- Supports pet switching, pose switching, and playback speed control in the browser.
+- Includes a web app manifest and app icons so the page can be installed as a standalone browser app where supported.
+
+## Current Constraints
+- The first version bundles known local pet assets instead of importing arbitrary pet packages from Files.
+- The app does not read Codex Desktop's <code>~/.codex/pets</code> directory at runtime.
+- The app is local/simulator-focused and is not configured for Ad Hoc OTA or App Store Connect deployment yet.
+- The widget does not play continuous pet animation; it displays a stable frame from the selected atlas row.
+- The web app ships as a static artifact and has been manually deployed to Cloudflare Pages with Wrangler; automated Pages deployment is not configured yet.
+
 ---
 
 # Safari Reactor - Product Specification

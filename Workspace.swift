@@ -4,6 +4,7 @@ let workspace = Workspace(
   name: "MuApps",
   projects: [
     "Apps/Verse",
+    "Apps/CodexPet",
     "Apps/HelloWorld",
     "Apps/VoiceRecorder",
     "Apps/HearAugment",
