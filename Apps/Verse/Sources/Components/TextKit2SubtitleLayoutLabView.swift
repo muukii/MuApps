@@ -224,7 +224,7 @@ private final class TextKit2SubtitleLayoutDebugTextView: UITextView {
       ))
 
       result.append(NSAttributedString(string: "\n"))
-      result.append(NSAttributedString(attachment: CueActionAttachment(
+      result.append(NSAttributedString(attachment: TextKit2SubtitleCueActionAttachment(
         cueID: cue.id,
         cueText: cueText
       )))
@@ -446,6 +446,8 @@ private struct CueLayout {
 }
 
 private extension NSAttributedString.Key {
+  static let cueID = NSAttributedString.Key("cueID")
+  static let cueStartTime = NSAttributedString.Key("cueStartTime")
   static let debugSectionID = NSAttributedString.Key("debugSectionID")
 }
 

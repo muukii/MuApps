@@ -110,6 +110,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 
 #### 2.2 Display
 - List of cues with timestamps
+- Continuous TextKit 2 reader that renders all cues in one scrollable text view
 - Current cue highlight
 - Word-level highlight when timing data is available (transcription)
 
