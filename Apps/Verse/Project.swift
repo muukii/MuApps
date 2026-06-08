@@ -23,6 +23,11 @@ let appInfoPlist: InfoPlist = .extendingDefault(with: [
 
 // MARK: - Project
 
+/// Destinations supported by the Verse app target.
+///
+/// Includes "Mac (Designed for iPad)" without enabling Mac Catalyst.
+let verseAppDestinations: Destinations = [.iPhone, .iPad, .macWithiPadDesign]
+
 let project = Project(
   name: "Verse",
   organizationName: AppConstants.organizationName,
@@ -37,7 +42,7 @@ let project = Project(
     // MARK: - Main App Target
     .target(
       name: "Verse",
-      destinations: .app,
+      destinations: verseAppDestinations,
       product: .app,
       bundleId: AppConstants.appBundleId,
       deploymentTargets: .app,

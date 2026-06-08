@@ -149,7 +149,7 @@ struct HomeView: View {
   private var rootLayout: some View {
     NavigationSplitView {
       historyContent
-        .navigationTitle("Verse")
+        .navigationBarTitleDisplayMode(.inline)
         .navigationSplitViewColumnWidth(min: 320, ideal: 360, max: 420)
         .toolbar {
           topToolbarContent
