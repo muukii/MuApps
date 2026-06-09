@@ -5,6 +5,7 @@
 //  Thin UIViewRepresentable wrapper for TextKit2SubtitlePlayerTextView.
 //
 
+import ScrollEdgeEffect
 import SwiftUI
 
 // MARK: - TextKit2SubtitleTextView
@@ -19,6 +20,7 @@ struct TextKit2SubtitleTextView: UIViewRepresentable {
   let currentTimeValue: Double
   let currentCueID: Subtitle.Cue.ID?
   @Binding var isTrackingEnabled: Bool
+  @Binding var scrollEdgeVisibility: ScrollEdgeEffect.Visibility
   let onAction: (SubtitleAction) -> Void
 
   // MARK: - UIViewRepresentable
@@ -40,6 +42,10 @@ struct TextKit2SubtitleTextView: UIViewRepresentable {
 
     textView.onTrackingShouldPause = { [binding = $isTrackingEnabled] in
       binding.wrappedValue = false
+    }
+
+    textView.onScrollEdgeVisibilityChange = { [binding = $scrollEdgeVisibility] visibility in
+      binding.wrappedValue = visibility
     }
 
     context.coordinator.textView = textView
@@ -85,6 +91,7 @@ struct TextKit2SubtitleTextView: UIViewRepresentable {
 private struct TextKit2SubtitleTextViewPreview: View {
   @State private var currentTime: Double = 3.2
   @State private var isTrackingEnabled = true
+  @State private var scrollEdgeVisibility = ScrollEdgeEffect.Visibility.hidden
   @State private var lastActionDescription = "No action yet"
 
   var body: some View {
@@ -94,6 +101,7 @@ private struct TextKit2SubtitleTextViewPreview: View {
         currentTimeValue: currentTime,
         currentCueID: currentCueID,
         isTrackingEnabled: $isTrackingEnabled,
+        scrollEdgeVisibility: $scrollEdgeVisibility,
         onAction: handleAction(_:)
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)

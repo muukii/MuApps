@@ -1,5 +1,5 @@
 {
-  "originHash" : "83f1676890ae0c4d4ecdd41e46593532fd103721537f9ffe97ff4ebfe581e3f3",
+  "originHash" : "5fab758aa161a51c3c1a23e9efd8e6b8f458138d77bbd8ad41739c668da86dce",
   "pins" : [
     {
       "identity" : "alamofire",
@@ -230,6 +230,15 @@
       "state" : {
         "revision" : "15fb9ab0a2ca7c6b3e58ca4c90433a8217dbfa98",
         "version" : "0.3.1"
+      }
+    },
+    {
+      "identity" : "swiftui-scroll-edge-effect",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/FluidGroup/swiftui-scroll-edge-effect.git",
+      "state" : {
+        "revision" : "2d613b6e265f88261d85a2357330d6f166c0b921",
+        "version" : "0.1.2"
       }
     },
     {

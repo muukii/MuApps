@@ -5,6 +5,7 @@
 //  Production TextKit 2 subtitle reader for the player screen.
 //
 
+import ScrollEdgeEffect
 import SwiftUI
 import UIKit
 
@@ -30,6 +31,9 @@ final class TextKit2SubtitlePlayerTextView: UITextView {
 
   /// Called when direct user interaction should pause automatic scroll tracking.
   var onTrackingShouldPause: (() -> Void)?
+
+  /// Called when the visible scroll edges change enough to update the SwiftUI mask.
+  var onScrollEdgeVisibilityChange: ((ScrollEdgeEffect.Visibility) -> Void)?
 
   // MARK: TextKit 2 Stack
 
@@ -59,6 +63,7 @@ final class TextKit2SubtitlePlayerTextView: UITextView {
   private var isAutoScrollSuppressedByUser = false
   private var isAdjustingSelection = false
   private var isPerformingProgrammaticScroll = false
+  private var scrollEdgeVisibility = ScrollEdgeEffect.Visibility.hidden
   private var resetProgrammaticScrollTask: Task<Void, Never>?
 
   // MARK: Initialization
@@ -103,6 +108,7 @@ final class TextKit2SubtitlePlayerTextView: UITextView {
   override func layoutSubviews() {
     super.layoutSubviews()
     flushPendingScrollIfPossible()
+    updateScrollEdgeVisibility()
   }
 
   // MARK: Public API
@@ -135,6 +141,7 @@ final class TextKit2SubtitlePlayerTextView: UITextView {
 
     assert(isUsingManagedTextKit2Stack)
     setNeedsLayout()
+    updateScrollEdgeVisibility()
   }
 
   /// Updates time-based rendering and optionally schedules a scroll to the current cue.
@@ -442,6 +449,16 @@ final class TextKit2SubtitlePlayerTextView: UITextView {
       setContentOffset(targetOffset, animated: false)
       isPerformingProgrammaticScroll = false
     }
+
+    updateScrollEdgeVisibility()
+  }
+
+  private func updateScrollEdgeVisibility() {
+    let nextVisibility = ScrollEdgeEffect.Visibility(verticalScrollView: self)
+    guard nextVisibility != scrollEdgeVisibility else { return }
+
+    scrollEdgeVisibility = nextVisibility
+    onScrollEdgeVisibilityChange?(nextVisibility)
   }
 
   private func pauseAutoScrollForUserInteraction() {
@@ -619,8 +636,13 @@ extension TextKit2SubtitlePlayerTextView: UITextViewDelegate {
     pauseAutoScrollForUserInteraction()
   }
 
+  func scrollViewDidScroll(_ scrollView: UIScrollView) {
+    updateScrollEdgeVisibility()
+  }
+
   func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
     isPerformingProgrammaticScroll = false
+    updateScrollEdgeVisibility()
   }
 }
 

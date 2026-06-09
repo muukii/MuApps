@@ -56,6 +56,7 @@ let project = Project(
         // External SPM dependencies
         .external(name: "YouTubeKit"),
         .external(name: "ObjectEdge"),
+        .external(name: "ScrollEdgeEffect"),
         .external(name: "SwiftUIRingSlider"),
         .external(name: "TypedIdentifier"),
         .external(name: "AsyncMultiplexImage"),

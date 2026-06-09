@@ -3,6 +3,7 @@
 //  YouTubeSubtitle
 //
 
+import ScrollEdgeEffect
 import SwiftUI
 
 // MARK: - TextKit2 Subtitle View
@@ -17,6 +18,7 @@ struct TextKit2SubtitleView: View {
   let onAction: (SubtitleAction) -> Void
 
   @State private var isTrackingEnabled: Bool = true
+  @State private var scrollEdgeVisibility = ScrollEdgeEffect.Visibility.hidden
 
   var body: some View {
     Group {
@@ -47,8 +49,17 @@ struct TextKit2SubtitleView: View {
       currentTimeValue: currentTimeValue,
       currentCueID: model.currentCueID,
       isTrackingEnabled: $isTrackingEnabled,
+      scrollEdgeVisibility: $scrollEdgeVisibility,
       onAction: onAction
     )
+    .mask {
+      ScrollEdgeEffect(
+        edges: SubtitleScrollEdgeMask.edges,
+        length: SubtitleScrollEdgeMask.length,
+        visibility: scrollEdgeVisibility
+      )
+      .animation(SubtitleScrollEdgeMask.animation, value: scrollEdgeVisibility)
+    }
   }
 
   // MARK: - Tracking Button
