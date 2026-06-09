@@ -6,6 +6,7 @@
 //
 
 import CoreMedia
+import ScrollEdgeEffect
 import Speech
 import SwiftUI
 import Translation
@@ -224,6 +225,12 @@ private struct SubtitleScrollContent: View {
     }
     .listStyle(.plain)
     .scrollContentBackground(.hidden)
+    .scrollEdgeEffect(
+      edges: SubtitleScrollEdgeMask.edges,
+      length: SubtitleScrollEdgeMask.length,
+      threshold: SubtitleScrollEdgeMask.threshold,
+      animation: SubtitleScrollEdgeMask.animation
+    )
   }
 }
 

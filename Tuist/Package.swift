@@ -45,6 +45,7 @@ let package = Package(
 
     // UI components
     .package(url: "https://github.com/FluidGroup/swiftui-object-edge", from: "1.0.0"),
+    .package(url: "https://github.com/FluidGroup/swiftui-scroll-edge-effect.git", from: "0.1.2"),
     .package(url: "https://github.com/FluidGroup/swiftui-ring-slider", from: "0.2.0"),
     .package(url: "https://github.com/FluidGroup/swiftui-async-multiplex-image", from: "1.0.0"),
     .package(url: "https://github.com/FluidGroup/swiftui-support.git", from: "0.13.0"),
