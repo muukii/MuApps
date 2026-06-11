@@ -7,10 +7,21 @@ extension LowLevelEffectProcessorObjC: @unchecked Sendable {}
 @Observable
 @MainActor
 final class HearAugmentViewModel {
+  /// Microphone permission states that matter to the app's launch-to-listen
+  /// flow. `requesting` is app-local because `AVAudioApplication` only stores
+  /// the persisted system authorization result.
+  private enum MicrophonePermissionState: Equatable {
+    case undetermined
+    case requesting
+    case granted
+    case denied
+  }
+
   private enum AudioError: LocalizedError {
     case unavailableInputFormat
     case unavailableOutputFormat
     case engineDidNotStart
+    case unavailableMicrophonePermission
 
     var errorDescription: String? {
       switch self {
@@ -20,6 +31,8 @@ final class HearAugmentViewModel {
         return "The stereo listening format could not be created."
       case .engineDidNotStart:
         return "The listening engine could not be started."
+      case .unavailableMicrophonePermission:
+        return "Microphone permission is unavailable on this device."
       }
     }
   }
@@ -36,6 +49,7 @@ final class HearAugmentViewModel {
   private var clockTask: Task<Void, Never>?
   private var isApplyingPreset = false
   private var shouldResumeAfterInterruption = false
+  private var microphonePermissionState: MicrophonePermissionState = .undetermined
 
   private(set) var inputDevices: [AudioInputDevice] = []
   private(set) var customPresets: [AudioEffectChainPreset] = []
@@ -81,7 +95,6 @@ final class HearAugmentViewModel {
   }
 
   private(set) var isPrepared = false
-  private(set) var isPermissionDenied = false
   private(set) var isListening = false
   private(set) var elapsedTime: TimeInterval = 0
   private(set) var outputRouteName = "System Output"
@@ -120,6 +133,18 @@ final class HearAugmentViewModel {
     isListening == false
   }
 
+  var isPermissionDenied: Bool {
+    microphonePermissionState == .denied
+  }
+
+  var isPermissionRequesting: Bool {
+    microphonePermissionState == .requesting
+  }
+
+  var isPermissionUndetermined: Bool {
+    microphonePermissionState == .undetermined
+  }
+
   var canAddEffect: Bool {
     effectChain.count < maximumChainLength
   }
@@ -148,22 +173,28 @@ final class HearAugmentViewModel {
 
   func prepare() async {
     errorMessage = nil
+    synchronizeMicrophonePermission()
 
-    let granted = await AVAudioApplication.requestRecordPermission()
-    guard granted else {
-      isPermissionDenied = true
+    guard microphonePermissionState == .granted else {
+      if isListening {
+        stopListening(restoreDiscovery: false)
+      }
       isPrepared = false
       refreshRoute()
       return
     }
 
-    isPermissionDenied = false
+    if isListening {
+      refreshAudioInputs()
+      return
+    }
 
     do {
       try configureDiscoverySession()
       refreshAudioInputs()
       isPrepared = true
     } catch {
+      isPrepared = false
       setError(error)
     }
   }
@@ -327,7 +358,11 @@ final class HearAugmentViewModel {
 
     switch type {
     case .began:
-      shouldResumeAfterInterruption = isListening
+      let shouldResume = isListening
+      if isListening {
+        stopListening(restoreDiscovery: false)
+      }
+      shouldResumeAfterInterruption = shouldResume
     case .ended:
       let optionsRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
       let options = AVAudioSession.InterruptionOptions(rawValue: optionsRaw)
@@ -435,8 +470,12 @@ final class HearAugmentViewModel {
   }
 
   private func ensurePermission() async -> Bool {
-    if isPrepared, isPermissionDenied == false {
+    if isPrepared, microphonePermissionState == .granted {
       return true
+    }
+
+    guard await requestMicrophonePermissionIfNeeded() else {
+      return false
     }
 
     await prepare()
@@ -447,7 +486,7 @@ final class HearAugmentViewModel {
     try session.setCategory(
       .playAndRecord,
       mode: .measurement,
-      options: [.allowBluetoothA2DP]
+      options: [.allowBluetooth, .allowBluetoothA2DP]
     )
     try session.setActive(true)
   }
@@ -456,7 +495,7 @@ final class HearAugmentViewModel {
     try session.setCategory(
       .playAndRecord,
       mode: .measurement,
-      options: [.allowBluetoothA2DP]
+      options: [.allowBluetooth, .allowBluetoothA2DP]
     )
     try? session.setPreferredSampleRate(48_000)
     try? session.setPreferredIOBufferDuration(
@@ -471,6 +510,49 @@ final class HearAugmentViewModel {
     guard let port = inputPorts.first(where: { $0.uid == id }) else { return }
     try session.setPreferredInput(port)
     applyStereoConfiguration(for: port)
+  }
+
+  private func synchronizeMicrophonePermission() {
+    switch AVAudioApplication.shared.recordPermission {
+    case .undetermined:
+      if microphonePermissionState != .requesting {
+        microphonePermissionState = .undetermined
+      }
+    case .denied:
+      microphonePermissionState = .denied
+    case .granted:
+      microphonePermissionState = .granted
+    @unknown default:
+      microphonePermissionState = .denied
+    }
+  }
+
+  private func requestMicrophonePermissionIfNeeded() async -> Bool {
+    switch AVAudioApplication.shared.recordPermission {
+    case .granted:
+      microphonePermissionState = .granted
+      return true
+    case .denied:
+      microphonePermissionState = .denied
+      isPrepared = false
+      refreshRoute()
+      return false
+    case .undetermined:
+      microphonePermissionState = .requesting
+      let granted = await AVAudioApplication.requestRecordPermission()
+      microphonePermissionState = granted ? .granted : .denied
+      if granted == false {
+        isPrepared = false
+        refreshRoute()
+      }
+      return granted
+    @unknown default:
+      microphonePermissionState = .denied
+      isPrepared = false
+      setError(AudioError.unavailableMicrophonePermission)
+      refreshRoute()
+      return false
+    }
   }
 
   /// Requests a stereo capture path on the given input port. The built-in mic on

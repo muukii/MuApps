@@ -344,7 +344,8 @@ HearAugment is a SwiftUI iPhone and iPad audio AR prototype inspired by real-tim
 ## Core Features
 
 ### 1. Live Listening
-- Requests microphone permission on launch.
+- Checks microphone permission on launch and asks for access only when the user starts live listening for the first time.
+- Shows explicit pending, requesting, denied, and granted microphone states. If access is denied, the primary Start control changes to **Open Settings** and the app re-checks permission when it becomes active again after the user returns from Settings.
 - Uses `AVAudioEngine` for audio-session hosting, microphone tap input, and output.
 - Microphone frames are passed through an Objective-C++ bridge into a C++ low-level float ring buffer and rendered by `AVAudioSourceNode`.
 - The render callback runs a custom C++ sample-by-sample serial effect chain instead of standard EQ, delay, reverb, or dynamics Audio Units.
@@ -390,6 +391,7 @@ HearAugment is a SwiftUI iPhone and iPad audio AR prototype inspired by real-tim
 - Lists available audio input devices from `AVAudioSession`.
 - Allows input selection while listening is stopped.
 - Shows selected input, active input route, captured channel layout (Mono / Stereo / N ch), and output route.
+- Enables both Bluetooth input and Bluetooth A2DP routing on the audio session so headsets that expose an HFP microphone can appear as input options while higher-quality Bluetooth output remains available when the route supports it.
 - When the selected input is the built-in microphone, the app requests a stereo capture path: it picks a data source whose supported polar patterns include `.stereo`, sets that polar pattern, sets the input orientation to portrait, and asks the session for two preferred input channels. Inputs that do not support stereo (older iPhones, Bluetooth, USB headsets, and most external interfaces) silently fall back to whatever channel layout they natively provide; the engine handles a mono return by mirroring the single channel to both stereo output channels.
 - Warns when headphones or AirPods are not connected to reduce feedback risk.
 

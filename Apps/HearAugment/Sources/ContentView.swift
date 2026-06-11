@@ -4,13 +4,14 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
+  @Environment(\.scenePhase) private var scenePhase
   @State private var viewModel = HearAugmentViewModel()
 
   var body: some View {
     NavigationStack {
       ScrollView {
         VStack(alignment: .leading, spacing: 20) {
-          ListeningPanel(viewModel: viewModel)
+          ListeningPanel(viewModel: viewModel, openSettings: openSettings)
           PresetGrid(viewModel: viewModel)
           EffectChainPanel(viewModel: viewModel)
           TuningPanel(viewModel: viewModel)
@@ -31,40 +32,93 @@ struct ContentView: View {
       .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { notification in
         viewModel.handleInterruption(notification)
       }
+      .onChange(of: scenePhase) { _, newPhase in
+        guard newPhase == .active else { return }
+        Task {
+          await viewModel.prepare()
+        }
+      }
       .safeAreaInset(edge: .bottom, spacing: 0) {
-        ListeningTransportBar(viewModel: viewModel)
+        ListeningTransportBar(viewModel: viewModel, openSettings: openSettings)
       }
     }
+  }
+
+  private func openSettings() {
+    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+    UIApplication.shared.open(url)
   }
 }
 
 fileprivate struct ListeningTransportBar: View {
   let viewModel: HearAugmentViewModel
+  let openSettings: () -> Void
 
   var body: some View {
     Button {
-      Task {
-        await viewModel.toggleListening()
+      if viewModel.isPermissionDenied {
+        openSettings()
+      } else {
+        Task {
+          await viewModel.toggleListening()
+        }
       }
     } label: {
       Label(
-        viewModel.isListening ? "Stop Listening" : "Start Listening",
-        systemImage: viewModel.isListening ? "stop.fill" : "ear.and.waveform"
+        title,
+        systemImage: systemImage
       )
       .frame(maxWidth: .infinity, minHeight: 48)
     }
     .buttonStyle(.borderedProminent)
-    .tint(viewModel.isListening ? .red : .accentColor)
-    .disabled(viewModel.isPermissionDenied)
+    .tint(tint)
+    .disabled(viewModel.isPermissionRequesting)
     .padding(.horizontal, 20)
     .padding(.top, 12)
     .padding(.bottom, 8)
     .background(.bar)
   }
+
+  private var title: String {
+    if viewModel.isPermissionDenied {
+      return "Open Settings"
+    }
+
+    if viewModel.isPermissionRequesting {
+      return "Requesting Access"
+    }
+
+    return viewModel.isListening ? "Stop Listening" : "Start Listening"
+  }
+
+  private var systemImage: String {
+    if viewModel.isPermissionDenied {
+      return "gear"
+    }
+
+    if viewModel.isPermissionRequesting {
+      return "hourglass"
+    }
+
+    return viewModel.isListening ? "stop.fill" : "ear.and.waveform"
+  }
+
+  private var tint: Color {
+    if viewModel.isListening {
+      return .red
+    }
+
+    if viewModel.isPermissionDenied {
+      return .orange
+    }
+
+    return .accentColor
+  }
 }
 
 fileprivate struct ListeningPanel: View {
   let viewModel: HearAugmentViewModel
+  let openSettings: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
@@ -105,6 +159,18 @@ fileprivate struct ListeningPanel: View {
           .foregroundStyle(.red)
       }
 
+      if viewModel.isPermissionUndetermined {
+        Label("Start Listening will ask for microphone access.", systemImage: "mic.fill")
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+      }
+
+      if viewModel.isPermissionRequesting {
+        Label("Waiting for the microphone permission response.", systemImage: "hourglass")
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+      }
+
       if viewModel.isPermissionDenied {
         Button {
           openSettings()
@@ -129,8 +195,16 @@ fileprivate struct ListeningPanel: View {
       return "Listening"
     }
 
+    if viewModel.isPermissionRequesting {
+      return "Requesting Access"
+    }
+
     if viewModel.isPermissionDenied {
       return "Microphone Needed"
+    }
+
+    if viewModel.isPermissionUndetermined {
+      return "Microphone Access"
     }
 
     return "Ready"
@@ -141,14 +215,26 @@ fileprivate struct ListeningPanel: View {
       return "ear.fill"
     }
 
+    if viewModel.isPermissionRequesting {
+      return "hourglass"
+    }
+
     if viewModel.isPermissionDenied {
       return "mic.slash.fill"
+    }
+
+    if viewModel.isPermissionUndetermined {
+      return "mic.fill"
     }
 
     return "waveform"
   }
 
   private var statusColor: Color {
+    if viewModel.isPermissionRequesting {
+      return .orange
+    }
+
     if viewModel.isPermissionDenied {
       return .red
     }
@@ -158,11 +244,6 @@ fileprivate struct ListeningPanel: View {
     }
 
     return MuColors.primary
-  }
-
-  private func openSettings() {
-    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-    UIApplication.shared.open(url)
   }
 }
 
