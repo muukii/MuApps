@@ -43,6 +43,7 @@ enum EffectType {
   effectConvergingBloom = 28,
   effectTapeRiserDelay = 29,
   effectStereoDelay = 30,
+  effectBinauralBeat = 31,
 };
 
 float clampFloat(float value, float lower, float upper) {
@@ -714,7 +715,7 @@ std::vector<EffectDescriptor> sanitizedChain(const std::vector<EffectDescriptor>
     next.amount = normalized(next.amount);
     next.parameterA = normalized(next.parameterA);
     next.parameterB = normalized(next.parameterB);
-    if (next.type < effectHighPass || next.type > effectStereoDelay) {
+    if (next.type < effectHighPass || next.type > effectBinauralBeat) {
       continue;
     }
     sanitized.push_back(next);
@@ -927,6 +928,9 @@ struct LowLevelEffectEngine::Impl {
       break;
     case effectStereoDelay:
       processStereoDelay(runtime, descriptor);
+      break;
+    case effectBinauralBeat:
+      processBinauralBeat(runtime, descriptor);
       break;
     case effectPingPongDelay:
       processPingPongDelay(runtime, descriptor);
@@ -1301,6 +1305,28 @@ struct LowLevelEffectEngine::Impl {
     right.delayA.write(inRight + ((wetRight + wetLeft * crossFeed) * feedback));
     frameScratch[0] = inLeft + (wetLeft * wetGain);
     frameScratch[1] = inRight + (wetRight * wetGain);
+  }
+
+  void processBinauralBeat(EffectRuntime &runtime, const EffectDescriptor &descriptor) {
+    // Adds independent left/right sine carriers whose frequencies differ by
+    // `beatFrequency`. Headphones keep those tones separated so the perceived
+    // beat is created by the listener rather than by mono amplitude modulation.
+    if (channelCount < 2) {
+      return;
+    }
+
+    const float carrierFrequency = lerp(120.0f, 420.0f, descriptor.parameterA);
+    const float beatFrequency = lerp(1.0f, 40.0f, descriptor.parameterB);
+    const float leftFrequency = std::max(carrierFrequency - (beatFrequency * 0.5f), 20.0f);
+    const float rightFrequency = std::min(carrierFrequency + (beatFrequency * 0.5f), sampleRate * 0.45f);
+    const float toneLevel = descriptor.amount * 0.18f;
+
+    auto &left = runtime.channels[0];
+    auto &right = runtime.channels[1];
+    frameScratch[0] += std::sin(left.lfoPhase) * toneLevel;
+    frameScratch[1] += std::sin(right.lfoPhase) * toneLevel;
+    advancePhase(left.lfoPhase, leftFrequency, sampleRate);
+    advancePhase(right.lfoPhase, rightFrequency, sampleRate);
   }
 
   void processPingPongDelay(EffectRuntime &runtime, const EffectDescriptor &descriptor) {

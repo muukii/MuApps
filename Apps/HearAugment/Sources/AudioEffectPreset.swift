@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 
 nonisolated enum ParameterDisplayFormat: Sendable, Hashable {
   case percent
+  case hertz(lower: Double, upper: Double)
   case milliseconds(lower: Double, upper: Double)
   case semitones(lower: Double, upper: Double)
 
@@ -14,6 +15,9 @@ nonisolated enum ParameterDisplayFormat: Sendable, Hashable {
     switch self {
     case .percent:
       return "\(Int((clamped * 100).rounded()))%"
+    case .hertz(let lower, let upper):
+      let hz = lower + (upper - lower) * clamped
+      return String(format: "%.1f Hz", hz)
     case .milliseconds(let lower, let upper):
       let ms = Int((lower + (upper - lower) * clamped).rounded())
       return "\(ms) ms"
@@ -69,7 +73,7 @@ nonisolated extension AudioEffectKind {
     .autoPan, .vibrato, .chorus, .flanger, .phaser, .slapDelay,
     .acceleratingDelay, .pingPongDelay, .reverse, .roomReverb, .stereoReverb,
     .shimmer, .combResonator, .spaceWidener, .longBloom, .convergingBloom,
-    .tapeRiserDelay, .stereoDelay,
+    .tapeRiserDelay, .stereoDelay, .binauralBeat,
   ]
 
   private static let byID: [Int: AudioEffectKind] = Dictionary(
@@ -412,6 +416,17 @@ nonisolated extension AudioEffectKind {
     parameterA: .init(name: "Time", defaultValue: 0.42, format: .milliseconds(lower: 50, upper: 800)),
     parameterB: .init(name: "Feedback", defaultValue: 0.55, format: .percent),
     parameterC: .init(name: "Spread", defaultValue: 0.6, format: .percent)
+  )
+
+  static let binauralBeat = AudioEffectKind(
+    id: 31,
+    title: "Binaural Beat",
+    subtitle: "Stereo carrier offset",
+    symbolName: "ear.and.waveform",
+    amount: .init(name: "Level", defaultValue: 0.28, format: .percent),
+    parameterA: .init(name: "Carrier", defaultValue: 0.28, format: .hertz(lower: 120.0, upper: 420.0)),
+    parameterB: .init(name: "Beat", defaultValue: 0.15, format: .hertz(lower: 1.0, upper: 40.0)),
+    parameterC: nil
   )
 }
 
