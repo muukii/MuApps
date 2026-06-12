@@ -27,7 +27,7 @@ struct ContentView: View {
         await viewModel.prepare()
       }
       .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
-        viewModel.refreshAudioRoute()
+        viewModel.handleRouteChange()
       }
       .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { notification in
         viewModel.handleInterruption(notification)
@@ -88,6 +88,10 @@ fileprivate struct ListeningTransportBar: View {
       return "Requesting Access"
     }
 
+    if viewModel.shouldRequireHeadphonesBeforeListening {
+      return "Connect Headphones"
+    }
+
     return viewModel.isListening ? "Stop Listening" : "Start Listening"
   }
 
@@ -100,6 +104,10 @@ fileprivate struct ListeningTransportBar: View {
       return "hourglass"
     }
 
+    if viewModel.shouldRequireHeadphonesBeforeListening {
+      return "headphones"
+    }
+
     return viewModel.isListening ? "stop.fill" : "ear.and.waveform"
   }
 
@@ -109,6 +117,10 @@ fileprivate struct ListeningTransportBar: View {
     }
 
     if viewModel.isPermissionDenied {
+      return .orange
+    }
+
+    if viewModel.shouldRequireHeadphonesBeforeListening {
       return .orange
     }
 
@@ -181,8 +193,12 @@ fileprivate struct ListeningPanel: View {
         .buttonStyle(.bordered)
       }
 
-      if viewModel.isHeadphoneOutput == false {
-        Label("Connect headphones before listening to reduce feedback risk.", systemImage: "headphones")
+      if let headphoneRouteMessage = viewModel.headphoneRouteMessage {
+        Label(headphoneRouteMessage, systemImage: "headphones")
+          .font(.footnote)
+          .foregroundStyle(.orange)
+      } else if viewModel.isHeadphoneOutput == false {
+        Label("Connect headphones or AirPods before listening.", systemImage: "headphones")
           .font(.footnote)
           .foregroundStyle(.orange)
       }
@@ -201,6 +217,10 @@ fileprivate struct ListeningPanel: View {
 
     if viewModel.isPermissionDenied {
       return "Microphone Needed"
+    }
+
+    if viewModel.shouldRequireHeadphonesBeforeListening {
+      return "Headphones Needed"
     }
 
     if viewModel.isPermissionUndetermined {
@@ -223,6 +243,10 @@ fileprivate struct ListeningPanel: View {
       return "mic.slash.fill"
     }
 
+    if viewModel.shouldRequireHeadphonesBeforeListening {
+      return "headphones"
+    }
+
     if viewModel.isPermissionUndetermined {
       return "mic.fill"
     }
@@ -237,6 +261,10 @@ fileprivate struct ListeningPanel: View {
 
     if viewModel.isPermissionDenied {
       return .red
+    }
+
+    if viewModel.shouldRequireHeadphonesBeforeListening {
+      return .orange
     }
 
     if let accentName = viewModel.selectedPreset?.accentName {
@@ -899,6 +927,7 @@ fileprivate struct InputPanel: View {
         routeRow(title: "Active Input", value: viewModel.activeInputName)
         routeRow(title: "Channels", value: viewModel.inputChannelDescription)
         routeRow(title: "Output", value: viewModel.outputRouteName)
+        routeRow(title: "Spatial", value: viewModel.spatialAudioDescription)
       }
     }
     .sectionSurface()
