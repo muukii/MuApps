@@ -5,7 +5,10 @@
 - The workflow exports Ad Hoc IPAs for Verse, Tone, PhotosOrganizer, AmbientLight, HearAugment, PolyReader, VoiceRecorder, and HelloWorld.
 - Builds are published to the single `adhoc-latest` GitHub release so the release list does not grow per branch.
 - GitHub Pages serves `docs/install.html` as the shared install page for the latest `main` Ad Hoc builds.
+- The install page is built from `Web/InstallPage` with Vite 8, React, Tailwind CSS, and shadcn/ui components; `npm run build` in that package regenerates `docs/install.html` and `docs/install-assets/`.
 - Each app has its own install action backed by an `itms-services` manifest in the `adhoc-latest` GitHub release.
+- The page presents a polished responsive web UI with a MuApps header, GitHub release link, release-channel summary, app install cards, manifest filenames, and a registered-device requirement notice.
+- The page follows the browser/system color scheme by default and includes a header theme toggle that persists the user's light or dark preference locally.
 - Installs require a registered iPhone included in the Apple Developer Ad Hoc provisioning profile.
 
 ## App Store Connect Deployment
