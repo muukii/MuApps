@@ -927,7 +927,6 @@ fileprivate struct InputPanel: View {
         routeRow(title: "Active Input", value: viewModel.activeInputName)
         routeRow(title: "Channels", value: viewModel.inputChannelDescription)
         routeRow(title: "Output", value: viewModel.outputRouteName)
-        routeRow(title: "Spatial", value: viewModel.spatialAudioDescription)
       }
     }
     .sectionSurface()

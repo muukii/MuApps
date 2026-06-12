@@ -47,7 +47,6 @@ final class HearAugmentViewModel {
   private var inputPorts: [AVAudioSessionPortDescription] = []
   private var engine: AVAudioEngine?
   private var sourceNode: AVAudioSourceNode?
-  private var environmentNode: AVAudioEnvironmentNode?
   private var effectProcessor: LowLevelEffectProcessorObjC?
   private var clockTask: Task<Void, Never>?
   private var isApplyingPreset = false
@@ -104,7 +103,6 @@ final class HearAugmentViewModel {
   private(set) var activeInputName = "No Input"
   private(set) var isHeadphoneOutput = false
   private(set) var headphoneRouteMessage: String?
-  private(set) var isHeadTrackedSpatialActive = false
   private(set) var errorMessage: String?
   private(set) var inputChannelCount: Int = 0
 
@@ -169,18 +167,6 @@ final class HearAugmentViewModel {
   var audioBufferDescription: String {
     let sampleRate = session.sampleRate > 0 ? session.sampleRate : 48_000
     return "\(selectedAudioBufferSize.frameCount) frames / \(selectedAudioBufferSize.latencyText(sampleRate: sampleRate))"
-  }
-
-  var spatialAudioDescription: String {
-    if isHeadTrackedSpatialActive {
-      return "Head Tracked"
-    }
-
-    if shouldRequireHeadphonesBeforeListening {
-      return "Connect Headphones"
-    }
-
-    return "Head Tracked Ready"
   }
 
   var inputChannelDescription: String {
@@ -419,10 +405,8 @@ final class HearAugmentViewModel {
 
     engine = nil
     sourceNode = nil
-    environmentNode = nil
     effectProcessor = nil
     isListening = false
-    isHeadTrackedSpatialActive = false
     elapsedTime = 0
     inputChannelCount = 0
 
@@ -478,20 +462,11 @@ final class HearAugmentViewModel {
         return noErr
       }
 
-      let environmentNode = AVAudioEnvironmentNode()
-
       engine.attach(sourceNode)
-      engine.attach(environmentNode)
-      engine.connect(sourceNode, to: environmentNode, format: outputFormat)
-      engine.connect(environmentNode, to: engine.mainMixerNode, format: outputFormat)
-      configureHeadTrackedSpatialRendering(
-        environmentNode: environmentNode,
-        sourceNode: sourceNode
-      )
+      engine.connect(sourceNode, to: engine.mainMixerNode, format: outputFormat)
 
       self.engine = engine
       self.sourceNode = sourceNode
-      self.environmentNode = environmentNode
       self.effectProcessor = effectProcessor
 
       engine.mainMixerNode.outputVolume = Float(outputLevel)
@@ -504,7 +479,6 @@ final class HearAugmentViewModel {
       }
 
       isListening = true
-      isHeadTrackedSpatialActive = true
       elapsedTime = 0
       startClock()
       refreshRoute()
@@ -555,42 +529,6 @@ final class HearAugmentViewModel {
     guard let port = inputPorts.first(where: { $0.uid == id }) else { return }
     try session.setPreferredInput(port)
     applyStereoConfiguration(for: port)
-  }
-
-  private func configureHeadTrackedSpatialRendering(
-    environmentNode: AVAudioEnvironmentNode,
-    sourceNode: AVAudioSourceNode
-  ) {
-    environmentNode.outputType = .headphones
-    environmentNode.listenerPosition = AVAudio3DPoint(x: 0, y: 0, z: 0)
-    environmentNode.listenerAngularOrientation = AVAudio3DAngularOrientation(yaw: 0, pitch: 0, roll: 0)
-    environmentNode.isListenerHeadTrackingEnabled = true
-
-    sourceNode.sourceMode = .pointSource
-    sourceNode.pointSourceInHeadMode = .mono
-    sourceNode.position = AVAudio3DPoint(x: 0, y: 0, z: -1.4)
-    sourceNode.reverbBlend = 0
-    sourceNode.renderingAlgorithm = preferredSpatialRenderingAlgorithm(for: environmentNode)
-  }
-
-  private func preferredSpatialRenderingAlgorithm(for environmentNode: AVAudioEnvironmentNode) -> AVAudio3DMixingRenderingAlgorithm {
-    let algorithms = Set(environmentNode.applicableRenderingAlgorithms.compactMap { value in
-      AVAudio3DMixingRenderingAlgorithm(rawValue: value.intValue)
-    })
-
-    if algorithms.contains(.auto) {
-      return .auto
-    }
-
-    if algorithms.contains(.HRTFHQ) {
-      return .HRTFHQ
-    }
-
-    if algorithms.contains(.HRTF) {
-      return .HRTF
-    }
-
-    return .sphericalHead
   }
 
   private func requireHeadphoneRouteForStart() -> Bool {

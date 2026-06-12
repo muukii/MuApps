@@ -352,7 +352,6 @@ HearAugment is a SwiftUI iPhone and iPad audio AR prototype inspired by real-tim
 - The C++ ring buffer uses a single-producer/single-consumer atomic index design so the steady-state render path avoids mutex locking.
 - The C++ input ring keeps about 2.5 seconds of microphone frames as underrun protection; this capacity is separate from the low-latency input tap buffer.
 - The source node renders a stereo float format so mono microphone input can feed stereo processors such as panning, ping-pong delay, stereo reverb, and width effects.
-- The processed signal is routed through `AVAudioEnvironmentNode` with headphone output rendering and listener head tracking enabled, so capable AirPods/headphone routes can keep the augmented sound field anchored as the user turns their head.
 - Shows current listening state, elapsed listening time, selected chain, enabled effect count, and any audio-session errors.
 - Continues live listening when the app moves to the background or the screen is locked, declared via the `audio` `UIBackgroundModes` capability so the engine and microphone remain active.
 - Recovers from audio-session interruptions (phone calls, Siri, alarms, other audio apps grabbing the session): when the interruption ends and the system grants resumption, listening restarts automatically if the user had not manually stopped it.
@@ -393,7 +392,6 @@ HearAugment is a SwiftUI iPhone and iPad audio AR prototype inspired by real-tim
 - Lists available audio input devices from `AVAudioSession`.
 - Allows input selection while listening is stopped.
 - Shows selected input, active input route, captured channel layout (Mono / Stereo / N ch), and output route.
-- Shows the current Spatial status as Head Tracked, Head Tracked Ready, or Connect Headphones.
 - Enables both Bluetooth HFP input and Bluetooth A2DP routing on the audio session so headsets that expose an HFP microphone can appear as input options while higher-quality Bluetooth output remains available when the route supports it.
 - When the selected input is the built-in microphone, the app requests a stereo capture path: it picks a data source whose supported polar patterns include `.stereo`, sets that polar pattern, sets the input orientation to portrait, and asks the session for two preferred input channels. Inputs that do not support stereo (older iPhones, Bluetooth, USB headsets, and most external interfaces) silently fall back to whatever channel layout they natively provide; the engine handles a mono return by mirroring the single channel to both stereo output channels.
 - Warns when headphones or AirPods are not connected to reduce feedback risk.
