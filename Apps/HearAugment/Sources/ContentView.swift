@@ -909,9 +909,9 @@ fileprivate struct InputPanel: View {
     VStack(alignment: .leading, spacing: 12) {
       sectionTitle("Audio Route", systemImage: "mic")
 
-      Picker("Input", selection: inputSelection) {
+      Picker("Microphone", selection: inputSelection) {
         ForEach(viewModel.inputDevices) { device in
-          Label(device.name, systemImage: device.isBluetooth ? "airpodspro" : "iphone")
+          Label(device.name, systemImage: "iphone")
             .tag(device.id)
         }
       }
@@ -919,7 +919,7 @@ fileprivate struct InputPanel: View {
       .disabled(viewModel.canSelectInput == false || viewModel.inputDevices.isEmpty)
 
       if viewModel.inputDevices.isEmpty {
-        Text("Microphone access or an available input is required.")
+        Text("Device microphone access is required.")
           .font(.footnote)
           .foregroundStyle(.secondary)
       } else {

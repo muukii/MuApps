@@ -339,7 +339,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 
 ## Overview
 
-HearAugment is a SwiftUI iPhone and iPad audio AR prototype inspired by real-time environmental sound filtering apps. It listens through the device microphone, processes the live signal with editable effect chains, and plays the result through the current headphone route.
+HearAugment is a SwiftUI iPhone and iPad audio AR prototype inspired by real-time environmental sound filtering apps. It listens through the device microphone, processes the live signal with editable effect chains, and plays the result through the current headphone route. Headphones and AirPods are playback-only routes; their microphones are not used for capture.
 
 ## Core Features
 
@@ -389,11 +389,11 @@ HearAugment is a SwiftUI iPhone and iPad audio AR prototype inspired by real-tim
 - Custom presets can be deleted from the preset card context menu.
 
 ### 5. Audio Route
-- Lists available audio input devices from `AVAudioSession`.
-- Allows input selection while listening is stopped.
+- Uses the on-device built-in microphone as the capture device. AirPods, Bluetooth HFP microphones, wired headset microphones, USB microphones, and other external inputs are not selected for HearAugment capture.
+- Shows the device microphone as the selected microphone while listening is stopped.
 - Shows selected input, active input route, captured channel layout (Mono / Stereo / N ch), and output route.
-- Enables both Bluetooth HFP input and Bluetooth A2DP routing on the audio session so headsets that expose an HFP microphone can appear as input options while higher-quality Bluetooth output remains available when the route supports it.
-- When the selected input is the built-in microphone, the app requests a stereo capture path: it picks a data source whose supported polar patterns include `.stereo`, sets that polar pattern, sets the input orientation to portrait, and asks the session for two preferred input channels. Inputs that do not support stereo (older iPhones, Bluetooth, USB headsets, and most external interfaces) silently fall back to whatever channel layout they natively provide; the engine handles a mono return by mirroring the single channel to both stereo output channels.
+- Enables Bluetooth A2DP output routing on the audio session but does not enable Bluetooth HFP input, so supported AirPods/headphones can be used for playback without becoming the microphone.
+- For the device microphone, the app requests a stereo capture path: it picks a data source whose supported polar patterns include `.stereo`, sets that polar pattern, sets the input orientation to portrait, and asks the session for two preferred input channels. Devices that do not support stereo capture silently fall back to whatever channel layout they natively provide; the engine handles a mono return by mirroring the single channel to both stereo output channels.
 - Warns when headphones or AirPods are not connected to reduce feedback risk.
 
 ### 6. Hearing Safety

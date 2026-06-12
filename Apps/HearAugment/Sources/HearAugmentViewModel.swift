@@ -21,6 +21,7 @@ final class HearAugmentViewModel {
     case unavailableInputFormat
     case unavailableOutputFormat
     case engineDidNotStart
+    case unavailableDeviceMicrophone
     case unavailableMicrophonePermission
 
     var errorDescription: String? {
@@ -31,6 +32,8 @@ final class HearAugmentViewModel {
         return "The stereo listening format could not be created."
       case .engineDidNotStart:
         return "The listening engine could not be started."
+      case .unavailableDeviceMicrophone:
+        return "The device microphone is not available."
       case .unavailableMicrophonePermission:
         return "Microphone permission is unavailable on this device."
       }
@@ -207,12 +210,12 @@ final class HearAugmentViewModel {
   }
 
   func refreshAudioInputs() {
-    inputPorts = session.availableInputs ?? []
+    inputPorts = (session.availableInputs ?? []).filter { port in
+      port.portType == .builtInMic
+    }
     inputDevices = inputPorts.map(AudioInputDevice.init(port:))
 
-    if selectedInputID.isEmpty || inputDevices.contains(where: { $0.id == selectedInputID }) == false {
-      selectedInputID = inputDevices.first(where: \.isBuiltIn)?.id ?? inputDevices.first?.id ?? ""
-    }
+    selectedInputID = inputDevices.first?.id ?? ""
 
     refreshRoute()
   }
@@ -231,12 +234,13 @@ final class HearAugmentViewModel {
   }
 
   func selectInput(id: String) {
+    guard inputDevices.contains(where: { $0.id == id }) else { return }
     selectedInputID = id
 
     guard canSelectInput else { return }
 
     do {
-      try applyPreferredInput(id: id)
+      try applyDeviceMicrophoneInput()
       refreshRoute()
     } catch {
       setError(error)
@@ -505,7 +509,7 @@ final class HearAugmentViewModel {
     try session.setCategory(
       .playAndRecord,
       mode: .measurement,
-      options: [.allowBluetoothHFP, .allowBluetoothA2DP]
+      options: [.allowBluetoothA2DP]
     )
     try session.setActive(true)
   }
@@ -514,7 +518,7 @@ final class HearAugmentViewModel {
     try session.setCategory(
       .playAndRecord,
       mode: .measurement,
-      options: [.allowBluetoothHFP, .allowBluetoothA2DP]
+      options: [.allowBluetoothA2DP]
     )
     try? session.setPreferredSampleRate(48_000)
     try? session.setPreferredIOBufferDuration(
@@ -522,11 +526,17 @@ final class HearAugmentViewModel {
     )
     try session.setActive(true)
     refreshAudioInputs()
-    try applyPreferredInput(id: selectedInputID)
+    try applyDeviceMicrophoneInput()
   }
 
-  private func applyPreferredInput(id: String) throws {
-    guard let port = inputPorts.first(where: { $0.uid == id }) else { return }
+  /// Keeps HearAugment's capture path on the on-device microphone. Headphones
+  /// and AirPods are output-only for this app, so Bluetooth headset
+  /// microphones are deliberately not eligible input devices.
+  private func applyDeviceMicrophoneInput() throws {
+    guard let port = inputPorts.first(where: { $0.portType == .builtInMic }) else {
+      throw AudioError.unavailableDeviceMicrophone
+    }
+    selectedInputID = port.uid
     try session.setPreferredInput(port)
     applyStereoConfiguration(for: port)
   }
@@ -703,7 +713,7 @@ final class HearAugmentViewModel {
 
     isHeadphoneOutput = route.outputs.contains { port in
       switch port.portType {
-      case .headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE, .usbAudio:
+      case .headphones, .bluetoothA2DP, .bluetoothLE, .usbAudio:
         return true
       default:
         return false

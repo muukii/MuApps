@@ -1,12 +1,15 @@
 import Foundation
 @preconcurrency import AVFoundation
 
+/// A user-facing microphone option backed by an `AVAudioSession` input port.
+///
+/// HearAugment currently exposes only the on-device microphone to preserve the
+/// intended stereo capture path while headphones and AirPods remain
+/// playback-only routes.
 struct AudioInputDevice: Identifiable, Hashable {
   let id: String
   let name: String
   let detail: String
-  let isBuiltIn: Bool
-  let isBluetooth: Bool
 
   init(port: AVAudioSessionPortDescription) {
     id = port.uid
@@ -24,29 +27,9 @@ struct AudioInputDevice: Identifiable, Hashable {
       switch port.portType {
       case .builtInMic:
         return "Built-in input"
-      case .bluetoothHFP, .bluetoothLE:
-        return "Bluetooth input"
-      case .headsetMic:
-        return "Headset input"
-      case .usbAudio:
-        return "USB input"
-      case .lineIn:
-        return "Line input"
       default:
         return port.portType.rawValue
       }
     }()
-
-    switch port.portType {
-    case .builtInMic:
-      isBuiltIn = true
-      isBluetooth = false
-    case .bluetoothHFP, .bluetoothLE:
-      isBuiltIn = false
-      isBluetooth = true
-    default:
-      isBuiltIn = false
-      isBluetooth = false
-    }
   }
 }
