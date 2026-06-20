@@ -25,8 +25,8 @@ let appInfoPlist: InfoPlist = .extendingDefault(with: [
 
 /// Destinations supported by the Verse app target.
 ///
-/// Includes "Mac (Designed for iPad)" without enabling Mac Catalyst.
-let verseAppDestinations: Destinations = [.iPhone, .iPad, .macWithiPadDesign]
+/// iPad support is currently disabled; iPhone only.
+let verseAppDestinations: Destinations = [.iPhone]
 
 let project = Project(
   name: "Verse",
