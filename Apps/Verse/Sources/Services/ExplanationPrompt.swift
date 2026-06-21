@@ -8,7 +8,7 @@
 import Foundation
 
 /// Shared prompt builder for word/phrase explanations.
-/// Used by both on-device LLM (LLMService) and external services (Gemini).
+/// Used by both on-device LLM (LLMService) and external services (ChatGPT).
 struct ExplanationPrompt {
 
   // MARK: - Device Language

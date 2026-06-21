@@ -37,7 +37,7 @@ struct SelectionActionSheet: View {
 
   // Internal state
   @State private var showVocabulary = false
-  @State private var geminiURL: URL?
+  @State private var chatGPTURL: URL?
 
   var body: some View {
     List {
@@ -47,7 +47,7 @@ struct SelectionActionSheet: View {
         service: service,
         text: selection.text,
         context: selection.context,
-        geminiURL: $geminiURL
+        chatGPTURL: $chatGPTURL
       )
     }
     .safeAreaPadding(.top, 20)
@@ -57,7 +57,7 @@ struct SelectionActionSheet: View {
     .sheet(isPresented: $showVocabulary) {
       VocabularyEditSheet(mode: .add(initialTerm: selection.text))
     }
-    .sheet(item: $geminiURL) { url in
+    .sheet(item: $chatGPTURL) { url in
       SafariView(url: url)
         .ignoresSafeArea()
     }

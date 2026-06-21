@@ -200,7 +200,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
     - Detailed explanation of meaning, usage, and nuances
     - Phrase analysis: breakdown of context sentence into meaningful phrases with grammatical roles
     - Idiom detection: identifies idioms/fixed expressions with meaning and origin
-  - "Ask Gemini" button opens Gemini with the same prompt (in-app browser on iOS)
+  - "Ask ChatGPT" button opens ChatGPT with the same prompt (in-app browser on iOS)
   - "Share Prompt" option to share the explanation prompt
 - Vocabulary auto-fill using Apple Intelligence
   - Structured generation for meaning, examples, and notes
