@@ -5,7 +5,6 @@ import ProjectDescription
 public enum AppConstants {
   public static let developmentTeam = "KU2QEJ9K3Z"
   public static let organizationName = "muukii"
-  public static let appBundleId = "app.muukii.verse"
 }
 
 // MARK: - Deployment Targets
@@ -61,26 +60,4 @@ public extension SettingsDictionary {
     "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
     "TARGETED_DEVICE_FAMILY": "1,2,7",
   ])
-}
-
-// MARK: - Feature Module Template (for future use)
-
-public extension Target {
-  /// Creates a feature module target
-  /// Usage: .featureModule(name: "Home", dependencies: [...])
-  static func featureModule(
-    name: String,
-    dependencies: [TargetDependency] = []
-  ) -> Target {
-    .target(
-      name: "Feature\(name)",
-      destinations: .app,
-      product: .staticFramework,
-      bundleId: "\(AppConstants.appBundleId).feature.\(name.lowercased())",
-      deploymentTargets: .app,
-      sources: ["Features/\(name)/**/*.swift"],
-      dependencies: dependencies,
-      settings: .settings(base: .frameworkTarget)
-    )
-  }
 }

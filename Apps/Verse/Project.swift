@@ -44,7 +44,7 @@ let project = Project(
       name: "Verse",
       destinations: verseAppDestinations,
       product: .app,
-      bundleId: AppConstants.appBundleId,
+      bundleId: "app.muukii.verse",
       deploymentTargets: .app,
       infoPlist: appInfoPlist,
       buildableFolders: ["Sources"],
@@ -76,7 +76,7 @@ let project = Project(
     // MARK: - Components Framework Target
     .target(
       name: "Components",
-      destinations: .app,
+      destinations: verseAppDestinations,
       product: .staticFramework,
       bundleId: "app.muukii.Components",
       deploymentTargets: .app,

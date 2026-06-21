@@ -9,6 +9,7 @@ import CoreMedia
 import SwiftData
 import SwiftUI
 import Translation
+import Speech
 
 /// Sample view demonstrating real-time microphone transcription using SpeechAnalyzer (iOS 26+)
 struct RealtimeTranscriptionView: View {
