@@ -5,6 +5,7 @@ let workspace = Workspace(
   projects: [
     "Apps/Verse",
     "Apps/CodexPet",
+    "Apps/ColorPlayground",
     "Apps/HelloWorld",
     "Apps/VoiceRecorder",
     "Apps/HearAugment",
