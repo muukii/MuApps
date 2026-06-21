@@ -44,7 +44,7 @@ public extension SettingsDictionary {
     "ENABLE_USER_SELECTED_FILES": "readonly",
     "REGISTER_APP_GROUPS": "YES",
     "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
-    "TARGETED_DEVICE_FAMILY": "1,2",
+    // TARGETED_DEVICE_FAMILY is derived from each target's `destinations`; do not hardcode it here.
     "SUPPORTS_MACCATALYST": "NO",
     // MARKETING_VERSION and CURRENT_PROJECT_VERSION are defined in Tuist/xcconfig/Version.xcconfig
     "LD_RUNPATH_SEARCH_PATHS": "$(inherited) @executable_path/Frameworks",
@@ -58,6 +58,6 @@ public extension SettingsDictionary {
     "SWIFT_INSTALL_OBJC_HEADER": "NO",
     "ALLOW_TARGET_PLATFORM_SPECIALIZATION": "YES",
     "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
-    "TARGETED_DEVICE_FAMILY": "1,2,7",
+    // TARGETED_DEVICE_FAMILY is derived from each target's `destinations`; do not hardcode it here.
   ])
 }
