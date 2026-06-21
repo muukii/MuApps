@@ -10,15 +10,15 @@ import SwiftUI
 import SafariServices
 #endif
 
-// MARK: - Gemini URL Builder
+// MARK: - ChatGPT URL Builder
 
-/// Builds URLs for opening Google Gemini with a prompt
-struct GeminiURLBuilder {
-  private static let baseURL = "https://gemini.google.com"
-  private static let promptParameter = "prompt_text"
+/// Builds URLs for opening ChatGPT with a prompt
+struct ChatGPTURLBuilder {
+  private static let baseURL = "https://chatgpt.com/"
+  private static let promptParameter = "q"
 
-  /// Builds a Gemini URL with the given prompt text
-  /// - Parameter prompt: The prompt text to send to Gemini
+  /// Builds a ChatGPT URL with the given prompt text
+  /// - Parameter prompt: The prompt text to send to ChatGPT
   /// - Returns: A URL if successfully built, nil otherwise
   static func buildURL(prompt: String) -> URL? {
     var components = URLComponents(string: baseURL)
@@ -27,13 +27,13 @@ struct GeminiURLBuilder {
     ]
 
     if let url = components?.url {
-      print("[GeminiURLBuilder] URL length: \(url.absoluteString.count)")
+      print("[ChatGPTURLBuilder] URL length: \(url.absoluteString.count)")
       return url
     }
     return nil
   }
 
-  /// Builds a Gemini URL for asking about a word/phrase with context
+  /// Builds a ChatGPT URL for asking about a word/phrase with context
   /// Uses the same prompt format as the on-device LLM (via ExplanationPrompt)
   /// - Parameters:
   ///   - text: The word or phrase to ask about
@@ -82,7 +82,7 @@ struct WordExplanationView: View {
   let service: ExplanationService
   let text: String
   let context: String
-  @Binding var geminiURL: URL?
+  @Binding var chatGPTURL: URL?
 
   @State private var translation: String = ""
   @State private var explanation: String = ""
@@ -93,7 +93,7 @@ struct WordExplanationView: View {
   var body: some View {
     let _ = Self._printChanges()
     Group {
-      geminiSection
+      chatGPTSection
       translationSection
       explanationSection
       phrasesSection
@@ -207,12 +207,12 @@ struct WordExplanationView: View {
     }
   }
 
-  private var geminiSection: some View {
+  private var chatGPTSection: some View {
     Section {
       Button {
-        geminiURL = GeminiURLBuilder.buildURL(text: text, context: context)
+        chatGPTURL = ChatGPTURLBuilder.buildURL(text: text, context: context)
       } label: {
-        Label("Ask Gemini", systemImage: "sparkle.magnifyingglass")
+        Label("Ask ChatGPT", systemImage: "sparkle.magnifyingglass")
       }
 
       ShareLink(
@@ -325,7 +325,7 @@ struct WordExplanationView: View {
 // MARK: - Preview
 
 #Preview("In List") {
-  @Previewable @State var geminiURL: URL?
+  @Previewable @State var chatGPTURL: URL?
   List {
     Section {
       Text("serendipity")
@@ -339,7 +339,7 @@ struct WordExplanationView: View {
       service: .init(),
       text: "serendipity",
       context: "It was pure serendipity that we met.",
-      geminiURL: $geminiURL
+      chatGPTURL: $chatGPTURL
     )
   }
   .listStyle(.insetGrouped)
