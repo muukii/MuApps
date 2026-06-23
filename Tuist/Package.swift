@@ -65,8 +65,6 @@ let package = Package(
 
     // Media conversion
     .package(url: "https://github.com/awxkee/avif.swift", from: "1.0.0"),
-    
-    .package(url: "https://github.com/FluidGroup/swift-macro-hex-color", from: "0.2.2"),
 
     // Camera capture (vendored as a git submodule under Submodules/)
     .package(path: "../Submodules/Capturer"),
