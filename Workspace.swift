@@ -15,6 +15,7 @@ let workspace = Workspace(
     "Apps/Tone",
     "Apps/SafariReactor",
     "Apps/TabLab",
+    "Apps/Journal",
     "Shared",
   ]
 )

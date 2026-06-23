@@ -267,7 +267,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - History list with thumbnails, metadata, and playback progress bars
 - Toolbar: Sort menu (Manual/Last Played/Date Added), Edit (for reordering in Manual mode only), Settings
 - Bottom bar: Paste URL, Browse YouTube
-- iPad layout uses a split view with a persistent history sidebar and a dedicated detail pane for playback; the detail pane shows a "Select a Video" prompt until the user chooses an item
+- Navigation uses a single stack on all devices; selecting a history item pushes the player (no split view / detail pane)
 - Edit mode: drag handles for reordering history items (Manual sort mode only)
 - Context menu: Add to Playlist
 
@@ -303,14 +303,14 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Accent color used for current subtitle and word highlights
 - Tracking toggle: filled icon when enabled, outlined when disabled
 - Subtitle row timestamp pill for quick seek
-- Selected videos in the iPad sidebar use a tinted rounded highlight
+- The last-opened history row uses a tinted rounded highlight
 
 ### Interactions
 - Auto-tracking stops on manual scroll or selection
 - Swipe actions for translate/explain
 - Context menus for subtitle actions and step mode
 - Sheets use medium/large detents on iOS
-- On iPad, selecting a history item updates the detail pane in place instead of pushing a full-screen navigation stack
+- Selecting a history item pushes the player onto the navigation stack with a zoom transition from the tapped thumbnail
 
 ## Data and Storage
 - SwiftData local storage only (no cloud sync)

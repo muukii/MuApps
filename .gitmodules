@@ -1,0 +1,3 @@
+[submodule "Submodules/Capturer"]
+	path = Submodules/Capturer
+	url = https://github.com/FluidGroup/Capturer

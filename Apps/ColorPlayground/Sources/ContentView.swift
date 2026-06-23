@@ -32,10 +32,20 @@ struct ContentView: View {
           }
 
           NavigationLink {
-            BackgroundStyleDemoView()
+            ForegroundStyleDemoView()
           } label: {
             DemoRow(
               index: 3,
+              title: "The .foreground style",
+              detail: ".fill(.foreground) tracks the current foreground style; Color.primary is fixed"
+            )
+          }
+
+          NavigationLink {
+            BackgroundStyleDemoView()
+          } label: {
+            DemoRow(
+              index: 4,
               title: "backgroundStyle",
               detail: "Sets what .background resolves to — it paints nothing by itself"
             )
@@ -45,7 +55,7 @@ struct ContentView: View {
             MaterialVibrancyDemoView()
           } label: {
             DemoRow(
-              index: 4,
+              index: 5,
               title: "Material & vibrancy",
               detail: "Foreground hierarchy over a Material becomes vibrant — a separate system"
             )

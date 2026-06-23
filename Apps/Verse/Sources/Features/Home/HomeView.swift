@@ -41,7 +41,7 @@ struct HomeView: View {
   private let deepLinkManager = DeepLinkManager.shared
   @AppStorage("historySortOption") private var sortOption: HistorySortOption = .manual
 
-  @Namespace private var heroNamespace
+  @Namespace private var namespace
 
   // TODO: Consider moving sorting to SwiftData layer for better performance with large datasets.
   // Current implementation sorts in-memory which may impact performance as history grows.
@@ -68,11 +68,6 @@ struct HomeView: View {
     case .dateAdded:
       return allHistory.sorted { $0.timestamp > $1.timestamp }
     }
-  }
-
-  private var selectedVideoItem: VideoItem? {
-    guard let selectedVideoItemID else { return nil }
-    return history.first { $0.typedID == selectedVideoItemID }
   }
 
   var body: some View {
@@ -147,20 +142,31 @@ struct HomeView: View {
   }
 
   private var rootLayout: some View {
-    NavigationSplitView {
+    NavigationStack(path: navigationPath) {
       historyContent
         .navigationBarTitleDisplayMode(.inline)
-        .navigationSplitViewColumnWidth(min: 320, ideal: 360, max: 420)
         .toolbar {
           topToolbarContent
         }
         .safeAreaInset(edge: .bottom) {
           historyActionBar
         }
-    } detail: {
-      detailContent
+        .navigationDestination(for: VideoItem.TypedID.self) { id in
+          if let item = history.first(where: { $0.typedID == id }) {
+            playerDestination(for: item)
+          }
+        }
     }
-    .navigationSplitViewStyle(.balanced)
+  }
+
+  /// Derives the navigation stack path from `selectedVideoItemID`, keeping the
+  /// selection as the single source of truth shared with deep links and URL
+  /// loading (both of which navigate by setting `selectedVideoItemID`).
+  private var navigationPath: Binding<[VideoItem.TypedID]> {
+    Binding(
+      get: { selectedVideoItemID.map { [$0] } ?? [] },
+      set: { selectedVideoItemID = $0.last }
+    )
   }
 
   @ViewBuilder
@@ -208,7 +214,7 @@ struct HomeView: View {
     return NavigationLink(value: item.typedID) {
       VideoItemCell(
         video: item,
-        namespace: heroNamespace,
+        namespace: namespace,
         downloadManager: downloadManager,
         showTimestamp: true
       )
@@ -224,8 +230,8 @@ struct HomeView: View {
             }
           }
       }
+      .matchedTransitionSource(id: item.videoID, in: namespace)
     }
-    .buttonStyle(.plain)
     .tag(item.typedID)
     .contextMenu {
       Button {
@@ -306,37 +312,10 @@ struct HomeView: View {
     }
   }
 
-  @ViewBuilder
-  private var detailContent: some View {
-    if let selectedVideoItem {
-      playerDestination(for: selectedVideoItem)
-    } else {
-      ContentUnavailableView {
-        Label("Select a Video", systemImage: "play.rectangle")
-      } description: {
-        Text("Choose a video from your history or add a new one to start watching with synced subtitles.")
-      } actions: {
-        Button {
-          showURLInput = true
-        } label: {
-          Label("Paste URL", systemImage: "link")
-        }
-        .buttonStyle(.borderedProminent)
-
-        Button {
-          showWebView = true
-        } label: {
-          Label("Browse YouTube", systemImage: "safari")
-        }
-        .buttonStyle(.bordered)
-      }
-    }
-  }
-
   private func playerDestination(for videoItem: VideoItem) -> some View {
     PlayerView(videoItem: videoItem)
       .id(videoItem.videoID.rawValue)
-      .navigationTransition(.zoom(sourceID: videoItem.videoID, in: heroNamespace))
+      .navigationTransition(.zoom(sourceID: videoItem.videoID, in: namespace))
   }
   
   private func loadURL(_ urlText: String) {
