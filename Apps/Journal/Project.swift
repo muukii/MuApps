@@ -70,21 +70,110 @@ let project = Project(
       // its value is expanded from $(APS_ENVIRONMENT) per configuration below so
       // Release builds get `production` (otherwise shipped builds never receive
       // CloudKit's silent pushes and background sync silently no-ops).
+      // `com.apple.developer.journal.allow` lets `CaptureSuggestions` present the
+      // system Journaling Suggestions picker (inert without it; device-only). Its
+      // value is the string array `["suggestions"]`, NOT a boolean — it must match
+      // exactly what the App ID's Journaling Suggestions capability writes into the
+      // provisioning profile, or signing fails with an entitlement-mismatch error.
+      // `com.apple.security.application-groups` is shared with `JournalWidget`: the
+      // SwiftData store lives in this App Group container so both processes read
+      // the same database (see `JournalStore` in the `JournalModel` framework).
       entitlements: .dictionary([
         "com.apple.developer.icloud-container-identifiers": ["iCloud.app.muukii.journal"],
         "com.apple.developer.icloud-services": ["CloudKit"],
+        "com.apple.security.application-groups": ["group.app.muukii.journal"],
         "aps-environment": "$(APS_ENVIRONMENT)",
+        "com.apple.developer.journal.allow": ["suggestions"],
       ]),
       dependencies: [
         .sdk(name: "CloudKit", type: .framework),
+        .external(name: "SwiftUIIntrospect"),
+        .external(name: "ScrollEdgeEffect"),
+        .target(name: "JournalModel"),
+        // Embeds the widget extension into the app bundle.
+        .target(name: "JournalWidget"),
         .target(name: "MuColor"),
+        .target(name: "MuHaptics"),
         .target(name: "CaptureText"),
         .target(name: "CapturePhoto"),
         .target(name: "CaptureDoodle"),
         .target(name: "CaptureAudio"),
+        .target(name: "CaptureSuggestions"),
       ],
       settings: .settings(
         base: .appTarget,
+        configurations: [
+          .debug(name: "Debug", settings: ["APS_ENVIRONMENT": "development"]),
+          .release(name: "Release", settings: ["APS_ENVIRONMENT": "production"]),
+        ]
+      )
+    ),
+
+    // MARK: - Shared data layer
+
+    // The SwiftData models (`Card`, `Tag`, `Coordinate`) and the shared store
+    // factory (`JournalStore`). A *dynamic* framework — unlike the capture
+    // components (static, app-only), this is linked by both the app and the
+    // `JournalWidget` extension, so a dynamic framework embeds it once and lets
+    // the extension reference it. `APPLICATION_EXTENSION_API_ONLY` keeps it safe
+    // to link into the extension.
+    .target(
+      name: "JournalModel",
+      destinations: .app,
+      product: .framework,
+      bundleId: "app.muukii.journal.JournalModel",
+      deploymentTargets: .app,
+      infoPlist: .default,
+      buildableFolders: ["JournalModel"],
+      dependencies: [],
+      settings: .settings(
+        base: .frameworkTarget.merging([
+          "APPLICATION_EXTENSION_API_ONLY": "YES",
+        ]),
+        configurations: [
+          .debug(name: "Debug"),
+          .release(name: "Release"),
+        ]
+      )
+    ),
+
+    // MARK: - Widget extension
+
+    // Reads the shared SwiftData store (via `JournalModel`/`JournalStore`) to
+    // render recent cards. It carries the same App Group and iCloud entitlements
+    // as the app so it can open the identical CloudKit-mirrored store; the
+    // `aps-environment` value is expanded per configuration like the app's.
+    .target(
+      name: "JournalWidget",
+      destinations: .app,
+      product: .appExtension,
+      bundleId: "app.muukii.journal.JournalWidget",
+      deploymentTargets: .app,
+      infoPlist: .dictionary([
+        "CFBundleDisplayName": "Journal",
+        "CFBundleExecutable": "$(EXECUTABLE_NAME)",
+        "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
+        "CFBundleName": "$(PRODUCT_NAME)",
+        "CFBundleShortVersionString": "1.0",
+        "CFBundleVersion": "1",
+        "NSExtension": .dictionary([
+          "NSExtensionPointIdentifier": "com.apple.widgetkit-extension",
+        ]),
+      ]),
+      buildableFolders: ["JournalWidget"],
+      entitlements: .dictionary([
+        "com.apple.developer.icloud-container-identifiers": ["iCloud.app.muukii.journal"],
+        "com.apple.developer.icloud-services": ["CloudKit"],
+        "com.apple.security.application-groups": ["group.app.muukii.journal"],
+        "aps-environment": "$(APS_ENVIRONMENT)",
+      ]),
+      dependencies: [
+        .target(name: "JournalModel"),
+      ],
+      settings: .settings(
+        base: .base.merging([
+          "APPLICATION_EXTENSION_API_ONLY": "YES",
+        ]),
         configurations: [
           .debug(name: "Debug", settings: ["APS_ENVIRONMENT": "development"]),
           .release(name: "Release", settings: ["APS_ENVIRONMENT": "production"]),
@@ -98,6 +187,7 @@ let project = Project(
         .external(name: "HexColorMacro"),
       ]
     ),
+    journalFramework(name: "MuHaptics"),
     journalFramework(name: "CaptureText"),
     journalFramework(
       name: "CapturePhoto",
@@ -105,18 +195,19 @@ let project = Project(
         .external(name: "Capturer"),
       ]
     ),
-    journalFramework(
-      name: "CaptureDoodle",
-      dependencies: [
-        .sdk(name: "Metal", type: .framework),
-        .sdk(name: "MetalKit", type: .framework),
-      ]
-    ),
+    // Pure SwiftUI vector canvas (Canvas/Path) — no Metal dependency.
+    journalFramework(name: "CaptureDoodle"),
     journalFramework(
       name: "CaptureAudio",
       dependencies: [
         .sdk(name: "AVFoundation", type: .framework),
       ]
     ),
+    // `JournalingSuggestions` (and `HealthKit`, used to read workout quantities)
+    // ship only in the device SDK — they are absent from the Simulator SDK, so an
+    // explicit `.sdk` link would break Simulator builds. The framework instead
+    // `import`s them behind `#if canImport(...)` and relies on Swift autolinking,
+    // keeping the target buildable for both device and Simulator.
+    journalFramework(name: "CaptureSuggestions"),
   ]
 )

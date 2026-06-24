@@ -1,20 +1,29 @@
 import UIKit
 
+/// A touch location paired with its `UITouch.timestamp` (seconds since boot,
+/// monotonic). Timestamps flow all the way into the stored model so a doodle can
+/// be replayed at the speed it was drawn.
+struct TimedPoint {
+  var location: CGPoint
+  var timestamp: TimeInterval
+}
+
 /// Single-touch drawing recognizer ported from Brightroom's
 /// `_EditingCanvasDrawingGestureRecognizer`. Consumes coalesced touches for
 /// high-frequency input, draws Pencil immediately, and requires an 8pt movement
 /// slop before a finger starts a stroke. A second touch cancels the stroke.
 final class DrawingGestureRecognizer: UIGestureRecognizer {
 
-  var onBegin: ((CGPoint) -> Void)?
-  var onMove: (([CGPoint]) -> Void)?
-  var onEnd: ((CGPoint) -> Void)?
-  var onCancel: (() -> Void)?
+  var onBegin: (@MainActor (TimedPoint) -> Void)?
+  var onMove: (@MainActor ([TimedPoint]) -> Void)?
+  var onEnd: (@MainActor (TimedPoint) -> Void)?
+  var onCancel: (@MainActor () -> Void)?
 
   private let directTouchDrawingThreshold: CGFloat = 8
   private weak var activeTouch: UITouch?
   private var activeTouchType: UITouch.TouchType?
   private var initialPoint: CGPoint?
+  private var initialTimestamp: TimeInterval?
   private var didBeginDrawing = false
 
   override init(target: Any?, action: Selector?) {
@@ -33,6 +42,7 @@ final class DrawingGestureRecognizer: UIGestureRecognizer {
     activeTouch = nil
     activeTouchType = nil
     initialPoint = nil
+    initialTimestamp = nil
     didBeginDrawing = false
   }
 
@@ -52,6 +62,7 @@ final class DrawingGestureRecognizer: UIGestureRecognizer {
     activeTouch = touch
     activeTouchType = touch.type
     initialPoint = touch.location(in: view)
+    initialTimestamp = touch.timestamp
   }
 
   override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
@@ -67,17 +78,18 @@ final class DrawingGestureRecognizer: UIGestureRecognizer {
     let currentPoint = activeTouch.location(in: view)
     guard didBeginDrawing || shouldBeginDrawing(at: currentPoint) else { return }
 
-    beginDrawingIfNeeded(at: currentPoint)
+    beginDrawingIfNeeded(fallback: TimedPoint(location: currentPoint, timestamp: activeTouch.timestamp))
     let coalesced = event.coalescedTouches(for: activeTouch) ?? [activeTouch]
-    onMove?(coalesced.map { $0.location(in: view) })
+    onMove?(coalesced.map { TimedPoint(location: $0.location(in: view), timestamp: $0.timestamp) })
     if state == .began { return }
     state = .changed
   }
 
   override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
     guard let activeTouch, touches.contains(where: { $0 === activeTouch }) else { return }
-    beginDrawingIfNeeded(at: activeTouch.location(in: view))
-    onEnd?(activeTouch.location(in: view))
+    let end = TimedPoint(location: activeTouch.location(in: view), timestamp: activeTouch.timestamp)
+    beginDrawingIfNeeded(fallback: end)
+    onEnd?(end)
     state = .ended
   }
 
@@ -90,11 +102,15 @@ final class DrawingGestureRecognizer: UIGestureRecognizer {
     return initialPoint.distance(to: point) >= directTouchDrawingThreshold
   }
 
-  private func beginDrawingIfNeeded(at point: CGPoint) {
+  private func beginDrawingIfNeeded(fallback: TimedPoint) {
     guard didBeginDrawing == false else { return }
     didBeginDrawing = true
     state = .began
-    onBegin?(initialPoint ?? point)
+    if let initialPoint, let initialTimestamp {
+      onBegin?(TimedPoint(location: initialPoint, timestamp: initialTimestamp))
+    } else {
+      onBegin?(fallback)
+    }
   }
 
   private func cancelStroke() {

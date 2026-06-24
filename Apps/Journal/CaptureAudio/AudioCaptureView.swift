@@ -25,9 +25,9 @@ public struct AudioCaptureView: View {
         .monospacedDigit()
         .contentTransition(.numericText())
 
-      LevelMeter(level: recorder.level, isActive: recorder.state == .recording)
-        .frame(height: 48)
-        .padding(.horizontal, 40)
+      WaveformMeter(samples: recorder.samples, isActive: recorder.state == .recording)
+        .frame(height: 64)
+        .padding(.horizontal, 32)
 
       Spacer()
 
@@ -99,33 +99,47 @@ public struct AudioCaptureView: View {
   }
 }
 
-// MARK: - Level Meter
+// MARK: - Waveform Meter
 
-private struct LevelMeter: View {
-  let level: Float
+/// A live, scrolling waveform in the style of the iMessage voice message UI:
+/// each bar is a real amplitude sample, mirrored around a center line, with the
+/// newest sample entering at the right. The bars occupy fixed positional slots,
+/// so as the underlying samples shift left each slot springs to its neighbour's
+/// value — reading as flowing horizontal motion.
+private struct WaveformMeter: View {
+  let samples: [Float]
   let isActive: Bool
 
-  private let barCount = 24
+  private let barSpacing: CGFloat = 3
+  private let minBarHeight: CGFloat = 4
 
   var body: some View {
     GeometryReader { proxy in
-      HStack(spacing: 4) {
-        ForEach(0..<barCount, id: \.self) { index in
-          let threshold = Float(index) / Float(barCount)
-          RoundedRectangle(cornerRadius: 2)
-            .fill(isActive && level >= threshold ? Color.accentColor : Color.secondary.opacity(0.2))
-            .frame(height: barHeight(for: index, in: proxy.size.height))
+      let count = max(samples.count, 1)
+      let barWidth = max(
+        (proxy.size.width - barSpacing * CGFloat(count - 1)) / CGFloat(count),
+        1
+      )
+      HStack(spacing: barSpacing) {
+        // Fixed positional slots, not identity-bearing data: index-as-id is the
+        // intended model — slot N always renders the Nth sample in the window.
+        ForEach(samples.indices, id: \.self) { index in
+          Capsule()
+            .fill(.tint)
+            .frame(width: barWidth, height: height(for: samples[index], in: proxy.size.height))
             .frame(maxHeight: .infinity, alignment: .center)
         }
       }
-      .animation(.linear(duration: 0.05), value: level)
+      .frame(width: proxy.size.width, height: proxy.size.height)
+      .opacity(isActive ? 1 : 0.3)
+      .animation(.spring(response: 0.18, dampingFraction: 0.72), value: samples)
+      .animation(.smooth, value: isActive)
     }
   }
 
-  private func barHeight(for index: Int, in maxHeight: CGFloat) -> CGFloat {
-    // Symmetric falloff from the center for a classic equalizer silhouette.
-    let normalized = 1 - abs(CGFloat(index) - CGFloat(barCount) / 2) / (CGFloat(barCount) / 2)
-    return maxHeight * (0.3 + 0.7 * normalized)
+  private func height(for sample: Float, in maxHeight: CGFloat) -> CGFloat {
+    let amplitude = CGFloat(min(max(sample, 0), 1))
+    return minBarHeight + (maxHeight - minBarHeight) * amplitude
   }
 }
 

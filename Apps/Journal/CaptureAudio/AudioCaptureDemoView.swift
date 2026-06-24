@@ -35,6 +35,7 @@ public struct AudioCaptureDemoView: View {
         .padding()
       }
     }
+    .background(.background)
     .navigationTitle("Ambient Sound")
     .navigationBarTitleDisplayMode(.inline)
   }

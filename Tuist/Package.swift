@@ -50,7 +50,11 @@ let package = Package(
     .package(url: "https://github.com/FluidGroup/swiftui-async-multiplex-image", from: "1.0.0"),
     .package(url: "https://github.com/FluidGroup/swiftui-support.git", from: "0.13.0"),
     .package(url: "https://github.com/FluidGroup/swiftui-persistent-control.git", revision: "093554c7a02642acb306b8e8482fd3b8322314f3"),
-    .package(url: "https://github.com/FluidGroup/swift-dynamic-list", revision: "0c1fd1dcc0eb7283818166905c5536028edbbe9d"),
+    // Bumped to the iOS 26 support revision (#64): the prior revision capped
+    // SwiftUIIntrospect at `from: 1.3.0` (< 2.0.0), and 1.3.0 has no `.v26`, so an
+    // introspect closure never fires on iOS 26+. This revision relaxes it to
+    // `from: 26.0.0`, letting introspect resolve to 26.x workspace-wide.
+    .package(url: "https://github.com/FluidGroup/swift-dynamic-list", revision: "ca86e8c834b31e27710cb5acd4433c29b4ba6d93"),
     .package(url: "https://github.com/siteline/swiftui-introspect", "1.3.0"..<"27.0.0"),
     .package(url: "https://github.com/dmrschmidt/DSWaveformImage", from: "14.2.2"),
     .package(url: "https://github.com/muukii/swift-macro-hex-color", from: "0.1.1"),

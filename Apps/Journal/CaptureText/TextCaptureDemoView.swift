@@ -27,6 +27,7 @@ public struct TextCaptureDemoView: View {
         .padding()
       }
     }
+    .background(.background)
     .navigationTitle("Text")
     .navigationBarTitleDisplayMode(.inline)
   }

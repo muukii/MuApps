@@ -18,11 +18,9 @@ public struct PhotoCaptureView: View {
 
   public var body: some View {
     ZStack {
-      Color.black.ignoresSafeArea()
-
       switch controller.authorization {
       case .unknown:
-        ProgressView().tint(.white)
+        ProgressView().tint(.primary)
       case .authorized:
         CameraPreviewView(previewView: controller.previewView)
           .ignoresSafeArea()
@@ -36,6 +34,7 @@ public struct PhotoCaptureView: View {
         controls
       }
     }
+    .background(.background)
     .task { await controller.configureAndStart() }
     .onDisappear { Task { await controller.stop() } }
   }
@@ -80,7 +79,7 @@ public struct PhotoCaptureView: View {
   private func unavailableMessage(_ text: String) -> some View {
     Text(text)
       .multilineTextAlignment(.center)
-      .foregroundStyle(.white)
+      .foregroundStyle(.primary)
       .padding(40)
   }
 

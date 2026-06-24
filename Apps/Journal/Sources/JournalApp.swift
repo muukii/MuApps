@@ -1,3 +1,4 @@
+import JournalModel
 import SwiftData
 import SwiftUI
 import MuColor
@@ -9,16 +10,9 @@ struct JournalApp: App {
 
   init() {
     do {
-      let schema = Schema([
-        JournalEntry.self
-      ])
-      // `.automatic` enables CloudKit mirroring using the iCloud container
-      // declared in the app's entitlements (iCloud.app.muukii.journal).
-      let configuration = ModelConfiguration(
-        schema: schema,
-        cloudKitDatabase: .automatic
-      )
-      modelContainer = try ModelContainer(for: schema, configurations: configuration)
+      // Shared App Group + CloudKit store, defined once in `JournalModel` so the
+      // app and the `JournalWidget` extension open the identical database.
+      modelContainer = try JournalStore.makeModelContainer()
     } catch {
       fatalError("Failed to create ModelContainer: \(error)")
     }
@@ -26,10 +20,27 @@ struct JournalApp: App {
 
   var body: some Scene {
     WindowGroup {
-      PaletteContainer(palette: .default) {         
-        CaptureGalleryView()
-      }
+      RootView()
     }
     .modelContainer(modelContainer)
   }
+}
+
+/// Reads the persisted theme and applies its palette to the whole app. Kept
+/// separate from `JournalApp` so the `@AppStorage` read lives in a `View`, where
+/// changes re-render the tree.
+private struct RootView: View {
+
+  @AppStorage(JournalDefaults.themeID) private var themeID: String = Theme.default.id
+
+  var body: some View {
+    PrimaryContainer(theme: Theme.with(id: themeID)) {
+      CreationView()
+    }
+  }
+}
+
+#Preview {
+  RootView()
+    .modelContainer(try! JournalStore.makeModelContainer())
 }

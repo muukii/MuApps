@@ -1,19 +1,22 @@
 import SwiftUI
 
-/// Standalone demo harness for `DoodleCanvasView`. Exports the drawing and shows
-/// it, so the doodle component can be exercised on its own.
+/// Standalone demo harness for `DoodleCanvasView`. Runs on the component's own
+/// scheme with a neutral ink color (the app supplies the theme color in
+/// production). Exports the drawing and shows a rasterized thumbnail.
 public struct DoodleCaptureDemoView: View {
 
   @State private var lastDrawing: DoodleDrawing?
 
+  private let inkColor: Color = .primary
+
   public init() {}
 
   public var body: some View {
-    DoodleCanvasView { drawing in
+    DoodleCanvasView(inkColor: inkColor) { drawing in
       lastDrawing = drawing
     }
     .overlay(alignment: .topTrailing) {
-      if let image = lastDrawing?.image {
+      if let image = lastDrawing?.image(inkColor: inkColor) {
         Image(uiImage: image)
           .resizable()
           .scaledToFit()

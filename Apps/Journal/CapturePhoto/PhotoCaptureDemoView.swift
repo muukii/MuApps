@@ -26,7 +26,6 @@ public struct PhotoCaptureDemoView: View {
     }
     .navigationTitle("Photo")
     .navigationBarTitleDisplayMode(.inline)
-    .toolbarColorScheme(.dark, for: .navigationBar)
   }
 }
 

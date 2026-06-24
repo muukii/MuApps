@@ -18,7 +18,7 @@ public struct CapturedText: Sendable, Equatable {
 // MARK: - Capture View
 
 /// A self-contained multiline text editor. Emits the edited text through
-/// `onCommit`; owns no persistence and knows nothing about JournalEntry.
+/// `onCommit`; owns no persistence and knows nothing about Card.
 public struct TextCaptureView: View {
 
   @State private var text: String
@@ -68,61 +68,8 @@ public struct TextCaptureView: View {
         Spacer()
       }
     }
-    .background(.background)
     .onAppear { isFocused = true }
   }
-}
-
-struct FloatingCardContainer: View {
-
-  @State private var isAnimated: Bool = false
-
-  var body: some View {
-    ZStack {
-      Text("Hello")
-        .font(.system(size: 32))
-        .fontWeight(.bold)
-    }
-    .padding(16)
-    .background {
-      RoundedRectangle(cornerRadius: 16)
-        .fill(.background)
-    }
-    .animation(
-      .spring(
-        Spring(
-          settlingDuration: 4.1,
-          dampingRatio: 1,
-          epsilon: 0.1
-        )
-      ).repeatForever(),
-      body: { content in
-        content.rotationEffect(.degrees(isAnimated ? -5 : 5))
-      }
-    )
-    .animation(
-      .spring(
-        Spring(
-          settlingDuration: 2.3,
-          dampingRatio: 0.8,
-          epsilon: 0.2
-        )
-      ).repeatForever(),
-      body: { content in
-        content
-          .offset(y: isAnimated ? -8 : 8)
-          .scaleEffect(isAnimated ? 1.12 : 1)
-      }
-    )
-    .backgroundStyle(.red)
-    .onAppear {
-      isAnimated = true
-    }
-  }
-}
-
-#Preview {
-  FloatingCardContainer()
 }
 
 #Preview {

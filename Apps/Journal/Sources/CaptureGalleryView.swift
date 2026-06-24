@@ -1,8 +1,10 @@
 import CaptureAudio
-import CaptureDoodle
 import CapturePhoto
+import CaptureSuggestions
 import CaptureText
+import JournalModel
 import MuColor
+import MuHaptics
 import SwiftData
 import SwiftUI
 
@@ -10,6 +12,7 @@ import SwiftUI
 /// scaffolding for developing the components independently while the real
 /// journaling UI is undecided — not the shipping entry point.
 struct CaptureGalleryView: View {
+
   var body: some View {
     NavigationStack {
       List {
@@ -19,6 +22,7 @@ struct CaptureGalleryView: View {
           } label: {
             Label("Text", systemImage: "text.alignleft")
           }
+          .listRowBackground(Rectangle().fill(.appSecondaryContainer))
 
           NavigationLink {
             PhotoCaptureDemoView()
@@ -27,7 +31,7 @@ struct CaptureGalleryView: View {
           }
 
           NavigationLink {
-            DoodleCaptureDemoView()
+            DoodleCaptureView()
           } label: {
             Label("Doodle", systemImage: "scribble.variable")
           }
@@ -37,22 +41,48 @@ struct CaptureGalleryView: View {
           } label: {
             Label("Ambient Sound", systemImage: "waveform")
           }
+
+          NavigationLink {
+            SuggestionCaptureDemoView()
+          } label: {
+            Label("Suggestions", systemImage: "sparkles")
+          }
+        }
+
+        Section("Lab") {
+          NavigationLink {
+            HapticEditorView()
+          } label: {
+            Label("Haptics", systemImage: "iphone.radiowaves.left.and.right")
+          }
         }
 
         Section("Storage") {
           NavigationLink {
-            ContentView()
+            ListView()
           } label: {
             Label("Entries (SwiftData / iCloud)", systemImage: "icloud")
           }
         }
       }
+      .scrollContentBackground(.hidden)
+      .background(.background)
       .navigationTitle("Journal · Dev")
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          NavigationLink {
+            SettingsView()
+          } label: {
+            Label("Settings", systemImage: "gearshape")
+          }
+        }
+      }
     }
+    .appNavigationBarStyle()
   }
 }
 
 #Preview {
   CaptureGalleryView()
-    .modelContainer(for: JournalEntry.self, inMemory: true)
+    .modelContainer(for: Card.self, inMemory: true)
 }

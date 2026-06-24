@@ -33,12 +33,21 @@ public final class AmbientAudioRecorder {
 
   public private(set) var state: State = .idle
   public private(set) var duration: TimeInterval = 0
-  /// Normalized input amplitude (0...1), derived from average power, for meters.
-  public private(set) var level: Float = 0
+  /// A rolling window of recent normalized amplitudes (0...1), oldest first,
+  /// newest last. Each entry is a real measurement sampled at `pollInterval`;
+  /// rendering it as bars produces a live, scrolling waveform. Fixed length —
+  /// padded with zeros before any audio arrives so the meter has a resting shape.
+  public private(set) var samples: [Float] = Array(repeating: 0, count: sampleCount)
+
+  /// Number of amplitude samples kept in `samples`. At `pollInterval` cadence
+  /// this is the width of the waveform's time window (~2.4s).
+  public static let sampleCount = 48
 
   private var recorder: AVAudioRecorder?
   private var fileURL: URL?
   private var pollTask: Task<Void, Never>?
+
+  private static let pollInterval: Duration = .milliseconds(50)
 
   public init() {}
 
@@ -81,7 +90,7 @@ public final class AmbientAudioRecorder {
     self.recorder = recorder
     self.fileURL = url
     self.duration = 0
-    self.level = 0
+    self.samples = Array(repeating: 0, count: Self.sampleCount)
     self.state = .recording
     startPolling()
   }
@@ -99,7 +108,7 @@ public final class AmbientAudioRecorder {
 
     self.recorder = nil
     self.fileURL = nil
-    self.level = 0
+    self.samples = Array(repeating: 0, count: Self.sampleCount)
     self.duration = finalDuration
     self.state = .finished
 
@@ -113,9 +122,12 @@ public final class AmbientAudioRecorder {
         guard let self, let recorder = self.recorder else { return }
         recorder.updateMeters()
         let power = recorder.averagePower(forChannel: 0)
-        self.level = Self.normalizedLevel(fromDecibels: power)
+        var next = self.samples
+        next.removeFirst()
+        next.append(Self.normalizedLevel(fromDecibels: power))
+        self.samples = next
         self.duration = recorder.currentTime
-        try? await Task.sleep(for: .milliseconds(50))
+        try? await Task.sleep(for: Self.pollInterval)
       }
     }
   }
@@ -125,11 +137,18 @@ public final class AmbientAudioRecorder {
     pollTask = nil
   }
 
-  /// Maps average power in decibels (−160...0) to a linear amplitude (0...1).
+  /// Decibel level treated as silence. Average power runs −160...0 dB, but the
+  /// usable range for voice/ambient sound sits near the top; flooring here keeps
+  /// the meter responsive instead of pinned to the bottom of the raw scale.
+  private static let silenceFloor: Float = -50
+
+  /// Maps average power in decibels to a perceptual 0...1, linear in dB above
+  /// `silenceFloor`. Linear-in-dB tracks loudness as the ear hears it, so the
+  /// waveform reacts to normal speech rather than only to loud peaks.
   private static func normalizedLevel(fromDecibels decibels: Float) -> Float {
     guard decibels.isFinite else { return 0 }
-    let amplitude = pow(10, decibels / 20)
-    return min(max(amplitude, 0), 1)
+    let clamped = max(decibels, silenceFloor)
+    return (clamped - silenceFloor) / -silenceFloor
   }
 
   // No `deinit` cleanup needed: the poll loop captures `self` weakly and exits
