@@ -12,6 +12,7 @@ let workspace = Workspace(
     "Apps/PhotosOrganizer",
     "Apps/AmbientLight",
     "Apps/PolyReader",
+    "Apps/PeekLUT",
     "Apps/Tone",
     "Apps/SafariReactor",
     "Apps/TabLab",
