@@ -1,7 +1,8 @@
+import CaptureDoodle
 import JournalModel
+import MuColor
 import SwiftData
 import SwiftUI
-import MuColor
 
 @main
 struct JournalApp: App {
@@ -25,6 +26,7 @@ struct JournalApp: App {
   var body: some Scene {
     WindowGroup {
       RootView()
+        .task { DoodleHaptics.prepareForDrawing() }
         .task { await mediaSync.start() }
         .task { SyncStatusMonitor.shared.start() }
     }

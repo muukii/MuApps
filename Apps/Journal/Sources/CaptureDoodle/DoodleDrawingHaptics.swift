@@ -3,6 +3,19 @@ import CoreHaptics
 import Foundation
 import QuartzCore
 
+/// Startup and lifecycle hooks for the haptics used by the doodle canvas.
+public enum DoodleHaptics {
+
+  /// Warms the Core Haptics engine used for drawing feedback.
+  ///
+  /// Call this once after app launch, or before presenting the doodle canvas, so
+  /// the first stroke does not pay Core Haptics' initial engine setup cost.
+  @MainActor
+  public static func prepareForDrawing() {
+    DoodleDrawingHaptics.prepareSharedEngine()
+  }
+}
+
 /// Drives the tactile feedback used while a doodle stroke is being drawn.
 ///
 /// `DoodleDrawingHaptics` punctuates the touch sequence with a light tap at
@@ -47,12 +60,23 @@ final class DoodleDrawingHaptics {
     }
   }
 
-  private var engine: CHHapticEngine?
+  private static var sharedEngine: CHHapticEngine?
+
   private var texturePlayer: (any CHHapticAdvancedPatternPlayer)?
   private var tapPlayer: (any CHHapticPatternPlayer)?
   private var hasActiveTouch = false
   private var isPlaying = false
   private var lastUpdateTimestamp: TimeInterval = 0
+
+  static func prepareSharedEngine() {
+    guard isSupported else { return }
+
+    do {
+      _ = try runningSharedEngine()
+    } catch {
+      sharedEngine = nil
+    }
+  }
 
   func touchDown() {
     guard Self.isSupported else { return }
@@ -140,14 +164,18 @@ final class DoodleDrawingHaptics {
   }
 
   private func runningEngine() throws -> CHHapticEngine {
-    if let engine {
+    try Self.runningSharedEngine()
+  }
+
+  private static func runningSharedEngine() throws -> CHHapticEngine {
+    if let engine = sharedEngine {
       try engine.start()
       return engine
     }
 
     let engine = try CHHapticEngine()
     engine.isAutoShutdownEnabled = true
-    self.engine = engine
+    sharedEngine = engine
     try engine.start()
     return engine
   }
