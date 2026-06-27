@@ -29,53 +29,69 @@ final class DoodleCanvas {
   /// `UITouch.timestamp` of the very first point, the zero of the shared timeline.
   /// Persists across strokes (so pen-up gaps replay) until `clear()`.
   @ObservationIgnored private var originTimestamp: TimeInterval?
+  /// Offset applied when appending new strokes to an existing drawing.
+  @ObservationIgnored private var timelineOffset: TimeInterval = 0
   @ObservationIgnored private var livePoints: [DoodlePoint] = []
   @ObservationIgnored private var lastEmittedTime: TimeInterval = 0
   @ObservationIgnored private var lastEmittedLocation: CGPoint = .zero
+  @ObservationIgnored private var lastEmittedWidth: Double = 0
+  @ObservationIgnored private let drawingHaptics = DoodleDrawingHaptics()
 
-  init() {}
+  init(drawing: DoodleDrawing? = nil) {
+    guard let drawing, drawing.isEmpty == false else { return }
+    strokes = drawing.strokes
+    canvasSize = drawing.canvasSize
+    timelineOffset = drawing.duration
+    lastEmittedTime = drawing.duration
+
+    if let lastStroke = drawing.strokes.last {
+      width = lastStroke.width
+      lastEmittedWidth = lastStroke.points.last?.width ?? lastStroke.width
+      lastEmittedLocation = lastStroke.points.last?.location ?? .zero
+    }
+  }
 
   var isEmpty: Bool { strokes.isEmpty }
   var duration: TimeInterval { strokes.last?.points.last?.time ?? 0 }
 
-  /// Half the stamp spacing, floored — the resolution the smoother resamples to.
-  /// Matches the old Metal canvas's near-constant `sampleDistance`.
+  /// The centerline resampling resolution. Keeping this dense gives the renderer
+  /// enough points to form long smooth curves without visible chord edges.
   private var sampleDistance: CGFloat { max(CGFloat(width) * 0.025, 2) }
 
   // MARK: Input (driven by DoodleInputView)
 
   func begin(_ point: TimedPoint) {
     smoother.configure(smoothing)
-    smoother.begin(at: point.location)
+    smoother.begin(at: point)
+    drawingHaptics.begin()
 
     let time = relativeTime(point.timestamp)
-    livePoints = [DoodlePoint(x: point.location.x, y: point.location.y, time: time)]
+    livePoints = [DoodlePoint(x: point.location.x, y: point.location.y, time: time, width: width)]
     lastEmittedTime = time
     lastEmittedLocation = point.location
+    lastEmittedWidth = width
     liveStroke = DoodleStroke(points: livePoints, width: width)
   }
 
   func append(_ points: [TimedPoint]) {
     guard let last = points.last else { return }
-    let smoothed = smoother.append(points.map(\.location), sampleDistance: sampleDistance)
-    let timed = assignTimes(to: smoothed, reaching: relativeTime(last.timestamp))
-    guard timed.isEmpty == false else { return }
-    livePoints += timed
-    liveStroke = DoodleStroke(points: livePoints, width: width)
+    drawingHaptics.update(speed: hapticSpeed(from: points), timestamp: last.timestamp)
+    appendLive(points, reaching: relativeTime(last.timestamp))
   }
 
   func end(_ point: TimedPoint) {
-    let smoothed = smoother.finish(at: point.location, sampleDistance: sampleDistance)
-    let timed = assignTimes(to: smoothed, reaching: relativeTime(point.timestamp))
-    livePoints += timed
-
+    // The authored live shape is the saved shape. Do not run a second full-stroke
+    // fit or a catch-up tail on lift; those make already-seen curves move.
+    appendLive([point], reaching: relativeTime(point.timestamp))
     if livePoints.isEmpty == false {
       strokes.append(DoodleStroke(points: livePoints, width: width))
     }
+    drawingHaptics.end()
     resetLive()
   }
 
   func cancel() {
+    drawingHaptics.end()
     smoother.reset()
     resetLive()
   }
@@ -90,12 +106,44 @@ final class DoodleCanvas {
   func clear() {
     strokes.removeAll()
     originTimestamp = nil
+    timelineOffset = 0
+    drawingHaptics.end()
     resetLive()
   }
 
   func makeDrawing() -> DoodleDrawing? {
     guard strokes.isEmpty == false else { return nil }
     return DoodleDrawing(strokes: strokes, canvasSize: canvasSize, duration: duration)
+  }
+
+  func updateCanvasSize(_ size: CGSize) {
+    guard size.width > 0, size.height > 0 else {
+      canvasSize = size
+      return
+    }
+
+    guard canvasSize.width > 0, canvasSize.height > 0 else {
+      canvasSize = size
+      return
+    }
+
+    guard abs(canvasSize.width - size.width) > 0.5
+      || abs(canvasSize.height - size.height) > 0.5
+    else {
+      return
+    }
+
+    let scaleX = size.width / canvasSize.width
+    let scaleY = size.height / canvasSize.height
+    let widthScale = (scaleX + scaleY) / 2
+
+    strokes = strokes.map { $0.scaled(x: scaleX, y: scaleY) }
+    liveStroke = liveStroke?.scaled(x: scaleX, y: scaleY)
+    livePoints = livePoints.map { $0.scaled(x: scaleX, y: scaleY) }
+    lastEmittedLocation = lastEmittedLocation.scaled(x: scaleX, y: scaleY)
+    lastEmittedWidth *= Double(widthScale)
+    width *= Double(widthScale)
+    canvasSize = size
   }
 
   // MARK: Timing
@@ -105,13 +153,34 @@ final class DoodleCanvas {
       originTimestamp = timestamp
       return timestamp
     }()
-    return timestamp - origin
+    return timestamp - origin + timelineOffset
   }
 
-  /// Distributes the interval `[lastEmittedTime, target]` across the freshly
-  /// smoothed points by arc length, so each point gets a monotonically increasing
-  /// timestamp that tracks the real drawing speed. Smoothed points lag the raw
-  /// input, so the mapping is approximate — fine for replay.
+  private func appendLive(_ points: [TimedPoint], reaching target: TimeInterval) {
+    let smoothed = smoother.append(points, sampleDistance: sampleDistance)
+    let timed = assignTimes(to: smoothed, reaching: target)
+    guard timed.isEmpty == false else { return }
+    livePoints += timed
+    liveStroke = DoodleStroke(points: livePoints, width: width)
+  }
+
+  private func hapticSpeed(from points: [TimedPoint]) -> CGFloat {
+    guard let last = points.last else { return 0 }
+
+    let previousLocation = points.dropLast().last?.location ?? lastEmittedLocation
+    let previousTimestamp = points.dropLast().last?.timestamp ?? absoluteTimestamp(for: lastEmittedTime)
+    let elapsed = max(last.timestamp - previousTimestamp, 1.0 / 240.0)
+    return previousLocation.distance(to: last.location) / CGFloat(elapsed)
+  }
+
+  private func absoluteTimestamp(for relativeTime: TimeInterval) -> TimeInterval {
+    guard let originTimestamp else { return relativeTime }
+    return originTimestamp + relativeTime - timelineOffset
+  }
+
+  /// Distributes the interval `[lastEmittedTime, target]` across freshly smoothed
+  /// points by arc length. Width is derived from the local speed on that same
+  /// timeline: fast spans thin out, while slow spans keep the brush full.
   private func assignTimes(to smoothed: [CGPoint], reaching target: TimeInterval) -> [DoodlePoint] {
     guard smoothed.isEmpty == false else { return [] }
 
@@ -128,17 +197,56 @@ final class DoodleCanvas {
     let span = max(target - start, 0)
     let count = smoothed.count
 
+    var widthLocation = lastEmittedLocation
+    var widthTime = lastEmittedTime
+    var widthValue = lastEmittedWidth > 0 ? lastEmittedWidth : width
+
     let timed = smoothed.enumerated().map { index, point -> DoodlePoint in
       let fraction = total > 0 ? Double(cumulative[index] / total) : Double(index + 1) / Double(count)
-      return DoodlePoint(x: point.x, y: point.y, time: start + span * fraction)
+      let pointTime = start + span * fraction
+      let speed = localSpeed(from: widthLocation, at: widthTime, to: point, at: pointTime)
+      let targetWidth = brushWidth(forSpeed: speed)
+      let response = widthResponse(forSpeed: speed)
+      widthValue += (targetWidth - widthValue) * response
+      widthLocation = point
+      widthTime = pointTime
+      return DoodlePoint(x: point.x, y: point.y, time: pointTime, width: widthValue)
     }
 
     lastEmittedTime = timed.last?.time ?? start
     lastEmittedLocation = smoothed.last ?? lastEmittedLocation
+    lastEmittedWidth = timed.last?.width ?? widthValue
     return timed
   }
 
+  private func localSpeed(
+    from previousLocation: CGPoint,
+    at previousTime: TimeInterval,
+    to location: CGPoint,
+    at time: TimeInterval
+  ) -> CGFloat {
+    let elapsed = max(time - previousTime, 1.0 / 240.0)
+    return previousLocation.distance(to: location) / CGFloat(elapsed)
+  }
+
+  private func brushWidth(forSpeed speed: CGFloat) -> Double {
+    let progress = smoothstep(edge0: 80, edge1: 1_250, value: speed)
+    let multiplier = 1.04 - Double(progress) * 0.30
+    return max(width * 0.68, width * multiplier, 1)
+  }
+
+  private func widthResponse(forSpeed speed: CGFloat) -> Double {
+    let progress = smoothstep(edge0: 120, edge1: 1_100, value: speed)
+    return 0.16 + Double(progress) * 0.10
+  }
+
+  private func smoothstep(edge0: CGFloat, edge1: CGFloat, value: CGFloat) -> CGFloat {
+    let progress = min(max((value - edge0) / max(edge1 - edge0, 1), 0), 1)
+    return progress * progress * (3 - 2 * progress)
+  }
+
   private func resetLive() {
+    smoother.reset()
     livePoints = []
     liveStroke = nil
   }
@@ -149,22 +257,29 @@ final class DoodleCanvas {
 /// A self-contained doodle surface: a single theme-colored ink, a width slider,
 /// undo, clear, replay, and (optional) export. The ink is `inkColor`, applied at
 /// draw time, so changing the app theme re-tints everything — including a doodle
-/// drawn earlier. Smooth ink via the ported Brightroom smoothing.
+/// drawn earlier. The default ink uses stable incremental smoothing and commits
+/// the visible live stroke as-is when the finger lifts.
 public struct DoodleCanvasView: View {
 
-  @State private var canvas = DoodleCanvas()
+  @State private var canvas: DoodleCanvas
   /// Non-nil while a replay is animating; the value is the replay's start time.
   @State private var replayStart: Date?
 
   private let inkColor: Color
   private let onExport: (@MainActor @Sendable (DoodleDrawing) -> Void)?
+  private let onChange: (@MainActor @Sendable (DoodleDrawing?) -> Void)?
 
+  @MainActor
   public init(
     inkColor: Color,
-    onExport: (@MainActor @Sendable (DoodleDrawing) -> Void)? = nil
+    initialDrawing: DoodleDrawing? = nil,
+    onExport: (@MainActor @Sendable (DoodleDrawing) -> Void)? = nil,
+    onChange: (@MainActor @Sendable (DoodleDrawing?) -> Void)? = nil
   ) {
+    _canvas = State(initialValue: DoodleCanvas(drawing: initialDrawing))
     self.inkColor = inkColor
     self.onExport = onExport
+    self.onChange = onChange
   }
 
   /// Gaps between points longer than this are clamped during replay, so long
@@ -172,27 +287,45 @@ public struct DoodleCanvasView: View {
   /// instead of dead time. The stored timestamps stay faithful — this only shapes
   /// playback.
   private static let replayMaxGap: TimeInterval = 0.35
+  /// Width divided by height for the drawable surface. Matches the journal card
+  /// paper proportion so exported doodles share the same portrait geometry.
+  private static let aspectRatio: CGFloat = 1 / 1.4144
 
   public var body: some View {
     // Read in `body` so Observation tracks edits and the canvas re-renders.
     let strokes = canvas.strokes
     let live = canvas.liveStroke
 
-    ZStack {
-      inkLayer(strokes: strokes, live: live)
-        .ignoresSafeArea()
+    VStack {
+      drawingSurface(strokes: strokes, live: live)
+        .aspectRatio(Self.aspectRatio, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(.thinMaterial, lineWidth: 1)
+        }
+        .padding(8)
 
-      DoodleInputView(canvas: canvas)
-        .ignoresSafeArea()
-        // Lock input out while a replay is animating so a stray touch can't
-        // splice a new stroke into the playback.
-        .allowsHitTesting(replayStart == nil)
-    }
-    .overlay(alignment: .bottom) {
       controlBar
         .padding(.horizontal)
         .padding(.bottom, 8)
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .onChange(of: strokes) { _, _ in
+      onChange?(canvas.makeDrawing())
+    }
+  }
+
+  private func drawingSurface(strokes: [DoodleStroke], live: DoodleStroke?) -> some View {
+    ZStack {
+      inkLayer(strokes: strokes, live: live)
+
+      DoodleInputView(canvas: canvas)
+        // Lock input out while a replay is animating so a stray touch can't
+        // splice a new stroke into the playback.
+        .allowsHitTesting(replayStart == nil)
+    }
+    .clipped()
   }
 
   @ViewBuilder
@@ -269,7 +402,7 @@ private struct DoodleInputView: UIViewRepresentable {
   func makeUIView(context: Context) -> InputView {
     let view = InputView()
     view.backgroundColor = .clear
-    view.onLayout = { size in canvas.canvasSize = size }
+    view.onLayout = { size in canvas.updateCanvasSize(size) }
 
     let recognizer = DrawingGestureRecognizer(target: nil, action: nil)
     recognizer.onBegin = { canvas.begin($0) }
@@ -292,6 +425,37 @@ private struct DoodleInputView: UIViewRepresentable {
   }
 }
 
+private extension CGPoint {
+
+  func scaled(x scaleX: CGFloat, y scaleY: CGFloat) -> CGPoint {
+    CGPoint(x: x * scaleX, y: y * scaleY)
+  }
+}
+
+private extension DoodlePoint {
+
+  func scaled(x scaleX: CGFloat, y scaleY: CGFloat) -> DoodlePoint {
+    let widthScale = Double((scaleX + scaleY) / 2)
+    return DoodlePoint(
+      x: x * Double(scaleX),
+      y: y * Double(scaleY),
+      time: time,
+      width: width.map { $0 * widthScale }
+    )
+  }
+}
+
+private extension DoodleStroke {
+
+  func scaled(x scaleX: CGFloat, y scaleY: CGFloat) -> DoodleStroke {
+    let widthScale = Double((scaleX + scaleY) / 2)
+    return DoodleStroke(
+      points: points.map { $0.scaled(x: scaleX, y: scaleY) },
+      width: width * widthScale
+    )
+  }
+}
+
 // MARK: - Replay timing
 
 extension [DoodleStroke] {
@@ -311,7 +475,7 @@ extension [DoodleStroke] {
           clock += Swift.min(Swift.max(point.time - previousTime, 0), maxGap)
         }
         previousTime = point.time
-        return DoodlePoint(x: point.x, y: point.y, time: clock)
+        return DoodlePoint(x: point.x, y: point.y, time: clock, width: point.width)
       }
       return DoodleStroke(points: points, width: stroke.width)
     }

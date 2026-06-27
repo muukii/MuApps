@@ -15,6 +15,9 @@ let journalInfoPlist: InfoPlist = .extendingDefault(with: [
   // microphone (CaptureAudio) require usage descriptions to function.
   "NSCameraUsageDescription": "Take a photo to attach to a journal entry.",
   "NSMicrophoneUsageDescription": "Record the ambient sound around you to attach to a journal entry.",
+  // Optional per-card location: when enabled while composing, the card records
+  // where it was written (LocationManager → Card.location).
+  "NSLocationWhenInUseUsageDescription": "Attach where you are to a journal entry.",
 ])
 
 // MARK: - Journal-local frameworks
@@ -89,6 +92,7 @@ let project = Project(
         .sdk(name: "CloudKit", type: .framework),
         .external(name: "SwiftUIIntrospect"),
         .external(name: "ScrollEdgeEffect"),
+        .external(name: "Algorithms"),
         .target(name: "JournalModel"),
         // Embeds the widget extension into the app bundle.
         .target(name: "JournalWidget"),
@@ -97,6 +101,7 @@ let project = Project(
         .target(name: "CaptureText"),
         .target(name: "CapturePhoto"),
         .target(name: "CaptureDoodle"),
+        .target(name: "CaptureBlob"),
         .target(name: "CaptureAudio"),
         .target(name: "CaptureSuggestions"),
       ],
@@ -111,8 +116,9 @@ let project = Project(
 
     // MARK: - Shared data layer
 
-    // The SwiftData models (`Card`, `Tag`, `Coordinate`) and the shared store
-    // factory (`JournalStore`). A *dynamic* framework — unlike the capture
+    // The SwiftData models (`Card`, `Tag`, `Attachment`, `CardRelationship`,
+    // `Coordinate`) and the shared store factory (`JournalStore`). A *dynamic*
+    // framework — unlike the capture
     // components (static, app-only), this is linked by both the app and the
     // `JournalWidget` extension, so a dynamic framework embeds it once and lets
     // the extension reference it. `APPLICATION_EXTENSION_API_ONLY` keeps it safe
@@ -195,8 +201,16 @@ let project = Project(
         .external(name: "Capturer"),
       ]
     ),
-    // Pure SwiftUI vector canvas (Canvas/Path) — no Metal dependency.
-    journalFramework(name: "CaptureDoodle"),
+    // Pure SwiftUI vector canvas (Canvas/Path) with drawing-time haptics.
+    journalFramework(
+      name: "CaptureDoodle",
+      dependencies: [
+        .sdk(name: "CoreHaptics", type: .framework),
+      ]
+    ),
+    // Filled gradient shape-painting experiment, kept separate from Doodle's
+    // centerline ink model.
+    journalFramework(name: "CaptureBlob"),
     journalFramework(
       name: "CaptureAudio",
       dependencies: [
@@ -209,5 +223,26 @@ let project = Project(
     // `import`s them behind `#if canImport(...)` and relies on Swift autolinking,
     // keeping the target buildable for both device and Simulator.
     journalFramework(name: "CaptureSuggestions"),
+
+    // MARK: - UI Tests (temporary, for Settings UI verification)
+    .target(
+      name: "JournalUITests",
+      destinations: .app,
+      product: .uiTests,
+      bundleId: "app.muukii.journal.UITests",
+      deploymentTargets: .app,
+      infoPlist: .default,
+      buildableFolders: ["JournalUITests"],
+      dependencies: [
+        .target(name: "Journal"),
+      ],
+      settings: .settings(
+        base: [:],
+        configurations: [
+          .debug(name: "Debug"),
+          .release(name: "Release"),
+        ]
+      )
+    ),
   ]
 )

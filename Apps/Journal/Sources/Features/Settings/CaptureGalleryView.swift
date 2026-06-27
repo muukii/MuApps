@@ -1,4 +1,5 @@
 import CaptureAudio
+import CaptureBlob
 import CapturePhoto
 import CaptureSuggestions
 import CaptureText
@@ -37,6 +38,12 @@ struct CaptureGalleryView: View {
           }
 
           NavigationLink {
+            BlobCaptureDemoView()
+          } label: {
+            Label("Blob Paint", systemImage: "paintbrush.pointed")
+          }
+
+          NavigationLink {
             AudioCaptureDemoView()
           } label: {
             Label("Ambient Sound", systemImage: "waveform")
@@ -59,7 +66,7 @@ struct CaptureGalleryView: View {
 
         Section("Storage") {
           NavigationLink {
-            ListView()
+            SavedListView()
           } label: {
             Label("Entries (SwiftData / iCloud)", systemImage: "icloud")
           }
@@ -84,5 +91,8 @@ struct CaptureGalleryView: View {
 
 #Preview {
   CaptureGalleryView()
-    .modelContainer(for: Card.self, inMemory: true)
+    .modelContainer(try! ModelContainer(
+      for: JournalStore.schema,
+      configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    ))
 }

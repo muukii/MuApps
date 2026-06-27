@@ -6,7 +6,7 @@ import Observation
 /// A finished ambient-sound recording. The file lives in the temporary
 /// directory; the host is responsible for moving/persisting it if it wants to
 /// keep it.
-public struct AudioRecording: Sendable, Equatable {
+public struct AudioRecording: Sendable, Equatable, Codable {
   public var fileURL: URL
   public var duration: TimeInterval
 

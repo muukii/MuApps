@@ -20,13 +20,15 @@ about distribution, not product behavior).
 - `Sources/` — app shell: `JournalApp`, `CaptureGalleryView` (root), `ContentView`
   (SwiftData harness), `SettingsView`.
 - `JournalModel/` — **shared data layer** (dynamic framework): `Card`, `Tag`,
-  `Coordinate`, and `JournalStore` (the schema + the one shared-container
-  factory). Linked by both the app and the widget; built extension-API-only.
+  `Attachment`, `CardRelationship`, `Coordinate`, and `JournalStore` (the schema
+  + the one shared-container factory). Linked by both the app and the widget;
+  built extension-API-only.
 - `JournalWidget/` — **WidgetKit extension** (`.appExtension`): `JournalWidgetBundle`
-  (`@main`) + `RecentCardsWidget`, which reads recent Cards from the shared store.
+  (`@main`) + `LatestNoteWidget`, which shows the most recently created note
+  (`Card.body`) read from the shared store.
 - Capture frameworks (one isolated static framework each):
-  `CaptureText`, `CapturePhoto`, `CaptureDoodle`, `CaptureAudio`,
-  `CaptureSuggestions`.
+  `CaptureText`, `CapturePhoto`, `CaptureDoodle`, `CaptureBlob`,
+  `CaptureAudio`, `CaptureSuggestions`.
 - Support frameworks: `MuColor` (themes/palette), `MuHaptics` (Core Haptics lab).
 - `Project.swift` — Tuist manifest (targets, entitlements, Info.plist).
 
@@ -48,8 +50,9 @@ about distribution, not product behavior).
   the app and widget both call `JournalStore.makeModelContainer()`; never build a
   `ModelContainer` for journal data elsewhere. Models are `public` (the widget
   links them). After a write the app can refresh the widget with
-  `WidgetCenter.shared.reloadAllTimelines()`. Widget views render a `Sendable`
-  `CardSnapshot`, never `Card` references.
+  `WidgetCenter.shared.reloadAllTimelines()` (already wired into
+  `CreationView.save()`). Widget views render a `Sendable` `NoteSnapshot`, never
+  `Card` references.
 - **Theming goes through `MuColor`.** Use the palette/app shape styles
   (`.appPrimaryContainer`, etc.) and `PrimaryContainer`/`SecondaryContainer`
   rather than hard-coded colors. Five seed colors only — no new hues.

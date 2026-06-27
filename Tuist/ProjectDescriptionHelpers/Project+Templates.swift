@@ -27,6 +27,8 @@ public extension SettingsDictionary {
   static let base: SettingsDictionary = [
     "DEVELOPMENT_TEAM": .string(AppConstants.developmentTeam),
     "CODE_SIGN_STYLE": "Automatic",
+    // Enable Xcode 26's reusable compilation cache across all generated projects and targets.
+    "COMPILATION_CACHE_ENABLE_CACHING": "YES",
     "SWIFT_VERSION": "6.0",
     "SWIFT_APPROACHABLE_CONCURRENCY": "YES",
     "SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY": "YES",

@@ -4,27 +4,34 @@ import UIKit
 
 // MARK: - Vector model
 
-/// One timestamped sample along a stroke. `time` is seconds from the first point
-/// of the whole drawing (so every stroke shares one timeline), which is what lets
-/// the drawing be replayed at the speed it was drawn.
+/// One timestamped sample along a stroke.
+///
+/// `time` is seconds from the first point of the whole drawing, so every stroke
+/// shares one replay timeline. `width` is optional for backward compatibility:
+/// old drawings fall back to the owning `DoodleStroke.width`, while new strokes
+/// can store a velocity-shaped width per point.
 public struct DoodlePoint: Sendable, Equatable, Codable {
   public var x: Double
   public var y: Double
   public var time: TimeInterval
+  public var width: Double?
 
-  public init(x: Double, y: Double, time: TimeInterval) {
+  public init(x: Double, y: Double, time: TimeInterval, width: Double? = nil) {
     self.x = x
     self.y = y
     self.time = time
+    self.width = width
   }
 
   var location: CGPoint { CGPoint(x: x, y: y) }
 }
 
-/// A single continuous stroke: smoothed, timestamped points plus the width it was
-/// drawn at. Deliberately **colorless** — the ink color is the app's theme color,
-/// applied when the stroke is rendered, so changing the theme re-tints every
-/// doodle without touching stored data.
+/// A single continuous stroke.
+///
+/// `width` is the base brush width; individual `DoodlePoint.width` values can
+/// override it to create speed-driven tapering. The stroke is deliberately
+/// **colorless**: the ink color is the app's theme color, applied when rendered,
+/// so changing the theme re-tints every doodle without touching stored data.
 public struct DoodleStroke: Sendable, Equatable, Codable {
   public var points: [DoodlePoint]
   public var width: Double
@@ -57,14 +64,16 @@ public struct DoodleDrawing: Sendable, Equatable, Codable {
 
   /// Rasterizes the vector strokes into a transparent image, tinted with
   /// `inkColor`. For thumbnails / sharing only — the drawing itself stays vector.
+  /// Pass `scale` from a view context when the target screen scale matters.
   @MainActor
-  public func image(inkColor: Color, scale: CGFloat = UIScreen.main.scale) -> UIImage? {
+  public func image(inkColor: Color, scale: CGFloat? = nil) -> UIImage? {
     guard canvasSize.width > 0, canvasSize.height > 0 else { return nil }
     let renderer = ImageRenderer(
       content: DoodleStrokesView(strokes: strokes, liveStroke: nil, inkColor: inkColor, revealedTime: nil)
         .frame(width: canvasSize.width, height: canvasSize.height)
     )
-    renderer.scale = scale
+    let resolvedScale = scale ?? UITraitCollection.current.displayScale
+    renderer.scale = resolvedScale > 0 ? resolvedScale : 1
     renderer.isOpaque = false
     return renderer.uiImage
   }
@@ -72,12 +81,18 @@ public struct DoodleDrawing: Sendable, Equatable, Codable {
 
 // MARK: - Smoothing config
 
-/// Stroke smoothing configuration, ported from Brightroom. `.bezier` at a fairly
-/// strong strength is the default (velocity-aware lag + streaming cubic Bézier).
+/// Stroke smoothing configuration for the doodle brush.
+///
+/// The default `.streamline` mode is intentionally stronger than PencilKit:
+/// timestamped coalesced touches flow through an incremental trajectory filter
+/// and streaming spline while the finger is down. The emitted live centerline is
+/// also the saved centerline, so lifting the finger does not run a second
+/// geometry pass that changes the stroke shape.
 public struct InkSmoothing: Equatable, Sendable {
 
   public enum Algorithm: String, CaseIterable, Sendable, Identifiable {
     case raw
+    case streamline
     case bezier
     case catmullRom
     case movingAverage
@@ -88,7 +103,7 @@ public struct InkSmoothing: Equatable, Sendable {
   public var algorithm: Algorithm
   public var strength: Double
 
-  public init(algorithm: Algorithm = .bezier, strength: Double = 0.92) {
+  public init(algorithm: Algorithm = .streamline, strength: Double = 0.99) {
     self.algorithm = algorithm
     self.strength = strength
   }
@@ -119,54 +134,168 @@ struct DoodleStrokesView: View {
   }
 
   private func draw(_ stroke: DoodleStroke, upTo limit: TimeInterval?, in context: GraphicsContext) {
-    let visible = stroke.visiblePoints(upTo: limit)
-    guard let first = visible.first else { return }
+    let points = stroke.visiblePoints(upTo: limit)
+    guard let first = points.first else { return }
 
     // A tap (or a replay that has only reached the first point) is a single dot;
-    // a degenerate polyline wouldn't render, so fill a circle instead.
-    guard visible.count > 1 else {
-      let radius = stroke.width / 2
-      let dot = Path(ellipseIn: CGRect(
-        x: first.x - radius, y: first.y - radius, width: stroke.width, height: stroke.width
-      ))
-      context.fill(dot, with: .color(inkColor))
+    // a stroked polyline wouldn't render it, so fill a circle instead.
+    guard points.count > 1 else {
+      let radius = first.width / 2
+      context.fill(
+        Path(ellipseIn: CGRect(
+          x: first.location.x - radius,
+          y: first.location.y - radius,
+          width: first.width,
+          height: first.width
+        )),
+        with: .color(inkColor)
+      )
       return
     }
 
-    var path = Path()
-    path.addLines(visible)
-    context.stroke(
-      path,
-      with: .color(inkColor),
-      style: StrokeStyle(lineWidth: stroke.width, lineCap: .round, lineJoin: .round)
-    )
+    if points.contains(where: \.hasExplicitWidth) {
+      drawVariableWidth(points, in: context)
+    } else {
+      context.stroke(
+        Path(smooth: points.map(\.location)),
+        with: .color(inkColor),
+        style: StrokeStyle(lineWidth: stroke.width, lineCap: .round, lineJoin: .round)
+      )
+    }
   }
+
+  private func drawVariableWidth(_ points: [DoodleRenderPoint], in context: GraphicsContext) {
+    let points = points.removingNearDuplicates()
+    guard points.count > 1 else {
+      if let point = points.first {
+        let radius = point.width / 2
+        context.fill(
+          Path(ellipseIn: CGRect(
+            x: point.location.x - radius,
+            y: point.location.y - radius,
+            width: point.width,
+            height: point.width
+          )),
+          with: .color(inkColor)
+        )
+      }
+      return
+    }
+
+    // Draw dense overlapping round segments instead of one filled offset polygon.
+    // Offset polygons fold over at tight turns and crossings; overlapping round
+    // strokes keep the centerline dominant and make width changes subtle.
+    for index in 1..<points.count {
+      let previous = points[index - 1]
+      let point = points[index]
+      let width = (previous.width + point.width) / 2
+      var segment = Path()
+      segment.move(to: previous.location)
+      segment.addLine(to: point.location)
+      context.stroke(
+        segment,
+        with: .color(inkColor),
+        style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
+      )
+    }
+  }
+}
+
+private struct DoodleRenderPoint {
+  var location: CGPoint
+  var width: CGFloat
+  var hasExplicitWidth: Bool
+}
+
+extension Path {
+
+  /// An open path through `points`, rounding each interior corner with a quadratic
+  /// curve whose endpoints are the edge midpoints and whose control point is the
+  /// vertex — the standard one-pass smoothing for a hand-drawn polyline. Gives the
+  /// line a flowing, pen-like glide on top of the centerline's own smoothing.
+  fileprivate init(smooth points: [CGPoint]) {
+    self.init()
+    guard let first = points.first else { return }
+    move(to: first)
+    guard points.count > 2 else {
+      for point in points.dropFirst() { addLine(to: point) }
+      return
+    }
+    func midpoint(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+      CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+    }
+    for index in 1..<(points.count - 1) {
+      addQuadCurve(to: midpoint(points[index], points[index + 1]), control: points[index])
+    }
+    addQuadCurve(to: points[points.count - 1], control: points[points.count - 2])
+  }
+
 }
 
 extension DoodleStroke {
 
   /// The polyline to draw, optionally truncated at `limit` seconds with the final
   /// segment interpolated so a replay grows smoothly rather than in jumps.
-  func visiblePoints(upTo limit: TimeInterval?) -> [CGPoint] {
+  fileprivate func visiblePoints(upTo limit: TimeInterval?) -> [DoodleRenderPoint] {
     guard let first = points.first else { return [] }
 
     guard let limit else {
-      return points.map(\.location)
+      return points.map { DoodleRenderPoint(point: $0, fallbackWidth: width) }
     }
 
     guard first.time <= limit else { return [] }
-    var result: [CGPoint] = [first.location]
+    var result: [DoodleRenderPoint] = [DoodleRenderPoint(point: first, fallbackWidth: width)]
     for index in 1..<max(points.count, 1) {
       let point = points[index]
       if point.time <= limit {
-        result.append(point.location)
+        result.append(DoodleRenderPoint(point: point, fallbackWidth: width))
         continue
       }
       let previous = points[index - 1]
       let span = point.time - previous.time
-      let progress = span > 0 ? (limit - previous.time) / span : 1
-      result.append(previous.location.interpolate(to: point.location, progress: CGFloat(progress)))
+      let progress = CGFloat(span > 0 ? (limit - previous.time) / span : 1)
+      result.append(DoodleRenderPoint(
+        location: previous.location.interpolate(to: point.location, progress: progress),
+        width: CGFloat(previous.resolvedWidth(fallback: width))
+          + (CGFloat(point.resolvedWidth(fallback: width)) - CGFloat(previous.resolvedWidth(fallback: width))) * progress,
+        hasExplicitWidth: previous.width != nil || point.width != nil
+      ))
       break
+    }
+    return result
+  }
+}
+
+extension DoodleRenderPoint {
+
+  init(point: DoodlePoint, fallbackWidth: Double) {
+    self.init(
+      location: point.location,
+      width: CGFloat(point.resolvedWidth(fallback: fallbackWidth)),
+      hasExplicitWidth: point.width != nil
+    )
+  }
+}
+
+extension DoodlePoint {
+
+  fileprivate func resolvedWidth(fallback: Double) -> Double {
+    width ?? fallback
+  }
+}
+
+extension [DoodleRenderPoint] {
+
+  fileprivate func removingNearDuplicates() -> [DoodleRenderPoint] {
+    var result: [DoodleRenderPoint] = []
+    for point in self {
+      guard let previous = result.last else {
+        result.append(point)
+        continue
+      }
+      if previous.location.distance(to: point.location) > 0.2 {
+        result.append(point)
+      }
     }
     return result
   }

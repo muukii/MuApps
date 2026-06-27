@@ -25,6 +25,10 @@ let avifDependencyHeaderSearchPaths: ProjectDescription.SettingValue = .array([
 
 let packageSettings = PackageSettings(
   productTypes: [:],
+  baseSettings: .settings(base: [
+    // Enable Xcode 26's reusable compilation cache for generated Swift package targets.
+    "COMPILATION_CACHE_ENABLE_CACHING": "YES",
+  ]),
   targetSettings: [
     "avifc": .settings(base: [
       "HEADER_SEARCH_PATHS": avifDependencyHeaderSearchPaths,

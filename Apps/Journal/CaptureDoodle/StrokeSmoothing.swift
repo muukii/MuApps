@@ -1,18 +1,20 @@
 import CoreGraphics
 
-// Stroke smoothing ported from FluidGroup/Brightroom's EditingCanvas
-// (EditingCanvasStroke.swift) — the masking/image-editing concerns are dropped;
-// this operates purely on `[CGPoint]`. Two stages run in order:
+// Stroke smoothing ported from FluidGroup/Brightroom's EditingCanvas and then
+// pushed toward an Instagram/Procreate-style streamline brush. The masking/image
+// editing concerns are dropped; this operates on timestamped touch samples. Two
+// stages run in order:
 //   raw coalesced points
-//     → StrokeStabilizer  (velocity-aware exponential lag — the "feel")
+//     → trajectory filter (keeps the user's large path, removes jitter)
 //     → spline smoother   (streaming cubic Bézier / Catmull-Rom / moving avg)
 //     → uniformly resampled points
-// Callers then decimate the output into fixed-spacing brush stamps.
+// Callers render the output as a smooth stroked centerline.
 
 struct StrokeSmoother {
 
   private var configuration = InkSmoothing()
   private var stabilizer = StrokeStabilizer()
+  private var streamline = TrajectoryStreamlineFilter()
   private var bezier = BezierStrokeSmoother()
   private var catmullRom = CatmullRomStrokeSmoother()
   private var movingAverage = MovingAverageStrokeSmoother()
@@ -23,37 +25,65 @@ struct StrokeSmoother {
     reset()
   }
 
-  mutating func begin(at point: CGPoint) {
+  mutating func begin(at point: TimedPoint) {
     reset()
-    stabilizer.begin(at: point)
+    stabilizer.begin(at: point.location)
+    streamline.begin(at: point)
 
     switch configuration.algorithm {
     case .raw:
       break
+    case .streamline:
+      bezier.begin(at: point.location)
     case .bezier:
-      bezier.begin(at: point)
+      bezier.begin(at: point.location)
     case .catmullRom:
-      catmullRom.begin(at: point)
+      catmullRom.begin(at: point.location)
     case .movingAverage:
-      movingAverage.begin(at: point)
+      movingAverage.begin(at: point.location)
     }
   }
 
-  mutating func append(_ inputPoints: [CGPoint], sampleDistance: CGFloat) -> [CGPoint] {
-    let prepared = stabilizer.append(
-      inputPoints,
-      strength: configuration.strength,
-      sampleDistance: sampleDistance
-    )
-    return appendPrepared(prepared, sampleDistance: sampleDistance)
+  mutating func append(_ inputPoints: [TimedPoint], sampleDistance: CGFloat) -> [CGPoint] {
+    switch configuration.algorithm {
+    case .raw:
+      return inputPoints.map(\.location)
+    case .streamline:
+      let prepared = streamline.append(
+        inputPoints,
+        strength: configuration.strength,
+        sampleDistance: sampleDistance
+      )
+      return bezier.append(prepared, sampleDistance: sampleDistance)
+    case .bezier, .catmullRom, .movingAverage:
+      let prepared = stabilizer.append(
+        inputPoints.map(\.location),
+        strength: configuration.strength,
+        sampleDistance: sampleDistance
+      )
+      return appendPrepared(prepared, sampleDistance: sampleDistance)
+    }
   }
 
-  mutating func finish(at point: CGPoint, sampleDistance: CGFloat) -> [CGPoint] {
-    let prepared = stabilizer.finish(
-      at: point,
-      strength: configuration.strength,
-      sampleDistance: sampleDistance
-    )
+  mutating func finish(at point: TimedPoint, sampleDistance: CGFloat) -> [CGPoint] {
+    let prepared: [CGPoint]
+    switch configuration.algorithm {
+    case .raw:
+      prepared = [point.location]
+    case .streamline:
+      prepared = streamline.finish(
+        at: point,
+        strength: configuration.strength,
+        sampleDistance: sampleDistance
+      )
+    case .bezier, .catmullRom, .movingAverage:
+      prepared = stabilizer.finish(
+        at: point.location,
+        strength: configuration.strength,
+        sampleDistance: sampleDistance
+      )
+    }
+
     guard let endPoint = prepared.last else {
       reset()
       return []
@@ -67,6 +97,7 @@ struct StrokeSmoother {
 
   mutating func reset() {
     stabilizer.reset()
+    streamline.reset()
     bezier.reset()
     catmullRom.reset()
     movingAverage.reset()
@@ -76,6 +107,8 @@ struct StrokeSmoother {
     switch configuration.algorithm {
     case .raw:
       return points
+    case .streamline:
+      return bezier.append(points, sampleDistance: sampleDistance)
     case .bezier:
       return bezier.append(points, sampleDistance: sampleDistance)
     case .catmullRom:
@@ -89,6 +122,8 @@ struct StrokeSmoother {
     switch configuration.algorithm {
     case .raw:
       return [point]
+    case .streamline:
+      return bezier.finish(at: point, sampleDistance: sampleDistance)
     case .bezier:
       return bezier.finish(at: point, sampleDistance: sampleDistance)
     case .catmullRom:
@@ -99,11 +134,147 @@ struct StrokeSmoother {
   }
 }
 
+// MARK: - Streamline
+
+/// Trajectory-preserving streamline filter.
+///
+/// Unlike a lazy brush, this does not let the visible ink trail far behind the
+/// finger. It keeps the large user-drawn trajectory, drops near-collinear jitter,
+/// and emits anchors only when the path has travelled far enough or changed
+/// direction enough for the downstream Bézier stage to need a new point.
+struct TrajectoryStreamlineFilter {
+
+  private var lastEmittedPoint: CGPoint?
+  private var pendingPoint: CGPoint?
+  private var previousInput: TimedPoint?
+  private var filteredPoint: CGPoint?
+  private var filteredVelocity: CGFloat = 0
+
+  mutating func begin(at point: TimedPoint) {
+    reset()
+    lastEmittedPoint = point.location
+    pendingPoint = point.location
+    previousInput = point
+    filteredPoint = point.location
+  }
+
+  mutating func append(_ inputPoints: [TimedPoint], strength: Double, sampleDistance: CGFloat) -> [CGPoint] {
+    inputPoints.flatMap { append($0, strength: strength, sampleDistance: sampleDistance) }
+  }
+
+  mutating func finish(at point: TimedPoint, strength: Double, sampleDistance: CGFloat) -> [CGPoint] {
+    var output = append(point, strength: strength, sampleDistance: sampleDistance)
+    if output.last?.distance(to: point.location) ?? .greatestFiniteMagnitude > max(sampleDistance * 1.5, 1) {
+      output += easedCatchUp(to: point.location, sampleDistance: sampleDistance)
+    } else if output.isEmpty {
+      output.append(point.location)
+    }
+
+    reset()
+    return output
+  }
+
+  mutating func reset() {
+    lastEmittedPoint = nil
+    pendingPoint = nil
+    previousInput = nil
+    filteredPoint = nil
+    filteredVelocity = 0
+  }
+
+  private mutating func append(_ point: TimedPoint, strength: Double, sampleDistance: CGFloat) -> [CGPoint] {
+    guard let lastEmittedPoint else {
+      self.lastEmittedPoint = point.location
+      pendingPoint = point.location
+      previousInput = point
+      return [point.location]
+    }
+
+    let clampedStrength = min(max(CGFloat(strength), 0), 1)
+    guard clampedStrength > 0.001 else {
+      self.lastEmittedPoint = point.location
+      pendingPoint = point.location
+      previousInput = point
+      return [point.location]
+    }
+
+    updateVelocity(with: point)
+
+    let filteredLocation = smoothedLocation(to: point.location, strength: clampedStrength)
+    let distance = lastEmittedPoint.distance(to: filteredLocation)
+    let spacing = anchorSpacing(strength: clampedStrength, velocity: filteredVelocity, sampleDistance: sampleDistance)
+    let angle = turnAngle(from: lastEmittedPoint, through: pendingPoint ?? lastEmittedPoint, to: filteredLocation)
+    pendingPoint = filteredLocation
+
+    guard distance >= spacing || angle >= angleThreshold(strength: clampedStrength) else {
+      return []
+    }
+
+    self.lastEmittedPoint = filteredLocation
+    return [filteredLocation]
+  }
+
+  private mutating func updateVelocity(with point: TimedPoint) {
+    defer { previousInput = point }
+    guard let previousInput else { return }
+
+    let elapsed = max(point.timestamp - previousInput.timestamp, 1.0 / 240.0)
+    let velocity = previousInput.location.distance(to: point.location) / CGFloat(elapsed)
+    filteredVelocity = filteredVelocity + (velocity - filteredVelocity) * 0.22
+  }
+
+  private mutating func smoothedLocation(to location: CGPoint, strength: CGFloat) -> CGPoint {
+    guard let filteredPoint else {
+      self.filteredPoint = location
+      return location
+    }
+
+    let speed = smoothstep(edge0: 140, edge1: 1_700, value: filteredVelocity)
+    let baseResponse = 0.075 + (1 - strength) * 0.12
+    let response = min(baseResponse + speed * 0.18, 0.28)
+    let nextPoint = filteredPoint.interpolate(to: location, progress: response)
+    self.filteredPoint = nextPoint
+    return nextPoint
+  }
+
+  private func anchorSpacing(strength: CGFloat, velocity: CGFloat, sampleDistance: CGFloat) -> CGFloat {
+    let spacing = max(sampleDistance, 1)
+    let slowSpacing = spacing * (1.4 + strength * 2.2)
+    let fastSpacing = spacing * (3.2 + strength * 5.2)
+    let speed = smoothstep(edge0: 180, edge1: 1_600, value: velocity)
+    return slowSpacing + (fastSpacing - slowSpacing) * speed
+  }
+
+  private func angleThreshold(strength: CGFloat) -> CGFloat {
+    .pi * (0.14 + strength * 0.20)
+  }
+
+  private func turnAngle(from start: CGPoint, through middle: CGPoint, to end: CGPoint) -> CGFloat {
+    let first = CGVector(dx: middle.x - start.x, dy: middle.y - start.y)
+    let second = CGVector(dx: end.x - middle.x, dy: end.y - middle.y)
+    let firstLength = max(hypot(first.dx, first.dy), 0.001)
+    let secondLength = max(hypot(second.dx, second.dy), 0.001)
+    let dot = (first.dx * second.dx + first.dy * second.dy) / (firstLength * secondLength)
+    return acos(min(max(dot, -1), 1))
+  }
+
+  private func easedCatchUp(to point: CGPoint, sampleDistance: CGFloat) -> [CGPoint] {
+    guard let lastEmittedPoint else { return [point] }
+    let segment = LinearSegment(start: lastEmittedPoint, end: point)
+      .sampledPoints(maxSegmentLength: max(sampleDistance * 2, 1))
+    return Array(segment.dropFirst())
+  }
+
+  private func smoothstep(edge0: CGFloat, edge1: CGFloat, value: CGFloat) -> CGFloat {
+    let progress = min(max((value - edge0) / max(edge1 - edge0, 1), 0), 1)
+    return progress * progress * (3 - 2 * progress)
+  }
+}
+
 // MARK: - Stabilizer
 
-/// Velocity-aware exponential lag filter (think Procreate "Streamline"): the
-/// stabilized point trails the finger by a strength-scaled fraction, catching up
-/// faster on fast strokes.
+/// Legacy exponential lag filter: the stabilized point trails the finger by a
+/// strength-scaled fraction, catching up faster as the distance grows.
 struct StrokeStabilizer {
 
   private var stabilizedPoint: CGPoint?
