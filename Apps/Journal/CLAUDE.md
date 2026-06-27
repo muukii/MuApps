@@ -9,27 +9,31 @@ A journaling app (iPhone + iPad) where each captured thing becomes one **Card**.
 iCloud sync is a hard requirement → **SwiftData with CloudKit mirroring**.
 
 The app is **pre-product**: the real journaling UI is undecided. Today the root
-is a **dev gallery** (`Sources/CaptureGalleryView.swift`) that launches each
-capture component standalone. Read `docs/SPECIFICATION.md` for the full,
+is a **dev gallery**
+(`Sources/Journal/Features/Settings/CaptureGalleryView.swift`) that launches
+each capture component standalone. Read `docs/SPECIFICATION.md` for the full,
 current state — keep it updated when behavior changes (see its Documentation
 Policy; this is in addition to the repo-root `docs/SPECIFICATION.md`, which is
 about distribution, not product behavior).
 
 ## Layout
 
-- `Sources/` — app shell: `JournalApp`, `CaptureGalleryView` (root), `ContentView`
-  (SwiftData harness), `SettingsView`.
-- `JournalModel/` — **shared data layer** (dynamic framework): `Card`, `Tag`,
+- `Sources/Journal/` — app shell: `JournalApp`, creation/list/settings features,
+  app-local components, sync helpers, notification UI, and app resources such as
+  `Icon.icon`.
+- `Sources/JournalModel/` — **shared data layer** (dynamic framework): `Card`, `Tag`,
   `Attachment`, `CardRelationship`, `Coordinate`, and `JournalStore` (the schema
   + the one shared-container factory). Linked by both the app and the widget;
   built extension-API-only.
-- `JournalWidget/` — **WidgetKit extension** (`.appExtension`): `JournalWidgetBundle`
-  (`@main`) + `LatestNoteWidget`, which shows the most recently created note
-  (`Card.body`) read from the shared store.
-- Capture frameworks (one isolated static framework each):
-  `CaptureText`, `CapturePhoto`, `CaptureDoodle`, `CaptureBlob`,
-  `CaptureAudio`, `CaptureSuggestions`.
-- Support frameworks: `MuColor` (themes/palette), `MuHaptics` (Core Haptics lab).
+- `Sources/JournalWidget/` — **WidgetKit extension** (`.appExtension`): `JournalWidgetBundle`
+  (`@main`) + `LatestNoteWidget`, which shows the most recently created card
+  read from the shared store, including doodle thumbnails when available.
+- `Sources/Capture*/` — capture frameworks (one isolated static framework each):
+  `CaptureText`, `CapturePhoto`, `CaptureDoodle`, `CaptureAudio`,
+  `CaptureSuggestions`.
+- `Sources/MuColor/`, `Sources/MuHaptics/` — support frameworks for themes/palette
+  and Core Haptics labs.
+- `Sources/JournalUITests/` — UI tests.
 - `Project.swift` — Tuist manifest (targets, entitlements, Info.plist).
 
 ## Conventions specific to Journal
@@ -72,5 +76,5 @@ xcodebuild -workspace MuApps.xcworkspace -scheme Journal \
 ```
 
 Use **iPhone 17 / OS 27.0** (no iPhone 16 simulator on this machine). Capture
-components have their own schemes for isolated runs. `Capturer` (used by
-`CapturePhoto`) is a git submodule — ensure it is checked out before generating.
+components have their own schemes for isolated runs. `CapturePhoto` is implemented
+directly on AVFoundation.

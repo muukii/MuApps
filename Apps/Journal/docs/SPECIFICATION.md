@@ -8,9 +8,9 @@ functional change lands (see [Documentation Policy](#documentation-policy)).
 ## Overview
 
 `Journal` is a journaling app for iPhone and iPad. Each thing a user records —
-text, a photo, a doodle, ambient sound, a Journaling Suggestion — becomes one
-**Card**. iCloud sync across a user's devices is a hard product requirement, so
-persistence is **SwiftData with CloudKit mirroring**.
+text, a photo, a doodle, Bauhaus grid artwork, ambient sound, a Journaling
+Suggestion — becomes one **Card**. iCloud sync across a user's devices is a hard
+product requirement, so persistence is **SwiftData with CloudKit mirroring**.
 
 ### Project status
 
@@ -23,10 +23,10 @@ exists today is:
 - Six **capture components**, each built as an isolated framework so it can be
   developed and exercised on its own, independent of the undecided UI.
 - A **compose-first app shell** (`CreationView`) that writes text, photo, audio,
-  and doodle Cards through card-specific detail editors, plus a **dev gallery**
+  doodle, and Bauhaus Cards through card-specific editors, plus a **dev gallery**
   (`CaptureGalleryView`) that launches each component standalone for on-device
   testing. The dev gallery is scaffolding, **not the shipping entry point**.
-- A **theming system** (`MuColor`) and a **Core Haptics lab** (`MuHaptics`).
+- A **theming system** (`MuColor`) and **Core Haptics labs** (`MuHaptics`).
 - A **widget-ready structure**: the data layer lives in a shared `JournalModel`
   framework and the SwiftData store is in an App Group container, so the
   `JournalWidget` extension reads the same Cards as the app. A minimal "Recent
@@ -45,7 +45,10 @@ before persistence sees them.
 Tuist project (`Apps/Journal/Project.swift`) with an app target, a **widget
 extension**, a shared **data-layer framework**, and several **Journal-local
 static frameworks**. The frameworks live inside the app (not in the repo's
-`Shared/`) because they are app-scoped, not cross-app.
+`Shared/`) because they are app-scoped, not cross-app. All Journal target source
+roots are grouped under `Apps/Journal/Sources/<TargetName>/`; the app icon
+package is `Apps/Journal/Sources/Journal/Icon.icon`. The target and module names
+remain `Journal`; the user-facing bundle display name is `Tinycurve`.
 
 ```
 Journal (app, app.muukii.journal)
@@ -55,11 +58,11 @@ Journal (app, app.muukii.journal)
 │                        + JournalStore
 │                        (dynamic framework, linked by both app and widget)
 ├── MuColor            — color themes / palette + container views
-├── MuHaptics          — Core Haptics pattern editor & engine (Lab)
+├── MuHaptics          — Core Haptics pattern editor, tap sequencer & engine (Lab)
 ├── CaptureText        — text note capture
-├── CapturePhoto       — camera capture (depends on Capturer)
+├── CapturePhoto       — camera capture (AVFoundation)
 ├── CaptureDoodle      — SwiftUI vector ink canvas (depends on CoreHaptics)
-├── CaptureBlob        — translucent gradient shape painting (no extra deps)
+├── CaptureBauhaus     — 5 x 5 Bauhaus-style grid composer
 ├── CaptureAudio       — ambient sound recording (depends on AVFoundation)
 └── CaptureSuggestions — Apple Journaling Suggestions picker demo
 ```
@@ -77,11 +80,12 @@ explicit target dependency) is a WidgetKit extension. Its single **Latest Note**
 widget (small / medium / large families) reads the single most recently created
 `Card` directly from the shared SwiftData store via
 `JournalStore.makeModelContainer()` (a `FetchDescriptor` sorted by `createdAt`
-descending, `fetchLimit = 1`) and shows kind-aware display text: text cards use
-`Card.body` (falling back to `title`), while media cards show a modality label.
+descending, `fetchLimit = 1`) and shows kind-aware content: text cards use
+`Card.body` (falling back to `title`), doodle and Bauhaus cards render matching
+attachment thumbnails, and the other media cards still show a modality label.
 It maps the `Card` to a `Sendable` `NoteSnapshot` so the timeline entry and
-views stay free of the persistence layer, and shows an empty state when there
-are no notes.
+views stay free of the persistence layer, capture frameworks, and media files;
+it shows an empty state when there are no notes.
 
 The widget refreshes whenever a note is written: `CreationView.save()` calls
 `WidgetCenter.shared.reloadAllTimelines()` after `JournalStore.createThread(...)`
@@ -141,14 +145,15 @@ than scattered `context.insert(Card(...))` calls.
 values and saves them as one linear thread write, connecting each Card to the
 previous one with `.continuation`. The app-side `ThreadDraftCard` keeps
 composer media in the capture components' own value types (`CapturedPhoto`,
-`AudioRecording`, `DoodleDrawing`) so editors can reopen and continue those
-values. `ThreadDraftCard` is `Codable` for crash recovery, and only encodes the
-draft payload; SwiftUI presentation identity is rebuilt after restore.
+`AudioRecording`, `DoodleDrawing`, `BauhausGridArtwork`) so editors can reopen
+and continue those values. `ThreadDraftCard` is `Codable` for crash recovery,
+and only encodes the draft payload; SwiftUI presentation identity is rebuilt
+after restore.
 Immediately before saving, the composer snapshots each draft and converts it into
-`ThreadCardInput`. Text inputs write into `Card.body`; photo and doodle inputs
-stage encoded bytes plus thumbnails; audio inputs move the recording file URL
-into the shared media directory as an `.audio` attachment. The thread write still
-performs one final `ModelContext.save()`;
+`ThreadCardInput`. Text inputs write into `Card.body`; photo, doodle, and
+Bauhaus inputs stage encoded bytes plus thumbnails; audio inputs move the
+recording file URL into the shared media directory as an `.audio` attachment.
+The thread write still performs one final `ModelContext.save()`;
 attachment files are written or moved before that save, with orphan cleanup
 handled by `reconcileOrphanFiles(...)`.
 `createRelationship(from:to:kind:in:)` connects existing Cards and enforces the
@@ -167,7 +172,7 @@ ever matters, is an app-level concern.
 | Property | Type | Notes |
 |----------|------|-------|
 | `id` | `UUID` | Logical id; not unique-enforced (see above). |
-| `kind` | `Kind` | Primary modality: `.text`, `.photo`, `.audio`, or `.doodle`. Determines which content field/attachment is meaningful. |
+| `kind` | `Kind` | Primary modality: `.text`, `.photo`, `.audio`, `.doodle`, or `.bauhaus`. Determines which content field/attachment is meaningful. |
 | `createdAt` | `Date` | |
 | `updatedAt` | `Date` | |
 | `tags` | `[Tag]?` | Many-to-many; inverse declared on `Tag.cards`. |
@@ -179,8 +184,9 @@ ever matters, is an app-level concern.
 | `body` | `String` | |
 
 `kind` is the canonical content contract. `.text` cards render `body`; media
-cards expect a matching `Attachment.kind` (`.photo`, `.audio`, or `.doodle`) and
-do not render `body` as a caption.
+cards expect a matching `Attachment.kind` (`.photo`, `.audio`, `.doodle`, or
+`.bauhaus`) and do not render `body` as a caption. Bauhaus cards use `.bauhaus`
+attachments with encoded `BauhausGridArtwork` JSON plus a mirrored thumbnail.
 
 ### `Tag` — a label applied to many Cards
 
@@ -209,15 +215,15 @@ references can branch from any earlier card. The app-level invariant is DAG:
 
 ### `Attachment` — media metadata for a Card
 
-Attachments represent photos, audio recordings, and doodles associated with a
-card. The SwiftData row stores queryable metadata and a small thumbnail; the full
-bytes live as files in the App Group container and are reconciled by
-`JournalStore.reconcileOrphanFiles(...)`.
+Attachments represent photos, audio recordings, doodles, and Bauhaus artwork
+associated with a card. The SwiftData row stores queryable metadata and a small
+thumbnail; the full bytes live as files in the App Group container and are
+reconciled by `JournalStore.reconcileOrphanFiles(...)`.
 
 | Property | Type | Notes |
 |----------|------|-------|
 | `id` | `UUID` | Logical id and file name basis. |
-| `kind` | `Kind` | `.photo`, `.audio`, or `.doodle`. |
+| `kind` | `Kind` | `.photo`, `.audio`, `.doodle`, or `.bauhaus`. |
 | `byteSize` | `Int` | Size of the on-disk file at attach time. |
 | `thumbnail` | `Data?` | Small mirrored preview data, when generated. |
 | `createdAt` | `Date` | |
@@ -259,15 +265,15 @@ toolbar **Save** button (disabled when the trimmed text is empty).
 ### CapturePhoto → `CapturedPhoto`
 
 `PhotoCaptureView` — an in-place camera surface (live preview, shutter,
-front/back flip) built on the **Capturer** library. Handles authorization states
+front/back flip) built directly on AVFoundation. Handles authorization states
 (`unknown` / `authorized` / `denied` / `unavailable`) and emits the still through
 `onCapture`.
 
 - `CapturedPhoto`: `Sendable, Equatable` — `imageData: Data` (JPEG bytes),
   `pixelSize: CGSize`, lazy `image: UIImage?`,
   `thumbnailData(maxPixelLength:)` for generating a small preview JPEG.
-- `CameraController` drives Capturer's async camera API; `CameraPreviewView`
-  mounts Capturer's `PixelBufferView` in SwiftUI.
+- `CameraController` owns the `AVCaptureSession`, camera input, and still-photo
+  output; `CameraPreviewView` mounts an `AVCaptureVideoPreviewLayer` in SwiftUI.
 
 ### CaptureDoodle → `DoodleDrawing`
 
@@ -292,14 +298,16 @@ tail that would move already-drawn geometry. Width is velocity-shaped from the
 same emitted timeline: each point stores an optional rendered width, fast spans
 thin out, stroke tips taper lightly, and the renderer draws dense overlapping
 round segments so tapering doesn't fold into a broken outline at tight turns.
-Default smoothing strength is `0.99`. While drawing, supported devices play a
-Core Haptics continuous texture whose intensity and sharpness follow finger
-speed; unsupported hardware, including Simulator, no-ops. The drawable surface
-is fixed to the same portrait paper proportion as journal cards
+Default brush width is `3pt`. While drawing, supported devices bracket each
+stroke with light touch-down/lift taps and keep the in-stroke Core Haptics
+continuous texture light while its intensity and sharpness follow finger speed;
+unsupported hardware, including Simulator, no-ops. The drawable
+surface is fixed to the same portrait paper proportion as journal cards
 (`width / height = 1 / 1.4144`), and the toolbar is single-color: width slider,
 undo, replay, clear, and export when `onExport` is supplied. When `onChange` is
-supplied, the canvas emits the current `DoodleDrawing?` after committed stroke
-changes, undo, or clear so hosts can auto-save drafts.
+supplied, the canvas emits the current
+`DoodleDrawing?` after committed stroke changes, undo, or clear so hosts can
+auto-save drafts.
 
 - `DoodleDrawing`: `Sendable, Equatable, Codable` — `strokes: [DoodleStroke]`,
   `canvasSize: CGSize`, `duration: TimeInterval`. `image(inkColor:scale:)`
@@ -307,28 +315,32 @@ changes, undo, or clear so hosts can auto-save drafts.
 - `DoodleStroke`: `points: [DoodlePoint]` (each `x, y, time`, optional
   point-level `width`), `width: Double` base brush width.
 - Supporting types: `DoodleCanvas` (controller), `DoodleStrokesView` (renderer),
-  `InkSmoothing`, `StrokeSmoothing` (streamline and legacy algorithms),
-  `DoodleDrawingHaptics`, `DrawingGestureRecognizer` (timestamped),
-  `TimedPoint`.
+  `StrokeSmoothing` (fixed streamline pipeline), `DoodleDrawingHaptics`,
+  `DrawingGestureRecognizer` (timestamped), `TimedPoint`.
 
-### CaptureBlob → `BlobPainting`
+### CaptureBauhaus → `BauhausGridArtwork`
 
-`BlobPaintCanvasView(onExport:)` — a separate **SwiftUI vector** surface for
-translucent filled shapes, not ink strokes. Each finger stroke creates one
-closed ribbon-like `BlobLayer`: a smoothed centerline, a large fixed layer width,
-and an owned gradient style. The live layer is the authored layer; lifting the
-finger commits the visible shape as-is without a second fitting pass. Layers are
-drawn in order with translucent linear gradients, giving overlap and depth
-similar to abstract gradient paper cutouts. The toolbar offers gradient swatches,
-width slider, undo, clear, and export.
+`BauhausGridCaptureView(initialArtwork:onChange:onExport:)` — a SwiftUI grid
+composer for Bauhaus-style geometric artwork. The canvas is a fixed **5 x 5**
+grid of square cells. Tapping a cell presents a native shape picker sheet; the
+user chooses one of the prepared primitives (square, circle, four semicircles,
+four quarter-circles, and four diagonal triangles), and the selected
+shape/background colors are applied to that cell. Compact swatch rows choose the
+active primitive and cell background colors, the trash action clears the whole
+artwork, and an optional export callback lets hosts finish the capture
+explicitly. Every cell edit and clear emits the current `BauhausGridArtwork`
+through `onChange`.
 
-- `BlobPainting`: `Sendable, Equatable, Codable` — `layers: [BlobLayer]`,
-  `canvasSize: CGSize`, `duration: TimeInterval`. `image(scale:)` rasterizes a
-  thumbnail on demand.
-- `BlobLayer`: `id`, `points: [BlobPoint]` (centerline `x, y, time`),
-  `width: Double`, `style: BlobGradientStyle`.
-- Supporting types: `BlobPaintCanvas` (controller), `BlobPaintingRenderer`,
-  `BlobGradientStyle`, `BlobColor`, and the component-local touch recognizer.
+- `BauhausGridArtwork`: `Sendable, Equatable, Codable` — row-major 25-cell
+  storage where each cell is either empty or a `BauhausTile`.
+- `BauhausGridPosition`: `Sendable, Equatable, Hashable, Codable, Identifiable`
+  — a stable zero-based row/column coordinate inside the 5 x 5 grid.
+- `BauhausTile`: `Sendable, Equatable, Codable` — `shape: BauhausShapeKind`,
+  `shapeSwatch: BauhausSwatch`, `backgroundSwatch: BauhausSwatch`.
+- `BauhausShapeKind`: prepared geometric primitives that each fit inside one
+  square cell.
+- `BauhausSwatch`: a fixed Codable content-color token set. These are authored
+  artwork colors, not app theme colors.
 
 ### CaptureAudio → `AudioRecording`
 
@@ -382,11 +394,13 @@ flattened, `Sendable` value model.
 
 A small palette/theme system applied app-wide.
 
-- `Palette`: five seed colors (`tint`, `primaryContainer`, `onPrimaryContainer`,
-  `secondaryContainer`, `onSecondaryContainer`) plus opacity-derived variants
-  (`onPrimaryContainerVariant`, `outline`, `outlineVariant`, `tintRing`, …). No
-  new hues are added beyond the five seeds. Colors are Display P3, declared via
-  the `#hexColor` macro (the external `HexColorMacro` dependency).
+- `Palette`: six seed colors (`tint`, `onTint`, `primaryContainer`,
+  `onPrimaryContainer`, `secondaryContainer`, `onSecondaryContainer`) plus
+  opacity-derived variants (`onPrimaryContainerVariant`, `outline`,
+  `outlineVariant`, `tintRing`, …). `onTint` is the foreground color for text and
+  icons displayed directly on a tint/accent surface. No new hues are added beyond
+  the seeds. Colors are Display P3, declared via the `#hexColor` macro (the
+  external `HexColorMacro` dependency).
 - `Theme`: an `id` + display `name` + a **light** and **dark** `Palette` pair.
   Five themes: **Warm Cream** (default), **Soft Mocha**, **Midnight**, **Sage**,
   **Blush**. `Theme.palette(for:)` resolves the surface for the active
@@ -403,19 +417,27 @@ A small palette/theme system applied app-wide.
   derive raw `Color`/`UIColor` values where a `ShapeStyle` won't do — e.g.
   configuring a `UINavigationBarAppearance` (see `appNavigationBarStyle`).
 
-### MuHaptics — Core Haptics lab
+### MuHaptics — Core Haptics labs
 
-A self-contained pattern editor + playback engine (reached via the gallery's
-**Lab** section).
+A self-contained pattern editor, tap sequencer, and playback engine (reached via
+the gallery's **Lab** section).
 
 - `HapticPattern`: `Equatable, Sendable, Identifiable` — `name`, `events:
   [Event]` (each with `kind` transient/continuous, `time`, `duration`,
   `intensity`, `sharpness`). Computes `duration`, builds a `CHHapticPattern`, and
   can emit Swift source for a pattern. Ships presets (single tap, double tap,
   heartbeat, ramp up, …).
+- `HapticTapSequence`: `Codable, Equatable, Sendable, Identifiable` — `name`,
+  `taps: [Tap]`, where each tap stores `time`, `intensity`, and `sharpness`.
+  It is the haptic analogue of a doodle timeline: the user taps out a rhythm and
+  the sequence converts to a playable `HapticPattern`.
 - `HapticEngine`: plays a `HapticPattern` or a raw AHAP dictionary; `isSupported`
   gates unsupported hardware.
 - `HapticEditorView`: the lab UI.
+- `HapticTapSequencerView`: a **Haptic Doodle** lab that records tap timing from
+  touch-down on a large tap surface, previews the timeline, supports undo/clear,
+  plays the sequence through Core Haptics, and exports Swift source for the
+  captured sequence.
 
 ---
 
@@ -429,15 +451,19 @@ A self-contained pattern editor + playback engine (reached via the gallery's
   `@AppStorage(JournalDefaults.hasCompletedOnboarding)` is `false` it hosts
   `OnboardingView`; once completed it cross-fades (`.transition(.opacity)`) to
   `CreationView`. The completion flag is flipped by the closure `RootView` passes
-  to `OnboardingView`, not by the onboarding view itself.
+  to `OnboardingView`, not by the onboarding view itself. It also owns the
+  scene-local `JournalNotificationCenter` and wraps the app content in
+  `JournalNotificationHost`, which injects that model through the SwiftUI
+  environment and overlays app-wide bottom capsule notifications above the
+  current screen.
 - **`OnboardingView`** — the first-run introduction, also re-showable on demand
   from Settings. Four horizontally-paged screens (`TabView` with
   `.tabViewStyle(.page)`) plus a fixed **Get Started** / **Next** call-to-action
   and a **Skip** affordance on every page but the last:
   1. **Welcome** — a decorative `CardSurface` stating the core idea ("Every little
      thing becomes a card") over a short welcome blurb.
-  2. **Capture methods** — the six modalities (Text, Photo, Doodle, Blob Paint,
-     Ambient Sound, Suggestions) as icon + name + one-line summary.
+  2. **Capture methods** — the five modalities (Text, Photo, Doodle, Ambient
+     Sound, Suggestions) as icon + name + one-line summary.
   3. **Permissions** — optional priming for Camera, Microphone, and Location. Each
      row shows the live authorization status and an **Allow** button that triggers
      the system prompt on demand (`AVCaptureDevice.requestAccess(for:)`,
@@ -458,43 +484,56 @@ A self-contained pattern editor + playback engine (reached via the gallery's
   separators follow the user's locale (en: "Sat, Jun 27"; ja: "6月27日(土)").
   Each draft Card shows its ordinal, kind chip, optional location indicator, and
   a kind-aware summary: text previews the trimmed body or "Write your thoughts…";
-  photo and doodle show the captured thumbnail or an "Open camera/canvas" prompt;
-  audio shows the recorded duration or an "Open recorder" prompt. Tapping a
-  non-audio card opens `ThreadDraftCardDetailEditor` in a `fullScreenCover` with
-  a zoom transition from the card surface, a segmented kind picker, and one
-  concrete editor per kind. Tapping an audio card opens a native **Voice Record**
-  sheet instead, showing **Play** and **Record Again** for an existing
+  photo, doodle, and Bauhaus show the captured thumbnail or an "Open
+  camera/canvas/grid" prompt; audio shows the recorded duration or an "Open
+  recorder" prompt. Tapping a text card opens a native **Text** sheet with a
+  focused `TextEditor` and the per-card location toggle in the toolbar. Tapping a
+  photo card opens a native **Photo** sheet, showing the existing
+  `CapturedPhoto` with **Retake Photo** or `PhotoCaptureView` for a new shot.
+  Tapping a doodle card opens a dedicated full-screen **Doodle** canvas that
+  reopens the existing `DoodleDrawing` in `DoodleCanvasView` so new strokes append
+  to the same vector drawing. Tapping a Bauhaus card opens a native **Bauhaus**
+  sheet that restores the existing `BauhausGridArtwork`; tapping a cell presents
+  the shape picker sheet, and choosing a shape applies it into the selected 5 x 5
+  grid cell. Tapping an audio card opens a native **Voice Record** sheet, showing
+  **Play** and **Record Again** for an existing
   `AudioRecording` or `AudioCaptureView` for a new take. The bottom composer
-  controls include **Voice Record**, which opens the same sheet without creating a
-  draft until recording finishes; the first untouched text placeholder is reused
-  for the completed audio card, otherwise a new audio draft is appended. Text
-  reopens the existing draft body in a `TextEditor`; photo reopens the existing
-  `CapturedPhoto` with a **Retake Photo** action that switches back to
-  `PhotoCaptureView`; doodle reopens the existing `DoodleDrawing` in
-  `DoodleCanvasView` so new strokes append to the same vector drawing. The editor
-  toolbar owns the `Done` dismissal action and the per-card location toggle. The
-  doodle editor auto-syncs committed canvas changes into the draft; there is no
-  separate save button for doodles. **Add Card**
-  appends another draft, scrolls it into view, and opens the same full-screen
-  editor. The glass up-arrow saves the current draft cards as a linear
+  controls put the concrete content-type icons — Text, Photo, Doodle, Bauhaus,
+  and Voice — in separated Liquid Glass buttons inside one shared
+  `GlassEffectContainer`, with the save action remaining a separate prominent
+  glass button. Tapping one of those quick-capture icons presents the matching
+  native sheet. Text opens the last untouched text placeholder when one exists;
+  otherwise it creates a new text draft and opens the Text sheet. Photo and Voice
+  create/reuse a draft only after capture finishes, then dismiss back to the
+  composer. Doodle and Bauhaus present native sheets at the large detent and
+  resolve a draft on the first non-empty canvas/grid change, reusing the first
+  untouched text placeholder when possible and restoring/removing that quick draft
+  if the canvas/grid is cleared. The doodle canvas and Bauhaus grid auto-sync
+  committed changes into the draft; there is no separate save button for those
+  visual editors. The glass up-arrow saves the current draft cards as a linear
   thread via `JournalStore.createThread(cards:in:)`, then clears the composer.
+  A successful save shows a transient bottom capsule notification ("Saved to
+  Journal") with success haptics; if saving fails, the draft remains on screen
+  and a persistent bottom capsule notification explains that the save did not
+  complete with failure haptics. Notifications fade, blur, and scale in place
+  with a slight bounce instead of sliding from an edge.
   The save button is disabled until every draft can be persisted (text requires
   non-empty trimmed text; media kinds require a captured payload). Existing-Card
   continuation selection is not wired yet; this composer creates a new thread
   from the first draft.
   Toolbar links to the entries list (`ListView`) and Settings. Capture demos are
-  still reachable from Settings; blob paint and suggestions remain dev-gallery
-  components rather than compose-surface card kinds.
+  kept in the dev gallery rather than Settings; suggestions remain a dev-gallery
+  component rather than a compose-surface card kind.
 - **`CaptureGalleryView`** (dev scaffolding, not currently wired into the app
   root) — a `List` with:
-  - **Capture**: Text, Photo, Doodle, Blob Paint, Ambient Sound, Suggestions.
-  - **Lab**: Haptics.
+  - **Capture**: Text, Photo, Doodle, Bauhaus Grid, Ambient Sound, Suggestions.
+  - **Lab**: Haptics, Haptic Doodle in Debug builds only.
   - **Storage**: Entries (SwiftData / iCloud) → `ListView`.
   - Toolbar → **Settings**.
   - Navigation-bar title and icons follow the active palette
     (`onPrimaryContainer` / `tint`) via `appNavigationBarStyle` (see below).
 - **`appNavigationBarStyle(titleColor:iconColor:backgroundColor:)`**
-  (`Sources/AppNavigationBarStyle.swift`) — recolors the enclosing
+  (`Sources/Journal/Components/AppNavigationBarStyle.swift`) — recolors the enclosing
   `NavigationStack`'s title and icons (bar-button items + back chevron) by
   applying a per-instance `UINavigationBarAppearance`, reached via
   **SwiftUIIntrospect**. Uses the `@_spi(Advanced)` range predicate
@@ -502,27 +541,43 @@ A self-contained pattern editor + playback engine (reached via the gallery's
   only matches when 26 is the current major, so it would no-op on iOS 27+).
   iOS 26+'s system (Liquid Glass) background is preserved unless an explicit
   `backgroundColor` is passed; the global appearance proxy is never touched.
-- **`ListView`** — a `@Query` + `modelContext.insert` harness over `Card` that
-  exists only to exercise the SwiftData + CloudKit stack end-to-end. Cards render
-  in a two-column `LazyVGrid` of portrait tiles shaped like a sheet of paper
-  (1 : 1.4144), filled with the active palette's `secondaryContainer`. Each tile
+- **`ListView`** — a `@Query`-backed entries harness over `Card` that exists only
+  to exercise the SwiftData + CloudKit stack end-to-end. Cards are grouped into
+  local-calendar day sections, each with a localized date header and a responsive
+  `LazyVGrid` of portrait tiles shaped like a sheet of paper (1 : 1.4144), filled
+  with the active palette's `secondaryContainer`: compact widths keep two
+  columns, while regular-width iPad layouts add columns as space allows. Each tile
   renders exactly one card pattern based on `Card.kind`: text (`Card.body`),
-  audio (waveform chrome), image (the matching photo attachment thumbnail), or
-  doodle (the matching doodle thumbnail). Media cards do not render `Card.body`
-  as a caption; a captured
-  audio/image/doodle is its own Card. Each tile is tilted by a small stable angle
-  (±3°) derived from its `Card.id`, for a loosely hand-placed look. The debug
-  **Seed Samples** action and `Card Patterns` Preview exercise those four
-  independent patterns. Not the real entries UI.
-- **`SettingsView`** — a theme picker plus a development capture list. Selecting
-  a theme writes `JournalDefaults.themeID` (animated) and triggers selection
-  haptic feedback. The capture list links to Text, Photo, Doodle, Blob Paint,
-  Ambient Sound, Suggestions, and the Haptics lab so those components can be
-  tried from the current app root. An **About** section has **Show Onboarding**,
-  which re-presents `OnboardingView` in a `fullScreenCover`; dismissing it returns
-  to the app without changing `hasCompletedOnboarding`.
-
-> `Sources/EntryScreen.swift` is currently an empty stub (no functional content).
+  audio (waveform chrome), image (the matching photo attachment thumbnail),
+  doodle (the matching doodle thumbnail), or Bauhaus (the matching grid
+  thumbnail). Media cards do not render `Card.body` as a caption; a captured
+  audio/image/doodle/Bauhaus grid is its own Card. Each tile is tilted by a small
+  stable angle (±3°) derived from its `Card.id`, for a loosely hand-placed look.
+  Tapping a tile pushes an **Entry** detail screen. The detail screen uses a
+  separate, non-tilted, variable-height card component so it can show full text,
+  a larger photo/doodle/Bauhaus preview, audio playback when the local recording
+  file exists, and created/updated/location metadata without inheriting the grid
+  tile's clipping and aspect-ratio limits. Each tile's context menu and the detail toolbar
+  include **Share**, which opens a pre-share preview sheet before any system
+  share sheet is shown. The preview displays the themed image export; it lays out
+  the actual 9:16 export canvas and aspect-fits that result into the sheet instead
+  of reflowing the card at preview size. Doodle cards also get a **Video** tab
+  that replays the stored vector timeline in the same share chrome. **Share
+  Image** renders that Card into a themed 9:16 PNG sized for Instagram Reels;
+  **Share Video** renders a matching 9:16, 60 fps Doodle replay mp4 by reusing a
+  static SwiftUI-rendered share frame and compositing only the moving vector
+  strokes, then presents it through the system share sheet. Bauhaus cards share
+  as still images using their mirrored grid thumbnail. The debug **Seed Samples**
+  action and `Card Patterns` Preview exercise the independent card patterns.
+  Not the real entries UI.
+- **`SettingsView`** — an iCloud sync status row, a theme picker, optional
+  Debug-only Lab links, and About actions. Selecting a theme writes
+  `JournalDefaults.themeID` (animated) and triggers selection haptic feedback.
+  Capture demos are intentionally hidden from Settings. In Debug builds, **Lab**
+  links to Haptics and Haptic Doodle so those tools can be tried from the current
+  app root; Release builds omit the Lab section. An **About** section has **Show
+  Onboarding**, which re-presents `OnboardingView` in a `fullScreenCover`;
+  dismissing it returns to the app without changing `hasCompletedOnboarding`.
 
 ---
 
@@ -538,12 +593,11 @@ xcodebuild -workspace MuApps.xcworkspace -scheme Journal \
 ```
 
 Each capture component also has its own scheme (`CaptureText`, `CapturePhoto`,
-`CaptureDoodle`, `CaptureBlob`, `CaptureAudio`, `CaptureSuggestions`, `MuColor`,
-`MuHaptics`) for building/running it in isolation.
+`CaptureDoodle`, `CaptureBauhaus`, `CaptureAudio`, `CaptureSuggestions`,
+`MuColor`, `MuHaptics`) for building/running it in isolation.
 
 **Simulator note:** this machine has no iPhone 16 simulator — use **iPhone 17 /
-OS 27.0**. The `Capturer` dependency is a git submodule; ensure it is checked out
-before generating.
+OS 27.0**.
 
 ### iCloud / CloudKit verification
 
