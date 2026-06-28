@@ -5,15 +5,15 @@ import Observation
 /// Bridges Core Location into the card-creation flow, where the only question is:
 /// *where am I right now, if I'm allowed to know?*
 ///
-/// The journal attaches a location to a card only when the user opts in **per
-/// card** (the location toggle in `CreationView`). So this owns exactly two
-/// things — the permission prompt and a single one-shot fix — and deliberately
-/// nothing more: no continuous tracking, no background updates. A journal needs
-/// the spot you were standing when you wrote, not a trail.
+/// Journal can attach a location to newly authored cards when the app-wide
+/// setting is enabled. This owns exactly two things — the permission prompt and
+/// a single one-shot fix — and deliberately nothing more: no continuous
+/// tracking, no background updates. A journal needs the spot you were standing
+/// when you wrote, not a trail.
 ///
 /// `authorizationStatus` is observed so the UI reflects the live system state;
-/// the permission prompt is fired lazily when the user reaches for location, so
-/// nothing is asked for until it's wanted.
+/// the permission prompt is fired lazily when the composer first needs a
+/// coordinate, so nothing is asked for until it's wanted.
 @MainActor
 @Observable
 final class LocationManager: NSObject, CLLocationManagerDelegate {

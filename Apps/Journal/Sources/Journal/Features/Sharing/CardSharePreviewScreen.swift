@@ -508,7 +508,10 @@ private enum CardShareDoodleStrokeRenderer {
     inkColor: Color,
     in context: GraphicsContext
   ) {
-    let points = stroke.visibleSharePoints(upTo: limit)
+    let points = CardShareCGPathFactory.renderKnots(
+      from: stroke.visibleSharePoints(upTo: limit),
+      brushWidth: CGFloat(stroke.width)
+    )
     guard let first = points.first else { return }
 
     guard points.count > 1 else {
@@ -529,7 +532,7 @@ private enum CardShareDoodleStrokeRenderer {
       drawVariableWidth(points, inkColor: inkColor, in: context)
     } else {
       context.stroke(
-        Path(cardShareSmooth: points.map(\.location)),
+        Path(cardShareDoodleSpline: points.map(\.location)),
         with: .color(inkColor),
         style: StrokeStyle(lineWidth: CGFloat(stroke.width), lineCap: .round, lineJoin: .round)
       )
@@ -541,16 +544,38 @@ private enum CardShareDoodleStrokeRenderer {
     inkColor: Color,
     in context: GraphicsContext
   ) {
-    let points = points.removingNearDuplicates()
-    guard points.count > 1 else { return }
+    guard points.count > 1 else {
+      if let point = points.first {
+        let radius = point.width / 2
+        context.fill(
+          Path(ellipseIn: CGRect(
+            x: point.location.x - radius,
+            y: point.location.y - radius,
+            width: point.width,
+            height: point.width
+          )),
+          with: .color(inkColor)
+        )
+      }
+      return
+    }
 
-    for index in 1..<points.count {
-      let previous = points[index - 1]
-      let point = points[index]
+    let locations = points.map(\.location)
+    for index in 0..<(points.count - 1) {
+      let previous = points[index]
+      let point = points[index + 1]
       let width = (previous.width + point.width) / 2
+      let controls = CardShareCGPathFactory.controlPoints(
+        forSegmentAt: index,
+        in: locations
+      )
       var segment = Path()
       segment.move(to: previous.location)
-      segment.addLine(to: point.location)
+      segment.addCurve(
+        to: point.location,
+        control1: controls.control1,
+        control2: controls.control2
+      )
       context.stroke(
         segment,
         with: .color(inkColor),
@@ -632,52 +657,112 @@ private extension DoodlePoint {
 
 private extension Path {
 
-  /// Smooth open path used for fixed-width share preview strokes.
-  init(cardShareSmooth points: [CGPoint]) {
+  /// Cubic spline used for fixed-width share preview strokes.
+  init(cardShareDoodleSpline points: [CGPoint]) {
     self.init()
     guard let first = points.first else { return }
     move(to: first)
-    guard points.count > 2 else {
-      for point in points.dropFirst() {
-        addLine(to: point)
-      }
-      return
-    }
 
-    func midpoint(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
-      CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+    for index in 0..<(points.count - 1) {
+      let controls = CardShareCGPathFactory.controlPoints(
+        forSegmentAt: index,
+        in: points
+      )
+      addCurve(
+        to: points[index + 1],
+        control1: controls.control1,
+        control2: controls.control2
+      )
     }
-
-    for index in 1..<(points.count - 1) {
-      addQuadCurve(to: midpoint(points[index], points[index + 1]), control: points[index])
-    }
-    addQuadCurve(to: points[points.count - 1], control: points[points.count - 2])
   }
 }
 
 private enum CardShareCGPathFactory {
 
-  /// CoreGraphics equivalent of the SwiftUI smooth path used by replay preview.
-  nonisolated static func smoothPath(points: [CGPoint]) -> CGPath {
+  nonisolated static func renderKnots(
+    from points: [CardShareDoodleRenderPoint],
+    brushWidth: CGFloat
+  ) -> [CardShareDoodleRenderPoint] {
+    let points = points.removingNearDuplicates(minDistance: 0.75)
+    guard points.count > 2 else { return points }
+
+    let minimumSpacing = max(brushWidth * 3.0, 11)
+    let cornerAngle = CGFloat.pi * 0.26
+    var result: [CardShareDoodleRenderPoint] = [points[0]]
+
+    for index in 1..<(points.count - 1) {
+      let previous = result[result.count - 1]
+      let point = points[index]
+      let next = points[index + 1]
+      let distance = previous.location.distance(to: point.location)
+      let angle = turnAngle(
+        from: previous.location,
+        through: point.location,
+        to: next.location
+      )
+
+      if distance >= minimumSpacing || angle >= cornerAngle {
+        result.append(point)
+      }
+    }
+
+    if let last = points.last, result[result.count - 1].location.distance(to: last.location) > 0.5 {
+      result.append(last)
+    }
+
+    return result
+  }
+
+  /// CoreGraphics equivalent of the SwiftUI cubic spline used by replay preview.
+  nonisolated static func splinePath(points: [CGPoint]) -> CGPath {
     let path = CGMutablePath()
     guard let first = points.first else { return path }
     path.move(to: first)
-    guard points.count > 2 else {
-      for point in points.dropFirst() {
-        path.addLine(to: point)
-      }
-      return path
-    }
 
-    func midpoint(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
-      CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+    for index in 0..<(points.count - 1) {
+      let controls = controlPoints(forSegmentAt: index, in: points)
+      path.addCurve(
+        to: points[index + 1],
+        control1: controls.control1,
+        control2: controls.control2
+      )
     }
-
-    for index in 1..<(points.count - 1) {
-      path.addQuadCurve(to: midpoint(points[index], points[index + 1]), control: points[index])
-    }
-    path.addQuadCurve(to: points[points.count - 1], control: points[points.count - 2])
     return path
+  }
+
+  nonisolated static func controlPoints(
+    forSegmentAt index: Int,
+    in points: [CGPoint]
+  ) -> (control1: CGPoint, control2: CGPoint) {
+    let previous = clampedPoint(at: index - 1, in: points)
+    let start = clampedPoint(at: index, in: points)
+    let end = clampedPoint(at: index + 1, in: points)
+    let next = clampedPoint(at: index + 2, in: points)
+    let scale: CGFloat = 1.0 / 6.0
+
+    return (
+      control1: CGPoint(
+        x: start.x + (end.x - previous.x) * scale,
+        y: start.y + (end.y - previous.y) * scale
+      ),
+      control2: CGPoint(
+        x: end.x - (next.x - start.x) * scale,
+        y: end.y - (next.y - start.y) * scale
+      )
+    )
+  }
+
+  private nonisolated static func clampedPoint(at index: Int, in points: [CGPoint]) -> CGPoint {
+    points[min(max(index, 0), points.count - 1)]
+  }
+
+  private nonisolated static func turnAngle(from start: CGPoint, through middle: CGPoint, to end: CGPoint) -> CGFloat {
+    let first = CGVector(dx: middle.x - start.x, dy: middle.y - start.y)
+    let second = CGVector(dx: end.x - middle.x, dy: end.y - middle.y)
+    let firstLength = max(hypot(first.dx, first.dy), 0.001)
+    let secondLength = max(hypot(second.dx, second.dy), 0.001)
+    let dot = (first.dx * second.dx + first.dy * second.dy) / (firstLength * secondLength)
+    return acos(min(max(dot, -1), 1))
   }
 }
 
@@ -697,7 +782,7 @@ private extension CGPoint {
 
 private extension Array where Element == CardShareDoodleRenderPoint {
 
-  nonisolated func removingNearDuplicates() -> [CardShareDoodleRenderPoint] {
+  nonisolated func removingNearDuplicates(minDistance: CGFloat = 0.2) -> [CardShareDoodleRenderPoint] {
     var result: [CardShareDoodleRenderPoint] = []
     for point in self {
       guard let previous = result.last else {
@@ -705,7 +790,7 @@ private extension Array where Element == CardShareDoodleRenderPoint {
         continue
       }
 
-      if previous.location.distance(to: point.location) > 0.2 {
+      if previous.location.distance(to: point.location) > minDistance {
         result.append(point)
       }
     }
@@ -1049,7 +1134,10 @@ private actor CardShareVideoRenderWorker {
     inkColor: CardShareVideoRGBA,
     context: CGContext
   ) {
-    let points = stroke.visibleSharePoints(upTo: limit)
+    let points = CardShareCGPathFactory.renderKnots(
+      from: stroke.visibleSharePoints(upTo: limit),
+      brushWidth: CGFloat(stroke.width)
+    )
     guard let first = points.first else { return }
 
     context.setFillColor(inkColor.cgColor())
@@ -1070,18 +1158,27 @@ private actor CardShareVideoRenderWorker {
     context.setLineJoin(.round)
 
     if points.contains(where: \.hasExplicitWidth) {
-      for index in 1..<points.count {
-        let previous = points[index - 1]
-        let point = points[index]
+      let locations = points.map(\.location)
+      for index in 0..<(points.count - 1) {
+        let previous = points[index]
+        let point = points[index + 1]
+        let controls = CardShareCGPathFactory.controlPoints(
+          forSegmentAt: index,
+          in: locations
+        )
         context.setLineWidth((previous.width + point.width) / 2)
         context.beginPath()
         context.move(to: previous.location)
-        context.addLine(to: point.location)
+        context.addCurve(
+          to: point.location,
+          control1: controls.control1,
+          control2: controls.control2
+        )
         context.strokePath()
       }
     } else {
       context.setLineWidth(CGFloat(stroke.width))
-      context.addPath(CardShareCGPathFactory.smoothPath(points: points.map(\.location)))
+      context.addPath(CardShareCGPathFactory.splinePath(points: points.map(\.location)))
       context.strokePath()
     }
   }

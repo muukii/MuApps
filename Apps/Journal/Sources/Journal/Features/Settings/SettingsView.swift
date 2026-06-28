@@ -14,6 +14,10 @@ enum JournalDefaults {
   /// `JournalAppearancePreference` before applying the scene color scheme.
   static let appearancePreferenceID = "journal.appearancePreference.id"
 
+  /// Whether newly authored cards should automatically attach the current
+  /// coordinate when system location permission allows it.
+  static let shouldAttachLocationToNewCards = "journal.creation.attachLocation"
+
   /// Whether the first-run onboarding has been completed. While `false`,
   /// `RootView` shows `OnboardingView` instead of the main app.
   static let hasCompletedOnboarding = "journal.onboarding.completed"
@@ -69,6 +73,8 @@ struct SettingsView: View {
   @AppStorage(JournalDefaults.themeID) private var themeID: String = Theme.default.id
   @AppStorage(JournalDefaults.appearancePreferenceID)
   private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
+  @AppStorage(JournalDefaults.shouldAttachLocationToNewCards)
+  private var shouldAttachLocationToNewCards: Bool = true
 
   /// Drives the manual re-showing of onboarding from this screen. Unlike the
   /// first-run path, this presents over the app and dismisses on completion —
@@ -108,6 +114,7 @@ struct SettingsView: View {
       }
 
       AppearanceSection(selectionID: $appearancePreferenceID)
+      LocationSection(isEnabled: $shouldAttachLocationToNewCards)
 
       #if DEBUG
       Section("Lab") {
@@ -140,6 +147,7 @@ struct SettingsView: View {
     .navigationBarTitleDisplayMode(.inline)
     .sensoryFeedback(.selection, trigger: themeID)
     .sensoryFeedback(.selection, trigger: appearancePreferenceID)
+    .sensoryFeedback(.selection, trigger: shouldAttachLocationToNewCards)
     .fullScreenCover(isPresented: $isShowingOnboarding) {
       OnboardingView(onComplete: { isShowingOnboarding = false })
     }
@@ -167,6 +175,24 @@ fileprivate struct AppearanceSection: View {
       Text("Appearance")
     } footer: {
       Text("System follows the device setting. Light and Dark override it for Journal.")
+    }
+  }
+}
+
+/// A form section for the app-wide location attachment preference.
+fileprivate struct LocationSection: View {
+
+  @Binding var isEnabled: Bool
+
+  var body: some View {
+    Section {
+      Toggle(isOn: $isEnabled) {
+        Label("Attach Location", systemImage: "location")
+      }
+    } header: {
+      Text("Location")
+    } footer: {
+      Text("When enabled, new cards attach your current location automatically if iOS allows Journal to access it.")
     }
   }
 }

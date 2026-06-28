@@ -53,9 +53,12 @@ final class DoodleCanvas {
   var isEmpty: Bool { strokes.isEmpty }
   var duration: TimeInterval { strokes.last?.points.last?.time ?? 0 }
 
-  /// The centerline resampling resolution. Keeping this dense gives the renderer
-  /// enough points to form long smooth curves without visible chord edges.
-  private var sampleDistance: CGFloat { max(CGFloat(width) * 0.025, 2) }
+  /// The centerline resampling resolution for saved points.
+  ///
+  /// The renderer turns these points back into spline knots, so storing coarse
+  /// spacing produces an opinionated curve and avoids preserving small hand
+  /// jitter as authored geometry.
+  private var sampleDistance: CGFloat { max(CGFloat(width) * 0.20, 6) }
 
   // MARK: Input (driven by DoodleInputView)
 

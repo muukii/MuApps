@@ -25,13 +25,6 @@ struct ThreadDraftVoiceRecorderSheet: View {
       }
       .navigationTitle("Voice Record")
       .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .confirmationAction) {
-          Button("Done") {
-            dismiss()
-          }
-        }
-      }
     }
   }
 }

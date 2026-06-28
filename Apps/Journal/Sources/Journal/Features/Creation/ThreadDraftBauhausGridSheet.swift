@@ -8,8 +8,6 @@ import SwiftUI
 /// restore or remove an automatically-created draft.
 struct ThreadDraftBauhausGridSheet: View {
 
-  @Environment(\.dismiss) private var dismiss
-
   /// Existing draft to edit. `nil` means the caller will resolve a draft when the
   /// first non-empty artwork arrives from the grid editor.
   let card: ThreadDraftCard?
@@ -28,13 +26,6 @@ struct ThreadDraftBauhausGridSheet: View {
       )
       .navigationTitle("Bauhaus")
       .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .confirmationAction) {
-          Button("Done") {
-            dismiss()
-          }
-        }
-      }
     }
   }
 }

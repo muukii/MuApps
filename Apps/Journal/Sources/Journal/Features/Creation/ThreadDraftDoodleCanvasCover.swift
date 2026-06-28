@@ -41,8 +41,6 @@ struct ThreadDraftDoodleCanvasCover: View {
 /// Photo, and Voice while still reusing the full canvas content.
 struct ThreadDraftDoodleCanvasSheet: View {
 
-  @Environment(\.dismiss) private var dismiss
-
   /// Existing draft to edit. `nil` means the caller will resolve a draft when the
   /// first non-empty drawing arrives from the canvas.
   let card: ThreadDraftCard?
@@ -56,13 +54,6 @@ struct ThreadDraftDoodleCanvasSheet: View {
       ThreadDraftDoodleCanvasContent(card: card, onChange: onChange)
         .navigationTitle("Doodle")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-          ToolbarItem(placement: .confirmationAction) {
-            Button("Done") {
-              dismiss()
-            }
-          }
-        }
     }
   }
 }

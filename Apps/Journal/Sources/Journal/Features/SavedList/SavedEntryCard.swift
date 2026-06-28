@@ -197,6 +197,19 @@ struct SavedEntrySummaryCardHost: View {
   }
 }
 
+/// Entry-style summary card for an unsaved draft on the creation surface.
+///
+/// This keeps `CreationView` on the same card component as saved entries while
+/// still feeding it the draft's in-memory capture payloads.
+struct DraftEntrySummaryCard: View {
+
+  @Bindable var draft: CardEditDraft
+
+  var body: some View {
+    SavedEntryCard(presentation: .summary(draft.summaryDisplay))
+  }
+}
+
 /// Adaptive card wrapper for saved entries.
 ///
 /// This is the single component that owns `CardSurface`, so the paper aspect
@@ -324,10 +337,16 @@ private struct SavedEntrySummaryCardContent: View {
         SavedEntrySummaryAudioContent()
       case .image(let asset):
         SavedEntrySummaryImageContent(asset: asset)
+      case .capturedImage(let image):
+        SavedEntrySummaryCapturedImageContent(image: image)
       case .doodle(let asset):
         SavedEntrySummaryDoodleContent(asset: asset)
+      case .capturedDoodle(let drawing):
+        SavedEntrySummaryCapturedDoodleContent(drawing: drawing)
       case .bauhaus(let asset):
         SavedEntrySummaryBauhausContent(asset: asset)
+      case .capturedBauhaus(let document):
+        SavedEntrySummaryCapturedBauhausContent(document: document)
       case .unknown:
         SavedEntryUnknownContent()
       }
@@ -480,6 +499,28 @@ private struct SavedEntrySummaryImageContent: View {
   }
 }
 
+/// Photo summary content for an unsaved draft payload.
+private struct SavedEntrySummaryCapturedImageContent: View {
+
+  let image: UIImage?
+
+  var body: some View {
+    SavedEntryInlineMediaContentView(
+      payload: image,
+      fallbackSymbolName: "photo",
+      cornerRadius: 10,
+      fallbackFontSize: 34
+    ) { image in
+      SavedEntryLoadedPhotoView(
+        image: image,
+        contentMode: .fill,
+        imagePadding: 0
+      )
+    }
+    .aspectRatio(4 / 3, contentMode: .fit)
+  }
+}
+
 /// Doodle cards preserve the drawing as an object on the paper, not as a captioned
 /// note. The saved vector payload is decoded and rendered as a SwiftUI view.
 private struct SavedEntrySummaryDoodleContent: View {
@@ -491,6 +532,31 @@ private struct SavedEntrySummaryDoodleContent: View {
   var body: some View {
     SavedEntryMediaContentView(
       asset: asset,
+      fallbackSymbolName: "scribble.variable",
+      cornerRadius: 10,
+      fallbackFontSize: 34
+    ) { drawing in
+      DoodleDrawingView(
+        drawing: drawing,
+        inkColor: palette.tint,
+        displayAspectRatio: CardMetrics.aspectRatio
+      )
+      .padding(12)
+    }
+    .aspectRatio(CardMetrics.aspectRatio, contentMode: .fit)
+  }
+}
+
+/// Doodle summary content for an unsaved draft payload.
+private struct SavedEntrySummaryCapturedDoodleContent: View {
+
+  @Environment(\.appPalette) private var palette
+
+  let drawing: DoodleDrawing?
+
+  var body: some View {
+    SavedEntryInlineMediaContentView(
+      payload: drawing,
       fallbackSymbolName: "scribble.variable",
       cornerRadius: 10,
       fallbackFontSize: 34
@@ -522,6 +588,72 @@ private struct SavedEntrySummaryBauhausContent: View {
         .padding(12)
     }
     .aspectRatio(4 / 3, contentMode: .fit)
+  }
+}
+
+/// Bauhaus summary content for an unsaved draft payload.
+private struct SavedEntrySummaryCapturedBauhausContent: View {
+
+  let document: BauhausGridDocument?
+
+  var body: some View {
+    SavedEntryInlineMediaContentView(
+      payload: document,
+      fallbackSymbolName: "square.grid.3x3.square",
+      cornerRadius: 10,
+      fallbackFontSize: 34
+    ) { document in
+      BauhausGridArtworkView(artwork: document.artwork)
+        .padding(12)
+    }
+    .aspectRatio(4 / 3, contentMode: .fit)
+  }
+}
+
+/// Synchronous media well for unsaved draft payloads.
+private struct SavedEntryInlineMediaContentView<
+  Payload,
+  LoadedContent: View
+>: View {
+
+  let payload: Payload?
+  let fallbackSymbolName: String
+  let cornerRadius: CGFloat
+  let fallbackFontSize: CGFloat
+  let loadedContent: (Payload) -> LoadedContent
+
+  init(
+    payload: Payload?,
+    fallbackSymbolName: String,
+    cornerRadius: CGFloat,
+    fallbackFontSize: CGFloat,
+    @ViewBuilder loadedContent: @escaping (Payload) -> LoadedContent
+  ) {
+    self.payload = payload
+    self.fallbackSymbolName = fallbackSymbolName
+    self.cornerRadius = cornerRadius
+    self.fallbackFontSize = fallbackFontSize
+    self.loadedContent = loadedContent
+  }
+
+  var body: some View {
+    ZStack {
+      RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        .fill(.appOnSecondaryContainer.opacity(0.06))
+
+      if let payload {
+        loadedContent(payload)
+      } else {
+        Image(systemName: fallbackSymbolName)
+          .font(.system(size: fallbackFontSize, weight: .semibold))
+          .foregroundStyle(.appOnSecondaryContainer.opacity(0.46))
+      }
+    }
+    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        .strokeBorder(.appOnSecondaryContainer.opacity(0.08), lineWidth: 1)
+    }
   }
 }
 
@@ -715,10 +847,16 @@ private struct SavedEntryDetailContent: View {
       SavedEntryDetailAudioContent(fileURL: fileURL)
     case .image(let asset):
       SavedEntryDetailPhotoContent(asset: asset)
+    case .capturedImage(let image):
+      SavedEntryDetailCapturedPhotoContent(image: image)
     case .doodle(let asset):
       SavedEntryDetailDoodleContent(asset: asset)
+    case .capturedDoodle(let drawing):
+      SavedEntryDetailCapturedDoodleContent(drawing: drawing)
     case .bauhaus(let asset):
       SavedEntryDetailBauhausContent(asset: asset)
+    case .capturedBauhaus(let document):
+      SavedEntryDetailCapturedBauhausContent(document: document)
     case .unknown:
       SavedEntryUnknownContent()
     }
@@ -770,6 +908,28 @@ private struct SavedEntryDetailPhotoContent: View {
   }
 }
 
+/// Large read-only photo rendering for an unsaved draft payload.
+private struct SavedEntryDetailCapturedPhotoContent: View {
+
+  let image: UIImage?
+
+  var body: some View {
+    SavedEntryInlineMediaContentView(
+      payload: image,
+      fallbackSymbolName: "photo",
+      cornerRadius: detailImageCornerRadius,
+      fallbackFontSize: 58
+    ) { image in
+      SavedEntryLoadedPhotoView(
+        image: image,
+        contentMode: .fit,
+        imagePadding: 0
+      )
+    }
+    .aspectRatio(4 / 3, contentMode: .fit)
+  }
+}
+
 /// Large read-only doodle rendering for a detail card.
 private struct SavedEntryDetailDoodleContent: View {
 
@@ -780,6 +940,29 @@ private struct SavedEntryDetailDoodleContent: View {
   var body: some View {
     SavedEntryMediaContentView(
       asset: asset,
+      fallbackSymbolName: "scribble.variable",
+      cornerRadius: detailImageCornerRadius,
+      fallbackFontSize: 58
+    ) { drawing in
+      SavedEntryDoodleReplayContent(
+        drawing: drawing,
+        inkColor: palette.tint
+      )
+    }
+    .aspectRatio(CardMetrics.aspectRatio, contentMode: .fit)
+  }
+}
+
+/// Large read-only doodle rendering for an unsaved draft payload.
+private struct SavedEntryDetailCapturedDoodleContent: View {
+
+  @Environment(\.appPalette) private var palette
+
+  let drawing: DoodleDrawing?
+
+  var body: some View {
+    SavedEntryInlineMediaContentView(
+      payload: drawing,
       fallbackSymbolName: "scribble.variable",
       cornerRadius: detailImageCornerRadius,
       fallbackFontSize: 58
@@ -841,6 +1024,24 @@ private struct SavedEntryDetailBauhausContent: View {
   var body: some View {
     SavedEntryMediaContentView(
       asset: asset,
+      fallbackSymbolName: "square.grid.3x3.square",
+      cornerRadius: detailImageCornerRadius,
+      fallbackFontSize: 58
+    ) { document in
+      SavedEntryBauhausReplayContent(document: document)
+    }
+    .aspectRatio(4 / 3, contentMode: .fit)
+  }
+}
+
+/// Large read-only Bauhaus rendering for an unsaved draft payload.
+private struct SavedEntryDetailCapturedBauhausContent: View {
+
+  let document: BauhausGridDocument?
+
+  var body: some View {
+    SavedEntryInlineMediaContentView(
+      payload: document,
       fallbackSymbolName: "square.grid.3x3.square",
       cornerRadius: detailImageCornerRadius,
       fallbackFontSize: 58
@@ -1290,11 +1491,20 @@ private enum SavedEntryCardContent {
   /// A still image capture, decoded from its persisted asset file by `SavedEntryPhotoMediaLoader`.
   case image(SavedEntryMediaAsset<SavedEntryPhotoMediaLoader>?)
 
+  /// A still image capture that exists only in an unsaved draft.
+  case capturedImage(UIImage?)
+
   /// A doodle capture, decoded from its persisted asset file by `SavedEntryDoodleMediaLoader`.
   case doodle(SavedEntryMediaAsset<SavedEntryDoodleMediaLoader>?)
 
+  /// A doodle capture that exists only in an unsaved draft.
+  case capturedDoodle(DoodleDrawing?)
+
   /// A Bauhaus capture, decoded from its persisted asset file by `SavedEntryBauhausMediaLoader`.
   case bauhaus(SavedEntryMediaAsset<SavedEntryBauhausMediaLoader>?)
+
+  /// A Bauhaus capture that exists only in an unsaved draft.
+  case capturedBauhaus(BauhausGridDocument?)
 
   /// A card whose modality this build does not recognize. Carries no payload — it
   /// renders as a neutral placeholder.
@@ -1304,15 +1514,47 @@ private enum SavedEntryCardContent {
     switch self {
     case .text: .text
     case .audio: .audio
-    case .image: .photo
-    case .doodle: .doodle
-    case .bauhaus: .bauhaus
+    case .image, .capturedImage: .photo
+    case .doodle, .capturedDoodle: .doodle
+    case .bauhaus, .capturedBauhaus: .bauhaus
     case .unknown: .unknown
     }
   }
 }
 
 // MARK: - Formatting Helpers
+
+extension CardEditDraft {
+
+  /// Entry-card display values for an unsaved draft.
+  fileprivate var summaryDisplay: SavedEntrySummaryDisplay {
+    SavedEntrySummaryDisplay(
+      id: displayID,
+      content: entryCardContent,
+      createdAt: createdAt,
+      tilt: displayID.tiltAngle
+    )
+  }
+
+  private var entryCardContent: SavedEntryCardContent {
+    switch kind {
+    case .text:
+      return .text(text.trimmingCharacters(in: .whitespacesAndNewlines))
+    case .photo:
+      return .capturedImage(photo?.image)
+    case .audio:
+      return .audio(fileURL: audio?.fileURL)
+    case .doodle:
+      return .capturedDoodle(doodle)
+    case .bauhaus:
+      return .capturedBauhaus(bauhaus)
+    case .unknown:
+      return .unknown
+    @unknown default:
+      return .unknown
+    }
+  }
+}
 
 extension Card {
 
@@ -1466,7 +1708,15 @@ extension Card {
   /// angle across launches and stops it from re-rolling every time the body is
   /// re-evaluated.
   fileprivate var tiltAngle: Angle {
-    let bytes = id.uuid
+    id.tiltAngle
+  }
+}
+
+extension UUID {
+
+  /// A small, stable tilt derived from a card-like id.
+  fileprivate var tiltAngle: Angle {
+    let bytes = uuid
     let seed = UInt(bytes.0) &+ (UInt(bytes.7) &* 31) &+ (UInt(bytes.15) &* 131)
     let fraction = Double(seed % 1000) / 999  // 0...1
     return .degrees((fraction * 2 - 1) * cardMaxTilt)  // -max ... +max

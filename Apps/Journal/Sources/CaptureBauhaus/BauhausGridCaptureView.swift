@@ -1,6 +1,5 @@
 import Foundation
 import SwiftUI
-import UIKit
 
 /// Persistable Bauhaus card content.
 ///
@@ -33,22 +32,6 @@ public struct BauhausGridDocument: Codable, Equatable, Sendable {
   /// Whether the final artwork contains no tiles.
   public var isEmpty: Bool {
     artwork.isEmpty
-  }
-
-  /// Rasterizes the final artwork into an image for thumbnails and previews.
-  @MainActor
-  public func image(
-    size: CGSize = CGSize(width: 1024, height: 1024),
-    scale: CGFloat = 1,
-    colorScheme: ColorScheme = .light,
-    colorPalette: BauhausColorPalette = .default
-  ) -> UIImage? {
-    artwork.image(
-      size: size,
-      scale: scale,
-      colorScheme: colorScheme,
-      colorPalette: colorPalette
-    )
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -153,6 +136,35 @@ public enum BauhausGridReplayAction: Codable, Equatable, Sendable {
   }
 }
 
+private extension BauhausGridReplay {
+
+  /// Returns a display-only replay that places every authored event on the same
+  /// beat. The persisted authored timestamps remain unchanged.
+  func presentationTimeline(eventInterval: TimeInterval) -> BauhausGridReplay {
+    let resolvedEventInterval = max(eventInterval, 0)
+    guard events.isEmpty == false, resolvedEventInterval > 0 else {
+      return self
+    }
+
+    var adjustedEvents: [BauhausGridReplayEvent] = []
+    adjustedEvents.reserveCapacity(events.count)
+
+    for (index, event) in events.enumerated() {
+      adjustedEvents.append(
+        BauhausGridReplayEvent(
+          time: TimeInterval(index) * resolvedEventInterval,
+          action: event.action
+        )
+      )
+    }
+
+    return BauhausGridReplay(
+      events: adjustedEvents,
+      duration: adjustedEvents.last?.time ?? 0
+    )
+  }
+}
+
 /// A 5 x 5 Bauhaus-style composition made from one optional tile per grid cell.
 ///
 /// The value is intentionally independent of SwiftUI views and Journal
@@ -207,26 +219,6 @@ public struct BauhausGridArtwork: Codable, Equatable, Sendable {
     tiles.allSatisfy { $0 == nil }
   }
 
-  /// Rasterizes the artwork into a square image suitable for thumbnails and
-  /// share previews. Empty artwork returns `nil` so callers can keep their
-  /// "missing payload" checks simple.
-  @MainActor
-  public func image(
-    size: CGSize = CGSize(width: 1024, height: 1024),
-    scale: CGFloat = 1,
-    colorScheme: ColorScheme = .light,
-    colorPalette: BauhausColorPalette = .default
-  ) -> UIImage? {
-    guard isEmpty == false else { return nil }
-    let colors = colorPalette.colors(for: colorScheme)
-    let renderer = ImageRenderer(
-      content: BauhausArtworkRasterView(artwork: self, colors: colors)
-        .frame(width: size.width, height: size.height)
-    )
-    renderer.scale = scale
-    return renderer.uiImage
-  }
-
   private func index(for position: BauhausGridPosition) -> Int? {
     guard position.row >= 0,
           position.row < Self.dimension,
@@ -242,8 +234,6 @@ public struct BauhausGridArtwork: Codable, Equatable, Sendable {
 /// Read-only SwiftUI rendering for a saved `BauhausGridArtwork`.
 ///
 /// This builds the grid as live SwiftUI content from the editable artwork value.
-/// Use `BauhausGridArtwork.image(...)` only when a flattened export image is
-/// explicitly needed.
 public struct BauhausGridArtworkView: View {
 
   @Environment(\.colorScheme) private var colorScheme
@@ -293,12 +283,17 @@ public struct BauhausGridReplayView: View {
 
   public var body: some View {
     if let replay = document.replay, replay.isEmpty == false, isPlaying {
-      let recipe = BauhausGridReplayRecipe(replay: replay)
+      let playbackReplay = replay.presentationTimeline(
+        eventInterval: BauhausGridReplayRecipe.eventInterval
+      )
+      let recipe = BauhausGridReplayRecipe(replay: playbackReplay)
 
       TimelineView(.animation) { timeline in
         let elapsed = elapsedTime(at: timeline.date, recipe: recipe)
-        BauhausGridArtworkView(
-          artwork: replay.artwork(at: recipe.sourceTime(atVideoTime: elapsed)),
+        BauhausGridReplayArtworkView(
+          replay: playbackReplay,
+          videoTime: elapsed,
+          recipe: recipe,
           colorPalette: colorPalette
         )
         .onChange(of: elapsed >= recipe.totalDuration) { _, finished in
@@ -342,36 +337,192 @@ public struct BauhausGridReplayView: View {
   }
 }
 
+/// One rendered Bauhaus replay frame plus the source timestamp that created each
+/// currently visible tile.
+private struct BauhausGridReplayFrame: Equatable {
+
+  /// Artwork reconstructed at the current replay source time.
+  var artwork: BauhausGridArtwork
+
+  private var appearanceSourceTimes: [BauhausGridPosition: TimeInterval]
+
+  init(
+    replay: BauhausGridReplay,
+    sourceTime: TimeInterval
+  ) {
+    var artwork = BauhausGridArtwork.empty
+    var appearanceSourceTimes: [BauhausGridPosition: TimeInterval] = [:]
+
+    for event in replay.events where event.time <= sourceTime {
+      switch event.action {
+      case .setTile(let position, let tile):
+        artwork[position] = tile
+        if tile == nil {
+          appearanceSourceTimes[position] = nil
+        } else {
+          appearanceSourceTimes[position] = event.time
+        }
+      case .clear:
+        artwork = .empty
+        appearanceSourceTimes.removeAll()
+      }
+    }
+
+    self.artwork = artwork
+    self.appearanceSourceTimes = appearanceSourceTimes
+  }
+
+  func appearanceProgress(
+    for position: BauhausGridPosition,
+    atVideoTime videoTime: TimeInterval,
+    recipe: BauhausGridReplayRecipe,
+    duration: TimeInterval
+  ) -> CGFloat {
+    guard duration > 0,
+          let appearanceSourceTime = appearanceSourceTimes[position]
+    else {
+      return 1
+    }
+
+    let appearanceVideoTime = recipe.videoTime(atSourceTime: appearanceSourceTime)
+    let normalizedProgress = (videoTime - appearanceVideoTime) / duration
+    return CGFloat(min(max(normalizedProgress, 0), 1))
+  }
+}
+
+/// Read-only Bauhaus grid renderer that gives newly visible replay tiles a
+/// short bounce without changing the persisted artwork timeline.
+private struct BauhausGridReplayArtworkView: View {
+
+  @Environment(\.colorScheme) private var colorScheme
+
+  let replay: BauhausGridReplay
+  let videoTime: TimeInterval
+  let recipe: BauhausGridReplayRecipe
+  let colorPalette: BauhausColorPalette
+
+  var body: some View {
+    let replayFrame = BauhausGridReplayFrame(
+      replay: replay,
+      sourceTime: recipe.sourceTime(atVideoTime: videoTime)
+    )
+
+    BauhausGridReplayRasterView(
+      replayFrame: replayFrame,
+      videoTime: videoTime,
+      recipe: recipe,
+      colors: colorPalette.colors(for: colorScheme)
+    )
+    .aspectRatio(1, contentMode: .fit)
+  }
+}
+
+/// Raster surface for an in-progress Bauhaus replay frame.
+///
+/// Empty cells stay stable while newly visible tile colors fade in and their
+/// shapes scale through a short overshooting bounce.
+private struct BauhausGridReplayRasterView: View {
+
+  static let bounceDuration: TimeInterval = 0.2
+
+  let replayFrame: BauhausGridReplayFrame
+  let videoTime: TimeInterval
+  let recipe: BauhausGridReplayRecipe
+  let colors: BauhausResolvedColors
+
+  private let columns = Array(
+    repeating: GridItem(.flexible(minimum: 0), spacing: 2),
+    count: BauhausGridArtwork.dimension
+  )
+
+  var body: some View {
+    LazyVGrid(columns: columns, spacing: 2) {
+      ForEach(BauhausGridArtwork.positions) { position in
+        ZStack {
+          Rectangle()
+            .fill(colors.chrome.emptyCell)
+
+          if let tile = replayFrame.artwork[position] {
+            let progress = replayFrame.appearanceProgress(
+              for: position,
+              atVideoTime: videoTime,
+              recipe: recipe,
+              duration: Self.bounceDuration
+            )
+
+            Rectangle()
+              .fill(tile.backgroundSwatch.color(in: colors))
+              .opacity(Double(progress))
+
+            BauhausShape(kind: tile.shape)
+              .fill(tile.shapeSwatch.color(in: colors))
+              .scaleEffect(Self.bounceScale(progress))
+              .opacity(Double(progress))
+          }
+        }
+        .aspectRatio(1, contentMode: .fit)
+      }
+    }
+    .padding(8)
+    .background(
+      Rectangle()
+        .fill(colors.chrome.paper)
+    )
+  }
+
+  private static func bounceScale(_ progress: CGFloat) -> CGFloat {
+    let progress = min(max(progress, 0), 1)
+    guard progress < 1 else { return 1 }
+
+    let overshoot: CGFloat = 1.70158
+    let cubicOvershoot = overshoot + 1
+    let shiftedProgress = progress - 1
+    return 1
+      + cubicOvershoot * shiftedProgress * shiftedProgress * shiftedProgress
+      + overshoot * shiftedProgress * shiftedProgress
+  }
+}
+
 /// Playback timing policy for discrete Bauhaus replay events.
 private struct BauhausGridReplayRecipe: Equatable {
 
+  static let eventInterval: TimeInterval = 0.16
+
   let sourceDuration: TimeInterval
   let replayDuration: TimeInterval
+  let leadInDuration: TimeInterval
   let holdDuration: TimeInterval
 
   init(
     replay: BauhausGridReplay,
-    minimumReplayDuration: TimeInterval = 1.2,
-    maximumReplayDuration: TimeInterval = 8,
-    holdDuration: TimeInterval = 0.75
+    leadInDuration: TimeInterval = 0.2,
+    minimumReplayDuration: TimeInterval = 0.16,
+    holdDuration: TimeInterval = 0.28
   ) {
-    sourceDuration = max(replay.duration, replay.events.last?.time ?? 0, 0.18)
-    replayDuration = min(
-      max(sourceDuration, minimumReplayDuration),
-      maximumReplayDuration
-    )
+    sourceDuration = max(replay.duration, replay.events.last?.time ?? 0, Self.eventInterval)
+    replayDuration = max(sourceDuration, minimumReplayDuration)
+    self.leadInDuration = max(leadInDuration, 0)
     self.holdDuration = max(holdDuration, 0)
   }
 
   var totalDuration: TimeInterval {
-    replayDuration + holdDuration
+    leadInDuration + replayDuration + holdDuration
   }
 
   func sourceTime(atVideoTime videoTime: TimeInterval) -> TimeInterval {
     guard replayDuration > 0 else { return sourceDuration }
-    let visibleVideoTime = min(max(videoTime, 0), replayDuration)
+    guard videoTime >= leadInDuration else { return -Double.ulpOfOne }
+
+    let visibleVideoTime = min(max(videoTime - leadInDuration, 0), replayDuration)
     let progress = visibleVideoTime / replayDuration
     return min(sourceDuration * progress, sourceDuration)
+  }
+
+  func videoTime(atSourceTime sourceTime: TimeInterval) -> TimeInterval {
+    guard sourceDuration > 0 else { return leadInDuration }
+
+    let clampedSourceTime = min(max(sourceTime, 0), sourceDuration)
+    return leadInDuration + (clampedSourceTime / sourceDuration) * replayDuration
   }
 }
 
@@ -446,9 +597,11 @@ public struct BauhausTile: Codable, Equatable, Sendable {
 /// Bauhaus-inspired primitives that fit inside one square grid cell.
 public enum BauhausShapeKind: String, CaseIterable, Codable, Identifiable, Sendable {
   case square
+  /// A circle that fills the cell's available square.
+  case circle
   /// A circle inset from the cell edges so the surrounding cell color remains
   /// visible.
-  case circle
+  case paddedCircle
   case semicircleTop
   case semicircleTrailing
   case semicircleBottom
@@ -1165,6 +1318,7 @@ fileprivate enum BauhausShapeLibraryOrder {
   static let basic: [BauhausShapeKind] = [
     .square,
     .circle,
+    .paddedCircle,
   ]
 
   static let arcSemicircles: [BauhausShapeKind] = [
@@ -1413,14 +1567,16 @@ fileprivate struct BauhausShape: Shape {
 
 fileprivate extension BauhausShapeKind {
 
-  private static let circleInsetRatio: CGFloat = 0.12
+  private static let paddedCircleInsetRatio: CGFloat = 0.25
 
   var accessibilityLabel: Text {
     switch self {
     case .square:
       Text("Apply square")
     case .circle:
-      Text("Apply circle")
+      Text("Apply filled circle")
+    case .paddedCircle:
+      Text("Apply padded circle")
     case .semicircleTop:
       Text("Apply top arc semicircle")
     case .semicircleTrailing:
@@ -1461,6 +1617,8 @@ fileprivate extension BauhausShapeKind {
     case .square:
       return Path(rect)
     case .circle:
+      return Path(ellipseIn: rect)
+    case .paddedCircle:
       return paddedCirclePath(in: rect)
     case .semicircleTop:
       return semicirclePath(in: rect, edge: .top)
@@ -1498,7 +1656,7 @@ fileprivate extension BauhausShapeKind {
   }
 
   private func paddedCirclePath(in rect: CGRect) -> Path {
-    let inset = min(rect.width, rect.height) * Self.circleInsetRatio
+    let inset = min(rect.width, rect.height) * Self.paddedCircleInsetRatio
     return Path(ellipseIn: rect.insetBy(dx: inset, dy: inset))
   }
 
@@ -1683,6 +1841,7 @@ fileprivate enum BauhausPreviewFixtures {
     let placements: [(BauhausGridPosition, BauhausShapeKind)] = [
       (BauhausGridPosition(row: 0, column: 0), .square),
       (BauhausGridPosition(row: 0, column: 1), .circle),
+      (BauhausGridPosition(row: 0, column: 2), .paddedCircle),
       (BauhausGridPosition(row: 1, column: 2), .semicircleTop),
       (BauhausGridPosition(row: 2, column: 2), .quarterCircleBottomTrailing),
       (BauhausGridPosition(row: 3, column: 3), .triangleTopLeading),

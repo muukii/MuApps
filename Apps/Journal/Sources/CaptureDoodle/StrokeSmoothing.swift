@@ -122,8 +122,8 @@ struct TrajectoryStreamlineFilter {
     }
 
     let speed = smoothstep(edge0: 140, edge1: 1_700, value: filteredVelocity)
-    let baseResponse = 0.06 + (1 - strength) * 0.12
-    let response = min(baseResponse + speed * 0.16, 0.24)
+    let baseResponse = 0.032 + (1 - strength) * 0.085
+    let response = min(baseResponse + speed * 0.095, 0.14)
     let nextPoint = filteredPoint.interpolate(to: location, progress: response)
     self.filteredPoint = nextPoint
     return nextPoint
@@ -131,14 +131,14 @@ struct TrajectoryStreamlineFilter {
 
   private func anchorSpacing(strength: CGFloat, velocity: CGFloat, sampleDistance: CGFloat) -> CGFloat {
     let spacing = max(sampleDistance, 1)
-    let slowSpacing = spacing * (1.6 + strength * 2.4)
-    let fastSpacing = spacing * (3.6 + strength * 5.8)
+    let slowSpacing = spacing * (3.0 + strength * 4.0)
+    let fastSpacing = spacing * (6.0 + strength * 8.5)
     let speed = smoothstep(edge0: 180, edge1: 1_600, value: velocity)
     return slowSpacing + (fastSpacing - slowSpacing) * speed
   }
 
   private func angleThreshold(strength: CGFloat) -> CGFloat {
-    .pi * (0.16 + strength * 0.22)
+    .pi * (0.25 + strength * 0.25)
   }
 
   private func turnAngle(from start: CGPoint, through middle: CGPoint, to end: CGPoint) -> CGFloat {

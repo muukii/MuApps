@@ -1,23 +1,22 @@
-import Algorithms
 import CaptureAudio
 import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
-import CaptureText
 import CoreLocation
 import JournalModel
 import MuColor
 import ScrollEdgeEffect
 import SwiftData
 import SwiftUI
-import UIKit
 import WidgetKit
 
 struct CreationView: View {
 
   @Environment(\.modelContext) private var modelContext
-  @Environment(\.openURL) private var openURL
   @Environment(JournalNotificationCenter.self) private var notifications
+
+  @AppStorage(JournalDefaults.shouldAttachLocationToNewCards)
+  private var shouldAttachLocationToNewCards: Bool = true
 
   @State private var draftCards: [ThreadDraftCard] = []
   @State private var textEditorPresentation: TextEditorPresentation?
@@ -37,7 +36,6 @@ struct CreationView: View {
   /// coordinate it wants to persist; this object only handles permission and
   /// the current coordinate lookup.
   @State private var locationManager = LocationManager()
-  @State private var isLocationDeniedAlertPresented: Bool = false
 
   /// Guards the compose surface while a save is in flight, so a card can't be
   /// created twice by a fast double-tap.
@@ -54,11 +52,8 @@ struct CreationView: View {
         ScrollView {
 
           VStack(spacing: 20) {
-            ForEach(draftCards.indexed(), id: \.element) {
-              offset,
-              draft in
+            ForEach(draftCards, id: \.self) { draft in
               ThreadDraftCardEditor(
-                ordinal: offset + 1,
                 card: draft,
                 isSaving: isSaving,
                 onOpen: {
@@ -134,17 +129,7 @@ struct CreationView: View {
     }
     .sheet(item: $textEditorPresentation) { presentation in
       ThreadDraftTextEditorSheet(
-        card: presentation.target,
-        isSaving: isSaving,
-        onCapture: { captured in
-          finishTextCapture(captured, target: presentation.target)
-        },
-        onToggleLocation: {
-          guard let target = presentation.target else {
-            return
-          }
-          toggleLocation(target)
-        }
+        card: presentation.target
       )
       .presentationDetents([.medium, .large])
       .presentationDragIndicator(.visible)
@@ -225,37 +210,47 @@ struct CreationView: View {
         .presentationBackground(.background)
     }
     .appNavigationBarStyle()
+    .onAppear {
+      attachLocationToCurrentDraftsIfNeeded()
+    }
+    .onChange(of: shouldAttachLocationToNewCards) { _, isEnabled in
+      if isEnabled {
+        attachLocationToCurrentDraftsIfNeeded()
+      } else {
+        clearLocationFromCurrentDrafts()
+      }
+    }
     .onChange(of: locationManager.authorizationStatus) { _, status in
       // System access can be revoked after a coordinate was attached. Clear
       // draft coordinates so the UI never claims location metadata it can no
       // longer justify.
       switch status {
       case .denied, .restricted:
-        for card in draftCards {
-          card.location = nil
-        }
-      case .notDetermined, .authorizedWhenInUse, .authorizedAlways:
+        clearLocationFromCurrentDrafts()
+      case .authorizedWhenInUse, .authorizedAlways:
+        attachLocationToCurrentDraftsIfNeeded()
+      case .notDetermined:
         break
       @unknown default:
         break
       }
     }
-    .alert("Location Access Off", isPresented: $isLocationDeniedAlertPresented)
-    {
-      Button("Open Settings") {
-        openLocationSettings()
-      }
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      Text(
-        "Allow location access in Settings to attach where you are to a card."
-      )
-    }
 
   }
 
   private func presentTextCapture() {
-    textEditorPresentation = TextEditorPresentation(target: nil)
+    if let draft = draftCards.last, draft.isEmptyTextDraft {
+      scrollTargetID = draft
+      attachLocationToCurrentDraftsIfNeeded()
+      presentTextEditor(for: draft)
+      return
+    }
+
+    let draft = ThreadDraftCard()
+    draftCards.append(draft)
+    scrollTargetID = draft
+    attachLocationToCurrentDraftsIfNeeded()
+    presentTextEditor(for: draft)
   }
 
   private func openDraft(_ draft: ThreadDraftCard) {
@@ -309,19 +304,6 @@ struct CreationView: View {
     voiceRecorderPresentation = VoiceRecorderPresentation(target: nil)
   }
 
-  private func finishTextCapture(
-    _ capturedText: CapturedText,
-    target: ThreadDraftCard?
-  ) {
-    guard capturedText.isEmpty == false else {
-      return
-    }
-
-    let draft = target ?? draftForNewQuickCapture()
-    draft.setText(capturedText)
-    scrollTargetID = draft
-  }
-
   private func finishPhotoCapture(
     _ photo: CapturedPhoto,
     target: ThreadDraftCard?
@@ -329,6 +311,7 @@ struct CreationView: View {
     let draft = target ?? draftForNewQuickCapture()
     draft.setPhoto(photo)
     scrollTargetID = draft
+    attachLocationToCurrentDraftsIfNeeded()
   }
 
   private func updateDoodle(
@@ -343,6 +326,7 @@ struct CreationView: View {
     let draft = presentation.target ?? draftForNewDoodleCapture(presentation)
     draft.setDoodle(drawing)
     scrollTargetID = draft
+    attachLocationToCurrentDraftsIfNeeded()
   }
 
   private func draftForNewDoodleCapture(
@@ -400,6 +384,7 @@ struct CreationView: View {
     let draft = presentation.target ?? draftForNewBauhausCapture(presentation)
     draft.setBauhaus(document)
     scrollTargetID = draft
+    attachLocationToCurrentDraftsIfNeeded()
   }
 
   private func draftForNewBauhausCapture(
@@ -452,6 +437,7 @@ struct CreationView: View {
     let draft = target ?? draftForNewQuickCapture()
     draft.setAudio(recording)
     scrollTargetID = draft
+    attachLocationToCurrentDraftsIfNeeded()
   }
 
   private func draftForNewQuickCapture() -> ThreadDraftCard {
@@ -464,40 +450,35 @@ struct CreationView: View {
     return draft
   }
 
-  /// Turns the per-card location attachment on or off. Enabling it captures the
-  /// current coordinate immediately, so the draft owns the data it will save.
-  private func toggleLocation(_ draft: ThreadDraftCard) {
-    guard draft.location == nil else {
-      draft.location = nil
+  private func attachLocationToCurrentDraftsIfNeeded() {
+    guard shouldAttachLocationToNewCards else {
       return
     }
 
-    switch locationManager.authorizationStatus {
-    case .authorizedWhenInUse, .authorizedAlways:
-      requestLocation(for: draft)
-    case .notDetermined:
-      requestLocation(for: draft)
-    case .denied, .restricted:
-      isLocationDeniedAlertPresented = true
-    @unknown default:
-      isLocationDeniedAlertPresented = true
+    let targets = draftCards.filter { $0.location == nil }
+    guard targets.isEmpty == false else {
+      return
     }
-  }
 
-  private func requestLocation(for draft: ThreadDraftCard) {
     Task { @MainActor in
       guard let location = await locationManager.requestCoordinate() else {
         return
       }
-      draft.location = location
+
+      guard shouldAttachLocationToNewCards else {
+        return
+      }
+
+      for target in targets where target.location == nil {
+        target.location = location
+      }
     }
   }
 
-  private func openLocationSettings() {
-    guard let url = URL(string: UIApplication.openSettingsURLString) else {
-      return
+  private func clearLocationFromCurrentDrafts() {
+    for card in draftCards {
+      card.location = nil
     }
-    openURL(url)
   }
 
   private func save() {
@@ -529,6 +510,7 @@ struct CreationView: View {
         )
         let nextDraft = ThreadDraftCard()
         draftCards = [nextDraft]
+        attachLocationToCurrentDraftsIfNeeded()
         textEditorPresentation = nil
         photoCapturePresentation = nil
         doodleCanvasPresentation = nil
@@ -558,9 +540,8 @@ private struct TextEditorPresentation: Identifiable {
   /// a fresh value so SwiftUI rebuilds focus and keyboard state cleanly.
   let id = UUID()
 
-  /// Draft being edited, or `nil` when quick text capture should create/reuse a
-  /// draft only after the user saves non-empty text.
-  let target: ThreadDraftCard?
+  /// Draft being edited by the text sheet.
+  let target: ThreadDraftCard
 }
 
 /// Presentation payload for one photo capture session.
@@ -658,184 +639,17 @@ private struct VoiceRecorderPresentation: Identifiable {
 /// Card-shaped entry point for one draft in the creation thread.
 private struct ThreadDraftCardEditor: View {
 
-  let ordinal: Int
   @Bindable var card: ThreadDraftCard
   let isSaving: Bool
   let onOpen: @MainActor @Sendable () -> Void
 
   var body: some View {
     Button(action: onOpen) {
-      CardSurface {
-        VStack(alignment: .leading, spacing: 12) {
-          ThreadDraftCardHeader(
-            ordinal: ordinal,
-            kind: card.kind,
-            location: card.location
-          )
-
-          ThreadDraftCardPreview(card: card)
-            .frame(
-              maxWidth: .infinity,
-              maxHeight: .infinity,
-              alignment: .topLeading
-            )
-        }
-      }
+      DraftEntrySummaryCard(draft: card)
     }
     .buttonStyle(.plain)
     .disabled(isSaving)
-    .accessibilityLabel("Edit card \(ordinal)")
-  }
-}
-
-/// Compact metadata row shown at the top of a draft card.
-private struct ThreadDraftCardHeader: View {
-
-  let ordinal: Int
-  let kind: Card.Kind
-  let location: Coordinate?
-
-  var body: some View {
-    HStack(spacing: 10) {
-      Text("Card \(ordinal)")
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.appOnSecondaryContainer.opacity(0.55))
-
-      Label {
-        Text(kind.displayTitle)
-      } icon: {
-        Image(systemName: kind.creationSymbolName)
-      }
-      .font(.caption.weight(.semibold))
-      .labelStyle(.titleAndIcon)
-      .padding(.horizontal, 8)
-      .padding(.vertical, 5)
-      .background(.appOnSecondaryContainer.opacity(0.08), in: Capsule())
-
-      Spacer(minLength: 0)
-
-      if location != nil {
-        Image(systemName: "location.fill")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.appOnSecondaryContainer.opacity(0.55))
-          .accessibilityLabel("Location attached")
-      }
-
-      Image(systemName: "chevron.right")
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.appOnSecondaryContainer.opacity(0.45))
-    }
-  }
-}
-
-/// Kind-aware summary of a draft card's current editable payload.
-private struct ThreadDraftCardPreview: View {
-
-  @Environment(\.appPalette) private var palette
-  @Environment(\.colorScheme) private var colorScheme
-  @Bindable var card: ThreadDraftCard
-
-  var body: some View {
-    switch card.kind {
-    case .text:
-      ThreadDraftTextPreview(text: card.text)
-    case .photo:
-      ThreadDraftMediaPreview(
-        symbolName: card.kind.creationSymbolName,
-        prompt: "Open camera",
-        image: card.photo?.image
-      )
-    case .audio:
-      ThreadDraftAudioPreview(duration: card.audio?.duration)
-    case .doodle:
-      ThreadDraftMediaPreview(
-        symbolName: card.kind.creationSymbolName,
-        prompt: "Open canvas",
-        image: card.doodle?.image(inkColor: palette.tint)
-      )
-    case .bauhaus:
-      ThreadDraftMediaPreview(
-        symbolName: card.kind.creationSymbolName,
-        prompt: "Open grid",
-        image: card.bauhaus?.image(colorScheme: colorScheme)
-      )
-    case .unknown:
-      ThreadDraftTextPreview(text: card.text)
-    @unknown default:
-      ThreadDraftTextPreview(text: card.text)
-    }
-  }
-}
-
-/// Text-card summary for the creation surface.
-private struct ThreadDraftTextPreview: View {
-
-  let text: String
-
-  var body: some View {
-    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    Text(trimmed.isEmpty ? "Write your thoughts..." : trimmed)
-      .font(.system(size: 32, weight: .bold))
-      .foregroundStyle(.appOnSecondaryContainer)
-      .opacity(trimmed.isEmpty ? 0.42 : 1)
-      .lineLimit(7)
-      .frame(maxWidth: .infinity, alignment: .leading)
-  }
-}
-
-/// Photo and doodle summary for the creation surface.
-private struct ThreadDraftMediaPreview: View {
-
-  let symbolName: String
-  let prompt: LocalizedStringResource
-  let image: UIImage?
-
-  var body: some View {
-    if let image {
-      Image(uiImage: image)
-        .resizable()
-        .scaledToFill()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    } else {
-      VStack(alignment: .leading, spacing: 10) {
-        Image(systemName: symbolName)
-          .font(.system(size: 42, weight: .semibold))
-        Text(prompt)
-          .font(.title3.weight(.semibold))
-      }
-      .foregroundStyle(.appOnSecondaryContainer.opacity(0.48))
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-    }
-  }
-}
-
-/// Audio-card summary for the creation surface.
-private struct ThreadDraftAudioPreview: View {
-
-  let duration: TimeInterval?
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Image(systemName: "waveform")
-        .font(.system(size: 46, weight: .semibold))
-
-      if let duration {
-        Text("Recorded \(Self.formatted(duration))")
-          .font(.title3.weight(.semibold))
-      } else {
-        Text("Open recorder")
-          .font(.title3.weight(.semibold))
-      }
-    }
-    .foregroundStyle(.appOnSecondaryContainer)
-    .opacity(duration == nil ? 0.48 : 0.86)
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-  }
-
-  private static func formatted(_ duration: TimeInterval) -> String {
-    let total = Int(duration)
-    return String(format: "%02d:%02d", total / 60, total % 60)
+    .accessibilityLabel("Edit card")
   }
 }
 

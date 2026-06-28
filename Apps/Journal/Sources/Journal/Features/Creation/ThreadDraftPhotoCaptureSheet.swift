@@ -25,13 +25,6 @@ struct ThreadDraftPhotoCaptureSheet: View {
       }
       .navigationTitle("Photo")
       .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .confirmationAction) {
-          Button("Done") {
-            dismiss()
-          }
-        }
-      }
     }
   }
 }

@@ -3,7 +3,20 @@ import ProjectDescriptionHelpers
 
 // MARK: - Info.plist
 
+/// User-facing app name embedded in the archive and shown under the app icon.
+/// Keep this aligned with the product name users should see on the Home Screen.
 let journalBundleDisplayName: Plist.Value = "Tinycurve"
+
+/// Short app bundle name used by `CFBundleName`.
+/// Apple documents a 15-character limit for this value, and App Store Connect
+/// validates it together with the display name during binary upload.
+let journalBundleName: Plist.Value = "TinycurveJ"
+
+/// User-facing name for the WidgetKit extension bundle.
+let journalWidgetBundleDisplayName: Plist.Value = "Tinycurve Widget"
+
+/// Short bundle name for the WidgetKit extension.
+let journalWidgetBundleName: Plist.Value = "TinycurveWidget"
 
 let journalVersionInfoPlistKeys: [String: Plist.Value] = [
   "CFBundleShortVersionString": "$(MARKETING_VERSION)",
@@ -12,6 +25,7 @@ let journalVersionInfoPlistKeys: [String: Plist.Value] = [
 
 let journalInfoPlist: InfoPlist = .extendingDefault(with: journalVersionInfoPlistKeys.merging([
   "CFBundleDisplayName": journalBundleDisplayName,
+  "CFBundleName": journalBundleName,
   "ITSAppUsesNonExemptEncryption": false,
   "LSApplicationCategoryType": "public.app-category.lifestyle",
   // CloudKit pushes remote changes to the device; this lets SwiftData's
@@ -22,8 +36,8 @@ let journalInfoPlist: InfoPlist = .extendingDefault(with: journalVersionInfoPlis
   // (CaptureAudio) require usage descriptions to function.
   "NSCameraUsageDescription": "Take a photo to attach to a journal entry.",
   "NSMicrophoneUsageDescription": "Record the ambient sound around you to attach to a journal entry.",
-  // Optional per-card location: when enabled while composing, the card records
-  // where it was written (LocationManager → Card.location).
+  // Optional authored-card location: when the Journal setting is enabled, new
+  // cards record where they were written (LocationManager → Card.location).
   "NSLocationWhenInUseUsageDescription": "Attach where you are to a journal entry.",
 ]) { _, new in new })
 
@@ -178,10 +192,10 @@ let project = Project(
       bundleId: "app.muukii.journal.JournalWidget",
       deploymentTargets: .app,
       infoPlist: .dictionary([
-        "CFBundleDisplayName": journalBundleDisplayName,
+        "CFBundleDisplayName": journalWidgetBundleDisplayName,
         "CFBundleExecutable": "$(EXECUTABLE_NAME)",
         "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
-        "CFBundleName": "$(PRODUCT_NAME)",
+        "CFBundleName": journalWidgetBundleName,
         "CFBundleShortVersionString": "$(MARKETING_VERSION)",
         "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
         "NSExtension": .dictionary([

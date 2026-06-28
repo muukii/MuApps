@@ -48,7 +48,8 @@ static frameworks**. The frameworks live inside the app (not in the repo's
 `Shared/`) because they are app-scoped, not cross-app. All Journal target source
 roots are grouped under `Apps/Journal/Sources/<TargetName>/`; the app icon
 package is `Apps/Journal/Sources/Journal/Icon.icon`. The target and module names
-remain `Journal`; the user-facing bundle display name is `Tinycurve`.
+remain `Journal`; the user-facing app bundle display name is `Tinycurve`,
+and the WidgetKit extension bundle display name is `Tinycurve Widget`.
 
 ```
 Journal (app, app.muukii.journal)
@@ -124,6 +125,8 @@ CloudKit-mirrored store, so it needs the same access.
 
 - `NSCameraUsageDescription` — CapturePhoto.
 - `NSMicrophoneUsageDescription` — CaptureAudio.
+- `NSLocationWhenInUseUsageDescription` — automatic location attachment for
+  newly authored cards when the Journal setting is enabled.
 - `UIBackgroundModes` = `["remote-notification"]` — lets SwiftData's CloudKit
   mirroring pull updates while backgrounded.
 
@@ -271,12 +274,12 @@ as an optional SwiftData composite attribute. Bridges to/from
 `CLLocationCoordinate2D`. A present value always implies the user permitted
 location use.
 
-Location capture is wired into `CreationView` as a per-card opt-in from the
-detail editor toolbar. Tapping the location button prompts for When-In-Use access
-when needed, requests a one-shot coordinate immediately, and stores the resolved
-`Coordinate` on that draft. Saving uses the coordinate already attached to each
-draft, and still saves the card without a location when access is denied or no
-fix is available.
+Location capture is wired into `CreationView` as an app-wide default controlled
+by Settings. When enabled (the default), newly authored drafts request a
+one-shot coordinate lazily and store the resolved `Coordinate` on the draft.
+Turning the setting off removes location from in-progress drafts. Saving uses the
+coordinate already attached to each draft, and still saves the card without a
+location when access is denied or no fix is available.
 
 ---
 
@@ -285,10 +288,9 @@ fix is available.
 Each is an isolated framework that emits a value type through a callback and owns
 no persistence. The dev gallery hosts each in a standalone demo view; the
 compose detail editors also host Photo, Doodle, Bauhaus, and Ambient Sound and
-convert their callbacks into `CardEditDraft` payloads. Quick text composition
-hosts `TextCaptureView` and converts its `CapturedText` callback into a draft on
-Save; existing text cards use an app-shell `TextEditor` bound directly to
-`CardEditDraft.text`.
+convert their callbacks into `CardEditDraft` payloads. Text composition uses an
+app-shell `TextEditor` bound directly to `CardEditDraft.text`, so typed changes
+are reflected in the draft immediately.
 
 ### CaptureText → `CapturedText`
 
@@ -315,8 +317,9 @@ front/back flip) built directly on AVFoundation. Handles authorization states
 
 `DoodleCanvasView(inkColor:initialDrawing:onExport:onChange:)` — a **SwiftUI
 vector** ink canvas. Strokes are stored as resolution-independent, **colorless**
-polylines (the ink is the caller-supplied `inkColor`, applied at draw time, so
-changing the app theme re-tints every doodle — including ones drawn earlier).
+timestamped point streams rendered as cubic spline curves (the ink is the
+caller-supplied `inkColor`, applied at draw time, so changing the app theme
+re-tints every doodle — including ones drawn earlier).
 `initialDrawing` restores existing vector strokes into the canvas, scales them
 to the current canvas size, and appends new strokes after the existing replay
 timeline. Every point carries a timestamp on a single shared timeline, so the
@@ -326,14 +329,16 @@ doodle can be **replayed** at the speed it was drawn (▶︎ button; a
 points over `0.35s` (almost always the pen-up time between strokes) is clamped to
 that beat, so playback doesn't sit idle — the stored timestamps stay faithful;
 only playback is reshaped. The default brush is a strong custom **streamline**
-engine rather than PencilKit: timestamped coalesced touches flow through an
-incremental trajectory filter and streaming spline while the finger is down. The
-visible live centerline is the saved centerline: lifting the finger commits the
-current live points as-is, with no full-stroke refit, primitive snap, or catch-up
-tail that would move already-drawn geometry. Width is velocity-shaped from the
-same emitted timeline: each point stores an optional rendered width, fast spans
-thin out, stroke tips taper lightly, and the renderer draws dense overlapping
-round segments so tapering doesn't fold into a broken outline at tight turns.
+engine rather than PencilKit: timestamped coalesced touches flow through a
+very heavy incremental trajectory filter, coarse saved-point sampling, and a
+streaming spline while the finger is down. The visible live centerline is the
+saved centerline: lifting the finger commits the current live points as-is, with
+no full-stroke refit, primitive snap, or catch-up tail that would move
+already-drawn geometry. Width is velocity-shaped from the same emitted timeline:
+each point stores an optional rendered width, fast spans thin out, stroke tips
+taper lightly, and every on-screen/export/replay renderer aggressively thins
+dense point streams into distance/angle-selected knots before drawing fixed-width and
+tapered strokes through the same cubic spline centerline.
 Default brush width is `3pt`. While drawing, supported devices bracket each
 stroke with light touch-down/lift taps and keep the in-stroke Core Haptics
 continuous texture light while its intensity and sharpness follow finger speed;
@@ -360,9 +365,9 @@ auto-save drafts.
 `BauhausGridCaptureView(initialDocument:onChange:onExport:)` — a SwiftUI grid
 composer for Bauhaus-style geometric artwork. The canvas is a fixed **5 x 5**
 grid of square cells. Tapping a cell presents a native shape picker sheet; the
-user chooses one of the prepared primitives (square, inset circle, four
-arc-on-edge semicircles, four diameter-on-edge semicircles, four quarter-circles,
-and four diagonal triangles), and the selected
+user chooses one of the prepared primitives (square, filled circle, padded
+circle, four arc-on-edge semicircles, four diameter-on-edge semicircles, four
+quarter-circles, and four diagonal triangles), and the selected
 shape/background colors are applied to that cell. Compact swatch rows choose the
 active primitive and cell background colors, the trash action clears the whole
 artwork, and an optional export callback lets hosts finish the capture
@@ -374,6 +379,9 @@ grid is cleared; documents decoded from older final-only artwork stay static
 unless the user clears the grid and starts again. Cell and swatch selection use
 selection haptics, shape application and clearing use light impact haptics, and
 the optional export action uses success feedback.
+Saved Bauhaus replay starts with a very short empty-grid beat, places every
+authored event on the same brisk playback interval, and introduces each tile
+with a bounce while preserving the stored authored event timeline.
 
 - `BauhausGridDocument`: `Sendable, Equatable, Codable` — `artwork` is the
   canonical final grid for static rendering and editing; optional `replay`
@@ -390,8 +398,8 @@ the optional export action uses success feedback.
 - `BauhausTile`: `Sendable, Equatable, Codable` — `shape: BauhausShapeKind`,
   `shapeSwatch: BauhausSwatch`, `backgroundSwatch: BauhausSwatch`.
 - `BauhausShapeKind`: prepared geometric primitives that each fit inside one
-  square cell, including an inset circle that leaves a small amount of visible
-  cell background around the mark.
+  square cell, including both a filled circle and a padded circle that leaves a
+  small amount of visible cell background around the mark.
 - `BauhausSwatch`: a fixed Codable content-color slot set (`slot1...slot7`).
   These are authored artwork tokens, not app theme colors or concrete color
   names; the slot raw values are also the persisted JSON values.
@@ -549,13 +557,12 @@ the gallery's **Lab** section).
   a vertical `ScrollView` of card-shaped draft summaries. The header is rendered
   with the standard `Date.FormatStyle` field selection, so its field order and
   separators follow the user's locale (en: "Sat, Jun 27"; ja: "6月27日(土)").
-  Each draft Card shows its ordinal, kind chip, optional location indicator, and
-  a kind-aware summary: text previews the trimmed body or "Write your thoughts…";
-  photo, doodle, and Bauhaus show the captured thumbnail or an "Open
-  camera/canvas/grid" prompt; audio shows the recorded duration or an "Open
-  recorder" prompt. Tapping a text card opens a native **Text** sheet with a
-  focused `TextEditor` and the per-card location toggle in the toolbar. Tapping a
-  photo card opens a native **Photo** sheet, showing the existing
+  Drafts render through the same adaptive saved-entry summary card wrapper used
+  by Entries; the wrapper still owns the paper aspect ratio, footer, tilt, and
+  modality-specific summary layout, while draft-only media payloads are fed in
+  directly instead of being loaded from attachment files. Tapping a text card
+  opens a native **Text** sheet with a focused `TextEditor`. Tapping a photo card
+  opens a native **Photo** sheet, showing the existing
   `CapturedPhoto` with **Retake Photo** or `PhotoCaptureView` for a new shot.
   Tapping a doodle card opens a dedicated full-screen **Doodle** canvas that
   reopens the existing `DoodleDrawing` in `DoodleCanvasView` so new strokes append
@@ -570,11 +577,12 @@ the gallery's **Lab** section).
   and Voice — in separated Liquid Glass buttons inside one shared
   `GlassEffectContainer`, with the save action remaining a separate prominent
   glass button. Tapping one of those quick-capture icons presents the matching
-  native sheet. Text opens a `TextCaptureView` sheet and creates/reuses a draft
-  only after the user taps **Save** with non-empty text, then dismisses back to
-  the composer; cancellation leaves the composer unchanged. Photo and Voice
-  create/reuse a draft only after capture finishes, then dismiss back to the
-  composer. Doodle and Bauhaus present native sheets at the large detent and
+  native sheet. Text opens the last untouched text placeholder when one exists;
+  otherwise it creates a new text draft and opens the Text sheet. Text, Doodle,
+  and Bauhaus sheets reflect edits into the draft as the user works and rely on
+  interactive dismissal rather than **Done** or **Cancel** buttons. Photo and
+  Voice create/reuse a draft only after capture finishes, then dismiss back to
+  the composer. Doodle and Bauhaus present native sheets at the large detent and
   resolve a draft on the first non-empty canvas/grid change, reusing the first
   untouched text placeholder when possible and restoring/removing that quick draft
   if the canvas/grid is cleared. The doodle canvas and Bauhaus grid auto-sync
@@ -663,8 +671,9 @@ the gallery's **Lab** section).
   independent card patterns.
   Not the real entries UI.
 - **`SettingsView`** — an iCloud sync status row, a drill-in **iCloud Sync**
-  diagnostics screen, a theme picker, an **Appearance** picker, optional
-  Debug-only Lab links, and About actions. The diagnostics screen separates
+  diagnostics screen, a theme picker, an **Appearance** picker, a **Location**
+  toggle for automatic location attachment, optional Debug-only Lab links, and
+  About actions. The diagnostics screen separates
   iCloud account availability,
   SwiftData row mirroring phases/recent events, custom media-file sync pending
   counts/last activity/errors, and local attachment-file availability so a row
@@ -673,7 +682,9 @@ the gallery's **Lab** section).
   The Appearance segmented picker writes
   `JournalDefaults.appearancePreferenceID`; **System** follows the device
   setting, while **Light** and **Dark** request a fixed scene color scheme for
-  Journal and update the theme palette immediately.
+  Journal and update the theme palette immediately. The **Attach Location**
+  toggle writes `JournalDefaults.shouldAttachLocationToNewCards`; it defaults on,
+  and when disabled new draft cards are saved without location metadata.
   Capture demos are intentionally hidden from Settings. In Debug builds, **Lab**
   links to Haptics and Haptic Doodle so those tools can be tried from the current
   app root; Release builds omit the Lab section. An **About** section has **Show

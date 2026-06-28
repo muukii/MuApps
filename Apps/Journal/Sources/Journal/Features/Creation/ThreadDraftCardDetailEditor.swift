@@ -14,7 +14,6 @@ struct ThreadDraftCardDetailEditor: View {
 
   @Bindable var card: ThreadDraftCard
   let isSaving: Bool
-  let onToggleLocation: @MainActor @Sendable () -> Void
 
   var body: some View {
     CardEditDraftEditor(
@@ -24,8 +23,7 @@ struct ThreadDraftCardDetailEditor: View {
       requiresSavableDraft: false,
       onConfirm: {
         dismiss()
-      },
-      onToggleLocation: onToggleLocation
+      }
     )
   }
 }
@@ -43,7 +41,6 @@ struct CardEditDraftEditor: View {
   let requiresSavableDraft: Bool
   let showsKindPicker: Bool
   let onConfirm: @MainActor () -> Void
-  let onToggleLocation: (@MainActor () -> Void)?
 
   init(
     draft: CardEditDraft,
@@ -51,8 +48,7 @@ struct CardEditDraftEditor: View {
     confirmationTitle: String,
     requiresSavableDraft: Bool = true,
     showsKindPicker: Bool = true,
-    onConfirm: @escaping @MainActor () -> Void,
-    onToggleLocation: (@MainActor () -> Void)? = nil
+    onConfirm: @escaping @MainActor () -> Void
   ) {
     self.draft = draft
     self.isSaving = isSaving
@@ -60,7 +56,6 @@ struct CardEditDraftEditor: View {
     self.requiresSavableDraft = requiresSavableDraft
     self.showsKindPicker = showsKindPicker
     self.onConfirm = onConfirm
-    self.onToggleLocation = onToggleLocation
   }
 
   var body: some View {
@@ -86,16 +81,6 @@ struct CardEditDraftEditor: View {
           onConfirm()
         }
         .disabled(isSaving || (requiresSavableDraft && draft.canSave == false))
-      }
-
-      if let onToggleLocation {
-        ToolbarItem(placement: .navigationBarLeading) {
-          Button(action: onToggleLocation) {
-            Image(systemName: draft.location != nil ? "location.fill" : "location")
-          }
-          .disabled(isSaving)
-          .accessibilityLabel(draft.location != nil ? "Location attached" : "Attach location")
-        }
       }
     }
   }

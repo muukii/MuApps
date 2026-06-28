@@ -2,7 +2,6 @@ import CaptureAudio
 import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
-import CaptureText
 import Foundation
 import JournalModel
 import Observation
@@ -22,6 +21,8 @@ import Observation
 final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
 
   private enum CodingKeys: String, CodingKey {
+    case displayID
+    case createdAt
     case kind
     case text
     case photo
@@ -35,6 +36,16 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   nonisolated var id: ObjectIdentifier {
     ObjectIdentifier(self)
   }
+
+  /// Stable value identity used by non-editing card renderers.
+  ///
+  /// SwiftUI editing flows use object identity (`id`) so bindings stay attached
+  /// to this reference, while entry-style display components need a value id
+  /// like persisted `Card` rows have.
+  let displayID: UUID
+
+  /// Creation time shown by entry-style card chrome before the draft is saved.
+  let createdAt: Date
 
   static func == (lhs: CardEditDraft, rhs: CardEditDraft) -> Bool {
     lhs === rhs
@@ -105,6 +116,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   }
 
   init(
+    displayID: UUID = UUID(),
+    createdAt: Date = Date(),
     kind: Card.Kind = .text,
     text: String = "",
     photo: CapturedPhoto? = nil,
@@ -113,6 +126,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     bauhaus: BauhausGridDocument? = nil,
     location: Coordinate? = nil
   ) {
+    self.displayID = displayID
+    self.createdAt = createdAt
     self.kind = kind
     self.text = text
     self.photo = photo
@@ -124,6 +139,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
 
   required init(from decoder: any Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.displayID = try container.decodeIfPresent(UUID.self, forKey: .displayID) ?? UUID()
+    self.createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     self.kind = try container.decode(Card.Kind.self, forKey: .kind)
     self.text = try container.decode(String.self, forKey: .text)
     self.photo = try container.decodeIfPresent(CapturedPhoto.self, forKey: .photo)
@@ -135,6 +152,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
 
   func encode(to encoder: any Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(displayID, forKey: .displayID)
+    try container.encode(createdAt, forKey: .createdAt)
     try container.encode(kind, forKey: .kind)
     try container.encode(text, forKey: .text)
     try container.encodeIfPresent(photo, forKey: .photo)
@@ -163,19 +182,6 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   func setPhoto(_ photo: CapturedPhoto) {
     kind = .photo
     self.photo = photo
-  }
-
-  /// Stores written text and switches the draft to text mode.
-  ///
-  /// Quick text capture calls this at its completion boundary so dismissing an
-  /// empty new editor does not create a draft card.
-  func setText(_ capturedText: CapturedText) {
-    kind = .text
-    text = capturedText.text
-    photo = nil
-    audio = nil
-    doodle = nil
-    bauhaus = nil
   }
 
   /// Stores a completed audio recording and switches the draft to audio mode.
