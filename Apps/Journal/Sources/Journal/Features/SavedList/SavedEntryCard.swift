@@ -517,8 +517,8 @@ private struct SavedEntrySummaryBauhausContent: View {
       fallbackSymbolName: "square.grid.3x3.square",
       cornerRadius: 10,
       fallbackFontSize: 34
-    ) { artwork in
-      BauhausGridArtworkView(artwork: artwork)
+    ) { document in
+      BauhausGridArtworkView(artwork: document.artwork)
         .padding(12)
     }
     .aspectRatio(4 / 3, contentMode: .fit)
@@ -844,11 +844,45 @@ private struct SavedEntryDetailBauhausContent: View {
       fallbackSymbolName: "square.grid.3x3.square",
       cornerRadius: detailImageCornerRadius,
       fallbackFontSize: 58
-    ) { artwork in
-      BauhausGridArtworkView(artwork: artwork)
-        .padding(12)
+    ) { document in
+      SavedEntryBauhausReplayContent(document: document)
     }
     .aspectRatio(4 / 3, contentMode: .fit)
+  }
+}
+
+/// Detail Bauhaus content with read-only replay controls when history exists.
+private struct SavedEntryBauhausReplayContent: View {
+
+  let document: BauhausGridDocument
+
+  @State private var isPlaying = false
+
+  var body: some View {
+    ZStack(alignment: .bottomLeading) {
+      BauhausGridReplayView(document: document, isPlaying: $isPlaying)
+        .padding(12)
+
+      if document.replay?.isEmpty == false {
+        Button {
+          isPlaying.toggle()
+        } label: {
+          if isPlaying {
+            Label("Stop", systemImage: "stop.fill")
+          } else {
+            Label("Replay", systemImage: "play.fill")
+          }
+        }
+        .font(.caption.weight(.semibold))
+        .controlSize(.small)
+        .buttonStyle(.bordered)
+        .padding(12)
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .onDisappear {
+      isPlaying = false
+    }
   }
 }
 
@@ -1171,11 +1205,11 @@ private enum SavedEntryDoodleMediaLoader: SavedEntryMediaLoading {
   }
 }
 
-/// Loads a Bauhaus attachment file into editable grid artwork data.
+/// Loads a Bauhaus attachment file into editable grid document data.
 private enum SavedEntryBauhausMediaLoader: SavedEntryMediaLoading {
-  static func load(from fileURL: URL) async -> BauhausGridArtwork? {
+  static func load(from fileURL: URL) async -> BauhausGridDocument? {
     guard let data = await SavedEntryMediaFileReader.data(from: fileURL) else { return nil }
-    return try? JSONDecoder().decode(BauhausGridArtwork.self, from: data)
+    return try? JSONDecoder().decode(BauhausGridDocument.self, from: data)
   }
 }
 
@@ -1351,13 +1385,13 @@ extension Card {
       else {
         throw SavedEntryEditDraftError.mediaUnavailable
       }
-      guard let artwork = try? JSONDecoder().decode(BauhausGridArtwork.self, from: data) else {
+      guard let document = try? JSONDecoder().decode(BauhausGridDocument.self, from: data) else {
         throw SavedEntryEditDraftError.mediaDecodeFailed
       }
       return CardEditDraft(
         kind: .bauhaus,
         text: body,
-        bauhaus: artwork,
+        bauhaus: document,
         location: location
       )
     case .unknown:

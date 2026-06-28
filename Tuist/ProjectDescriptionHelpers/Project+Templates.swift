@@ -54,7 +54,10 @@ public extension SettingsDictionary {
   ])
 
   static let frameworkTarget: SettingsDictionary = base.merging([
-    "BUILD_LIBRARY_FOR_DISTRIBUTION": "YES",
+    // First-party app modules are rebuilt with their clients by default. Opt
+    // individual targets into library evolution only when distributing them as
+    // binary artifacts.
+    "BUILD_LIBRARY_FOR_DISTRIBUTION": "NO",
     "SKIP_INSTALL": "YES",
     "SWIFT_INSTALL_MODULE": "YES",
     "SWIFT_INSTALL_OBJC_HEADER": "NO",

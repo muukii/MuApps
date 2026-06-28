@@ -156,7 +156,7 @@ attachments with newly staged attachment rows/files. It returns uploaded and
 deleted attachment IDs so the app target can enqueue CKAsset uploads/deletions
 only after the SwiftData transaction succeeds. The app-side `CardEditDraft`
 keeps editable media in the capture components' own value types
-(`CapturedPhoto`, `AudioRecording`, `DoodleDrawing`, `BauhausGridArtwork`) so
+(`CapturedPhoto`, `AudioRecording`, `DoodleDrawing`, `BauhausGridDocument`) so
 creation, saved-entry editing, and previews share one draft model. `CardEditDraft`
 is `Codable` for crash recovery, and only encodes the draft payload; SwiftUI
 presentation identity is rebuilt after restore.
@@ -208,12 +208,14 @@ ever matters, is an app-level concern.
 `kind` is the canonical content contract. `.text` cards render `body`; media
 cards expect a matching `Attachment.kind` (`.photo`, `.audio`, `.doodle`, or
 `.bauhaus`) and do not render `body` as a caption. Bauhaus cards use `.bauhaus`
-attachments whose file bytes are encoded `BauhausGridArtwork` JSON. `.unknown` is
-a forward-compatibility fallback for a card whose modality this build does not
-recognize (e.g. one synced from a newer app version). The app never creates
-`.unknown` cards and omits the kind from the editor's kind picker; saved-list
-summary and detail render such a card as a neutral placeholder ("This card was
-made in a newer version…") instead of failing.
+attachments whose file bytes are encoded `BauhausGridDocument` JSON; the
+document decoder also accepts older final-only `BauhausGridArtwork` JSON and
+treats it as non-replayable. `.unknown` is a forward-compatibility fallback for a
+card whose modality this build does not recognize (e.g. one synced from a newer
+app version). The app never creates `.unknown` cards and omits the kind from the
+editor's kind picker; saved-list summary and detail render such a card as a
+neutral placeholder ("This card was made in a newer version…") instead of
+failing.
 
 ### `Tag` — a label applied to many Cards
 
@@ -282,9 +284,11 @@ fix is available.
 
 Each is an isolated framework that emits a value type through a callback and owns
 no persistence. The dev gallery hosts each in a standalone demo view; the
-compose detail editors also host Photo, Doodle, and Ambient Sound and convert
-their callbacks into `CardEditDraft` payloads. Text composition currently uses
-an app-shell `TextEditor` bound directly to `CardEditDraft.text`.
+compose detail editors also host Photo, Doodle, Bauhaus, and Ambient Sound and
+convert their callbacks into `CardEditDraft` payloads. Quick text composition
+hosts `TextCaptureView` and converts its `CapturedText` callback into a draft on
+Save; existing text cards use an app-shell `TextEditor` bound directly to
+`CardEditDraft.text`.
 
 ### CaptureText → `CapturedText`
 
@@ -351,24 +355,33 @@ auto-save drafts.
   `StrokeSmoothing` (fixed streamline pipeline), `DoodleDrawingHaptics`,
   `DrawingGestureRecognizer` (timestamped), `TimedPoint`.
 
-### CaptureBauhaus → `BauhausGridArtwork`
+### CaptureBauhaus → `BauhausGridDocument`
 
-`BauhausGridCaptureView(initialArtwork:onChange:onExport:)` — a SwiftUI grid
+`BauhausGridCaptureView(initialDocument:onChange:onExport:)` — a SwiftUI grid
 composer for Bauhaus-style geometric artwork. The canvas is a fixed **5 x 5**
 grid of square cells. Tapping a cell presents a native shape picker sheet; the
-user chooses one of the prepared primitives (square, circle, four arc-on-edge
-semicircles, four diameter-on-edge semicircles, four quarter-circles, and four
-diagonal triangles), and the selected
+user chooses one of the prepared primitives (square, inset circle, four
+arc-on-edge semicircles, four diameter-on-edge semicircles, four quarter-circles,
+and four diagonal triangles), and the selected
 shape/background colors are applied to that cell. Compact swatch rows choose the
 active primitive and cell background colors, the trash action clears the whole
 artwork, and an optional export callback lets hosts finish the capture
 explicitly. The picker groups primitives by family in fixed four-column rows so
 rotational variants stay visually aligned while the sheet adapts to device
-width. Every cell edit and clear emits the current `BauhausGridArtwork` through
-`onChange`. Cell and swatch selection use selection haptics, shape
-application and clearing use light impact haptics, and the optional export action
-uses success feedback.
+width. Every cell edit and clear emits the current `BauhausGridDocument` through
+`onChange`. New empty documents record a replay timeline as cells are set or the
+grid is cleared; documents decoded from older final-only artwork stay static
+unless the user clears the grid and starts again. Cell and swatch selection use
+selection haptics, shape application and clearing use light impact haptics, and
+the optional export action uses success feedback.
 
+- `BauhausGridDocument`: `Sendable, Equatable, Codable` — `artwork` is the
+  canonical final grid for static rendering and editing; optional `replay`
+  stores the authored event timeline from an empty grid. The decoder accepts
+  old `BauhausGridArtwork` JSON as `artwork` with `replay == nil`.
+- `BauhausGridReplay`: `Sendable, Equatable, Codable` — time-ordered
+  `BauhausGridReplayEvent` values plus `duration`. Replaying applies each
+  `BauhausGridReplayAction` to an empty grid up to the requested time.
 - `BauhausGridArtwork`: `Sendable, Equatable, Codable` — row-major 25-cell
   storage where each cell is either empty or a `BauhausTile`. `BauhausGridArtworkView`
   renders the saved grid directly as SwiftUI content.
@@ -377,7 +390,8 @@ uses success feedback.
 - `BauhausTile`: `Sendable, Equatable, Codable` — `shape: BauhausShapeKind`,
   `shapeSwatch: BauhausSwatch`, `backgroundSwatch: BauhausSwatch`.
 - `BauhausShapeKind`: prepared geometric primitives that each fit inside one
-  square cell.
+  square cell, including an inset circle that leaves a small amount of visible
+  cell background around the mark.
 - `BauhausSwatch`: a fixed Codable content-color slot set (`slot1...slot7`).
   These are authored artwork tokens, not app theme colors or concrete color
   names; the slot raw values are also the persisted JSON values.
@@ -546,17 +560,19 @@ the gallery's **Lab** section).
   Tapping a doodle card opens a dedicated full-screen **Doodle** canvas that
   reopens the existing `DoodleDrawing` in `DoodleCanvasView` so new strokes append
   to the same vector drawing. Tapping a Bauhaus card opens a native **Bauhaus**
-  sheet that restores the existing `BauhausGridArtwork`; tapping a cell presents
+  sheet that restores the existing `BauhausGridDocument`; tapping a cell presents
   the shape picker sheet, and choosing a shape applies it into the selected 5 x 5
-  grid cell. Tapping an audio card opens a native **Voice Record** sheet, showing
+  grid cell while recording replay events when the document has a replay
+  timeline. Tapping an audio card opens a native **Voice Record** sheet, showing
   **Play** and **Record Again** for an existing
   `AudioRecording` or `AudioCaptureView` for a new take. The bottom composer
   controls put the concrete content-type icons — Text, Photo, Doodle, Bauhaus,
   and Voice — in separated Liquid Glass buttons inside one shared
   `GlassEffectContainer`, with the save action remaining a separate prominent
   glass button. Tapping one of those quick-capture icons presents the matching
-  native sheet. Text opens the last untouched text placeholder when one exists;
-  otherwise it creates a new text draft and opens the Text sheet. Photo and Voice
+  native sheet. Text opens a `TextCaptureView` sheet and creates/reuses a draft
+  only after the user taps **Save** with non-empty text, then dismisses back to
+  the composer; cancellation leaves the composer unchanged. Photo and Voice
   create/reuse a draft only after capture finishes, then dismiss back to the
   composer. Doodle and Bauhaus present native sheets at the large detent and
   resolve a draft on the first non-empty canvas/grid change, reusing the first
@@ -619,7 +635,8 @@ the gallery's **Lab** section).
   summary/detail layout. The detail layout shows full text inside the card with
   internal scrolling when needed, a larger photo/doodle/Bauhaus preview, Doodle
   stroke replay controls that keep the visible canvas on the paper aspect while
-  preserving the saved stroke geometry, audio playback when the local recording
+  preserving the saved stroke geometry, Bauhaus replay controls when the stored
+  document has an authored event timeline, audio playback when the local recording
   file exists,
   and created/updated/location metadata without inheriting the grid tile's tilt
   or text truncation. The detail toolbar includes **Edit**, which rehydrates the
@@ -639,9 +656,9 @@ the gallery's **Lab** section).
   Image** renders that Card into a themed 9:16 PNG sized for Instagram Reels;
   **Share Video** renders a matching 9:16, 60 fps Doodle replay mp4 by reusing a
   static SwiftUI-rendered share frame and compositing only the moving vector
-strokes, then presents it through the system share sheet. Bauhaus cards share
-as still images by decoding their stored grid artwork when available, falling
-back to any mirrored thumbnail only when the JSON payload is unavailable. The
+  strokes, then presents it through the system share sheet. Bauhaus cards share
+  as still images by decoding their stored grid document when available, falling
+  back to any mirrored thumbnail only when the JSON payload is unavailable. The
   debug **Seed Samples** action and `Card Patterns` Preview exercise the
   independent card patterns.
   Not the real entries UI.

@@ -1,5 +1,157 @@
+import Foundation
 import SwiftUI
 import UIKit
+
+/// Persistable Bauhaus card content.
+///
+/// `artwork` is the canonical final grid for static rendering. `replay` is
+/// optional because cards saved before replay support only contain the final
+/// `BauhausGridArtwork` JSON and cannot truthfully reconstruct edit order.
+public struct BauhausGridDocument: Codable, Equatable, Sendable {
+
+  /// A blank document ready for a new capture session.
+  public static let empty = BauhausGridDocument(
+    artwork: .empty,
+    replay: BauhausGridReplay()
+  )
+
+  /// The final grid state. Static thumbnails, editing, and fallback rendering
+  /// should read this value even when replay data is absent.
+  public var artwork: BauhausGridArtwork
+
+  /// Authored edit timeline from an empty grid to `artwork`.
+  public var replay: BauhausGridReplay?
+
+  public init(
+    artwork: BauhausGridArtwork,
+    replay: BauhausGridReplay? = nil
+  ) {
+    self.artwork = artwork
+    self.replay = replay
+  }
+
+  /// Whether the final artwork contains no tiles.
+  public var isEmpty: Bool {
+    artwork.isEmpty
+  }
+
+  /// Rasterizes the final artwork into an image for thumbnails and previews.
+  @MainActor
+  public func image(
+    size: CGSize = CGSize(width: 1024, height: 1024),
+    scale: CGFloat = 1,
+    colorScheme: ColorScheme = .light,
+    colorPalette: BauhausColorPalette = .default
+  ) -> UIImage? {
+    artwork.image(
+      size: size,
+      scale: scale,
+      colorScheme: colorScheme,
+      colorPalette: colorPalette
+    )
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case artwork
+    case replay
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    if container.contains(.artwork) {
+      artwork = try container.decode(BauhausGridArtwork.self, forKey: .artwork)
+      replay = try container.decodeIfPresent(BauhausGridReplay.self, forKey: .replay)
+    } else {
+      artwork = try BauhausGridArtwork(from: decoder)
+      replay = nil
+    }
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(artwork, forKey: .artwork)
+    try container.encodeIfPresent(replay, forKey: .replay)
+  }
+}
+
+/// Time-ordered Bauhaus edit operations for read-only replay.
+///
+/// Replay always starts from an empty grid. The final frame is expected to match
+/// the owning document's `artwork`, while the document keeps that final state as
+/// the authoritative value for editing and static rendering.
+public struct BauhausGridReplay: Codable, Equatable, Sendable {
+
+  /// Mutations in the order they were authored.
+  public private(set) var events: [BauhausGridReplayEvent]
+
+  /// Time of the final authored mutation, in seconds from replay start.
+  public private(set) var duration: TimeInterval
+
+  public init(
+    events: [BauhausGridReplayEvent] = [],
+    duration: TimeInterval = 0
+  ) {
+    self.events = events.sorted { $0.time < $1.time }
+    self.duration = max(duration, self.events.last?.time ?? 0)
+  }
+
+  /// Whether the replay contains no visible operations.
+  public var isEmpty: Bool {
+    events.isEmpty
+  }
+
+  /// Appends an authored operation at the supplied timeline position.
+  public mutating func append(
+    action: BauhausGridReplayAction,
+    at time: TimeInterval
+  ) {
+    let resolvedTime = max(time, duration)
+    events.append(BauhausGridReplayEvent(time: resolvedTime, action: action))
+    duration = resolvedTime
+  }
+
+  /// Reconstructs the grid visible at a point on this replay timeline.
+  public func artwork(at time: TimeInterval) -> BauhausGridArtwork {
+    var artwork = BauhausGridArtwork.empty
+    for event in events where event.time <= time {
+      event.action.apply(to: &artwork)
+    }
+    return artwork
+  }
+}
+
+/// One timestamped mutation in a Bauhaus replay.
+public struct BauhausGridReplayEvent: Codable, Equatable, Sendable {
+
+  /// Seconds from the start of the replay.
+  public var time: TimeInterval
+
+  /// The mutation applied at `time`.
+  public var action: BauhausGridReplayAction
+
+  public init(time: TimeInterval, action: BauhausGridReplayAction) {
+    self.time = time
+    self.action = action
+  }
+}
+
+/// A discrete Bauhaus grid edit that can be replayed from an empty artwork.
+public enum BauhausGridReplayAction: Codable, Equatable, Sendable {
+  /// Replaces one cell with a tile, or clears it when `tile` is `nil`.
+  case setTile(position: BauhausGridPosition, tile: BauhausTile?)
+
+  /// Clears every cell.
+  case clear
+
+  fileprivate func apply(to artwork: inout BauhausGridArtwork) {
+    switch self {
+    case .setTile(let position, let tile):
+      artwork[position] = tile
+    case .clear:
+      artwork = .empty
+    }
+  }
+}
 
 /// A 5 x 5 Bauhaus-style composition made from one optional tile per grid cell.
 ///
@@ -116,6 +268,113 @@ public struct BauhausGridArtworkView: View {
   }
 }
 
+/// Read-only SwiftUI replay for a saved `BauhausGridDocument`.
+///
+/// The caller owns playback state through `isPlaying`; the view only maps the
+/// document's optional replay timeline to a sequence of visible grid states.
+/// Documents without replay data render their final artwork statically.
+public struct BauhausGridReplayView: View {
+
+  public let document: BauhausGridDocument
+  public let colorPalette: BauhausColorPalette
+
+  @Binding private var isPlaying: Bool
+  @State private var replayStart: Date?
+
+  public init(
+    document: BauhausGridDocument,
+    colorPalette: BauhausColorPalette = .default,
+    isPlaying: Binding<Bool>
+  ) {
+    self.document = document
+    self.colorPalette = colorPalette
+    self._isPlaying = isPlaying
+  }
+
+  public var body: some View {
+    if let replay = document.replay, replay.isEmpty == false, isPlaying {
+      let recipe = BauhausGridReplayRecipe(replay: replay)
+
+      TimelineView(.animation) { timeline in
+        let elapsed = elapsedTime(at: timeline.date, recipe: recipe)
+        BauhausGridArtworkView(
+          artwork: replay.artwork(at: recipe.sourceTime(atVideoTime: elapsed)),
+          colorPalette: colorPalette
+        )
+        .onChange(of: elapsed >= recipe.totalDuration) { _, finished in
+          if finished {
+            isPlaying = false
+          }
+        }
+      }
+      .onAppear {
+        synchronizeReplayStart()
+      }
+      .onChange(of: isPlaying) { _, _ in
+        synchronizeReplayStart()
+      }
+      .onChange(of: document) { _, _ in
+        synchronizeReplayStart()
+      }
+    } else {
+      BauhausGridArtworkView(
+        artwork: document.artwork,
+        colorPalette: colorPalette
+      )
+      .onAppear {
+        if document.replay?.isEmpty != false {
+          isPlaying = false
+        }
+      }
+    }
+  }
+
+  private func synchronizeReplayStart() {
+    replayStart = isPlaying ? Date() : nil
+  }
+
+  private func elapsedTime(
+    at date: Date,
+    recipe: BauhausGridReplayRecipe
+  ) -> TimeInterval {
+    guard let replayStart else { return 0 }
+    return min(max(date.timeIntervalSince(replayStart), 0), recipe.totalDuration)
+  }
+}
+
+/// Playback timing policy for discrete Bauhaus replay events.
+private struct BauhausGridReplayRecipe: Equatable {
+
+  let sourceDuration: TimeInterval
+  let replayDuration: TimeInterval
+  let holdDuration: TimeInterval
+
+  init(
+    replay: BauhausGridReplay,
+    minimumReplayDuration: TimeInterval = 1.2,
+    maximumReplayDuration: TimeInterval = 8,
+    holdDuration: TimeInterval = 0.75
+  ) {
+    sourceDuration = max(replay.duration, replay.events.last?.time ?? 0, 0.18)
+    replayDuration = min(
+      max(sourceDuration, minimumReplayDuration),
+      maximumReplayDuration
+    )
+    self.holdDuration = max(holdDuration, 0)
+  }
+
+  var totalDuration: TimeInterval {
+    replayDuration + holdDuration
+  }
+
+  func sourceTime(atVideoTime videoTime: TimeInterval) -> TimeInterval {
+    guard replayDuration > 0 else { return sourceDuration }
+    let visibleVideoTime = min(max(videoTime, 0), replayDuration)
+    let progress = visibleVideoTime / replayDuration
+    return min(sourceDuration * progress, sourceDuration)
+  }
+}
+
 /// A stable row/column coordinate inside a `BauhausGridArtwork`.
 public struct BauhausGridPosition: Codable, Equatable, Hashable, Identifiable, Sendable {
 
@@ -187,6 +446,8 @@ public struct BauhausTile: Codable, Equatable, Sendable {
 /// Bauhaus-inspired primitives that fit inside one square grid cell.
 public enum BauhausShapeKind: String, CaseIterable, Codable, Identifiable, Sendable {
   case square
+  /// A circle inset from the cell edges so the surrounding cell color remains
+  /// visible.
   case circle
   case semicircleTop
   case semicircleTrailing
@@ -435,17 +696,32 @@ public struct BauhausGridCaptureView: View {
 
   @Environment(\.colorScheme) private var colorScheme
 
-  @State private var artwork: BauhausGridArtwork
+  @State private var document: BauhausGridDocument
   @State private var selectedPosition: BauhausGridPosition?
   @State private var selectedShapeSwatch: BauhausSwatch = .slot1
   @State private var selectedBackgroundSwatch: BauhausSwatch = .slot3
   @State private var selectionFeedbackTrigger = 0
   @State private var editFeedbackTrigger = 0
   @State private var completionFeedbackTrigger = 0
+  @State private var replayStart: Date?
 
   private let colorPalette: BauhausColorPalette
-  private let onChange: (@MainActor @Sendable (BauhausGridArtwork) -> Void)?
-  private let onExport: (@MainActor @Sendable (BauhausGridArtwork) -> Void)?
+  private let onChange: (@MainActor @Sendable (BauhausGridDocument) -> Void)?
+  private let onExport: (@MainActor @Sendable (BauhausGridDocument) -> Void)?
+
+  @MainActor
+  public init(
+    initialDocument: BauhausGridDocument = .empty,
+    colorPalette: BauhausColorPalette = .default,
+    onChange: (@MainActor @Sendable (BauhausGridDocument) -> Void)? = nil,
+    onExport: (@MainActor @Sendable (BauhausGridDocument) -> Void)? = nil
+  ) {
+    let document = Self.captureReadyDocument(from: initialDocument)
+    _document = State(initialValue: document)
+    self.colorPalette = colorPalette
+    self.onChange = onChange
+    self.onExport = onExport
+  }
 
   @MainActor
   public init(
@@ -454,10 +730,15 @@ public struct BauhausGridCaptureView: View {
     onChange: (@MainActor @Sendable (BauhausGridArtwork) -> Void)? = nil,
     onExport: (@MainActor @Sendable (BauhausGridArtwork) -> Void)? = nil
   ) {
-    _artwork = State(initialValue: initialArtwork)
+    let document = Self.captureReadyDocument(from: BauhausGridDocument(artwork: initialArtwork))
+    _document = State(initialValue: document)
     self.colorPalette = colorPalette
-    self.onChange = onChange
-    self.onExport = onExport
+    self.onChange = { document in
+      onChange?(document.artwork)
+    }
+    self.onExport = { document in
+      onExport?(document.artwork)
+    }
   }
 
   public var body: some View {
@@ -466,7 +747,7 @@ public struct BauhausGridCaptureView: View {
     ScrollView {
       VStack(spacing: 20) {
         BauhausArtworkBoard(
-          artwork: artwork,
+          artwork: document.artwork,
           selectedPosition: selectedPosition,
           colors: colors,
           onSelect: selectCell
@@ -475,8 +756,8 @@ public struct BauhausGridCaptureView: View {
         BauhausCaptureControls(
           selectedShapeSwatch: $selectedShapeSwatch,
           selectedBackgroundSwatch: $selectedBackgroundSwatch,
-          isClearDisabled: artwork.isEmpty,
-          isExportDisabled: artwork.isEmpty,
+          isClearDisabled: document.artwork.isEmpty,
+          isExportDisabled: document.artwork.isEmpty,
           showsExport: onExport != nil,
           colors: colors,
           onClear: clear,
@@ -495,7 +776,7 @@ public struct BauhausGridCaptureView: View {
       BauhausShapePickerSheet(
         selectedShapeSwatch: $selectedShapeSwatch,
         selectedBackgroundSwatch: $selectedBackgroundSwatch,
-        currentTile: artwork[position],
+        currentTile: document.artwork[position],
         colorPalette: colorPalette,
         onApply: { tile in
           apply(tile, at: position)
@@ -516,7 +797,7 @@ public struct BauhausGridCaptureView: View {
 
   private func selectCell(_ position: BauhausGridPosition) {
     triggerSelectionFeedback()
-    if let tile = artwork[position] {
+    if let tile = document.artwork[position] {
       selectedShapeSwatch = tile.shapeSwatch
       selectedBackgroundSwatch = tile.backgroundSwatch
     }
@@ -525,26 +806,46 @@ public struct BauhausGridCaptureView: View {
 
   private func apply(_ tile: BauhausTile?, at position: BauhausGridPosition) {
     withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-      artwork[position] = tile
+      document.artwork[position] = tile
+      recordReplayAction(.setTile(position: position, tile: tile))
     }
     selectedPosition = nil
     triggerEditFeedback()
-    onChange?(artwork)
+    onChange?(document)
   }
 
   private func clear() {
-    guard artwork.isEmpty == false else { return }
+    guard document.artwork.isEmpty == false else { return }
     withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) {
-      artwork = .empty
+      document.artwork = .empty
+      if document.replay == nil {
+        document.replay = BauhausGridReplay()
+        replayStart = nil
+      } else {
+        recordReplayAction(.clear)
+      }
     }
     triggerEditFeedback()
-    onChange?(artwork)
+    onChange?(document)
   }
 
   private func export() {
-    guard artwork.isEmpty == false else { return }
+    guard document.artwork.isEmpty == false else { return }
     triggerCompletionFeedback()
-    onExport?(artwork)
+    onExport?(document)
+  }
+
+  private func recordReplayAction(_ action: BauhausGridReplayAction) {
+    guard document.replay != nil else { return }
+    document.replay?.append(action: action, at: replayTime())
+  }
+
+  private func replayTime() -> TimeInterval {
+    let existingDuration = document.replay?.duration ?? 0
+    if replayStart == nil {
+      replayStart = Date().addingTimeInterval(-existingDuration)
+    }
+    return replayStart.map { Date().timeIntervalSince($0) } ?? existingDuration
   }
 
   private func triggerSelectionFeedback() {
@@ -557,6 +858,15 @@ public struct BauhausGridCaptureView: View {
 
   private func triggerCompletionFeedback() {
     completionFeedbackTrigger += 1
+  }
+
+  private static func captureReadyDocument(
+    from document: BauhausGridDocument
+  ) -> BauhausGridDocument {
+    guard document.replay == nil, document.artwork.isEmpty else {
+      return document
+    }
+    return BauhausGridDocument(artwork: document.artwork, replay: BauhausGridReplay())
   }
 }
 
@@ -1103,6 +1413,8 @@ fileprivate struct BauhausShape: Shape {
 
 fileprivate extension BauhausShapeKind {
 
+  private static let circleInsetRatio: CGFloat = 0.12
+
   var accessibilityLabel: Text {
     switch self {
     case .square:
@@ -1149,7 +1461,7 @@ fileprivate extension BauhausShapeKind {
     case .square:
       return Path(rect)
     case .circle:
-      return Path(ellipseIn: rect.insetBy(dx: rect.width * 0.12, dy: rect.height * 0.12))
+      return paddedCirclePath(in: rect)
     case .semicircleTop:
       return semicirclePath(in: rect, edge: .top)
     case .semicircleTrailing:
@@ -1183,6 +1495,11 @@ fileprivate extension BauhausShapeKind {
     case .triangleBottomLeading:
       return trianglePath(in: rect, corner: .bottomLeading)
     }
+  }
+
+  private func paddedCirclePath(in rect: CGRect) -> Path {
+    let inset = min(rect.width, rect.height) * Self.circleInsetRatio
+    return Path(ellipseIn: rect.insetBy(dx: inset, dy: inset))
   }
 
   private enum Edge {
@@ -1307,8 +1624,274 @@ fileprivate extension BauhausShapeKind {
   }
 }
 
-#Preview {
+#Preview("Bauhaus Capture") {
   NavigationStack {
     BauhausGridCaptureDemoView()
+  }
+}
+
+#Preview("Bauhaus Board") {
+  BauhausPreviewCanvas {
+    BauhausArtworkBoard(
+      artwork: BauhausPreviewFixtures.allShapeArtwork,
+      selectedPosition: BauhausGridPosition(row: 0, column: 1),
+      colors: BauhausColorPalette.default.colors(for: .light),
+      onSelect: { _ in }
+    )
+    .frame(width: 320)
+  }
+}
+
+#Preview("Bauhaus Shape Parts") {
+  BauhausShapePartsPreview()
+}
+
+#Preview("Bauhaus Shape Library") {
+  BauhausShapeLibraryPreview()
+}
+
+#Preview("Bauhaus Controls") {
+  BauhausCaptureControlsPreview()
+}
+
+#Preview("Bauhaus Replay") {
+  BauhausReplayPreview()
+}
+
+// MARK: - Previews
+
+fileprivate enum BauhausPreviewFixtures {
+
+  static let primaryShapeSwatch: BauhausSwatch = .slot1
+  static let primaryBackgroundSwatch: BauhausSwatch = .slot3
+
+  static var allShapeArtwork: BauhausGridArtwork {
+    let tiles: [BauhausTile?] = BauhausShapeKind.allCases.enumerated().map {
+      index, shape in
+      let pair = swatchPairs[index % swatchPairs.count]
+      return BauhausTile(
+        shape: shape,
+        shapeSwatch: pair.shape,
+        backgroundSwatch: pair.background
+      )
+    }
+
+    return BauhausGridArtwork(tiles: tiles)
+  }
+
+  static var replayDocument: BauhausGridDocument {
+    let placements: [(BauhausGridPosition, BauhausShapeKind)] = [
+      (BauhausGridPosition(row: 0, column: 0), .square),
+      (BauhausGridPosition(row: 0, column: 1), .circle),
+      (BauhausGridPosition(row: 1, column: 2), .semicircleTop),
+      (BauhausGridPosition(row: 2, column: 2), .quarterCircleBottomTrailing),
+      (BauhausGridPosition(row: 3, column: 3), .triangleTopLeading),
+      (BauhausGridPosition(row: 4, column: 4), .semicircleFlatLeading),
+    ]
+
+    var artwork = BauhausGridArtwork()
+    var replay = BauhausGridReplay()
+
+    for (index, placement) in placements.enumerated() {
+      let pair = swatchPairs[index % swatchPairs.count]
+      let tile = BauhausTile(
+        shape: placement.1,
+        shapeSwatch: pair.shape,
+        backgroundSwatch: pair.background
+      )
+      artwork[placement.0] = tile
+      replay.append(
+        action: .setTile(position: placement.0, tile: tile),
+        at: Double(index) * 0.35
+      )
+    }
+
+    return BauhausGridDocument(artwork: artwork, replay: replay)
+  }
+
+  private static let swatchPairs: [
+    (shape: BauhausSwatch, background: BauhausSwatch)
+  ] = [
+    (.slot1, .slot3),
+    (.slot5, .slot2),
+    (.slot7, .slot4),
+    (.slot2, .slot6),
+  ]
+}
+
+fileprivate struct BauhausPreviewCanvas<Content: View>: View {
+
+  private let content: Content
+
+  init(@ViewBuilder content: () -> Content) {
+    self.content = content()
+  }
+
+  var body: some View {
+    ScrollView {
+      content
+        .padding(20)
+        .frame(maxWidth: 560)
+        .frame(maxWidth: .infinity)
+    }
+    .background(.background)
+  }
+}
+
+fileprivate struct BauhausShapePartsPreview: View {
+
+  @Environment(\.colorScheme) private var colorScheme
+
+  var body: some View {
+    let colors = BauhausColorPalette.default.colors(for: colorScheme)
+
+    BauhausPreviewCanvas {
+      VStack(alignment: .leading, spacing: 18) {
+        BauhausShapePartPreviewSection(
+          title: "Basic",
+          shapes: BauhausShapeLibraryOrder.basic,
+          colors: colors
+        )
+        BauhausShapePartPreviewSection(
+          title: "Semicircle Arc",
+          shapes: BauhausShapeLibraryOrder.arcSemicircles,
+          colors: colors
+        )
+        BauhausShapePartPreviewSection(
+          title: "Semicircle Flat",
+          shapes: BauhausShapeLibraryOrder.flatSemicircles,
+          colors: colors
+        )
+        BauhausShapePartPreviewSection(
+          title: "Quarter Circle",
+          shapes: BauhausShapeLibraryOrder.quarterCircles,
+          colors: colors
+        )
+        BauhausShapePartPreviewSection(
+          title: "Triangle",
+          shapes: BauhausShapeLibraryOrder.triangles,
+          colors: colors
+        )
+      }
+    }
+  }
+}
+
+fileprivate struct BauhausShapePartPreviewSection: View {
+
+  let title: LocalizedStringKey
+  let shapes: [BauhausShapeKind]
+  let colors: BauhausResolvedColors
+
+  private static let columns = Array(
+    repeating: GridItem(.fixed(56), spacing: 12),
+    count: 4
+  )
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(title)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+
+      LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 12) {
+        ForEach(shapes) { shape in
+          BauhausShapePartPreviewTile(
+            shape: shape,
+            colors: colors
+          )
+        }
+      }
+    }
+  }
+}
+
+fileprivate struct BauhausShapePartPreviewTile: View {
+
+  let shape: BauhausShapeKind
+  let colors: BauhausResolvedColors
+
+  var body: some View {
+    ZStack {
+      Rectangle()
+        .fill(BauhausPreviewFixtures.primaryBackgroundSwatch.color(in: colors))
+
+      BauhausShape(kind: shape)
+        .fill(BauhausPreviewFixtures.primaryShapeSwatch.color(in: colors))
+    }
+    .frame(width: 56, height: 56)
+    .overlay {
+      Rectangle()
+        .strokeBorder(colors.chrome.gridLine, lineWidth: 1)
+    }
+    .accessibilityLabel(shape.accessibilityLabel)
+  }
+}
+
+fileprivate struct BauhausShapeLibraryPreview: View {
+
+  @Environment(\.colorScheme) private var colorScheme
+  @State private var selectedShapeSwatch = BauhausPreviewFixtures.primaryShapeSwatch
+  @State private var selectedBackgroundSwatch = BauhausPreviewFixtures.primaryBackgroundSwatch
+  @State private var currentTile = BauhausTile(
+    shape: .circle,
+    shapeSwatch: BauhausPreviewFixtures.primaryShapeSwatch,
+    backgroundSwatch: BauhausPreviewFixtures.primaryBackgroundSwatch
+  )
+
+  var body: some View {
+    let colors = BauhausColorPalette.default.colors(for: colorScheme)
+
+    BauhausPreviewCanvas {
+      BauhausShapeLibrary(
+        selectedShapeSwatch: selectedShapeSwatch,
+        selectedBackgroundSwatch: selectedBackgroundSwatch,
+        currentTile: currentTile,
+        colors: colors,
+        onApply: { tile in
+          currentTile = tile
+        }
+      )
+    }
+  }
+}
+
+fileprivate struct BauhausCaptureControlsPreview: View {
+
+  @Environment(\.colorScheme) private var colorScheme
+  @State private var selectedShapeSwatch = BauhausPreviewFixtures.primaryShapeSwatch
+  @State private var selectedBackgroundSwatch = BauhausPreviewFixtures.primaryBackgroundSwatch
+
+  var body: some View {
+    let colors = BauhausColorPalette.default.colors(for: colorScheme)
+
+    BauhausPreviewCanvas {
+      BauhausCaptureControls(
+        selectedShapeSwatch: $selectedShapeSwatch,
+        selectedBackgroundSwatch: $selectedBackgroundSwatch,
+        isClearDisabled: false,
+        isExportDisabled: false,
+        showsExport: true,
+        colors: colors,
+        onClear: {},
+        onExport: {},
+        onSelectSwatch: {}
+      )
+    }
+  }
+}
+
+fileprivate struct BauhausReplayPreview: View {
+
+  @State private var isPlaying = true
+
+  var body: some View {
+    BauhausPreviewCanvas {
+      BauhausGridReplayView(
+        document: BauhausPreviewFixtures.replayDocument,
+        isPlaying: $isPlaying
+      )
+      .frame(width: 320, height: 320)
+    }
   }
 }

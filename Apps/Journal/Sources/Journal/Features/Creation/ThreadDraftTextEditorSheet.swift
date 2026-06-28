@@ -1,11 +1,41 @@
+import CaptureText
 import SwiftUI
 
 /// Native sheet shell for editing a text card from the composer.
 ///
-/// Text drafts are created before presentation because typing is the capture
-/// act itself. Dismissing this sheet leaves the draft in place, matching the
-/// existing composer behavior for an empty text placeholder.
+/// New text capture owns local input until **Save**, while existing text cards
+/// continue to edit their draft binding directly.
 struct ThreadDraftTextEditorSheet: View {
+
+  /// Draft whose body text and location metadata are edited by the sheet.
+  /// `nil` means quick text capture should create/reuse a draft only on Save.
+  let card: ThreadDraftCard?
+
+  /// Whether the composer is currently saving and should block metadata edits.
+  let isSaving: Bool
+
+  /// Called when a new quick text capture commits non-empty text.
+  let onCapture: @MainActor @Sendable (CapturedText) -> Void
+
+  /// Toggles the card's attached coordinate through the Creation-level location
+  /// permission bridge.
+  let onToggleLocation: @MainActor @Sendable () -> Void
+
+  var body: some View {
+    if let card {
+      ThreadDraftExistingTextEditorSheet(
+        card: card,
+        isSaving: isSaving,
+        onToggleLocation: onToggleLocation
+      )
+    } else {
+      ThreadDraftNewTextCaptureSheet(onCapture: onCapture)
+    }
+  }
+}
+
+/// Native sheet shell for editing an existing text draft.
+private struct ThreadDraftExistingTextEditorSheet: View {
 
   @Environment(\.dismiss) private var dismiss
 
@@ -39,6 +69,33 @@ struct ThreadDraftTextEditorSheet: View {
             .accessibilityLabel(card.location != nil ? "Location attached" : "Attach location")
           }
         }
+    }
+  }
+}
+
+/// Native sheet shell for creating a new text draft from the quick action.
+private struct ThreadDraftNewTextCaptureSheet: View {
+
+  @Environment(\.dismiss) private var dismiss
+
+  /// Called when `TextCaptureView` emits non-empty text.
+  let onCapture: @MainActor @Sendable (CapturedText) -> Void
+
+  var body: some View {
+    NavigationStack {
+      TextCaptureView(placeholder: "Write your thoughts...") { captured in
+        onCapture(captured)
+        dismiss()
+      }
+      .navigationTitle("Text")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancel") {
+            dismiss()
+          }
+        }
+      }
     }
   }
 }

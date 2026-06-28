@@ -3,6 +3,7 @@ import CaptureAudio
 import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
+import CaptureText
 import CoreLocation
 import JournalModel
 import MuColor
@@ -135,8 +136,14 @@ struct CreationView: View {
       ThreadDraftTextEditorSheet(
         card: presentation.target,
         isSaving: isSaving,
+        onCapture: { captured in
+          finishTextCapture(captured, target: presentation.target)
+        },
         onToggleLocation: {
-          toggleLocation(presentation.target)
+          guard let target = presentation.target else {
+            return
+          }
+          toggleLocation(target)
         }
       )
       .presentationDetents([.medium, .large])
@@ -168,8 +175,8 @@ struct CreationView: View {
     .sheet(item: $bauhausGridPresentation) { presentation in
       ThreadDraftBauhausGridSheet(
         card: presentation.target,
-        onChange: { artwork in
-          updateBauhaus(artwork, presentation: presentation)
+        onChange: { document in
+          updateBauhaus(document, presentation: presentation)
         }
       )
       .presentationDetents([.medium, .large])
@@ -179,8 +186,8 @@ struct CreationView: View {
     .sheet(item: $quickBauhausGridPresentation) { presentation in
       ThreadDraftBauhausGridSheet(
         card: presentation.target,
-        onChange: { artwork in
-          updateBauhaus(artwork, presentation: presentation)
+        onChange: { document in
+          updateBauhaus(document, presentation: presentation)
         }
       )
       .presentationDetents(
@@ -248,16 +255,7 @@ struct CreationView: View {
   }
 
   private func presentTextCapture() {
-    if let draft = draftCards.last, draft.isEmptyTextDraft {
-      scrollTargetID = draft
-      presentTextEditor(for: draft)
-      return
-    }
-
-    let draft = ThreadDraftCard()
-    draftCards.append(draft)
-    scrollTargetID = draft
-    presentTextEditor(for: draft)
+    textEditorPresentation = TextEditorPresentation(target: nil)
   }
 
   private func openDraft(_ draft: ThreadDraftCard) {
@@ -278,8 +276,8 @@ struct CreationView: View {
       )
     case .text:
       presentTextEditor(for: draft)
-    @unknown default:
-      presentTextEditor(for: draft)
+    case .unknown:
+      presentTextEditor(for: draft)   
     }
   }
 
@@ -309,6 +307,19 @@ struct CreationView: View {
 
   private func presentVoiceRecorder() {
     voiceRecorderPresentation = VoiceRecorderPresentation(target: nil)
+  }
+
+  private func finishTextCapture(
+    _ capturedText: CapturedText,
+    target: ThreadDraftCard?
+  ) {
+    guard capturedText.isEmpty == false else {
+      return
+    }
+
+    let draft = target ?? draftForNewQuickCapture()
+    draft.setText(capturedText)
+    scrollTargetID = draft
   }
 
   private func finishPhotoCapture(
@@ -378,16 +389,16 @@ struct CreationView: View {
   }
 
   private func updateBauhaus(
-    _ artwork: BauhausGridArtwork?,
+    _ document: BauhausGridDocument?,
     presentation: BauhausGridPresentation
   ) {
-    guard let artwork, artwork.isEmpty == false else {
+    guard let document, document.artwork.isEmpty == false else {
       clearBauhaus(for: presentation)
       return
     }
 
     let draft = presentation.target ?? draftForNewBauhausCapture(presentation)
-    draft.setBauhaus(artwork)
+    draft.setBauhaus(document)
     scrollTargetID = draft
   }
 
@@ -547,8 +558,9 @@ private struct TextEditorPresentation: Identifiable {
   /// a fresh value so SwiftUI rebuilds focus and keyboard state cleanly.
   let id = UUID()
 
-  /// Draft being edited by the text sheet.
-  let target: ThreadDraftCard
+  /// Draft being edited, or `nil` when quick text capture should create/reuse a
+  /// draft only after the user saves non-empty text.
+  let target: ThreadDraftCard?
 }
 
 /// Presentation payload for one photo capture session.
@@ -747,6 +759,8 @@ private struct ThreadDraftCardPreview: View {
         prompt: "Open grid",
         image: card.bauhaus?.image(colorScheme: colorScheme)
       )
+    case .unknown:
+      ThreadDraftTextPreview(text: card.text)
     @unknown default:
       ThreadDraftTextPreview(text: card.text)
     }

@@ -141,6 +141,8 @@ private struct CardEditDraftKindEditor: View {
         ThreadDraftDoodleDetailEditor(card: draft)
       case .bauhaus:
         ThreadDraftBauhausDetailEditor(card: draft)
+      case .unknown:
+        ThreadDraftTextDetailEditor(text: $draft.text)
       @unknown default:
         ThreadDraftTextDetailEditor(text: $draft.text)
       }
@@ -206,14 +208,14 @@ private struct ThreadDraftBauhausDetailEditor: View {
 
   var body: some View {
     BauhausGridCaptureView(
-      initialArtwork: card.bauhaus ?? .empty,
-      onChange: { [card] artwork in
-        guard artwork.isEmpty == false else {
+      initialDocument: card.bauhaus ?? .empty,
+      onChange: { [card] document in
+        guard document.artwork.isEmpty == false else {
           card.clearBauhaus()
           return
         }
 
-        card.setBauhaus(artwork)
+        card.setBauhaus(document)
       }
     )
   }
@@ -253,6 +255,8 @@ extension Card.Kind {
       return "Doodle Card"
     case .bauhaus:
       return "Bauhaus Card"
+    case .unknown:
+      return "Card"
     @unknown default:
       return "Card"
     }

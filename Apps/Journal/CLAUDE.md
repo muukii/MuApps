@@ -40,9 +40,9 @@ about distribution, not product behavior).
 
 - **Capture components stay persistence-agnostic.** Each emits a plain `Sendable`
   value type through a `@MainActor @Sendable` callback (`CapturedText`,
-  `CapturedPhoto`, `DoodleDrawing`, `AudioRecording`, `CapturedSuggestion`) and
-  must know nothing about `Card`, SwiftData, or iCloud. Don't couple them to the
-  app shell.
+  `CapturedPhoto`, `DoodleDrawing`, `BauhausGridDocument`, `AudioRecording`,
+  `CapturedSuggestion`) and must know nothing about `Card`, SwiftData, or
+  iCloud. Don't couple them to the app shell.
 - **SwiftData models obey CloudKit-mirroring constraints.** Every stored property
   optional-or-defaulted, no `.unique`, every relationship optional, inverse
   declared on one side only. Adding a non-optional property or a `.unique` will

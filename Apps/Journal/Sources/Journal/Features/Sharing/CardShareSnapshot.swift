@@ -1,3 +1,4 @@
+import CaptureBauhaus
 import Foundation
 import JournalModel
 
@@ -62,9 +63,11 @@ struct CardShareSnapshot: Identifiable, Sendable, Equatable {
     case .bauhaus:
       let attachment = attachments.first(matching: .bauhaus)
       return .bauhaus(
-        artworkData: fileData(for: attachment),
+        documentData: fileData(for: attachment),
         thumbnailData: attachment?.thumbnail
       )
+    case .unknown:
+      return .text(body)
     @unknown default:
       return .text(body)
     }
@@ -101,9 +104,10 @@ enum CardShareContent: Sendable, Equatable {
   /// fallback.
   case doodle(drawingData: Data?, thumbnailData: Data?)
 
-  /// A Bauhaus card with optional encoded `BauhausGridArtwork` JSON and thumbnail
-  /// fallback.
-  case bauhaus(artworkData: Data?, thumbnailData: Data?)
+  /// A Bauhaus card with optional encoded `BauhausGridDocument` JSON and
+  /// thumbnail fallback. Older final-only `BauhausGridArtwork` JSON decodes
+  /// through the document's compatibility path.
+  case bauhaus(documentData: Data?, thumbnailData: Data?)
 }
 
 private extension Array where Element == Attachment {

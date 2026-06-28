@@ -169,8 +169,6 @@ extension Card.Kind {
       self = .doodle
     case .bauhaus:
       self = .bauhaus
-    @unknown default:
-      self = .unknown
     }
   }
 

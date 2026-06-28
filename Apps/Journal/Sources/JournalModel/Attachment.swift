@@ -63,7 +63,7 @@ extension Attachment {
 
   /// The capture modality behind an attachment, which determines how the stored
   /// bytes are interpreted (photo → JPEG, audio → m4a, doodle → encoded
-  /// `DoodleDrawing` JSON, Bauhaus → encoded `BauhausGridArtwork` JSON).
+  /// `DoodleDrawing` JSON, Bauhaus → encoded `BauhausGridDocument` JSON).
   public enum Kind: String, Codable, Sendable, CaseIterable {
     case photo
     case audio

@@ -2,6 +2,7 @@ import CaptureAudio
 import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
+import CaptureText
 import Foundation
 import JournalModel
 import Observation
@@ -13,7 +14,7 @@ import Observation
 /// observe *that* draft.
 ///
 /// Drafts keep capture values in their authored form (`CapturedPhoto`,
-/// `AudioRecording`, `DoodleDrawing`, `BauhausGridArtwork`) until save time.
+/// `AudioRecording`, `DoodleDrawing`, `BauhausGridDocument`) until save time.
 /// Persistence conversion is a boundary step, not creation-screen state, so the
 /// same model can drive creation, saved-entry editing, and previews.
 @MainActor
@@ -60,8 +61,12 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   /// Vector doodle kept editable while the draft is open.
   var doodle: DoodleDrawing?
 
-  /// Geometric Bauhaus grid artwork kept editable while the draft is open.
-  var bauhaus: BauhausGridArtwork?
+  /// Geometric Bauhaus document kept editable while the draft is open.
+  ///
+  /// The document carries the final grid plus optional authored replay timeline.
+  /// Old final-only payloads decode with `replay == nil`, so draft editing never
+  /// invents a fake history for synced or pre-replay cards.
+  var bauhaus: BauhausGridDocument?
 
   /// Current coordinate attached to this draft. `nil` means this card will be
   /// saved without location metadata.
@@ -79,7 +84,9 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     case .doodle:
       return doodle != nil
     case .bauhaus:
-      return bauhaus?.isEmpty == false
+      return bauhaus?.artwork.isEmpty == false
+    case .unknown:
+      return false
     @unknown default:
       return false
     }
@@ -103,7 +110,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     photo: CapturedPhoto? = nil,
     audio: AudioRecording? = nil,
     doodle: DoodleDrawing? = nil,
-    bauhaus: BauhausGridArtwork? = nil,
+    bauhaus: BauhausGridDocument? = nil,
     location: Coordinate? = nil
   ) {
     self.kind = kind
@@ -122,7 +129,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     self.photo = try container.decodeIfPresent(CapturedPhoto.self, forKey: .photo)
     self.audio = try container.decodeIfPresent(AudioRecording.self, forKey: .audio)
     self.doodle = try container.decodeIfPresent(DoodleDrawing.self, forKey: .doodle)
-    self.bauhaus = try container.decodeIfPresent(BauhausGridArtwork.self, forKey: .bauhaus)
+    self.bauhaus = try container.decodeIfPresent(BauhausGridDocument.self, forKey: .bauhaus)
     self.location = try container.decodeIfPresent(Coordinate.self, forKey: .location)
   }
 
@@ -158,6 +165,19 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     self.photo = photo
   }
 
+  /// Stores written text and switches the draft to text mode.
+  ///
+  /// Quick text capture calls this at its completion boundary so dismissing an
+  /// empty new editor does not create a draft card.
+  func setText(_ capturedText: CapturedText) {
+    kind = .text
+    text = capturedText.text
+    photo = nil
+    audio = nil
+    doodle = nil
+    bauhaus = nil
+  }
+
   /// Stores a completed audio recording and switches the draft to audio mode.
   func setAudio(_ audio: AudioRecording) {
     kind = .audio
@@ -170,10 +190,10 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     self.doodle = doodle
   }
 
-  /// Stores Bauhaus grid artwork and switches the draft to Bauhaus mode.
-  func setBauhaus(_ artwork: BauhausGridArtwork) {
+  /// Stores a Bauhaus document and switches the draft to Bauhaus mode.
+  func setBauhaus(_ document: BauhausGridDocument) {
     kind = .bauhaus
-    bauhaus = artwork
+    bauhaus = document
   }
 
   /// Clears the current doodle payload while keeping the draft in doodle mode.
@@ -215,7 +235,7 @@ struct CardEditDraftSnapshot: Sendable, Codable {
   var photo: CapturedPhoto?
   var audio: AudioRecording?
   var doodle: DoodleDrawing?
-  var bauhaus: BauhausGridArtwork?
+  var bauhaus: BauhausGridDocument?
   var location: Coordinate?
 
   @MainActor
@@ -249,7 +269,7 @@ struct CardEditDraftSnapshot: Sendable, Codable {
         location: location
       )
     case .bauhaus:
-      guard let bauhaus, bauhaus.isEmpty == false else {
+      guard let bauhaus, bauhaus.artwork.isEmpty == false else {
         throw CardEditDraftSnapshotError.missingMediaPayload
       }
       return JournalStore.ThreadCardInput(
@@ -257,6 +277,8 @@ struct CardEditDraftSnapshot: Sendable, Codable {
         mediaData: try JSONEncoder().encode(bauhaus),
         location: location
       )
+    case .unknown:
+      throw CardEditDraftSnapshotError.unsupportedKind
     @unknown default:
       throw CardEditDraftSnapshotError.unsupportedKind
     }

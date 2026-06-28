@@ -4,8 +4,8 @@ import SwiftUI
 /// Native sheet shell for composing a Bauhaus grid artwork card.
 ///
 /// The grid editor streams every cell edit back to the draft, so dismissal is
-/// not a save boundary. Clearing the grid sends `nil` to let the composer restore
-/// or remove an automatically-created draft.
+/// not a save boundary. Clearing the grid sends `nil` to let the composer
+/// restore or remove an automatically-created draft.
 struct ThreadDraftBauhausGridSheet: View {
 
   @Environment(\.dismiss) private var dismiss
@@ -14,16 +14,16 @@ struct ThreadDraftBauhausGridSheet: View {
   /// first non-empty artwork arrives from the grid editor.
   let card: ThreadDraftCard?
 
-  /// Streams the current artwork after grid changes. `nil` means the grid has
-  /// become empty.
-  let onChange: @MainActor @Sendable (BauhausGridArtwork?) -> Void
+  /// Streams the current document after grid changes. `nil` means the grid has
+  /// become empty and should not leave a savable draft behind.
+  let onChange: @MainActor @Sendable (BauhausGridDocument?) -> Void
 
   var body: some View {
     NavigationStack {
       BauhausGridCaptureView(
-        initialArtwork: card?.bauhaus ?? .empty,
-        onChange: { artwork in
-          onChange(artwork.isEmpty ? nil : artwork)
+        initialDocument: card?.bauhaus ?? .empty,
+        onChange: { document in
+          onChange(document.artwork.isEmpty ? nil : document)
         }
       )
       .navigationTitle("Bauhaus")

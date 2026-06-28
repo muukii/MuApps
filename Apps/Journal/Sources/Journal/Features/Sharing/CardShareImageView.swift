@@ -158,8 +158,8 @@ private struct CardShareContentView: View {
       CardShareAudioContent(hasFile: fileURL != nil)
     case .doodle(_, let thumbnailData):
       CardShareImageContent(imageData: thumbnailData, fallbackSymbolName: "scribble.variable")
-    case .bauhaus(let artworkData, let thumbnailData):
-      CardShareBauhausContent(artworkData: artworkData, thumbnailData: thumbnailData)
+    case .bauhaus(let documentData, let thumbnailData):
+      CardShareBauhausContent(documentData: documentData, thumbnailData: thumbnailData)
     }
   }
 }
@@ -214,7 +214,7 @@ private struct CardShareImageContent: View {
 /// Bauhaus export content, preferring decoded vector grid data over old thumbnails.
 private struct CardShareBauhausContent: View {
 
-  let artworkData: Data?
+  let documentData: Data?
   let thumbnailData: Data?
 
   var body: some View {
@@ -222,8 +222,8 @@ private struct CardShareBauhausContent: View {
       RoundedRectangle(cornerRadius: 32, style: .continuous)
         .fill(.appOnSecondaryContainer.opacity(0.06))
 
-      if let artwork {
-        BauhausGridArtworkView(artwork: artwork)
+      if let document {
+        BauhausGridArtworkView(artwork: document.artwork)
           .padding(32)
       } else {
         CardShareImageContent(
@@ -235,9 +235,9 @@ private struct CardShareBauhausContent: View {
     .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
   }
 
-  private var artwork: BauhausGridArtwork? {
-    guard let artworkData else { return nil }
-    return try? JSONDecoder().decode(BauhausGridArtwork.self, from: artworkData)
+  private var document: BauhausGridDocument? {
+    guard let documentData else { return nil }
+    return try? JSONDecoder().decode(BauhausGridDocument.self, from: documentData)
   }
 }
 

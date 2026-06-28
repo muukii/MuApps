@@ -291,6 +291,8 @@ extension Card {
       return .bauhaus(
         thumbnailData: attachments.first(matching: .bauhaus)?.thumbnail
       )
+    case .unknown:
+      return .text("Untitled")
     @unknown default:
       return .text("Untitled")
     }
