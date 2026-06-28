@@ -1,5 +1,5 @@
 name: Deploy to App Store Connect
-run-name: Deploy to App Store Connect (${{ github.event.inputs.app || 'Verse' }}) from ${{ github.ref_name }}
+run-name: Deploy to App Store Connect (${{ github.event_name == 'push' && 'main-auto' || github.event.inputs.app || 'Verse' }}) from ${{ github.ref_name }}
 
 on:
   push:
@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: appstoreconnect-${{ github.ref_name }}-${{ github.event.inputs.app || 'Verse' }}
+  group: appstoreconnect-${{ github.ref_name }}-${{ github.event_name == 'push' && 'main-auto' || github.event.inputs.app || 'Verse' }}
   cancel-in-progress: false
 
 # Available secrets in this repository:
@@ -58,17 +58,27 @@ jobs:
         run: |
           set -euo pipefail
 
+          event_name="${{ github.event_name }}"
           requested_app="${{ github.event.inputs.app || 'Verse' }}"
-          configured_apps="$(jq -c --arg requested_app "$requested_app" '
-            if $requested_app == "all" then
-              .apps
-            else
-              [.apps[] | select(.name == $requested_app)]
-            end
-          ' .github/appstore-apps.json)"
+
+          if [ "$event_name" = "push" ]; then
+            configured_apps="$(jq -c '[.apps[] | select(.deploy_on_main == true)]' .github/appstore-apps.json)"
+          else
+            configured_apps="$(jq -c --arg requested_app "$requested_app" '
+              if $requested_app == "all" then
+                .apps
+              else
+                [.apps[] | select(.name == $requested_app)]
+              end
+            ' .github/appstore-apps.json)"
+          fi
 
           if [ "$configured_apps" = "[]" ]; then
-            echo "::error::No App Store Connect deploy configuration found for ${requested_app}."
+            if [ "$event_name" = "push" ]; then
+              echo "::error::No App Store Connect deploy configuration found for main push."
+            else
+              echo "::error::No App Store Connect deploy configuration found for ${requested_app}."
+            fi
             exit 1
           fi
 
@@ -79,7 +89,7 @@ jobs:
 
             if [ -f "$project_path" ]; then
               selected_apps="$(jq -c --argjson app_config "$app_config" '. + [$app_config]' <<< "$selected_apps")"
-            elif [ "$requested_app" = "all" ]; then
+            elif [ "$event_name" = "push" ] || [ "$requested_app" = "all" ]; then
               echo "::notice::Skipping ${app_name}: ${project_path} does not exist on this branch."
             else
               echo "::error::${app_name} is configured for App Store Connect deploy, but ${project_path} does not exist on this branch."

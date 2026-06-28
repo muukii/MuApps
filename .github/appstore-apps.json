@@ -5,14 +5,16 @@
       "scheme": "Verse",
       "project_path": "Apps/Verse/Project.swift",
       "xcode_version": "26.4",
-      "macos_runner": "macos-26"
+      "macos_runner": "macos-26",
+      "deploy_on_main": true
     },
     {
       "name": "Journal",
       "scheme": "Journal",
       "project_path": "Apps/Journal/Project.swift",
       "xcode_version": "26.4",
-      "macos_runner": "macos-26"
+      "macos_runner": "macos-26",
+      "deploy_on_main": true
     },
     {
       "name": "Tone",
