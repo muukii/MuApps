@@ -58,53 +58,50 @@ public final class Card {
 
   // MARK: - Content
 
-  public var title: String = ""
   public var body: String = ""
 
   private init(
     kind: Kind,
-    title: String = "",
     body: String = ""
   ) {
     self.id = UUID()
     self.kind = kind
     self.createdAt = Date()
     self.updatedAt = Date()
-    self.title = title
     self.body = body
   }
 
   /// Creates a written note card. Text cards use `body` as their primary
   /// content and do not require an attachment.
-  public convenience init(text: String, title: String = "") {
-    self.init(kind: .text, title: title, body: text)
+  public convenience init(text: String) {
+    self.init(kind: .text, body: text)
   }
 
   /// Creates a photo card. When an attachment is provided, it is linked as the
   /// card's media payload; `body` is intentionally left empty.
-  public convenience init(photo attachment: Attachment? = nil, title: String = "") {
-    self.init(kind: .photo, title: title)
+  public convenience init(photo attachment: Attachment? = nil) {
+    self.init(kind: .photo)
     attachMediaPayload(attachment)
   }
 
   /// Creates an audio card. When an attachment is provided, it is linked as the
   /// card's media payload; `body` is intentionally left empty.
-  public convenience init(audio attachment: Attachment? = nil, title: String = "") {
-    self.init(kind: .audio, title: title)
+  public convenience init(audio attachment: Attachment? = nil) {
+    self.init(kind: .audio)
     attachMediaPayload(attachment)
   }
 
   /// Creates a doodle card. When an attachment is provided, it is linked as the
   /// card's media payload; `body` is intentionally left empty.
-  public convenience init(doodle attachment: Attachment? = nil, title: String = "") {
-    self.init(kind: .doodle, title: title)
+  public convenience init(doodle attachment: Attachment? = nil) {
+    self.init(kind: .doodle)
     attachMediaPayload(attachment)
   }
 
   /// Creates a Bauhaus grid artwork card. When an attachment is provided, it is
   /// linked as the card's media payload; `body` is intentionally left empty.
-  public convenience init(bauhaus attachment: Attachment? = nil, title: String = "") {
-    self.init(kind: .bauhaus, title: title)
+  public convenience init(bauhaus attachment: Attachment? = nil) {
+    self.init(kind: .bauhaus)
     attachMediaPayload(attachment)
   }
 
@@ -145,6 +142,12 @@ extension Card {
     /// A Bauhaus grid artwork card. The card expects one `.bauhaus` attachment
     /// for the encoded `BauhausGridArtwork`.
     case bauhaus
+
+    /// A card whose modality this build does not recognize — for example one
+    /// synced from a newer app version that introduced a kind this build predates.
+    /// The app cannot create `.unknown` cards; it only renders them as a neutral
+    /// placeholder so unfamiliar content degrades gracefully instead of failing.
+    case unknown
   }
 
   /// The media attachment kind this card should carry, or `nil` for text cards.
@@ -167,7 +170,7 @@ extension Card.Kind {
     case .bauhaus:
       self = .bauhaus
     @unknown default:
-      self = .photo
+      self = .unknown
     }
   }
 
@@ -185,6 +188,8 @@ extension Card.Kind {
       return .doodle
     case .bauhaus:
       return .bauhaus
+    case .unknown:
+      return nil
     }
   }
 }

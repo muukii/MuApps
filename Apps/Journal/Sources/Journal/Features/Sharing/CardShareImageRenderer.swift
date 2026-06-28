@@ -21,12 +21,14 @@ enum CardShareImageRenderer {
   static func image(
     for card: Card,
     palette: Palette = .default,
+    colorScheme: ColorScheme = .light,
     pixelSize: CGSize = defaultPixelSize,
     scale: CGFloat = 1
   ) -> UIImage? {
     image(
       for: CardShareSnapshot(card: card),
       palette: palette,
+      colorScheme: colorScheme,
       pixelSize: pixelSize,
       scale: scale
     )
@@ -36,11 +38,13 @@ enum CardShareImageRenderer {
   static func image(
     for snapshot: CardShareSnapshot,
     palette: Palette = .default,
+    colorScheme: ColorScheme = .light,
     pixelSize: CGSize = defaultPixelSize,
     scale: CGFloat = 1
   ) -> UIImage? {
     let renderer = ImageRenderer(
       content: CardShareImageView(snapshot: snapshot, palette: palette)
+        .environment(\.colorScheme, colorScheme)
         .frame(width: pixelSize.width, height: pixelSize.height)
     )
     renderer.scale = max(scale, 1)
@@ -52,11 +56,13 @@ enum CardShareImageRenderer {
   static func doodleVideoBaseImage(
     for snapshot: CardShareSnapshot,
     palette: Palette = .default,
+    colorScheme: ColorScheme = .light,
     pixelSize: CGSize = defaultPixelSize,
     scale: CGFloat = 1
   ) -> UIImage? {
     let renderer = ImageRenderer(
       content: CardShareDoodleVideoBaseFrameView(snapshot: snapshot, palette: palette)
+        .environment(\.colorScheme, colorScheme)
         .frame(width: pixelSize.width, height: pixelSize.height)
     )
     renderer.scale = max(scale, 1)
@@ -68,11 +74,13 @@ enum CardShareImageRenderer {
   static func pngFile(
     for card: Card,
     palette: Palette = .default,
+    colorScheme: ColorScheme = .light,
     directory: URL = FileManager.default.temporaryDirectory
   ) throws -> URL {
     try pngFile(
       for: CardShareSnapshot(card: card),
       palette: palette,
+      colorScheme: colorScheme,
       directory: directory
     )
   }
@@ -81,9 +89,10 @@ enum CardShareImageRenderer {
   static func pngFile(
     for snapshot: CardShareSnapshot,
     palette: Palette = .default,
+    colorScheme: ColorScheme = .light,
     directory: URL = FileManager.default.temporaryDirectory
   ) throws -> URL {
-    guard let data = image(for: snapshot, palette: palette)?.pngData() else {
+    guard let data = image(for: snapshot, palette: palette, colorScheme: colorScheme)?.pngData() else {
       throw CardShareImageRendererError.renderingFailed
     }
 

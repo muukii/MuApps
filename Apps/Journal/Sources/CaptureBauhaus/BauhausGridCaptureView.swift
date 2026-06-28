@@ -61,11 +61,14 @@ public struct BauhausGridArtwork: Codable, Equatable, Sendable {
   @MainActor
   public func image(
     size: CGSize = CGSize(width: 1024, height: 1024),
-    scale: CGFloat = 1
+    scale: CGFloat = 1,
+    colorScheme: ColorScheme = .light,
+    colorPalette: BauhausColorPalette = .default
   ) -> UIImage? {
     guard isEmpty == false else { return nil }
+    let colors = colorPalette.colors(for: colorScheme)
     let renderer = ImageRenderer(
-      content: BauhausArtworkRasterView(artwork: self)
+      content: BauhausArtworkRasterView(artwork: self, colors: colors)
         .frame(width: size.width, height: size.height)
     )
     renderer.scale = scale
@@ -91,14 +94,24 @@ public struct BauhausGridArtwork: Codable, Equatable, Sendable {
 /// explicitly needed.
 public struct BauhausGridArtworkView: View {
 
-  public let artwork: BauhausGridArtwork
+  @Environment(\.colorScheme) private var colorScheme
 
-  public init(artwork: BauhausGridArtwork) {
+  public let artwork: BauhausGridArtwork
+  public let colorPalette: BauhausColorPalette
+
+  public init(
+    artwork: BauhausGridArtwork,
+    colorPalette: BauhausColorPalette = .default
+  ) {
     self.artwork = artwork
+    self.colorPalette = colorPalette
   }
 
   public var body: some View {
-    BauhausArtworkRasterView(artwork: artwork)
+    BauhausArtworkRasterView(
+      artwork: artwork,
+      colors: colorPalette.colors(for: colorScheme)
+    )
       .aspectRatio(1, contentMode: .fit)
   }
 }
@@ -135,7 +148,7 @@ public struct BauhausTile: Codable, Equatable, Sendable {
   public init(
     shape: BauhausShapeKind,
     shapeSwatch: BauhausSwatch,
-    backgroundSwatch: BauhausSwatch = .porcelain
+    backgroundSwatch: BauhausSwatch = .slot3
   ) {
     self.shape = shape
     self.shapeSwatch = shapeSwatch
@@ -158,9 +171,9 @@ public struct BauhausTile: Codable, Equatable, Sendable {
     shape = try container.decode(BauhausShapeKind.self, forKey: .shape)
     shapeSwatch = try container.decodeIfPresent(BauhausSwatch.self, forKey: .shapeSwatch)
       ?? container.decodeIfPresent(BauhausSwatch.self, forKey: .swatch)
-      ?? .vermilion
+      ?? .slot1
     backgroundSwatch = try container.decodeIfPresent(BauhausSwatch.self, forKey: .backgroundSwatch)
-      ?? .porcelain
+      ?? .slot3
   }
 
   public func encode(to encoder: any Encoder) throws {
@@ -179,6 +192,14 @@ public enum BauhausShapeKind: String, CaseIterable, Codable, Identifiable, Senda
   case semicircleTrailing
   case semicircleBottom
   case semicircleLeading
+  /// A semicircle whose flat diameter is attached to the top cell edge.
+  case semicircleFlatTop
+  /// A semicircle whose flat diameter is attached to the trailing cell edge.
+  case semicircleFlatTrailing
+  /// A semicircle whose flat diameter is attached to the bottom cell edge.
+  case semicircleFlatBottom
+  /// A semicircle whose flat diameter is attached to the leading cell edge.
+  case semicircleFlatLeading
   case quarterCircleTopLeading
   case quarterCircleTopTrailing
   case quarterCircleBottomTrailing
@@ -191,39 +212,217 @@ public enum BauhausShapeKind: String, CaseIterable, Codable, Identifiable, Senda
   public var id: String { rawValue }
 }
 
-/// A compact fixed palette for authored Bauhaus artwork.
+/// A neutral authored color slot in the Bauhaus palette.
 ///
-/// These are content colors, not Journal theme colors. Keeping them as tokens
-/// instead of raw `Color` values makes saved artwork stable and Codable.
+/// These are content-color tokens, not concrete color names. Keeping the slots
+/// color-free lets future palettes map the same saved artwork to different
+/// concrete colors without making the model names misleading.
 public enum BauhausSwatch: String, CaseIterable, Codable, Identifiable, Sendable {
-  case vermilion
-  case ochre
-  case porcelain
-  case blush
-  case cobalt
-  case forest
-  case ink
+  case slot1
+  case slot2
+  case slot3
+  case slot4
+  case slot5
+  case slot6
+  case slot7
 
   public var id: String { rawValue }
 
   public var color: Color {
-    switch self {
-    case .vermilion:
-      Color(.displayP3, red: 0.83, green: 0.22, blue: 0.12, opacity: 1)
-    case .ochre:
-      Color(.displayP3, red: 0.91, green: 0.66, blue: 0.31, opacity: 1)
-    case .porcelain:
-      Color(.displayP3, red: 0.93, green: 0.90, blue: 0.84, opacity: 1)
-    case .blush:
-      Color(.displayP3, red: 0.91, green: 0.63, blue: 0.64, opacity: 1)
-    case .cobalt:
-      Color(.displayP3, red: 0.25, green: 0.50, blue: 0.68, opacity: 1)
-    case .forest:
-      Color(.displayP3, red: 0.04, green: 0.27, blue: 0.18, opacity: 1)
-    case .ink:
-      Color(.displayP3, red: 0.04, green: 0.04, blue: 0.05, opacity: 1)
+    BauhausColorPalette.default.light.color(for: self)
+  }
+
+  public func color(in colors: BauhausResolvedColors) -> Color {
+    colors.color(for: self)
+  }
+}
+
+/// Light and dark appearance palettes for Bauhaus artwork rendering.
+///
+/// `BauhausSwatch` remains the stable authored token stored in JSON, while this
+/// palette owns the concrete colors used to draw those tokens in a particular
+/// appearance. Hosts can provide a different Bauhaus palette without coupling
+/// the capture component to app-level theme types.
+public struct BauhausColorPalette: Sendable {
+
+  public static let `default` = BauhausColorPalette(
+    light: BauhausResolvedColors(
+      swatches: BauhausSwatchColors(
+        slot1: Color(.displayP3, red: 0.83, green: 0.22, blue: 0.12, opacity: 1),
+        slot2: Color(.displayP3, red: 0.91, green: 0.66, blue: 0.31, opacity: 1),
+        slot3: Color(.displayP3, red: 0.93, green: 0.90, blue: 0.84, opacity: 1),
+        slot4: Color(.displayP3, red: 0.91, green: 0.63, blue: 0.64, opacity: 1),
+        slot5: Color(.displayP3, red: 0.25, green: 0.50, blue: 0.68, opacity: 1),
+        slot6: Color(.displayP3, red: 0.04, green: 0.27, blue: 0.18, opacity: 1),
+        slot7: Color(.displayP3, red: 0.04, green: 0.04, blue: 0.05, opacity: 1)
+      ),
+      chrome: BauhausCanvasChrome(
+        paper: Color(.displayP3, red: 0.96, green: 0.93, blue: 0.88, opacity: 1),
+        emptyCell: Color(.displayP3, red: 0.91, green: 0.87, blue: 0.80, opacity: 1),
+        gridLine: .white,
+        boardBorder: .black.opacity(0.08),
+        tileBorder: .white.opacity(0.72),
+        thumbnailShadow: .black.opacity(0.12)
+      )
+    ),
+    dark: BauhausResolvedColors(
+      swatches: BauhausSwatchColors(
+        slot1: Color(.displayP3, red: 1.00, green: 0.31, blue: 0.22, opacity: 1),
+        slot2: Color(.displayP3, red: 0.98, green: 0.72, blue: 0.33, opacity: 1),
+        slot3: Color(.displayP3, red: 0.18, green: 0.16, blue: 0.13, opacity: 1),
+        slot4: Color(.displayP3, red: 0.98, green: 0.55, blue: 0.62, opacity: 1),
+        slot5: Color(.displayP3, red: 0.35, green: 0.64, blue: 0.84, opacity: 1),
+        slot6: Color(.displayP3, red: 0.10, green: 0.42, blue: 0.29, opacity: 1),
+        slot7: Color(.displayP3, red: 0.94, green: 0.92, blue: 0.86, opacity: 1)
+      ),
+      chrome: BauhausCanvasChrome(
+        paper: Color(.displayP3, red: 0.09, green: 0.08, blue: 0.07, opacity: 1),
+        emptyCell: Color(.displayP3, red: 0.15, green: 0.14, blue: 0.12, opacity: 1),
+        gridLine: Color(.displayP3, red: 0.26, green: 0.24, blue: 0.20, opacity: 1),
+        boardBorder: .white.opacity(0.10),
+        tileBorder: .white.opacity(0.18),
+        thumbnailShadow: .black.opacity(0.34)
+      )
+    )
+  )
+
+  /// Concrete colors for light appearance.
+  public var light: BauhausResolvedColors
+
+  /// Concrete colors for dark appearance.
+  public var dark: BauhausResolvedColors
+
+  public init(light: BauhausResolvedColors, dark: BauhausResolvedColors) {
+    self.light = light
+    self.dark = dark
+  }
+
+  /// Returns the concrete resolved colors for the active SwiftUI appearance.
+  public func colors(for colorScheme: ColorScheme) -> BauhausResolvedColors {
+    switch colorScheme {
+    case .light:
+      light
+    case .dark:
+      dark
+    @unknown default:
+      light
     }
   }
+}
+
+/// Concrete Bauhaus colors resolved for one light or dark appearance.
+///
+/// Splitting authored `swatches` from non-authored canvas `chrome` keeps the
+/// saved artwork palette from looking like it owns every UI decoration color.
+public struct BauhausResolvedColors: Sendable {
+
+  /// Colors selected by `BauhausSwatch` values stored in artwork JSON.
+  public var swatches: BauhausSwatchColors
+
+  /// Structural colors for the Bauhaus board, grid separators, borders, and
+  /// thumbnail affordances. These are rendering chrome, not authored swatches.
+  public var chrome: BauhausCanvasChrome
+
+  public init(swatches: BauhausSwatchColors, chrome: BauhausCanvasChrome) {
+    self.swatches = swatches
+    self.chrome = chrome
+  }
+
+  /// The fill color for a saved Bauhaus swatch token.
+  public func color(for swatch: BauhausSwatch) -> Color {
+    swatches.color(for: swatch)
+  }
+}
+
+/// Concrete colors for the persisted `BauhausSwatch` token set.
+public struct BauhausSwatchColors: Sendable {
+
+  /// Fill color for `.slot1`.
+  public var slot1: Color
+  /// Fill color for `.slot2`.
+  public var slot2: Color
+  /// Fill color for `.slot3`.
+  public var slot3: Color
+  /// Fill color for `.slot4`.
+  public var slot4: Color
+  /// Fill color for `.slot5`.
+  public var slot5: Color
+  /// Fill color for `.slot6`.
+  public var slot6: Color
+  /// Fill color for `.slot7`.
+  public var slot7: Color
+
+  public init(
+    slot1: Color,
+    slot2: Color,
+    slot3: Color,
+    slot4: Color,
+    slot5: Color,
+    slot6: Color,
+    slot7: Color
+  ) {
+    self.slot1 = slot1
+    self.slot2 = slot2
+    self.slot3 = slot3
+    self.slot4 = slot4
+    self.slot5 = slot5
+    self.slot6 = slot6
+    self.slot7 = slot7
+  }
+
+  /// The fill color for a saved Bauhaus swatch token.
+  public func color(for swatch: BauhausSwatch) -> Color {
+    switch swatch {
+    case .slot1:
+      slot1
+    case .slot2:
+      slot2
+    case .slot3:
+      slot3
+    case .slot4:
+      slot4
+    case .slot5:
+      slot5
+    case .slot6:
+      slot6
+    case .slot7:
+      slot7
+    }
+  }
+}
+
+/// Non-authored colors for the Bauhaus board and thumbnail chrome.
+public struct BauhausCanvasChrome: Sendable {
+
+  /// Outer paper color behind the 5 x 5 grid.
+  public var paper: Color
+  /// Fill color for cells without an authored tile.
+  public var emptyCell: Color
+  /// Separator color between grid cells.
+  public var gridLine: Color
+  /// Hairline border color around the board.
+  public var boardBorder: Color
+  /// Border color around shape-picker preview tiles.
+  public var tileBorder: Color
+  /// Drop-shadow color for small floating thumbnails.
+  public var thumbnailShadow: Color
+
+  public init(
+    paper: Color,
+    emptyCell: Color,
+    gridLine: Color,
+    boardBorder: Color,
+    tileBorder: Color,
+    thumbnailShadow: Color
+  ) {
+    self.paper = paper
+    self.emptyCell = emptyCell
+    self.gridLine = gridLine
+    self.boardBorder = boardBorder
+    self.tileBorder = tileBorder
+    self.thumbnailShadow = thumbnailShadow
+  }
+
 }
 
 /// Interactive 5 x 5 Bauhaus grid editor.
@@ -234,38 +433,44 @@ public enum BauhausSwatch: String, CaseIterable, Codable, Identifiable, Sendable
 /// explicit export action when a host supplies `onExport`.
 public struct BauhausGridCaptureView: View {
 
+  @Environment(\.colorScheme) private var colorScheme
+
   @State private var artwork: BauhausGridArtwork
   @State private var selectedPosition: BauhausGridPosition?
-  @State private var selectedShapeSwatch: BauhausSwatch = .vermilion
-  @State private var selectedBackgroundSwatch: BauhausSwatch = .porcelain
+  @State private var selectedShapeSwatch: BauhausSwatch = .slot1
+  @State private var selectedBackgroundSwatch: BauhausSwatch = .slot3
   @State private var selectionFeedbackTrigger = 0
   @State private var editFeedbackTrigger = 0
   @State private var completionFeedbackTrigger = 0
 
+  private let colorPalette: BauhausColorPalette
   private let onChange: (@MainActor @Sendable (BauhausGridArtwork) -> Void)?
   private let onExport: (@MainActor @Sendable (BauhausGridArtwork) -> Void)?
 
   @MainActor
   public init(
     initialArtwork: BauhausGridArtwork = .empty,
+    colorPalette: BauhausColorPalette = .default,
     onChange: (@MainActor @Sendable (BauhausGridArtwork) -> Void)? = nil,
     onExport: (@MainActor @Sendable (BauhausGridArtwork) -> Void)? = nil
   ) {
     _artwork = State(initialValue: initialArtwork)
+    self.colorPalette = colorPalette
     self.onChange = onChange
     self.onExport = onExport
   }
 
   public var body: some View {
+    let colors = colorPalette.colors(for: colorScheme)
+
     ScrollView {
       VStack(spacing: 20) {
         BauhausArtworkBoard(
           artwork: artwork,
           selectedPosition: selectedPosition,
+          colors: colors,
           onSelect: selectCell
         )
-        .padding(.horizontal, 20)
-        .padding(.top, 18)
 
         BauhausCaptureControls(
           selectedShapeSwatch: $selectedShapeSwatch,
@@ -273,13 +478,13 @@ public struct BauhausGridCaptureView: View {
           isClearDisabled: artwork.isEmpty,
           isExportDisabled: artwork.isEmpty,
           showsExport: onExport != nil,
+          colors: colors,
           onClear: clear,
           onExport: export,
           onSelectSwatch: triggerSelectionFeedback
         )
-        .padding(.horizontal, 20)
-        .padding(.bottom, 24)
       }
+      .padding(16)
       .frame(maxWidth: 560)
       .frame(maxWidth: .infinity)
     }
@@ -291,6 +496,7 @@ public struct BauhausGridCaptureView: View {
         selectedShapeSwatch: $selectedShapeSwatch,
         selectedBackgroundSwatch: $selectedBackgroundSwatch,
         currentTile: artwork[position],
+        colorPalette: colorPalette,
         onApply: { tile in
           apply(tile, at: position)
         },
@@ -299,7 +505,7 @@ public struct BauhausGridCaptureView: View {
         },
         onSelectSwatch: triggerSelectionFeedback
       )
-      .presentationDetents([.height(420), .medium])
+      .presentationDetents([.height(540), .large])
       .presentationDragIndicator(.visible)
       .presentationBackground(.background)
     }
@@ -382,16 +588,11 @@ public struct BauhausGridCaptureDemoView: View {
 
 // MARK: - Board
 
-fileprivate enum BauhausGridStyle {
-
-  static let paperColor = Color(.displayP3, red: 0.96, green: 0.93, blue: 0.88, opacity: 1)
-  static let emptyCellColor = Color(.displayP3, red: 0.91, green: 0.87, blue: 0.80, opacity: 1)
-}
-
 fileprivate struct BauhausArtworkBoard: View {
 
   let artwork: BauhausGridArtwork
   let selectedPosition: BauhausGridPosition?
+  let colors: BauhausResolvedColors
   let onSelect: @MainActor @Sendable (BauhausGridPosition) -> Void
 
   private let columns = Array(
@@ -406,6 +607,7 @@ fileprivate struct BauhausArtworkBoard: View {
           BauhausGridCellButton(
             tile: artwork[position],
             isSelected: position == selectedPosition,
+            colors: colors,
             onSelect: {
               onSelect(position)
             }
@@ -413,21 +615,21 @@ fileprivate struct BauhausArtworkBoard: View {
         }
       }
       .padding(2)
-      .background(.white)
+      .background(colors.chrome.gridLine)
       .aspectRatio(1, contentMode: .fit)
       .overlay {
         Rectangle()
-          .strokeBorder(.white, lineWidth: 2)
+          .strokeBorder(colors.chrome.gridLine, lineWidth: 2)
       }
     }
     .padding(12)
-    .background(
+    .background {
       Rectangle()
-        .fill(BauhausGridStyle.paperColor)
-    )
+        .fill(colors.chrome.paper)
+    }
     .overlay {
       Rectangle()
-        .strokeBorder(.primary.opacity(0.08), lineWidth: 1)
+        .strokeBorder(colors.chrome.boardBorder, lineWidth: 1)
     }
   }
 }
@@ -436,17 +638,18 @@ fileprivate struct BauhausGridCellButton: View {
 
   let tile: BauhausTile?
   let isSelected: Bool
+  let colors: BauhausResolvedColors
   let onSelect: @MainActor @Sendable () -> Void
 
   var body: some View {
     Button(action: onSelect) {
       ZStack {
         Rectangle()
-          .fill(tile?.backgroundSwatch.color ?? BauhausGridStyle.emptyCellColor)
+          .fill(tile?.backgroundSwatch.color(in: colors) ?? colors.chrome.emptyCell)
 
         if let tile {
           BauhausShape(kind: tile.shape)
-            .fill(tile.shapeSwatch.color)
+            .fill(tile.shapeSwatch.color(in: colors))
             .transition(.scale(scale: 0.82).combined(with: .opacity))
         }
 
@@ -471,50 +674,41 @@ fileprivate struct BauhausShapePickerSheet: View {
   @Binding var selectedBackgroundSwatch: BauhausSwatch
 
   let currentTile: BauhausTile?
+  let colorPalette: BauhausColorPalette
   let onApply: @MainActor @Sendable (BauhausTile) -> Void
   let onClear: @MainActor @Sendable () -> Void
   let onSelectSwatch: @MainActor @Sendable () -> Void
 
-  private let columns = [
-    GridItem(.adaptive(minimum: 56, maximum: 56), spacing: 12)
-  ]
+  @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
+    let colors = colorPalette.colors(for: colorScheme)
+
     NavigationStack {
       ScrollView {
-        VStack(spacing: 18) {
+        VStack(spacing: 20) {
           VStack(spacing: 10) {
             BauhausSwatchStrip(
               title: "Shape",
               selectedSwatch: $selectedShapeSwatch,
+              colors: colors,
               onSelect: onSelectSwatch
             )
             BauhausSwatchStrip(
               title: "Background",
               selectedSwatch: $selectedBackgroundSwatch,
+              colors: colors,
               onSelect: onSelectSwatch
             )
           }
 
-          LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(BauhausShapeKind.allCases) { shape in
-              let tile = BauhausTile(
-                shape: shape,
-                shapeSwatch: selectedShapeSwatch,
-                backgroundSwatch: selectedBackgroundSwatch
-              )
-              Button {
-                onApply(tile)
-              } label: {
-                BauhausShapeLibraryTile(
-                  tile: tile,
-                  isSelected: currentTile == tile
-                )
-              }
-              .buttonStyle(.plain)
-              .accessibilityLabel("Apply Bauhaus shape")
-            }
-          }
+          BauhausShapeLibrary(
+            selectedShapeSwatch: selectedShapeSwatch,
+            selectedBackgroundSwatch: selectedBackgroundSwatch,
+            currentTile: currentTile,
+            colors: colors,
+            onApply: onApply
+          )
         }
         .padding(.horizontal, 20)
         .padding(.top, 14)
@@ -535,10 +729,168 @@ fileprivate struct BauhausShapePickerSheet: View {
   }
 }
 
+fileprivate struct BauhausShapeLibrary: View {
+
+  let selectedShapeSwatch: BauhausSwatch
+  let selectedBackgroundSwatch: BauhausSwatch
+  let currentTile: BauhausTile?
+  let colors: BauhausResolvedColors
+  let onApply: @MainActor @Sendable (BauhausTile) -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 18) {
+      BauhausShapePickerSection(
+        title: "Basic",
+        shapes: BauhausShapeLibraryOrder.basic,
+        selectedShapeSwatch: selectedShapeSwatch,
+        selectedBackgroundSwatch: selectedBackgroundSwatch,
+        currentTile: currentTile,
+        colors: colors,
+        onApply: onApply
+      )
+      BauhausShapePickerSection(
+        title: "Semicircle Arc",
+        shapes: BauhausShapeLibraryOrder.arcSemicircles,
+        selectedShapeSwatch: selectedShapeSwatch,
+        selectedBackgroundSwatch: selectedBackgroundSwatch,
+        currentTile: currentTile,
+        colors: colors,
+        onApply: onApply
+      )
+      BauhausShapePickerSection(
+        title: "Semicircle Flat",
+        shapes: BauhausShapeLibraryOrder.flatSemicircles,
+        selectedShapeSwatch: selectedShapeSwatch,
+        selectedBackgroundSwatch: selectedBackgroundSwatch,
+        currentTile: currentTile,
+        colors: colors,
+        onApply: onApply
+      )
+      BauhausShapePickerSection(
+        title: "Quarter Circle",
+        shapes: BauhausShapeLibraryOrder.quarterCircles,
+        selectedShapeSwatch: selectedShapeSwatch,
+        selectedBackgroundSwatch: selectedBackgroundSwatch,
+        currentTile: currentTile,
+        colors: colors,
+        onApply: onApply
+      )
+      BauhausShapePickerSection(
+        title: "Triangle",
+        shapes: BauhausShapeLibraryOrder.triangles,
+        selectedShapeSwatch: selectedShapeSwatch,
+        selectedBackgroundSwatch: selectedBackgroundSwatch,
+        currentTile: currentTile,
+        colors: colors,
+        onApply: onApply
+      )
+    }
+    .frame(maxWidth: BauhausShapePickerMetrics.libraryWidth)
+    .frame(maxWidth: .infinity)
+  }
+}
+
+fileprivate struct BauhausShapePickerSection: View {
+
+  let title: LocalizedStringKey
+  let shapes: [BauhausShapeKind]
+  let selectedShapeSwatch: BauhausSwatch
+  let selectedBackgroundSwatch: BauhausSwatch
+  let currentTile: BauhausTile?
+  let colors: BauhausResolvedColors
+  let onApply: @MainActor @Sendable (BauhausTile) -> Void
+
+  private static let columns = Array(
+    repeating: GridItem(
+      .fixed(BauhausShapePickerMetrics.tileSide),
+      spacing: BauhausShapePickerMetrics.columnSpacing
+    ),
+    count: 4
+  )
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(title)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+
+      LazyVGrid(columns: Self.columns, alignment: .leading, spacing: BauhausShapePickerMetrics.rowSpacing) {
+        ForEach(shapes) { shape in
+          let tile = BauhausTile(
+            shape: shape,
+            shapeSwatch: selectedShapeSwatch,
+            backgroundSwatch: selectedBackgroundSwatch
+          )
+
+          Button {
+            onApply(tile)
+          } label: {
+            BauhausShapeLibraryTile(
+              tile: tile,
+              isSelected: currentTile == tile,
+              colors: colors
+            )
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel(shape.accessibilityLabel)
+        }
+      }
+    }
+  }
+}
+
+fileprivate enum BauhausShapePickerMetrics {
+  static let tileSide: CGFloat = 32
+  static let columnSpacing: CGFloat = 10
+  static let rowSpacing: CGFloat = 10
+  static let libraryWidth = tileSide * 4 + columnSpacing * 3
+}
+
+/// Fixed picker ordering for quickly comparing rotational variants.
+///
+/// Directional shapes are grouped by family and kept in spatial order. The
+/// picker section uses four columns, so each family can stay on a single row
+/// instead of wrapping differently across device widths.
+fileprivate enum BauhausShapeLibraryOrder {
+  static let basic: [BauhausShapeKind] = [
+    .square,
+    .circle,
+  ]
+
+  static let arcSemicircles: [BauhausShapeKind] = [
+    .semicircleTop,
+    .semicircleTrailing,
+    .semicircleBottom,
+    .semicircleLeading,
+  ]
+
+  static let flatSemicircles: [BauhausShapeKind] = [
+    .semicircleFlatTop,
+    .semicircleFlatTrailing,
+    .semicircleFlatBottom,
+    .semicircleFlatLeading,
+  ]
+
+  static let quarterCircles: [BauhausShapeKind] = [
+    .quarterCircleTopLeading,
+    .quarterCircleTopTrailing,
+    .quarterCircleBottomTrailing,
+    .quarterCircleBottomLeading,
+  ]
+
+  static let triangles: [BauhausShapeKind] = [
+    .triangleTopLeading,
+    .triangleTopTrailing,
+    .triangleBottomTrailing,
+    .triangleBottomLeading,
+  ]
+}
+
 fileprivate struct BauhausSwatchStrip: View {
 
   var title: LocalizedStringKey?
   @Binding var selectedSwatch: BauhausSwatch
+  let colors: BauhausResolvedColors
   var dotSize: CGFloat = 28
   var onSelect: @MainActor @Sendable () -> Void = {}
 
@@ -558,7 +910,7 @@ fileprivate struct BauhausSwatchStrip: View {
           onSelect()
         } label: {
           Circle()
-            .fill(swatch.color)
+            .fill(swatch.color(in: colors))
             .frame(width: dotSize, height: dotSize)
             .overlay {
               Circle()
@@ -584,20 +936,21 @@ fileprivate struct BauhausShapeLibraryTile: View {
 
   let tile: BauhausTile
   let isSelected: Bool
+  let colors: BauhausResolvedColors
 
   var body: some View {
     ZStack {
       RoundedRectangle(cornerRadius: 8)
-        .fill(tile.backgroundSwatch.color)
+        .fill(tile.backgroundSwatch.color(in: colors))
 
       BauhausShape(kind: tile.shape)
-        .fill(tile.shapeSwatch.color)
+        .fill(tile.shapeSwatch.color(in: colors))
         .padding(8)
     }
-    .frame(width: 56, height: 56)
+    .frame(width: BauhausShapePickerMetrics.tileSide, height: BauhausShapePickerMetrics.tileSide)
     .overlay {
       RoundedRectangle(cornerRadius: 8)
-        .strokeBorder(.white.opacity(0.72), lineWidth: 1)
+        .strokeBorder(colors.chrome.tileBorder, lineWidth: 1)
     }
     .overlay {
       RoundedRectangle(cornerRadius: 8)
@@ -614,46 +967,52 @@ fileprivate struct BauhausCaptureControls: View {
   let isClearDisabled: Bool
   let isExportDisabled: Bool
   let showsExport: Bool
+  let colors: BauhausResolvedColors
   let onClear: @MainActor @Sendable () -> Void
   let onExport: @MainActor @Sendable () -> Void
   let onSelectSwatch: @MainActor @Sendable () -> Void
 
   var body: some View {
-    HStack(spacing: 14) {
-      Button(role: .destructive, action: onClear) {
-        Image(systemName: "trash")
-      }
-      .disabled(isClearDisabled)
-      .accessibilityLabel("Clear artwork")
-
-      Spacer(minLength: 0)
-
-      VStack(spacing: 8) {
-        BauhausSwatchStrip(
-          title: "Shape",
-          selectedSwatch: $selectedShapeSwatch,
-          dotSize: 24,
-          onSelect: onSelectSwatch
-        )
-        BauhausSwatchStrip(
-          title: "Background",
-          selectedSwatch: $selectedBackgroundSwatch,
-          dotSize: 24,
-          onSelect: onSelectSwatch
-        )
-      }
-      .frame(maxWidth: 360)
-
-      Spacer(minLength: 0)
-
-      if showsExport {
-        Button(action: onExport) {
-          Image(systemName: "checkmark")
+    ScrollView(.horizontal) {
+      HStack(spacing: 14) {
+        Button(role: .destructive, action: onClear) {
+          Image(systemName: "trash")
         }
-        .disabled(isExportDisabled)
-        .accessibilityLabel("Finish artwork")
+        .disabled(isClearDisabled)
+        .accessibilityLabel("Clear artwork")
+
+        Spacer(minLength: 0)
+
+        VStack(spacing: 8) {
+          BauhausSwatchStrip(
+            title: "Shape",
+            selectedSwatch: $selectedShapeSwatch,
+            colors: colors,
+            dotSize: 24,
+            onSelect: onSelectSwatch
+          )
+          BauhausSwatchStrip(
+            title: "Background",
+            selectedSwatch: $selectedBackgroundSwatch,
+            colors: colors,
+            dotSize: 24,
+            onSelect: onSelectSwatch
+          )
+        }
+        .frame(maxWidth: 360)
+
+        Spacer(minLength: 0)
+
+        if showsExport {
+          Button(action: onExport) {
+            Image(systemName: "checkmark")
+          }
+          .disabled(isExportDisabled)
+          .accessibilityLabel("Finish artwork")
+        }
       }
     }
+    .scrollBounceBehavior(.automatic)
     .buttonStyle(.bordered)
     .controlSize(.large)
   }
@@ -663,7 +1022,10 @@ fileprivate struct BauhausCaptureControls: View {
 
 fileprivate struct BauhausArtworkThumbnail: View {
 
+  @Environment(\.colorScheme) private var colorScheme
+
   let artwork: BauhausGridArtwork
+  var colorPalette: BauhausColorPalette = .default
 
   private let columns = Array(
     repeating: GridItem(.flexible(minimum: 0), spacing: 1),
@@ -671,33 +1033,36 @@ fileprivate struct BauhausArtworkThumbnail: View {
   )
 
   var body: some View {
+    let colors = colorPalette.colors(for: colorScheme)
+
     LazyVGrid(columns: columns, spacing: 1) {
       ForEach(BauhausGridArtwork.positions) { position in
         ZStack {
           Rectangle()
-            .fill(artwork[position]?.backgroundSwatch.color ?? BauhausGridStyle.emptyCellColor)
+            .fill(artwork[position]?.backgroundSwatch.color(in: colors) ?? colors.chrome.emptyCell)
 
           if let tile = artwork[position] {
             BauhausShape(kind: tile.shape)
-              .fill(tile.shapeSwatch.color)
+              .fill(tile.shapeSwatch.color(in: colors))
           }
         }
         .aspectRatio(1, contentMode: .fit)
       }
     }
     .padding(2)
-    .background(.white)
+    .background(colors.chrome.gridLine)
     .overlay {
       Rectangle()
-        .strokeBorder(.white, lineWidth: 2)
+        .strokeBorder(colors.chrome.gridLine, lineWidth: 2)
     }
-    .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 6)
+    .shadow(color: colors.chrome.thumbnailShadow, radius: 10, x: 0, y: 6)
   }
 }
 
 fileprivate struct BauhausArtworkRasterView: View {
 
   let artwork: BauhausGridArtwork
+  let colors: BauhausResolvedColors
 
   private let columns = Array(
     repeating: GridItem(.flexible(minimum: 0), spacing: 2),
@@ -709,11 +1074,11 @@ fileprivate struct BauhausArtworkRasterView: View {
       ForEach(BauhausGridArtwork.positions) { position in
         ZStack {
           Rectangle()
-            .fill(artwork[position]?.backgroundSwatch.color ?? BauhausGridStyle.emptyCellColor)
+            .fill(artwork[position]?.backgroundSwatch.color(in: colors) ?? colors.chrome.emptyCell)
 
           if let tile = artwork[position] {
             BauhausShape(kind: tile.shape)
-              .fill(tile.shapeSwatch.color)
+              .fill(tile.shapeSwatch.color(in: colors))
           }
         }
         .aspectRatio(1, contentMode: .fit)
@@ -722,7 +1087,7 @@ fileprivate struct BauhausArtworkRasterView: View {
     .padding(8)
     .background(
       Rectangle()
-        .fill(BauhausGridStyle.paperColor)
+        .fill(colors.chrome.paper)
     )
   }
 }
@@ -738,6 +1103,47 @@ fileprivate struct BauhausShape: Shape {
 
 fileprivate extension BauhausShapeKind {
 
+  var accessibilityLabel: Text {
+    switch self {
+    case .square:
+      Text("Apply square")
+    case .circle:
+      Text("Apply circle")
+    case .semicircleTop:
+      Text("Apply top arc semicircle")
+    case .semicircleTrailing:
+      Text("Apply trailing arc semicircle")
+    case .semicircleBottom:
+      Text("Apply bottom arc semicircle")
+    case .semicircleLeading:
+      Text("Apply leading arc semicircle")
+    case .semicircleFlatTop:
+      Text("Apply top flat semicircle")
+    case .semicircleFlatTrailing:
+      Text("Apply trailing flat semicircle")
+    case .semicircleFlatBottom:
+      Text("Apply bottom flat semicircle")
+    case .semicircleFlatLeading:
+      Text("Apply leading flat semicircle")
+    case .quarterCircleTopLeading:
+      Text("Apply top-leading quarter circle")
+    case .quarterCircleTopTrailing:
+      Text("Apply top-trailing quarter circle")
+    case .quarterCircleBottomTrailing:
+      Text("Apply bottom-trailing quarter circle")
+    case .quarterCircleBottomLeading:
+      Text("Apply bottom-leading quarter circle")
+    case .triangleTopLeading:
+      Text("Apply top-leading triangle")
+    case .triangleTopTrailing:
+      Text("Apply top-trailing triangle")
+    case .triangleBottomTrailing:
+      Text("Apply bottom-trailing triangle")
+    case .triangleBottomLeading:
+      Text("Apply bottom-leading triangle")
+    }
+  }
+
   func path(in rect: CGRect) -> Path {
     switch self {
     case .square:
@@ -752,6 +1158,14 @@ fileprivate extension BauhausShapeKind {
       return semicirclePath(in: rect, edge: .bottom)
     case .semicircleLeading:
       return semicirclePath(in: rect, edge: .leading)
+    case .semicircleFlatTop:
+      return flatSemicirclePath(in: rect, edge: .top)
+    case .semicircleFlatTrailing:
+      return flatSemicirclePath(in: rect, edge: .trailing)
+    case .semicircleFlatBottom:
+      return flatSemicirclePath(in: rect, edge: .bottom)
+    case .semicircleFlatLeading:
+      return flatSemicirclePath(in: rect, edge: .leading)
     case .quarterCircleTopLeading:
       return quarterCirclePath(in: rect, corner: .topLeading)
     case .quarterCircleTopTrailing:
@@ -806,6 +1220,33 @@ fileprivate extension BauhausShapeKind {
       path.move(to: CGPoint(x: rect.midX, y: rect.maxY))
       path.addArc(center: CGPoint(x: rect.midX, y: rect.midY), radius: radius, startAngle: .degrees(90), endAngle: .degrees(270), clockwise: false)
       path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+    }
+
+    path.closeSubpath()
+    return path
+  }
+
+  private func flatSemicirclePath(in rect: CGRect, edge: Edge) -> Path {
+    let radius = min(rect.width, rect.height) / 2
+    var path = Path()
+
+    switch edge {
+    case .top:
+      path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+      path.addArc(center: CGPoint(x: rect.midX, y: rect.minY), radius: radius, startAngle: .degrees(0), endAngle: .degrees(180), clockwise: false)
+      path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+    case .trailing:
+      path.move(to: CGPoint(x: rect.maxX, y: rect.maxY))
+      path.addArc(center: CGPoint(x: rect.maxX, y: rect.midY), radius: radius, startAngle: .degrees(90), endAngle: .degrees(270), clockwise: false)
+      path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+    case .bottom:
+      path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+      path.addArc(center: CGPoint(x: rect.midX, y: rect.maxY), radius: radius, startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
+      path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+    case .leading:
+      path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+      path.addArc(center: CGPoint(x: rect.minX, y: rect.midY), radius: radius, startAngle: .degrees(-90), endAngle: .degrees(90), clockwise: false)
+      path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
     }
 
     path.closeSubpath()

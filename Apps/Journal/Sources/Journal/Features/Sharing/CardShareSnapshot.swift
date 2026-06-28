@@ -17,9 +17,6 @@ struct CardShareSnapshot: Identifiable, Sendable, Equatable {
   /// User-facing creation date shown on exported cards.
   var createdAt: Date
 
-  /// Optional card title, trimmed for display.
-  var title: String
-
   /// Value payload used by image and video exporters.
   var content: CardShareContent
 
@@ -33,14 +30,12 @@ struct CardShareSnapshot: Identifiable, Sendable, Equatable {
   /// because sharing should still work for partially available CloudKit rows.
   @MainActor
   init(card: Card) {
-    let title = card.title.trimmingCharacters(in: .whitespacesAndNewlines)
     let body = card.body.trimmingCharacters(in: .whitespacesAndNewlines)
     let attachments = (card.attachments ?? []).sorted { $0.createdAt < $1.createdAt }
 
     self.id = card.id
     self.kind = card.kind
     self.createdAt = card.createdAt
-    self.title = title
     self.location = card.location
     self.content = Self.makeContent(kind: card.kind, body: body, attachments: attachments)
   }

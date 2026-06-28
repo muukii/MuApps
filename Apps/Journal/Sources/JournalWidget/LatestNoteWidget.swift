@@ -299,9 +299,7 @@ extension Card {
   /// The fallback label for non-visual widget content.
   fileprivate var displayText: String {
     let body = self.body.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !body.isEmpty { return body }
-    let title = self.title.trimmingCharacters(in: .whitespacesAndNewlines)
-    return title.isEmpty ? "Untitled" : title
+    return body.isEmpty ? "Untitled" : body
   }
 }
 

@@ -49,10 +49,28 @@ extension Theme {
   /// Blush
   public static let blush = Theme(id: "blush", name: "Blush", assetName: "Blush")
 
+  /// Citrus
+  public static let citrus = Theme(id: "citrus", name: "Citrus", assetName: "Citrus")
+
+  /// Lagoon
+  public static let lagoon = Theme(id: "lagoon", name: "Lagoon", assetName: "Lagoon")
+
+  /// Berry
+  public static let berry = Theme(id: "berry", name: "Berry", assetName: "Berry")
+
   public static let `default`: Theme = .warmCream
 
   /// All themes, in picker display order.
-  public static let all: [Theme] = [.warmCream, .softMocha, .midnight, .sage, .blush]
+  public static let all: [Theme] = [
+    .warmCream,
+    .softMocha,
+    .midnight,
+    .sage,
+    .blush,
+    .citrus,
+    .lagoon,
+    .berry,
+  ]
 
   /// Resolves a persisted id back to a theme, falling back to `.default` for
   /// unknown or removed ids.

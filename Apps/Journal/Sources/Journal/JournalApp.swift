@@ -45,9 +45,9 @@ struct JournalApp: App {
   }
 }
 
-/// Reads the persisted theme and applies its palette to the whole app. Kept
-/// separate from `JournalApp` so the `@AppStorage` reads live in a `View`, where
-/// changes re-render the tree.
+/// Reads the persisted theme and appearance preference, then applies them to the
+/// whole app. Kept separate from `JournalApp` so the `@AppStorage` reads live in
+/// a `View`, where changes re-render the tree.
 ///
 /// Also the first-run gate: until onboarding is completed it shows
 /// `OnboardingView`, then cross-fades to the app. The completion flag is written
@@ -55,10 +55,14 @@ struct JournalApp: App {
 private struct RootView: View {
 
   @AppStorage(JournalDefaults.themeID) private var themeID: String = Theme.default.id
+  @AppStorage(JournalDefaults.appearancePreferenceID)
+  private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
   @AppStorage(JournalDefaults.hasCompletedOnboarding) private var hasCompletedOnboarding: Bool = false
   @State private var notificationCenter = JournalNotificationCenter()
 
   var body: some View {
+    let appearancePreference = JournalAppearancePreference.with(id: appearancePreferenceID)
+
     PrimaryContainer(theme: Theme.with(id: themeID)) {
       JournalNotificationHost(center: notificationCenter) {
         if hasCompletedOnboarding {
@@ -74,6 +78,7 @@ private struct RootView: View {
         }
       }
     }
+    .preferredColorScheme(appearancePreference.colorScheme)
   }
 }
 

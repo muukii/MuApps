@@ -17,6 +17,7 @@ struct CardSharePreviewScreen: View {
   let palette: Palette
 
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.colorScheme) private var colorScheme
   @State private var selectedMode: CardSharePreviewMode
   @State private var activityPresentation: CardShareActivityPresentation?
   @State private var isPreparingShareItem: Bool = false
@@ -120,7 +121,11 @@ struct CardSharePreviewScreen: View {
     do {
       isPreparingShareItem = true
       defer { isPreparingShareItem = false }
-      let url = try CardShareImageRenderer.pngFile(for: snapshot, palette: palette)
+      let url = try CardShareImageRenderer.pngFile(
+        for: snapshot,
+        palette: palette,
+        colorScheme: colorScheme
+      )
       activityPresentation = CardShareActivityPresentation(fileURL: url)
     } catch {
       isShareFailurePresented = true

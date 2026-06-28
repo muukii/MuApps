@@ -1,12 +1,16 @@
 import AVFoundation
+import CaptureAudio
 import CaptureBauhaus
 import CaptureDoodle
+import CapturePhoto
 import Combine
 import JournalModel
 import MuColor
 import Observation
+import SwiftData
 import SwiftUI
 import UIKit
+import WidgetKit
 
 /// Maximum absolute tilt for a card, in degrees. Each tile picks a stable angle
 /// in `-cardMaxTilt ... +cardMaxTilt` from its id, giving the grid a loosely
@@ -32,8 +36,15 @@ private let detailImageCornerRadius: CGFloat = 14
 /// freezing a navigation-time snapshot.
 struct SavedEntryDetailView: View {
 
+  @Environment(\.modelContext) private var modelContext
+
   let card: Card
   let onShare: @MainActor (Card) -> Void
+
+  @State private var editDraft: CardEditDraft?
+  @State private var isEditDraftLoading = false
+  @State private var isSavingEdit = false
+  @State private var editErrorMessage: String?
 
   var body: some View {
     ScrollView {
@@ -46,13 +57,127 @@ struct SavedEntryDetailView: View {
     .navigationTitle("Entry")
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
+      ToolbarItemGroup(placement: .topBarTrailing) {
+        Button {
+          presentEditDraft()
+        } label: {
+          if isEditDraftLoading {
+            ProgressView()
+              .controlSize(.small)
+          } else {
+            Image(systemName: "square.and.pencil")
+          }
+        }
+        .disabled(isEditDraftLoading || isSavingEdit)
+        .accessibilityLabel("Edit")
+
         Button {
           onShare(card)
         } label: {
           Image(systemName: "square.and.arrow.up")
         }
         .accessibilityLabel("Share")
+      }
+    }
+    .sheet(item: $editDraft) { draft in
+      SavedEntryEditSheet(
+        draft: draft,
+        isSaving: isSavingEdit,
+        onSave: {
+          saveEdit(draft)
+        },
+        onCancel: {
+          editDraft = nil
+        }
+      )
+      .presentationBackground(.background)
+    }
+    .alert("Could Not Edit Entry", isPresented: editErrorPresentation) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      if let editErrorMessage {
+        Text(editErrorMessage)
+      }
+    }
+  }
+
+  private var editErrorPresentation: Binding<Bool> {
+    Binding {
+      editErrorMessage != nil
+    } set: { isPresented in
+      if isPresented == false {
+        editErrorMessage = nil
+      }
+    }
+  }
+
+  private func presentEditDraft() {
+    guard isEditDraftLoading == false else { return }
+
+    isEditDraftLoading = true
+    Task { @MainActor in
+      defer { isEditDraftLoading = false }
+
+      do {
+        editDraft = try await card.editDraft()
+      } catch {
+        editErrorMessage = error.localizedDescription
+      }
+    }
+  }
+
+  private func saveEdit(_ draft: CardEditDraft) {
+    guard isSavingEdit == false else { return }
+
+    isSavingEdit = true
+
+    Task { @MainActor in
+      defer { isSavingEdit = false }
+
+      do {
+        let input = try draft.savingSnapshot().storeInput()
+        let result = try JournalStore.updateCard(card, with: input, in: modelContext)
+        await MediaSyncEngine.shared.enqueueUploads(attachmentIDs: result.uploadedAttachmentIDs)
+        for attachmentID in result.deletedAttachmentIDs {
+          await MediaSyncEngine.shared.enqueueDelete(attachmentID: attachmentID)
+        }
+        WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
+        editDraft = nil
+      } catch {
+        editErrorMessage = error.localizedDescription
+      }
+    }
+  }
+}
+
+/// Modal editor for an existing saved entry.
+///
+/// The sheet owns cancellation chrome while `CardEditDraftEditor` owns the
+/// actual card-editing controls. Saving is still lifted to the detail screen so
+/// SwiftData, media sync, and widget reloads stay at the live model boundary.
+private struct SavedEntryEditSheet: View {
+
+  @Bindable var draft: CardEditDraft
+  let isSaving: Bool
+  let onSave: @MainActor () -> Void
+  let onCancel: @MainActor () -> Void
+
+  var body: some View {
+    NavigationStack {
+      CardEditDraftEditor(
+        draft: draft,
+        isSaving: isSaving,
+        confirmationTitle: "Save",
+        showsKindPicker: false,
+        onConfirm: onSave
+      )
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancel") {
+            onCancel()
+          }
+          .disabled(isSaving)
+        }
       }
     }
   }
@@ -203,6 +328,8 @@ private struct SavedEntrySummaryCardContent: View {
         SavedEntrySummaryDoodleContent(asset: asset)
       case .bauhaus(let asset):
         SavedEntrySummaryBauhausContent(asset: asset)
+      case .unknown:
+        SavedEntryUnknownContent()
       }
     }
   }
@@ -245,6 +372,32 @@ private struct SavedEntrySummaryAudioContent: View {
 
       SavedEntryAudioWaveform()
         .frame(height: 56)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+  }
+}
+
+/// Placeholder body for a card whose modality this build does not recognize
+/// (for example one synced from a newer app version). Shared by summary and
+/// detail so an unsupported card reads the same wherever it appears.
+private struct SavedEntryUnknownContent: View {
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      ZStack {
+        Circle()
+          .fill(.appOnSecondaryContainer.opacity(0.08))
+          .frame(width: 44, height: 44)
+
+        Image(systemName: "questionmark")
+          .font(.system(size: 22, weight: .semibold))
+          .foregroundStyle(.appOnSecondaryContainer.opacity(0.78))
+      }
+
+      Text("This card was made in a newer version and can't be shown here yet.")
+        .font(.callout)
+        .foregroundStyle(.appOnSecondaryContainer.opacity(0.62))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
@@ -511,10 +664,6 @@ private struct SavedEntryDetailCardLayout: View {
     VStack(alignment: .leading, spacing: 14) {
       SavedEntryDetailHeader(kind: display.kind, createdAt: display.createdAt)
 
-      if display.title.isEmpty == false {
-        SavedEntryDetailTitle(text: display.title)
-      }
-
       SavedEntryDetailContent(content: display.content)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
@@ -553,18 +702,6 @@ private struct SavedEntryDetailHeader: View {
   }
 }
 
-/// Optional explicit title stored on a card.
-private struct SavedEntryDetailTitle: View {
-
-  let text: String
-
-  var body: some View {
-    Text(text)
-      .font(.title2.weight(.semibold))
-      .frame(maxWidth: .infinity, alignment: .leading)
-  }
-}
-
 /// Modality-specific detail content.
 private struct SavedEntryDetailContent: View {
 
@@ -582,6 +719,8 @@ private struct SavedEntryDetailContent: View {
       SavedEntryDetailDoodleContent(asset: asset)
     case .bauhaus(let asset):
       SavedEntryDetailBauhausContent(asset: asset)
+    case .unknown:
+      SavedEntryUnknownContent()
     }
   }
 }
@@ -953,9 +1092,6 @@ private struct SavedEntryDetailDisplay: Identifiable {
   /// Persisted modality that chooses the detail header and content layout.
   let kind: Card.Kind
 
-  /// Optional user-authored title, already trimmed for display.
-  let title: String
-
   /// Exactly one visual/content modality for the detail card.
   let content: SavedEntryCardContent
 
@@ -1052,6 +1188,63 @@ private enum SavedEntryMediaFileReader {
   }
 }
 
+/// Errors surfaced when a saved entry cannot be reopened as an editable draft.
+private enum SavedEntryEditDraftError: LocalizedError {
+  case mediaUnavailable
+  case mediaDecodeFailed
+  case audioCopyFailed
+  case unsupportedKind
+
+  var errorDescription: String? {
+    switch self {
+    case .mediaUnavailable:
+      return "This entry's media file is not available on this device yet."
+    case .mediaDecodeFailed:
+      return "This entry's media file could not be read for editing."
+    case .audioCopyFailed:
+      return "This audio recording could not be prepared for editing."
+    case .unsupportedKind:
+      return "This entry type is not editable yet."
+    }
+  }
+}
+
+/// File preparation needed before persisted media can re-enter the edit pipeline.
+private enum SavedEntryEditMediaPreparer {
+
+  @MainActor
+  static func audioCopy(from sourceURL: URL) throws -> URL {
+    guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+      throw SavedEntryEditDraftError.mediaUnavailable
+    }
+
+    let pathExtension = sourceURL.pathExtension.isEmpty ? "m4a" : sourceURL.pathExtension
+    let destinationURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("journal-edit-audio-\(UUID().uuidString)")
+      .appendingPathExtension(pathExtension)
+
+    do {
+      try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+      return destinationURL
+    } catch {
+      throw SavedEntryEditDraftError.audioCopyFailed
+    }
+  }
+
+  @MainActor
+  static func audioDuration(from fileURL: URL) -> TimeInterval {
+    (try? AVAudioPlayer(contentsOf: fileURL).duration) ?? 0
+  }
+}
+
+extension UIImage {
+
+  /// Pixel dimensions for persistence metadata derived from reloaded image data.
+  fileprivate var pixelSize: CGSize {
+    CGSize(width: size.width * scale, height: size.height * scale)
+  }
+}
+
 /// The mutually-exclusive content variants shown by saved-entry cards.
 private enum SavedEntryCardContent {
   /// A text capture; media captures never use this as a caption.
@@ -1069,6 +1262,10 @@ private enum SavedEntryCardContent {
   /// A Bauhaus capture, decoded from its persisted asset file by `SavedEntryBauhausMediaLoader`.
   case bauhaus(SavedEntryMediaAsset<SavedEntryBauhausMediaLoader>?)
 
+  /// A card whose modality this build does not recognize. Carries no payload — it
+  /// renders as a neutral placeholder.
+  case unknown
+
   var kind: Card.Kind {
     switch self {
     case .text: .text
@@ -1076,6 +1273,7 @@ private enum SavedEntryCardContent {
     case .image: .photo
     case .doodle: .doodle
     case .bauhaus: .bauhaus
+    case .unknown: .unknown
     }
   }
 }
@@ -1083,6 +1281,92 @@ private enum SavedEntryCardContent {
 // MARK: - Formatting Helpers
 
 extension Card {
+
+  /// Rehydrates this saved card into the shared editing draft model.
+  ///
+  /// The method intentionally starts from the live SwiftData card, then reads
+  /// local attachment files only at presentation time. A missing media file
+  /// therefore blocks editing instead of producing a lossy replacement draft.
+  @MainActor
+  fileprivate func editDraft() async throws -> CardEditDraft {
+    let attachments = (attachments ?? []).sorted { $0.createdAt < $1.createdAt }
+
+    switch kind {
+    case .text:
+      return CardEditDraft(
+        kind: .text,
+        text: body,
+        location: location
+      )
+    case .photo:
+      guard
+        let fileURL = attachments.first(matching: .photo)?.mediaFileURL,
+        let data = await SavedEntryMediaFileReader.data(from: fileURL)
+      else {
+        throw SavedEntryEditDraftError.mediaUnavailable
+      }
+      guard let image = UIImage(data: data) else {
+        throw SavedEntryEditDraftError.mediaDecodeFailed
+      }
+      return CardEditDraft(
+        kind: .photo,
+        text: body,
+        photo: CapturedPhoto(imageData: data, pixelSize: image.pixelSize),
+        location: location
+      )
+    case .audio:
+      guard let fileURL = attachments.first(matching: .audio)?.mediaFileURL else {
+        throw SavedEntryEditDraftError.mediaUnavailable
+      }
+      let editableURL = try SavedEntryEditMediaPreparer.audioCopy(from: fileURL)
+      return CardEditDraft(
+        kind: .audio,
+        text: body,
+        audio: AudioRecording(
+          fileURL: editableURL,
+          duration: SavedEntryEditMediaPreparer.audioDuration(from: editableURL)
+        ),
+        location: location
+      )
+    case .doodle:
+      guard
+        let fileURL = attachments.first(matching: .doodle)?.mediaFileURL,
+        let data = await SavedEntryMediaFileReader.data(from: fileURL)
+      else {
+        throw SavedEntryEditDraftError.mediaUnavailable
+      }
+      guard let drawing = try? JSONDecoder().decode(DoodleDrawing.self, from: data) else {
+        throw SavedEntryEditDraftError.mediaDecodeFailed
+      }
+      return CardEditDraft(
+        kind: .doodle,
+        text: body,
+        doodle: drawing,
+        location: location
+      )
+    case .bauhaus:
+      guard
+        let fileURL = attachments.first(matching: .bauhaus)?.mediaFileURL,
+        let data = await SavedEntryMediaFileReader.data(from: fileURL)
+      else {
+        throw SavedEntryEditDraftError.mediaUnavailable
+      }
+      guard let artwork = try? JSONDecoder().decode(BauhausGridArtwork.self, from: data) else {
+        throw SavedEntryEditDraftError.mediaDecodeFailed
+      }
+      return CardEditDraft(
+        kind: .bauhaus,
+        text: body,
+        bauhaus: artwork,
+        location: location
+      )
+    case .unknown:
+      throw SavedEntryEditDraftError.unsupportedKind
+    @unknown default:
+      throw SavedEntryEditDraftError.unsupportedKind
+    }
+  }
+
   fileprivate var summaryDisplay: SavedEntrySummaryDisplay {
     let attachments = (attachments ?? []).sorted { $0.createdAt < $1.createdAt }
     let content: SavedEntryCardContent = {
@@ -1097,8 +1381,10 @@ extension Card {
         return .doodle(attachments.first(matching: .doodle)?.doodleAsset)
       case .bauhaus:
         return .bauhaus(attachments.first(matching: .bauhaus)?.bauhausAsset)
+      case .unknown:
+        return .unknown
       @unknown default:
-        return .text(body.trimmingCharacters(in: .whitespacesAndNewlines))
+        return .unknown
       }
     }()
 
@@ -1124,15 +1410,16 @@ extension Card {
         return .doodle(attachments.first(matching: .doodle)?.doodleAsset)
       case .bauhaus:
         return .bauhaus(attachments.first(matching: .bauhaus)?.bauhausAsset)
+      case .unknown:
+        return .unknown
       @unknown default:
-        return .text(body.trimmingCharacters(in: .whitespacesAndNewlines))
+        return .unknown
       }
     }()
 
     return SavedEntryDetailDisplay(
       id: id,
       kind: kind,
-      title: title.trimmingCharacters(in: .whitespacesAndNewlines),
       content: content,
       createdAt: createdAt,
       updatedAt: updatedAt,
@@ -1167,8 +1454,10 @@ extension Card.Kind {
       return "Doodle"
     case .bauhaus:
       return "Bauhaus"
+    case .unknown:
+      return "Unknown"
     @unknown default:
-      return "Card"
+      return "Unknown"
     }
   }
 
@@ -1180,6 +1469,7 @@ extension Card.Kind {
     case .audio: "waveform"
     case .doodle: "scribble.variable"
     case .bauhaus: "square.grid.3x3.square"
+    case .unknown: "questionmark"
     @unknown default: "questionmark"
     }
   }
@@ -1218,4 +1508,202 @@ extension Attachment {
   fileprivate var mediaFileURL: URL? {
     try? JournalStore.fileURL(for: self)
   }
+}
+
+// MARK: - Previews
+
+/// Xcode Preview harness for the saved-entry card patterns.
+///
+/// The production list keeps a live SwiftData `Card` at the observation boundary,
+/// while the card itself consumes these short-lived display values. Exercising
+/// that value path here keeps the Preview independent of CloudKit, SwiftData, and
+/// app-group media files.
+private struct SavedEntryCardPatternsPreview: View {
+
+  var body: some View {
+    PrimaryContainer(theme: .default) {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 28) {
+          SavedEntrySummaryCardPatternsPreview()
+          SavedEntryDetailCardPatternsPreview()
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .background(.appPrimaryContainer)
+    }
+  }
+}
+
+/// Grid-sized preview of every saved-entry summary card pattern.
+private struct SavedEntrySummaryCardPatternsPreview: View {
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Summary")
+        .font(.headline)
+
+      LazyVGrid(columns: columns, spacing: 16) {
+        ForEach(SavedEntryCardPreviewData.summaryDisplays) { display in
+          SavedEntryCard(presentation: .summary(display))
+        }
+      }
+    }
+  }
+
+  private var columns: [GridItem] {
+    [
+      GridItem(.adaptive(minimum: 148, maximum: 180), spacing: 16)
+    ]
+  }
+}
+
+/// Detail-sized preview of every saved-entry card pattern.
+private struct SavedEntryDetailCardPatternsPreview: View {
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Detail")
+        .font(.headline)
+
+      ScrollView(.horizontal) {
+        HStack(alignment: .top, spacing: 16) {
+          ForEach(SavedEntryCardPreviewData.detailDisplays) { display in
+            SavedEntryCard(presentation: .detail(display))
+              .frame(width: 340)
+          }
+        }
+        .padding(.vertical, 4)
+      }
+      .scrollIndicators(.hidden)
+    }
+  }
+}
+
+/// Stable sample values for the saved-entry card Xcode Preview.
+private enum SavedEntryCardPreviewData {
+
+  static var summaryDisplays: [SavedEntrySummaryDisplay] {
+    [
+      .init(
+        id: previewID(1),
+        content: .text(shortText),
+        createdAt: referenceDate.addingTimeInterval(-18 * 60),
+        tilt: .degrees(-1.8)
+      ),
+      .init(
+        id: previewID(2),
+        content: .image(nil),
+        createdAt: referenceDate.addingTimeInterval(-52 * 60),
+        tilt: .degrees(1.2)
+      ),
+      .init(
+        id: previewID(3),
+        content: .audio(fileURL: nil),
+        createdAt: referenceDate.addingTimeInterval(-2 * 60 * 60),
+        tilt: .degrees(-0.6)
+      ),
+      .init(
+        id: previewID(4),
+        content: .doodle(nil),
+        createdAt: referenceDate.addingTimeInterval(-5 * 60 * 60),
+        tilt: .degrees(2.1)
+      ),
+      .init(
+        id: previewID(5),
+        content: .bauhaus(nil),
+        createdAt: referenceDate.addingTimeInterval(-8 * 60 * 60),
+        tilt: .degrees(-2.4)
+      ),
+      .init(
+        id: previewID(6),
+        content: .unknown,
+        createdAt: referenceDate.addingTimeInterval(-11 * 60 * 60),
+        tilt: .degrees(0.9)
+      ),
+    ]
+  }
+
+  static var detailDisplays: [SavedEntryDetailDisplay] {
+    [
+      .init(
+        id: previewID(11),
+        kind: .text,
+        content: .text(longText),
+        createdAt: referenceDate.addingTimeInterval(-40 * 60),
+        updatedAt: referenceDate.addingTimeInterval(-12 * 60),
+        location: Coordinate(latitude: 35.6812, longitude: 139.7671)
+      ),
+      .init(
+        id: previewID(12),
+        kind: .photo,
+        content: .image(nil),
+        createdAt: referenceDate.addingTimeInterval(-3 * 60 * 60),
+        updatedAt: referenceDate.addingTimeInterval(-3 * 60 * 60),
+        location: nil
+      ),
+      .init(
+        id: previewID(13),
+        kind: .audio,
+        content: .audio(fileURL: nil),
+        createdAt: referenceDate.addingTimeInterval(-6 * 60 * 60),
+        updatedAt: referenceDate.addingTimeInterval(-6 * 60 * 60),
+        location: nil
+      ),
+      .init(
+        id: previewID(14),
+        kind: .doodle,
+        content: .doodle(nil),
+        createdAt: referenceDate.addingTimeInterval(-24 * 60 * 60),
+        updatedAt: referenceDate.addingTimeInterval(-24 * 60 * 60),
+        location: Coordinate(latitude: 34.6937, longitude: 135.5023)
+      ),
+      .init(
+        id: previewID(15),
+        kind: .bauhaus,
+        content: .bauhaus(nil),
+        createdAt: referenceDate.addingTimeInterval(-2 * 24 * 60 * 60),
+        updatedAt: referenceDate.addingTimeInterval(-2 * 24 * 60 * 60),
+        location: nil
+      ),
+      .init(
+        id: previewID(16),
+        kind: .unknown,
+        content: .unknown,
+        createdAt: referenceDate.addingTimeInterval(-3 * 24 * 60 * 60),
+        updatedAt: referenceDate.addingTimeInterval(-3 * 24 * 60 * 60),
+        location: nil
+      ),
+    ]
+  }
+
+  private static var referenceDate: Date {
+    Date(timeIntervalSinceReferenceDate: 805_248_000)
+  }
+
+  private static var shortText: String {
+    "The long way home had better light than the shortcut."
+  }
+
+  private static var longText: String {
+    """
+    Walked out before the city was fully awake and found the river already bright.
+    The useful part was not the route, but the ten quiet minutes before checking anything.
+    """
+  }
+
+  private static func previewID(_ value: UInt8) -> UUID {
+    UUID(uuid: (
+      0x53, 0x61, 0x76, 0x65,
+      0x64, 0x45,
+      0x6e, 0x74,
+      0x72, 0x79,
+      0x00, value,
+      0x00, 0x00, 0x00, value
+    ))
+  }
+}
+
+#Preview("Card Patterns") {
+  SavedEntryCardPatternsPreview()
 }

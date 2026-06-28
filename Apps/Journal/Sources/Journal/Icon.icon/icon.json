@@ -5,9 +5,26 @@
   "groups" : [
     {
       "layers" : [
+
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    },
+    {
+      "layers" : [
         {
-          "image-name" : "Frame 2.png",
-          "name" : "Frame 2",
+          "blend-mode" : "normal",
+          "fill" : "none",
+          "glass" : false,
+          "hidden" : false,
+          "image-name" : "Frame 8.png",
+          "name" : "Frame 8",
           "position" : {
             "scale" : 0.5,
             "translation-in-points" : [

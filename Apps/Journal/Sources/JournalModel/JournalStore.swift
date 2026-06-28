@@ -87,9 +87,6 @@ extension JournalStore {
     /// Journal media directory at save time.
     public var mediaFileURL: URL?
 
-    /// Small mirrored preview data for media cards, when generated.
-    public var mediaThumbnail: Data?
-
     /// Location to attach to the created card, if the user opted in and a fix
     /// was available.
     public var location: Coordinate?
@@ -99,15 +96,35 @@ extension JournalStore {
       text: String = "",
       mediaData: Data? = nil,
       mediaFileURL: URL? = nil,
-      mediaThumbnail: Data? = nil,
       location: Coordinate? = nil
     ) {
       self.kind = kind
       self.text = text
       self.mediaData = mediaData
       self.mediaFileURL = mediaFileURL
-      self.mediaThumbnail = mediaThumbnail
       self.location = location
+    }
+  }
+
+  /// Result of replacing a saved card's editable content.
+  ///
+  /// The app target uses these IDs after the SwiftData transaction succeeds to
+  /// enqueue matching media uploads and remote CKAsset deletions without passing
+  /// SwiftData model objects across actor boundaries.
+  public struct CardUpdateResult: Sendable {
+
+    /// Newly written attachments whose files should be uploaded.
+    public var uploadedAttachmentIDs: [UUID]
+
+    /// Removed attachments whose remote files should be deleted.
+    public var deletedAttachmentIDs: [UUID]
+
+    public init(
+      uploadedAttachmentIDs: [UUID] = [],
+      deletedAttachmentIDs: [UUID] = []
+    ) {
+      self.uploadedAttachmentIDs = uploadedAttachmentIDs
+      self.deletedAttachmentIDs = deletedAttachmentIDs
     }
   }
 
@@ -197,7 +214,7 @@ extension JournalStore {
       card.updatedAt = createdAt
       card.location = draft.location
       context.insert(card)
-      try stageAttachment(from: draft, to: card, in: context)
+      _ = try stageAttachment(from: draft, to: card, in: context)
 
       if let previousCard {
         let relationship = try insertRelationship(
@@ -218,6 +235,45 @@ extension JournalStore {
     return createdCards
   }
 
+  /// Replaces the editable fields and media payload on an existing card.
+  ///
+  /// Media updates are modeled as attachment replacement: the old attachment row
+  /// and file are removed after the new payload has been staged and the SwiftData
+  /// save succeeds. That keeps readers pointed at either the old complete card
+  /// or the new complete card, never at an intentionally empty media slot.
+  @MainActor
+  @discardableResult
+  public static func updateCard(
+    _ card: Card,
+    with input: ThreadCardInput,
+    in context: ModelContext
+  ) throws -> CardUpdateResult {
+    let oldAttachments = card.attachments ?? []
+    let oldAttachmentIDs = oldAttachments.map(\.id)
+    let oldFileURLs = oldAttachments.compactMap { try? fileURL(for: $0) }
+
+    card.kind = input.kind
+    card.body = input.kind == .text ? input.text : ""
+    card.location = input.location
+    card.updatedAt = Date()
+
+    let newAttachments = try stageAttachment(from: input, to: card, in: context)
+    for attachment in oldAttachments {
+      context.delete(attachment)
+    }
+
+    try context.save()
+
+    for url in oldFileURLs {
+      try? FileManager.default.removeItem(at: url)
+    }
+
+    return CardUpdateResult(
+      uploadedAttachmentIDs: newAttachments.map(\.id),
+      deletedAttachmentIDs: oldAttachmentIDs
+    )
+  }
+
   private static func makeCard(kind: Card.Kind, body: String) -> Card {
     switch kind {
     case .text:
@@ -230,58 +286,74 @@ extension JournalStore {
       return Card(doodle: nil)
     case .bauhaus:
       return Card(bauhaus: nil)
+    case .unknown:
+      // Unreachable: `.unknown` is never user-creatable, only synced in. Fall
+      // back to an empty text card rather than crashing the save path.
+      return Card(text: body)
     }
   }
 
   @MainActor
+  @discardableResult
   private static func stageAttachment(
     from draft: ThreadCardInput,
     to card: Card,
     in context: ModelContext
-  ) throws {
+  ) throws -> [Attachment] {
     switch draft.kind {
     case .text:
-      break
+      return []
     case .photo:
       if let mediaData = draft.mediaData {
-        try stageDataAttachment(
-          mediaData,
-          kind: .photo,
-          thumbnail: draft.mediaThumbnail,
-          to: card,
-          in: context
-        )
+        return [
+          try stageDataAttachment(
+            mediaData,
+            kind: .photo,
+            to: card,
+            in: context
+          )
+        ]
       }
+      return []
     case .audio:
       if let mediaFileURL = draft.mediaFileURL {
-        try stageFileAttachment(
-          movingFrom: mediaFileURL,
-          kind: .audio,
-          thumbnail: draft.mediaThumbnail,
-          to: card,
-          in: context
-        )
+        return [
+          try stageFileAttachment(
+            movingFrom: mediaFileURL,
+            kind: .audio,
+            to: card,
+            in: context
+          )
+        ]
       }
+      return []
     case .doodle:
       if let mediaData = draft.mediaData {
-        try stageDataAttachment(
-          mediaData,
-          kind: .doodle,
-          thumbnail: draft.mediaThumbnail,
-          to: card,
-          in: context
-        )
+        return [
+          try stageDataAttachment(
+            mediaData,
+            kind: .doodle,
+            to: card,
+            in: context
+          )
+        ]
       }
+      return []
     case .bauhaus:
       if let mediaData = draft.mediaData {
-        try stageDataAttachment(
-          mediaData,
-          kind: .bauhaus,
-          thumbnail: draft.mediaThumbnail,
-          to: card,
-          in: context
-        )
+        return [
+          try stageDataAttachment(
+            mediaData,
+            kind: .bauhaus,
+            to: card,
+            in: context
+          )
+        ]
       }
+      return []
+    case .unknown:
+      // Unreachable: `.unknown` cards carry no creatable attachment payload.
+      return []
     }
   }
 }
@@ -614,7 +686,7 @@ extension JournalStore {
   private static func stageDataAttachment(
     _ data: Data,
     kind: Attachment.Kind,
-    thumbnail: Data?,
+    thumbnail: Data? = nil,
     to card: Card,
     in context: ModelContext
   ) throws -> Attachment {
@@ -632,7 +704,7 @@ extension JournalStore {
   private static func stageFileAttachment(
     movingFrom sourceURL: URL,
     kind: Attachment.Kind,
-    thumbnail: Data?,
+    thumbnail: Data? = nil,
     to card: Card,
     in context: ModelContext
   ) throws -> Attachment {

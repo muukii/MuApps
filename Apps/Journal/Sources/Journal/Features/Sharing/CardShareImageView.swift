@@ -1,3 +1,4 @@
+import CaptureBauhaus
 import JournalModel
 import MuColor
 import SwiftUI
@@ -157,8 +158,8 @@ private struct CardShareContentView: View {
       CardShareAudioContent(hasFile: fileURL != nil)
     case .doodle(_, let thumbnailData):
       CardShareImageContent(imageData: thumbnailData, fallbackSymbolName: "scribble.variable")
-    case .bauhaus(_, let thumbnailData):
-      CardShareImageContent(imageData: thumbnailData, fallbackSymbolName: "square.grid.3x3.square")
+    case .bauhaus(let artworkData, let thumbnailData):
+      CardShareBauhausContent(artworkData: artworkData, thumbnailData: thumbnailData)
     }
   }
 }
@@ -207,6 +208,36 @@ private struct CardShareImageContent: View {
     imageData
       .flatMap(UIImage.init(data:))
       .map(Image.init(uiImage:))
+  }
+}
+
+/// Bauhaus export content, preferring decoded vector grid data over old thumbnails.
+private struct CardShareBauhausContent: View {
+
+  let artworkData: Data?
+  let thumbnailData: Data?
+
+  var body: some View {
+    ZStack {
+      RoundedRectangle(cornerRadius: 32, style: .continuous)
+        .fill(.appOnSecondaryContainer.opacity(0.06))
+
+      if let artwork {
+        BauhausGridArtworkView(artwork: artwork)
+          .padding(32)
+      } else {
+        CardShareImageContent(
+          imageData: thumbnailData,
+          fallbackSymbolName: "square.grid.3x3.square"
+        )
+      }
+    }
+    .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+  }
+
+  private var artwork: BauhausGridArtwork? {
+    guard let artworkData else { return nil }
+    return try? JSONDecoder().decode(BauhausGridArtwork.self, from: artworkData)
   }
 }
 
@@ -284,8 +315,10 @@ private extension Card.Kind {
       return "Doodle"
     case .bauhaus:
       return "Bauhaus"
+    case .unknown:
+      return "Unknown"
     @unknown default:
-      return "Card"
+      return "Unknown"
     }
   }
 
@@ -301,6 +334,8 @@ private extension Card.Kind {
       return "scribble.variable"
     case .bauhaus:
       return "square.grid.3x3.square"
+    case .unknown:
+      return "questionmark"
     @unknown default:
       return "questionmark"
     }

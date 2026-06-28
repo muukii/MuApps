@@ -10,9 +10,49 @@ enum JournalDefaults {
   /// falling back to `Theme.default` for unknown ids.
   static let themeID = "journal.theme.id"
 
+  /// Selected appearance preference id. Resolved against
+  /// `JournalAppearancePreference` before applying the scene color scheme.
+  static let appearancePreferenceID = "journal.appearancePreference.id"
+
   /// Whether the first-run onboarding has been completed. While `false`,
   /// `RootView` shows `OnboardingView` instead of the main app.
   static let hasCompletedOnboarding = "journal.onboarding.completed"
+}
+
+/// The user's app-wide appearance preference.
+///
+/// `.system` follows the device setting. `.light` and `.dark` request a concrete
+/// SwiftUI `ColorScheme` for the whole Journal scene, including the active
+/// `MuColor` palette resolution.
+enum JournalAppearancePreference: String, CaseIterable, Identifiable, Sendable {
+  case system
+  case light
+  case dark
+
+  var id: String { rawValue }
+
+  /// User-facing label for Settings.
+  var title: LocalizedStringResource {
+    switch self {
+    case .system: "System"
+    case .light: "Light"
+    case .dark: "Dark"
+    }
+  }
+
+  /// The color scheme requested from SwiftUI, or `nil` to follow the device.
+  var colorScheme: ColorScheme? {
+    switch self {
+    case .system: nil
+    case .light: .light
+    case .dark: .dark
+    }
+  }
+
+  /// Resolves a persisted raw value, falling back to `.system` for unknown ids.
+  static func with(id: String) -> Self {
+    Self(rawValue: id) ?? .system
+  }
 }
 
 struct SettingsScreen: View {
@@ -27,6 +67,8 @@ struct SettingsScreen: View {
 struct SettingsView: View {
 
   @AppStorage(JournalDefaults.themeID) private var themeID: String = Theme.default.id
+  @AppStorage(JournalDefaults.appearancePreferenceID)
+  private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
 
   /// Drives the manual re-showing of onboarding from this screen. Unlike the
   /// first-run path, this presents over the app and dismisses on completion —
@@ -64,6 +106,9 @@ struct SettingsView: View {
       } footer: {
         Text("Applies the color palette across the app.")
       }
+
+      AppearanceSection(selectionID: $appearancePreferenceID)
+
       #if DEBUG
       Section("Lab") {
         NavigationLink {
@@ -94,6 +139,7 @@ struct SettingsView: View {
     .navigationTitle("Settings")
     .navigationBarTitleDisplayMode(.inline)
     .sensoryFeedback(.selection, trigger: themeID)
+    .sensoryFeedback(.selection, trigger: appearancePreferenceID)
     .fullScreenCover(isPresented: $isShowingOnboarding) {
       OnboardingView(onComplete: { isShowingOnboarding = false })
     }
@@ -101,6 +147,29 @@ struct SettingsView: View {
 }
 
 // MARK: - Fileprivate Views
+
+/// A form section for choosing whether Journal follows the device appearance or
+/// requests a fixed Light/Dark scheme.
+fileprivate struct AppearanceSection: View {
+
+  @Binding var selectionID: String
+
+  var body: some View {
+    Section {
+      Picker("Appearance", selection: $selectionID) {
+        ForEach(JournalAppearancePreference.allCases) { preference in
+          Text(preference.title)
+            .tag(preference.rawValue)
+        }
+      }
+      .pickerStyle(.segmented)
+    } header: {
+      Text("Appearance")
+    } footer: {
+      Text("System follows the device setting. Light and Dark override it for Journal.")
+    }
+  }
+}
 
 fileprivate struct ThemeRow: View {
 

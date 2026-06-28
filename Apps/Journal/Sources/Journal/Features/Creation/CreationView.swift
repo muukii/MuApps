@@ -16,10 +16,9 @@ struct CreationView: View {
 
   @Environment(\.modelContext) private var modelContext
   @Environment(\.openURL) private var openURL
-  @Environment(\.appPalette) private var palette
   @Environment(JournalNotificationCenter.self) private var notifications
 
-  @State private var draftCards: [ThreadDraftCard] = [ThreadDraftCard()]
+  @State private var draftCards: [ThreadDraftCard] = []
   @State private var textEditorPresentation: TextEditorPresentation?
   @State private var photoCapturePresentation: PhotoCapturePresentation?
   @State private var doodleCanvasPresentation: DoodleCanvasPresentation?
@@ -52,52 +51,28 @@ struct CreationView: View {
           .ignoresSafeArea(edges: .all)
 
         ScrollView {
+
           VStack(spacing: 20) {
-
-            DateView()
-              .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(spacing: 20) {
-              ForEach(draftCards.indexed(), id: \.element) {
-                offset,
-                draft in
-                ThreadDraftCardEditor(
-                  ordinal: offset + 1,
-                  card: draft,
-                  isSaving: isSaving,
-                  onOpen: {
-                    openDraft(draft)
-                  }
-                )
-                .matchedTransitionSource(id: draft, in: namespace)
-                .containerRelativeFrame(.horizontal) { length, _ in
-                  length * 0.5
-                }
-              }
-
-              ThreadDraftActionRow(
-                draftCards: draftCards,
+            ForEach(draftCards.indexed(), id: \.element) {
+              offset,
+              draft in
+              ThreadDraftCardEditor(
+                ordinal: offset + 1,
+                card: draft,
                 isSaving: isSaving,
-                onComposeText: {
-                  presentTextCapture()
-                },
-                onCapturePhoto: {
-                  presentPhotoCapture()
-                },
-                onDrawDoodle: {
-                  presentDoodleCanvas()
-                },
-                onComposeBauhaus: {
-                  presentBauhausGrid()
-                },
-                onRecordVoice: {
-                  presentVoiceRecorder()
-                },
-                onSave: save
+                onOpen: {
+                  openDraft(draft)
+                }
               )
+              .matchedTransitionSource(id: draft, in: namespace)
+              .containerRelativeFrame(.horizontal) { length, _ in
+                length * 0.5
+              }
             }
-            .scrollTargetLayout()
+
           }
+          .frame(maxWidth: .infinity)
+          .scrollTargetLayout()
           .padding(.horizontal, 16)
           .padding(.top, 16)
         }
@@ -105,7 +80,9 @@ struct CreationView: View {
         .scrollTargetBehavior(.viewAligned)
 
       }
+      .toolbarTitleDisplayMode(.inlineLarge)
       .toolbar(content: {
+              
         ToolbarItem(placement: .navigationBarTrailing) {
           NavigationLink.init {
             SavedListView()
@@ -125,6 +102,34 @@ struct CreationView: View {
           .matchedTransitionSource(id: "settings", in: namespace)
         }
       })
+      .safeAreaInset(edge: .top, content: { 
+        DateView()
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.horizontal)
+      })
+      .safeAreaInset(edge: .bottom) {
+        ThreadDraftActionRow(
+          draftCards: draftCards,
+          isSaving: isSaving,
+          onComposeText: {
+            presentTextCapture()
+          },
+          onCapturePhoto: {
+            presentPhotoCapture()
+          },
+          onDrawDoodle: {
+            presentDoodleCanvas()
+          },
+          onComposeBauhaus: {
+            presentBauhausGrid()
+          },
+          onRecordVoice: {
+            presentVoiceRecorder()
+          },
+          onSave: save
+        )
+        .padding(.horizontal)
+      }
     }
     .sheet(item: $textEditorPresentation) { presentation in
       ThreadDraftTextEditorSheet(
@@ -153,7 +158,10 @@ struct CreationView: View {
           updateDoodle(drawing, presentation: presentation)
         }
       )
-      .presentationDetents([.medium, .large], selection: $quickDoodleSheetDetent)
+      .presentationDetents(
+        [.medium, .large],
+        selection: $quickDoodleSheetDetent
+      )
       .presentationDragIndicator(.visible)
       .presentationBackground(.background)
     }
@@ -175,7 +183,10 @@ struct CreationView: View {
           updateBauhaus(artwork, presentation: presentation)
         }
       )
-      .presentationDetents([.medium, .large], selection: $quickBauhausSheetDetent)
+      .presentationDetents(
+        [.medium, .large],
+        selection: $quickBauhausSheetDetent
+      )
       .presentationDragIndicator(.visible)
       .presentationBackground(.background)
     }
@@ -481,7 +492,6 @@ struct CreationView: View {
   private func save() {
 
     let drafts = draftCards.map { $0.savingSnapshot() }
-    let doodleInkColor = palette.tint
 
     guard drafts.isEmpty == false, isSaving == false else { return }
 
@@ -494,13 +504,18 @@ struct CreationView: View {
 
       do {
         let storeInputs = try drafts.map {
-          try $0.storeInput(doodleInkColor: doodleInkColor)
+          try $0.storeInput()
         }
-        let createdCards = try JournalStore.createThread(cards: storeInputs, in: modelContext)
+        let createdCards = try JournalStore.createThread(
+          cards: storeInputs,
+          in: modelContext
+        )
         let mediaAttachmentIDs = createdCards.flatMap { card in
           (card.attachments ?? []).map(\.id)
         }
-        await MediaSyncEngine.shared.enqueueUploads(attachmentIDs: mediaAttachmentIDs)
+        await MediaSyncEngine.shared.enqueueUploads(
+          attachmentIDs: mediaAttachmentIDs
+        )
         let nextDraft = ThreadDraftCard()
         draftCards = [nextDraft]
         textEditorPresentation = nil
@@ -512,7 +527,9 @@ struct CreationView: View {
         quickBauhausGridPresentation = nil
         // The store the widget reads just changed; request a targeted reload so
         // the "Latest Note" widget can show what was just written.
-        WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
+        WidgetCenter.shared.reloadTimelines(
+          ofKind: JournalWidgetKind.latestNote
+        )
         notifications.post(.threadSaved)
       } catch {
         // The draft is left on screen so nothing the user typed is lost.
@@ -703,6 +720,7 @@ private struct ThreadDraftCardHeader: View {
 private struct ThreadDraftCardPreview: View {
 
   @Environment(\.appPalette) private var palette
+  @Environment(\.colorScheme) private var colorScheme
   @Bindable var card: ThreadDraftCard
 
   var body: some View {
@@ -727,7 +745,7 @@ private struct ThreadDraftCardPreview: View {
       ThreadDraftMediaPreview(
         symbolName: card.kind.creationSymbolName,
         prompt: "Open grid",
-        image: card.bauhaus?.image()
+        image: card.bauhaus?.image(colorScheme: colorScheme)
       )
     @unknown default:
       ThreadDraftTextPreview(text: card.text)
@@ -862,7 +880,7 @@ private struct ThreadDraftActionRow: View {
 
     }
   }
-    
+
   /// Separated Liquid Glass buttons for choosing the next content type.
   private struct ThreadDraftContentActionGroup: View {
 
@@ -905,7 +923,7 @@ private struct ThreadDraftActionRow: View {
         )
       }
     }
-      
+
     /// Compact icon button for the compose action row.
     private struct ThreadDraftActionIconButton: View {
 
@@ -946,8 +964,10 @@ extension Card.Kind {
       return "Doodle"
     case .bauhaus:
       return "Bauhaus"
+    case .unknown:
+      return "Unknown"
     @unknown default:
-      return "Card"
+      return "Unknown"
     }
   }
 
@@ -964,6 +984,8 @@ extension Card.Kind {
       return "scribble.variable"
     case .bauhaus:
       return "square.grid.3x3.square"
+    case .unknown:
+      return "questionmark"
     @unknown default:
       return "questionmark"
     }

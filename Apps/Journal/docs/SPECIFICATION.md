@@ -35,7 +35,7 @@ exists today is:
 Because the product shell is undecided, capture components are deliberately
 **persistence-agnostic**: each emits a plain `Sendable` value through a
 `@MainActor @Sendable` callback and knows nothing about `Card`, SwiftData, or
-iCloud. The app shell converts those values into `ThreadDraftCard` payloads
+iCloud. The app shell converts those values into `CardEditDraft` payloads
 before persistence sees them.
 
 ---
@@ -83,8 +83,9 @@ the shared SwiftData store via `JournalStore.makeModelContainer()` (a
 window). For multi-card thread saves it prefers the first card without an
 outgoing `.continuation`, so the widget shows the authored last item instead of
 an earlier card from the same save. It shows kind-aware content: text cards use
-`Card.body` (falling back to `title`), doodle and Bauhaus cards render matching
-attachment thumbnails, and the other media cards still show a modality label.
+`Card.body` (falling back to `Untitled`), doodle and Bauhaus cards use mirrored
+attachment thumbnails only when those optional bytes exist, and the other media
+cards still show a modality label.
 It maps the `Card` to a `Sendable` `NoteSnapshot` so the timeline entry and
 views stay free of the persistence layer, capture frameworks, and media files;
 it shows an empty state when there are no notes.
@@ -148,16 +149,22 @@ the caller can react to a failure). Card creation funnels through here rather
 than scattered `context.insert(Card(...))` calls.
 `createThread(cards:continuingFrom:in:)` accepts `JournalStore.ThreadCardInput`
 values and saves them as one linear thread write, connecting each Card to the
-previous one with `.continuation`. The app-side `ThreadDraftCard` keeps
-composer media in the capture components' own value types (`CapturedPhoto`,
-`AudioRecording`, `DoodleDrawing`, `BauhausGridArtwork`) so editors can reopen
-and continue those values. `ThreadDraftCard` is `Codable` for crash recovery,
-and only encodes the draft payload; SwiftUI presentation identity is rebuilt
-after restore.
+previous one with `.continuation`.
+`updateCard(_:with:in:)` applies the same normalized `ThreadCardInput` shape to
+an existing card, replacing its body/location and replacing old media
+attachments with newly staged attachment rows/files. It returns uploaded and
+deleted attachment IDs so the app target can enqueue CKAsset uploads/deletions
+only after the SwiftData transaction succeeds. The app-side `CardEditDraft`
+keeps editable media in the capture components' own value types
+(`CapturedPhoto`, `AudioRecording`, `DoodleDrawing`, `BauhausGridArtwork`) so
+creation, saved-entry editing, and previews share one draft model. `CardEditDraft`
+is `Codable` for crash recovery, and only encodes the draft payload; SwiftUI
+presentation identity is rebuilt after restore.
 Immediately before saving, the composer snapshots each draft and converts it into
 `ThreadCardInput`. Text inputs write into `Card.body`; photo, doodle, and
-Bauhaus inputs stage encoded bytes plus thumbnails; audio inputs move the
-recording file URL into the shared media directory as an `.audio` attachment.
+Bauhaus inputs stage encoded bytes without generating mirrored thumbnails; audio
+inputs move the recording file URL into the shared media directory as an `.audio`
+attachment.
 The thread write still performs one final `ModelContext.save()`;
 attachment files are written or moved before that save, with orphan cleanup
 handled by `reconcileOrphanFiles(...)`. Cards in the same thread get save-time
@@ -188,7 +195,7 @@ ever matters, is an app-level concern.
 | Property | Type | Notes |
 |----------|------|-------|
 | `id` | `UUID` | Logical id; not unique-enforced (see above). |
-| `kind` | `Kind` | Primary modality: `.text`, `.photo`, `.audio`, `.doodle`, or `.bauhaus`. Determines which content field/attachment is meaningful. |
+| `kind` | `Kind` | Primary modality: `.text`, `.photo`, `.audio`, `.doodle`, `.bauhaus`, or `.unknown`. Determines which content field/attachment is meaningful. |
 | `createdAt` | `Date` | |
 | `updatedAt` | `Date` | |
 | `tags` | `[Tag]?` | Many-to-many; inverse declared on `Tag.cards`. |
@@ -196,13 +203,17 @@ ever matters, is an app-level concern.
 | `outgoingRelationships` | `[CardRelationship]?` | Directed edges that start from this card. |
 | `incomingRelationships` | `[CardRelationship]?` | Directed edges that point at this card. |
 | `location` | `Coordinate?` | `nil` = no location (not permitted or unavailable). |
-| `title` | `String` | |
 | `body` | `String` | |
 
 `kind` is the canonical content contract. `.text` cards render `body`; media
 cards expect a matching `Attachment.kind` (`.photo`, `.audio`, `.doodle`, or
 `.bauhaus`) and do not render `body` as a caption. Bauhaus cards use `.bauhaus`
-attachments whose file bytes are encoded `BauhausGridArtwork` JSON.
+attachments whose file bytes are encoded `BauhausGridArtwork` JSON. `.unknown` is
+a forward-compatibility fallback for a card whose modality this build does not
+recognize (e.g. one synced from a newer app version). The app never creates
+`.unknown` cards and omits the kind from the editor's kind picker; saved-list
+summary and detail render such a card as a neutral placeholder ("This card was
+made in a newer version…") instead of failing.
 
 ### `Tag` — a label applied to many Cards
 
@@ -232,9 +243,11 @@ references can branch from any earlier card. The app-level invariant is DAG:
 ### `Attachment` — media metadata for a Card
 
 Attachments represent photos, audio recordings, doodles, and Bauhaus artwork
-associated with a card. The SwiftData row stores queryable metadata and a small
-thumbnail fallback; the full bytes live as files in the App Group container and
-are reconciled by `JournalStore.reconcileOrphanFiles(...)`. The app target's
+associated with a card. The SwiftData row stores queryable metadata; the full
+bytes live as files in the App Group container and are reconciled by
+`JournalStore.reconcileOrphanFiles(...)`. The optional `thumbnail` field remains
+as fallback metadata for rows or explicit attachment writes that provide one, but
+the current draft save path leaves it empty. The app target's
 `MediaSyncEngine` mirrors those files through a separate private CloudKit zone as
 one immutable CKAsset record per attachment id; the widget does not run that
 engine and only reads whatever rows/files are already available in the shared App
@@ -245,7 +258,7 @@ Group container.
 | `id` | `UUID` | Logical id and file name basis. |
 | `kind` | `Kind` | `.photo`, `.audio`, `.doodle`, or `.bauhaus`. |
 | `byteSize` | `Int` | Size of the on-disk file at attach time. |
-| `thumbnail` | `Data?` | Small mirrored fallback preview data, when generated. |
+| `thumbnail` | `Data?` | Optional mirrored fallback preview data; current draft saves do not generate it. |
 | `createdAt` | `Date` | |
 | `card` | `Card?` | Owning card; inverse declared on `Card.attachments`. |
 
@@ -270,8 +283,8 @@ fix is available.
 Each is an isolated framework that emits a value type through a callback and owns
 no persistence. The dev gallery hosts each in a standalone demo view; the
 compose detail editors also host Photo, Doodle, and Ambient Sound and convert
-their callbacks into `ThreadDraftCard` payloads. Text composition currently uses
-an app-shell `TextEditor` bound directly to `ThreadDraftCard.text`.
+their callbacks into `CardEditDraft` payloads. Text composition currently uses
+an app-shell `TextEditor` bound directly to `CardEditDraft.text`.
 
 ### CaptureText → `CapturedText`
 
@@ -290,8 +303,7 @@ front/back flip) built directly on AVFoundation. Handles authorization states
 `onCapture`.
 
 - `CapturedPhoto`: `Sendable, Equatable` — `imageData: Data` (JPEG bytes),
-  `pixelSize: CGSize`, lazy `image: UIImage?`,
-  `thumbnailData(maxPixelLength:)` for generating a small preview JPEG.
+  `pixelSize: CGSize`, lazy `image: UIImage?`.
 - `CameraController` owns the `AVCaptureSession`, camera input, and still-photo
   output; `CameraPreviewView` mounts an `AVCaptureVideoPreviewLayer` in SwiftUI.
 
@@ -344,13 +356,16 @@ auto-save drafts.
 `BauhausGridCaptureView(initialArtwork:onChange:onExport:)` — a SwiftUI grid
 composer for Bauhaus-style geometric artwork. The canvas is a fixed **5 x 5**
 grid of square cells. Tapping a cell presents a native shape picker sheet; the
-user chooses one of the prepared primitives (square, circle, four semicircles,
-four quarter-circles, and four diagonal triangles), and the selected
+user chooses one of the prepared primitives (square, circle, four arc-on-edge
+semicircles, four diameter-on-edge semicircles, four quarter-circles, and four
+diagonal triangles), and the selected
 shape/background colors are applied to that cell. Compact swatch rows choose the
 active primitive and cell background colors, the trash action clears the whole
 artwork, and an optional export callback lets hosts finish the capture
-explicitly. Every cell edit and clear emits the current `BauhausGridArtwork`
-through `onChange`. Cell and swatch selection use selection haptics, shape
+explicitly. The picker groups primitives by family in fixed four-column rows so
+rotational variants stay visually aligned while the sheet adapts to device
+width. Every cell edit and clear emits the current `BauhausGridArtwork` through
+`onChange`. Cell and swatch selection use selection haptics, shape
 application and clearing use light impact haptics, and the optional export action
 uses success feedback.
 
@@ -363,8 +378,13 @@ uses success feedback.
   `shapeSwatch: BauhausSwatch`, `backgroundSwatch: BauhausSwatch`.
 - `BauhausShapeKind`: prepared geometric primitives that each fit inside one
   square cell.
-- `BauhausSwatch`: a fixed Codable content-color token set. These are authored
-  artwork colors, not app theme colors.
+- `BauhausSwatch`: a fixed Codable content-color slot set (`slot1...slot7`).
+  These are authored artwork tokens, not app theme colors or concrete color
+  names; the slot raw values are also the persisted JSON values.
+- `BauhausColorPalette`: a Bauhaus-specific light/dark palette. Each resolved
+  appearance separates authored `BauhausSwatchColors` from non-authored
+  `BauhausCanvasChrome` such as paper, empty-cell, grid-line, border, and
+  thumbnail shadow colors.
 
 ### CaptureAudio → `AudioRecording`
 
@@ -429,10 +449,12 @@ A small palette/theme system applied app-wide.
   appearance; Swift only maps each `Theme` to its stable asset namespace and
   resolves the requested `ColorScheme` through asset traits.
 - `Theme`: an `id` + display `name` + a **light** and **dark** `Palette` pair.
-  Five themes: **Warm Cream** (default), **Soft Mocha**, **Midnight**, **Sage**,
-  **Blush**. `Theme.palette(for:)` resolves the surface for the active
+  Eight themes: **Warm Cream** (default), **Soft Mocha**, **Midnight**, **Sage**,
+  **Blush**, **Citrus**, **Lagoon**, and **Berry**. `Theme.palette(for:)`
+  resolves the surface for the active
   `ColorScheme`; `Theme.with(id:)` resolves a persisted id, falling back to
-  `.default`. Each theme adapts automatically to system Light/Dark mode.
+  `.default`. Each theme adapts to the active Light/Dark mode, which can either
+  follow the device setting or be overridden from Settings for Journal.
 - Container views `PrimaryContainer` / `SecondaryContainer` push a palette into
   the environment (`\.appPalette`) and apply background/foreground/tint.
   `PrimaryContainer(theme:)` resolves the theme's light/dark palette from the
@@ -474,7 +496,11 @@ the gallery's **Lab** section).
   schema with `ModelConfiguration(cloudKitDatabase: .automatic)`, and injects the
   persisted theme palette via `RootView` → `PrimaryContainer`.
 - **`RootView`** — reads the persisted theme (`@AppStorage(JournalDefaults.themeID)`)
-  and applies its palette. It is also the first-run gate: while
+  and appearance preference
+  (`@AppStorage(JournalDefaults.appearancePreferenceID)`), applies the palette,
+  and requests the chosen scene color scheme. `System` follows the device
+  appearance; `Light` and `Dark` override it for Journal. It is also the
+  first-run gate: while
   `@AppStorage(JournalDefaults.hasCompletedOnboarding)` is `false` it hosts
   `OnboardingView`; once completed it cross-fades (`.transition(.opacity)`) to
   `CreationView`. The completion flag is flipped by the closure `RootView` passes
@@ -596,26 +622,41 @@ the gallery's **Lab** section).
   preserving the saved stroke geometry, audio playback when the local recording
   file exists,
   and created/updated/location metadata without inheriting the grid tile's tilt
-  or text truncation. Each tile's context menu and the detail toolbar include
-  **Share**, which opens a pre-share preview sheet before any system share sheet
-  is shown. The preview displays the themed image export; it lays out
+  or text truncation. The detail toolbar includes **Edit**, which rehydrates the
+  live `Card` into a shared `CardEditDraft` from the local attachment file and
+  presents the shared card editor with the card type fixed and only the
+  kind-specific editor. If a media card's local file has not arrived yet, editing
+  is blocked with an alert rather than creating a lossy draft. Saving an edit
+  calls `JournalStore.updateCard(_:with:in:)`, replaces old media attachments
+  when the payload changes, queues uploads/deletions through `MediaSyncEngine`,
+  reloads the Latest Note widget timeline, and returns to the detail screen.
+  Each tile's context menu and the detail toolbar include **Share**, which opens
+  a pre-share preview sheet before any system share sheet is shown. The preview
+  displays the themed image export; it lays out
   the actual 9:16 export canvas and aspect-fits that result into the sheet instead
   of reflowing the card at preview size. Doodle cards also get a **Video** tab
   that replays the stored vector timeline in the same share chrome. **Share
   Image** renders that Card into a themed 9:16 PNG sized for Instagram Reels;
   **Share Video** renders a matching 9:16, 60 fps Doodle replay mp4 by reusing a
   static SwiftUI-rendered share frame and compositing only the moving vector
-  strokes, then presents it through the system share sheet. Bauhaus cards share
-  as still images using their mirrored grid thumbnail. The debug **Seed Samples**
-  action and `Card Patterns` Preview exercise the independent card patterns.
+strokes, then presents it through the system share sheet. Bauhaus cards share
+as still images by decoding their stored grid artwork when available, falling
+back to any mirrored thumbnail only when the JSON payload is unavailable. The
+  debug **Seed Samples** action and `Card Patterns` Preview exercise the
+  independent card patterns.
   Not the real entries UI.
 - **`SettingsView`** — an iCloud sync status row, a drill-in **iCloud Sync**
-  diagnostics screen, a theme picker, optional Debug-only Lab links, and About
-  actions. The diagnostics screen separates iCloud account availability,
+  diagnostics screen, a theme picker, an **Appearance** picker, optional
+  Debug-only Lab links, and About actions. The diagnostics screen separates
+  iCloud account availability,
   SwiftData row mirroring phases/recent events, custom media-file sync pending
   counts/last activity/errors, and local attachment-file availability so a row
   that arrived before its media file can be identified. Selecting a theme writes
   `JournalDefaults.themeID` (animated) and triggers selection haptic feedback.
+  The Appearance segmented picker writes
+  `JournalDefaults.appearancePreferenceID`; **System** follows the device
+  setting, while **Light** and **Dark** request a fixed scene color scheme for
+  Journal and update the theme palette immediately.
   Capture demos are intentionally hidden from Settings. In Debug builds, **Lab**
   links to Haptics and Haptic Doodle so those tools can be tried from the current
   app root; Release builds omit the Lab section. An **About** section has **Show

@@ -5,21 +5,20 @@ import CapturePhoto
 import Foundation
 import JournalModel
 import Observation
-import SwiftUI
 
-/// One editable card in the thread composer.
+/// One editable Journal card draft.
 ///
-/// A reference type so editors bind to a card directly instead of looking it up
+/// A reference type so editors bind to a draft directly instead of looking it up
 /// by `id` in an array, and so editing one card only re-renders the views that
-/// observe *that* card.
+/// observe *that* draft.
 ///
 /// Drafts keep capture values in their authored form (`CapturedPhoto`,
 /// `AudioRecording`, `DoodleDrawing`, `BauhausGridArtwork`) until save time.
-/// Persistence conversion is a boundary step, not composer state, so media
-/// editors can reopen and continue editing the original values.
+/// Persistence conversion is a boundary step, not creation-screen state, so the
+/// same model can drive creation, saved-entry editing, and previews.
 @MainActor
 @Observable
-final class ThreadDraftCard: Hashable, Sendable, Identifiable, Codable {
+final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
 
   private enum CodingKeys: String, CodingKey {
     case kind
@@ -36,7 +35,7 @@ final class ThreadDraftCard: Hashable, Sendable, Identifiable, Codable {
     ObjectIdentifier(self)
   }
 
-  static func == (lhs: ThreadDraftCard, rhs: ThreadDraftCard) -> Bool {
+  static func == (lhs: CardEditDraft, rhs: CardEditDraft) -> Bool {
     lhs === rhs
   }
 
@@ -141,8 +140,8 @@ final class ThreadDraftCard: Hashable, Sendable, Identifiable, Codable {
   /// Returns a detached copy for saving. The composer stays editable while the
   /// write path converts captured media, so persistence works from this stable
   /// snapshot instead of live view state.
-  func savingSnapshot() -> ThreadDraftCardSnapshot {
-    ThreadDraftCardSnapshot(
+  func savingSnapshot() -> CardEditDraftSnapshot {
+    CardEditDraftSnapshot(
       kind: kind,
       text: text,
       photo: photo,
@@ -209,7 +208,7 @@ final class ThreadDraftCard: Hashable, Sendable, Identifiable, Codable {
 /// The snapshot freezes capture values and any already-attached coordinate,
 /// then converts them into JournalModel's persistence input immediately before
 /// the write.
-struct ThreadDraftCardSnapshot: Sendable, Codable {
+struct CardEditDraftSnapshot: Sendable, Codable {
 
   var kind: Card.Kind
   var text: String
@@ -220,7 +219,7 @@ struct ThreadDraftCardSnapshot: Sendable, Codable {
   var location: Coordinate?
 
   @MainActor
-  func storeInput(doodleInkColor: Color) throws -> JournalStore.ThreadCardInput {
+  func storeInput() throws -> JournalStore.ThreadCardInput {
     switch kind {
     case .text:
       return JournalStore.ThreadCardInput(
@@ -229,45 +228,51 @@ struct ThreadDraftCardSnapshot: Sendable, Codable {
         location: location
       )
     case .photo:
-      guard let photo else { throw ThreadDraftCardSnapshotError.missingMediaPayload }
+      guard let photo else { throw CardEditDraftSnapshotError.missingMediaPayload }
       return JournalStore.ThreadCardInput(
         kind: .photo,
         mediaData: photo.imageData,
-        mediaThumbnail: photo.thumbnailData(),
         location: location
       )
     case .audio:
-      guard let audio else { throw ThreadDraftCardSnapshotError.missingMediaPayload }
+      guard let audio else { throw CardEditDraftSnapshotError.missingMediaPayload }
       return JournalStore.ThreadCardInput(
         kind: .audio,
         mediaFileURL: audio.fileURL,
         location: location
       )
     case .doodle:
-      guard let doodle else { throw ThreadDraftCardSnapshotError.missingMediaPayload }
+      guard let doodle else { throw CardEditDraftSnapshotError.missingMediaPayload }
       return JournalStore.ThreadCardInput(
         kind: .doodle,
         mediaData: try JSONEncoder().encode(doodle),
-        mediaThumbnail: doodle.image(inkColor: doodleInkColor)?.pngData(),
         location: location
       )
     case .bauhaus:
       guard let bauhaus, bauhaus.isEmpty == false else {
-        throw ThreadDraftCardSnapshotError.missingMediaPayload
+        throw CardEditDraftSnapshotError.missingMediaPayload
       }
       return JournalStore.ThreadCardInput(
         kind: .bauhaus,
         mediaData: try JSONEncoder().encode(bauhaus),
-        mediaThumbnail: bauhaus.image()?.pngData(),
         location: location
       )
     @unknown default:
-      throw ThreadDraftCardSnapshotError.unsupportedKind
+      throw CardEditDraftSnapshotError.unsupportedKind
     }
   }
 }
 
-enum ThreadDraftCardSnapshotError: Error {
+enum CardEditDraftSnapshotError: Error {
   case missingMediaPayload
   case unsupportedKind
 }
+
+/// Creation-facing name kept while the shared edit draft is adopted across the app.
+typealias ThreadDraftCard = CardEditDraft
+
+/// Creation-facing snapshot name kept for call sites that still speak in drafts.
+typealias ThreadDraftCardSnapshot = CardEditDraftSnapshot
+
+/// Creation-facing error name kept while save-time conversion is generalized.
+typealias ThreadDraftCardSnapshotError = CardEditDraftSnapshotError
