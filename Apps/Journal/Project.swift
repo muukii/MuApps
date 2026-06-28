@@ -5,7 +5,12 @@ import ProjectDescriptionHelpers
 
 let journalBundleDisplayName: Plist.Value = "Tinycurve"
 
-let journalInfoPlist: InfoPlist = .extendingDefault(with: [
+let journalVersionInfoPlistKeys: [String: Plist.Value] = [
+  "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+  "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
+]
+
+let journalInfoPlist: InfoPlist = .extendingDefault(with: journalVersionInfoPlistKeys.merging([
   "CFBundleDisplayName": journalBundleDisplayName,
   "ITSAppUsesNonExemptEncryption": false,
   "LSApplicationCategoryType": "public.app-category.lifestyle",
@@ -20,7 +25,7 @@ let journalInfoPlist: InfoPlist = .extendingDefault(with: [
   // Optional per-card location: when enabled while composing, the card records
   // where it was written (LocationManager → Card.location).
   "NSLocationWhenInUseUsageDescription": "Attach where you are to a journal entry.",
-])
+]) { _, new in new })
 
 // MARK: - Journal-local frameworks
 
@@ -117,8 +122,16 @@ let project = Project(
           "ASSETCATALOG_COMPILER_APPICON_NAME": "Icon",
         ]),
         configurations: [
-          .debug(name: "Debug", settings: ["APS_ENVIRONMENT": "development"]),
-          .release(name: "Release", settings: ["APS_ENVIRONMENT": "production"]),
+          .debug(
+            name: "Debug",
+            settings: ["APS_ENVIRONMENT": "development"],
+            xcconfig: "xcconfig/Version.xcconfig"
+          ),
+          .release(
+            name: "Release",
+            settings: ["APS_ENVIRONMENT": "production"],
+            xcconfig: "xcconfig/Version.xcconfig"
+          ),
         ]
       )
     ),
@@ -169,8 +182,8 @@ let project = Project(
         "CFBundleExecutable": "$(EXECUTABLE_NAME)",
         "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
         "CFBundleName": "$(PRODUCT_NAME)",
-        "CFBundleShortVersionString": "1.0",
-        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+        "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
         "NSExtension": .dictionary([
           "NSExtensionPointIdentifier": "com.apple.widgetkit-extension",
         ]),
@@ -190,8 +203,16 @@ let project = Project(
           "APPLICATION_EXTENSION_API_ONLY": "YES",
         ]),
         configurations: [
-          .debug(name: "Debug", settings: ["APS_ENVIRONMENT": "development"]),
-          .release(name: "Release", settings: ["APS_ENVIRONMENT": "production"]),
+          .debug(
+            name: "Debug",
+            settings: ["APS_ENVIRONMENT": "development"],
+            xcconfig: "xcconfig/Version.xcconfig"
+          ),
+          .release(
+            name: "Release",
+            settings: ["APS_ENVIRONMENT": "production"],
+            xcconfig: "xcconfig/Version.xcconfig"
+          ),
         ]
       )
     ),
