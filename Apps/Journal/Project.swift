@@ -28,7 +28,11 @@ let journalInfoPlist: InfoPlist = .extendingDefault(with: [
 /// isolated modality, developed/run on its own) and for shared foundations like
 /// `MuColor`. Sources live under `Sources/<TargetName>` so the app directory
 /// stays compact while keeping these modules app-scoped instead of `Shared/`.
-func journalFramework(name: String, dependencies: [TargetDependency] = []) -> Target {
+func journalFramework(
+  name: String,
+  resources: ResourceFileElements? = nil,
+  dependencies: [TargetDependency] = []
+) -> Target {
   .target(
     name: name,
     destinations: .app,
@@ -36,6 +40,7 @@ func journalFramework(name: String, dependencies: [TargetDependency] = []) -> Ta
     bundleId: "app.muukii.journal.\(name)",
     deploymentTargets: .app,
     infoPlist: .default,
+    resources: resources,
     buildableFolders: [BuildableFolder(stringLiteral: "Sources/\(name)")],
     dependencies: dependencies,
     settings: .settings(
@@ -193,8 +198,8 @@ let project = Project(
 
     journalFramework(
       name: "MuColor",
-      dependencies: [
-        .external(name: "HexColorMacro"),
+      resources: [
+        "Resources/MuColor/Assets.xcassets",
       ]
     ),
     journalFramework(name: "MuHaptics"),

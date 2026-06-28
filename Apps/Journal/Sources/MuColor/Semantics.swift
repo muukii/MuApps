@@ -1,17 +1,9 @@
-import HexColorMacro
 import SwiftUI
 import UIKit
 
 public struct Palette: Sendable {
 
-  public static let `default` = Palette(
-    tint: #hexColor("#C56B43", colorSpace: .displayP3),
-    onTint: #hexColor("#111111", colorSpace: .displayP3),
-    primaryContainer: #hexColor("#F2E9D8", colorSpace: .displayP3),
-    onPrimaryContainer: #hexColor("#2A241D", colorSpace: .displayP3),
-    secondaryContainer: #hexColor("#F3DAD0", colorSpace: .displayP3),
-    onSecondaryContainer: #hexColor("#2A241D", colorSpace: .displayP3)
-  )
+  public static let `default` = Palette(assetNamespace: "Theme/WarmCream", colorScheme: .light)
 
   // MARK: - Seeds (素の色は 6 つ)
 
@@ -43,6 +35,39 @@ public struct Palette: Sendable {
     self.onSecondaryContainer = onSecondaryContainer
   }
 
+  /// Loads the six seed colors from MuColor's asset catalog.
+  ///
+  /// `assetNamespace` is the namespaced asset catalog path shared by one theme,
+  /// such as `Theme/WarmCream`. Each color set stores its light value as Any and
+  /// its dark override as the Dark appearance.
+  init(assetNamespace: String, colorScheme: ColorScheme) {
+    self.init(
+      tint: Self.color(named: "\(assetNamespace)/Tint", colorScheme: colorScheme),
+      onTint: Self.color(named: "\(assetNamespace)/OnTint", colorScheme: colorScheme),
+      primaryContainer: Self.color(named: "\(assetNamespace)/PrimaryContainer", colorScheme: colorScheme),
+      onPrimaryContainer: Self.color(
+        named: "\(assetNamespace)/OnPrimaryContainer",
+        colorScheme: colorScheme
+      ),
+      secondaryContainer: Self.color(named: "\(assetNamespace)/SecondaryContainer", colorScheme: colorScheme),
+      onSecondaryContainer: Self.color(
+        named: "\(assetNamespace)/OnSecondaryContainer",
+        colorScheme: colorScheme
+      )
+    )
+  }
+
+  private static func color(named name: String, colorScheme: ColorScheme) -> Color {
+    guard let color = UIColor(
+      named: name,
+      in: .module,
+      compatibleWith: UITraitCollection(colorScheme: colorScheme)
+    ) else {
+      fatalError("Missing MuColor asset named \(name).")
+    }
+    return Color(uiColor: color)
+  }
+
   // MARK: - Derived (seed 色の不透明度違いのみ。新しい色相は足さない)
 
   /// primary 面上の副次文字。
@@ -60,6 +85,20 @@ public struct Palette: Sendable {
   /// 触覚ドットのハロー・tint の極薄塗り。
   public var tintRing: Color { tint.opacity(0.18) }
 
+}
+
+private extension UITraitCollection {
+
+  convenience init(colorScheme: ColorScheme) {
+    switch colorScheme {
+    case .light:
+      self.init(userInterfaceStyle: .light)
+    case .dark:
+      self.init(userInterfaceStyle: .dark)
+    @unknown default:
+      self.init(userInterfaceStyle: .light)
+    }
+  }
 }
 
 extension EnvironmentValues {

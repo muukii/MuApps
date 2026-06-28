@@ -399,8 +399,11 @@ A small palette/theme system applied app-wide.
   opacity-derived variants (`onPrimaryContainerVariant`, `outline`,
   `outlineVariant`, `tintRing`, …). `onTint` is the foreground color for text and
   icons displayed directly on a tint/accent surface. No new hues are added beyond
-  the seeds. Colors are Display P3, declared via the `#hexColor` macro (the
-  external `HexColorMacro` dependency).
+  the seeds. Colors are Display P3 named colors in namespaced groups under
+  `Resources/MuColor/Assets.xcassets`, such as `Theme/WarmCream/Tint`. Each
+  colorset stores the light value as Any and the dark value as the Dark
+  appearance; Swift only maps each `Theme` to its stable asset namespace and
+  resolves the requested `ColorScheme` through asset traits.
 - `Theme`: an `id` + display `name` + a **light** and **dark** `Palette` pair.
   Five themes: **Warm Cream** (default), **Soft Mocha**, **Midnight**, **Sage**,
   **Blush**. `Theme.palette(for:)` resolves the surface for the active
