@@ -5,15 +5,15 @@ import SwiftData
 /// doodle, or Bauhaus grid artwork. The **bytes live as a file on disk** in the
 /// shared App Group container
 /// (see `JournalStore.mediaDirectory`); this model stores only the metadata that
-/// must be queryable plus a small `thumbnail` for list / widget rendering.
+/// must be queryable plus an optional small `thumbnail` for lightweight fallback
+/// surfaces such as widgets and share rendering.
 ///
 /// Why a reference instead of the bytes themselves: keeping large media out of the
 /// SwiftData store means CloudKit's automatic mirroring never eagerly uploads or
-/// downloads it, which leaves room to sync media deliberately later (its own
-/// CKAsset records, download-on-demand) without a data-model migration. The
-/// trade-off is that the file lifecycle becomes the app's job — see
-/// `JournalStore.reconcileOrphanFiles`. Until that media sync exists the bytes are
-/// device-local (covered only by the device's iCloud backup, not cross-device sync).
+/// downloads it. The app process syncs the files deliberately through its own
+/// CKAsset records, keeping that lifecycle independent from SwiftData's mirrored
+/// rows. The trade-off is that the file lifecycle becomes the app's job — see
+/// `JournalStore.reconcileOrphanFiles` and the app target's `MediaSyncEngine`.
 ///
 /// CloudKit-mirroring constraints apply as on `Card`: every stored property is
 /// optional-or-defaulted, no `.unique`, and the relationship is optional.
@@ -35,8 +35,9 @@ public final class Attachment {
   public var byteSize: Int = 0
 
   /// A small rasterized preview. Small enough to ride along on CloudKit's automatic
-  /// mirroring, so other devices can render lists before (or without) the full
-  /// file. `nil` until the host generates one — rendering is not this layer's job.
+  /// mirroring, so lightweight surfaces can still render when the full file is not
+  /// locally available. Journal's main entries UI prefers the local media file and
+  /// treats this as a fallback-only field.
   public var thumbnail: Data?
 
   public var createdAt: Date = Date()

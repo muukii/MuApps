@@ -235,7 +235,7 @@ let project = Project(
       bundleId: "app.muukii.journal.UITests",
       deploymentTargets: .app,
       infoPlist: .default,
-      buildableFolders: ["Sources/JournalUITests"],
+      buildableFolders: ["Tests/JournalUITests"],
       dependencies: [
         .target(name: "Journal"),
       ],

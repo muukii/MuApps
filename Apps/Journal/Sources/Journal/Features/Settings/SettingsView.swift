@@ -36,7 +36,11 @@ struct SettingsView: View {
   var body: some View {
     Form {
       Section {
-        SyncStatusRow(summary: SyncStatusMonitor.shared.summary)
+        NavigationLink {
+          SyncDetailsView()
+        } label: {
+          SyncStatusRow(summary: SyncStatusMonitor.shared.summary)
+        }
       } header: {
         Text("iCloud Sync")
       } footer: {
@@ -157,7 +161,7 @@ fileprivate struct ThemeSwatch: View {
 
 /// Renders the coarse `SyncStatusMonitor.Summary` as an icon + label. Presentation
 /// (symbol, color, copy) lives here; the monitor only owns state.
-fileprivate struct SyncStatusRow: View {
+struct SyncStatusRow: View {
 
   let summary: SyncStatusMonitor.Summary
 

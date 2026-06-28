@@ -496,7 +496,11 @@ struct CreationView: View {
         let storeInputs = try drafts.map {
           try $0.storeInput(doodleInkColor: doodleInkColor)
         }
-        try JournalStore.createThread(cards: storeInputs, in: modelContext)
+        let createdCards = try JournalStore.createThread(cards: storeInputs, in: modelContext)
+        let mediaAttachmentIDs = createdCards.flatMap { card in
+          (card.attachments ?? []).map(\.id)
+        }
+        await MediaSyncEngine.shared.enqueueUploads(attachmentIDs: mediaAttachmentIDs)
         let nextDraft = ThreadDraftCard()
         draftCards = [nextDraft]
         textEditorPresentation = nil
@@ -506,9 +510,9 @@ struct CreationView: View {
         voiceRecorderPresentation = nil
         quickDoodleCanvasPresentation = nil
         quickBauhausGridPresentation = nil
-        // The store the widget reads just changed; ask WidgetKit to rebuild its
-        // timeline so the "Latest Note" widget shows what was just written.
-        WidgetCenter.shared.reloadAllTimelines()
+        // The store the widget reads just changed; request a targeted reload so
+        // the "Latest Note" widget can show what was just written.
+        WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
         notifications.post(.threadSaved)
       } catch {
         // The draft is left on screen so nothing the user typed is lost.
@@ -845,6 +849,7 @@ private struct ThreadDraftActionRow: View {
         }
       }
       .scrollClipDisabled()
+      .scrollIndicators(.hidden)
 
       Button(action: onSave) {
         Text("Save")
@@ -857,71 +862,73 @@ private struct ThreadDraftActionRow: View {
 
     }
   }
-}
+    
+  /// Separated Liquid Glass buttons for choosing the next content type.
+  private struct ThreadDraftContentActionGroup: View {
 
-/// Separated Liquid Glass buttons for choosing the next content type.
-private struct ThreadDraftContentActionGroup: View {
+    let onComposeText: @MainActor @Sendable () -> Void
+    let onCapturePhoto: @MainActor @Sendable () -> Void
+    let onDrawDoodle: @MainActor @Sendable () -> Void
+    let onComposeBauhaus: @MainActor @Sendable () -> Void
+    let onRecordVoice: @MainActor @Sendable () -> Void
 
-  let onComposeText: @MainActor @Sendable () -> Void
-  let onCapturePhoto: @MainActor @Sendable () -> Void
-  let onDrawDoodle: @MainActor @Sendable () -> Void
-  let onComposeBauhaus: @MainActor @Sendable () -> Void
-  let onRecordVoice: @MainActor @Sendable () -> Void
+    var body: some View {
+      HStack(spacing: 12) {
+        ThreadDraftActionIconButton(
+          systemName: "text.alignleft",
+          accessibilityLabel: "Text",
+          action: onComposeText
+        )
 
-  var body: some View {
-    HStack(spacing: 12) {
-      ThreadDraftActionIconButton(
-        systemName: "text.alignleft",
-        accessibilityLabel: "Text",
-        action: onComposeText
-      )
+        ThreadDraftActionIconButton(
+          systemName: "camera",
+          accessibilityLabel: "Photo",
+          action: onCapturePhoto
+        )
 
-      ThreadDraftActionIconButton(
-        systemName: "camera",
-        accessibilityLabel: "Photo",
-        action: onCapturePhoto
-      )
+        ThreadDraftActionIconButton(
+          systemName: "scribble.variable",
+          accessibilityLabel: "Doodle",
+          action: onDrawDoodle
+        )
 
-      ThreadDraftActionIconButton(
-        systemName: "scribble.variable",
-        accessibilityLabel: "Doodle",
-        action: onDrawDoodle
-      )
+        ThreadDraftActionIconButton(
+          systemName: "square.grid.3x3.square",
+          accessibilityLabel: "Bauhaus",
+          action: onComposeBauhaus
+        )
 
-      ThreadDraftActionIconButton(
-        systemName: "square.grid.3x3.square",
-        accessibilityLabel: "Bauhaus",
-        action: onComposeBauhaus
-      )
-
-      ThreadDraftActionIconButton(
-        systemName: "waveform",
-        accessibilityLabel: "Voice",
-        action: onRecordVoice
-      )
+        ThreadDraftActionIconButton(
+          systemName: "waveform",
+          accessibilityLabel: "Voice",
+          action: onRecordVoice
+        )
+      }
     }
-  }
-}
+      
+    /// Compact icon button for the compose action row.
+    private struct ThreadDraftActionIconButton: View {
 
-/// Compact icon button for the compose action row.
-private struct ThreadDraftActionIconButton: View {
+      let systemName: String
+      let accessibilityLabel: LocalizedStringResource
+      let action: @MainActor @Sendable () -> Void
 
-  let systemName: String
-  let accessibilityLabel: LocalizedStringResource
-  let action: @MainActor @Sendable () -> Void
-
-  var body: some View {
-    Button(action: action) {
-      Image(systemName: systemName)
-        .font(.system(size: 18, weight: .semibold))
-        .foregroundStyle(.appOnSecondaryContainer)
-        .frame(width: 52, height: 42)
-        .contentShape(Capsule())
+      var body: some View {
+        Button(action: action) {
+          Image(systemName: systemName)
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundStyle(.appOnSecondaryContainer)
+            .frame(width: 52, height: 42)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .accessibilityLabel(Text(accessibilityLabel))
+      }
     }
-    .buttonStyle(.plain)
-    .glassEffect(.regular.interactive(), in: .capsule)
-    .accessibilityLabel(Text(accessibilityLabel))
+
   }
+
 }
 
 extension Card.Kind {

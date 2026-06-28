@@ -79,6 +79,211 @@ public struct DoodleDrawing: Sendable, Equatable, Codable {
   }
 }
 
+/// Read-only SwiftUI rendering for a saved `DoodleDrawing`.
+///
+/// The drawing stays vector data: this view scales the authored canvas into the
+/// available layout space and renders the strokes with SwiftUI `Canvas` instead
+/// of first flattening them into an image.
+public struct DoodleDrawingView: View {
+
+  public let drawing: DoodleDrawing
+  public let inkColor: Color
+  /// Width divided by height for the visible drawing surface.
+  ///
+  /// Leave this as `nil` to use the authored canvas size. Pass a value when a
+  /// host surface, such as a journal card, owns the visual aspect ratio while the
+  /// strokes should still be scaled without distortion inside that surface.
+  public let displayAspectRatio: CGFloat?
+
+  public init(
+    drawing: DoodleDrawing,
+    inkColor: Color,
+    displayAspectRatio: CGFloat? = nil
+  ) {
+    self.drawing = drawing
+    self.inkColor = inkColor
+    self.displayAspectRatio = displayAspectRatio
+  }
+
+  public var body: some View {
+    if let canvasSize = drawing.validCanvasSize {
+      GeometryReader { proxy in
+        let fitted = DoodleDrawingFittedLayout(
+          sourceSize: canvasSize,
+          containerSize: proxy.size
+        )
+
+        DoodleStrokesView(
+          strokes: drawing.strokes,
+          liveStroke: nil,
+          inkColor: inkColor,
+          revealedTime: nil
+        )
+        .frame(width: canvasSize.width, height: canvasSize.height)
+        .scaleEffect(fitted.scale, anchor: .topLeading)
+        .frame(width: fitted.size.width, height: fitted.size.height, alignment: .topLeading)
+        .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+      }
+      .aspectRatio(
+        doodleDisplayAspectRatio(displayAspectRatio, canvasSize: canvasSize),
+        contentMode: .fit
+      )
+    } else {
+      Color.clear
+    }
+  }
+}
+
+/// Read-only SwiftUI replay for a saved `DoodleDrawing`.
+///
+/// The caller owns the playback state through `isPlaying`, while this view owns
+/// only the drawing timeline. Long pen-up gaps are compressed for playback, just
+/// like `DoodleCanvasView`, so replay shows the authored strokes without making
+/// the viewer wait through every pause between strokes.
+public struct DoodleDrawingReplayView: View {
+
+  public let drawing: DoodleDrawing
+  public let inkColor: Color
+  /// Width divided by height for the visible replay surface.
+  ///
+  /// Leave this as `nil` to replay in the authored canvas aspect. Hosts that
+  /// present doodles inside a fixed paper shape can pass that shape's aspect
+  /// ratio while preserving the saved stroke geometry.
+  public let displayAspectRatio: CGFloat?
+
+  @Binding private var isPlaying: Bool
+  @State private var replayStart: Date?
+
+  public init(
+    drawing: DoodleDrawing,
+    inkColor: Color,
+    displayAspectRatio: CGFloat? = nil,
+    isPlaying: Binding<Bool>
+  ) {
+    self.drawing = drawing
+    self.inkColor = inkColor
+    self.displayAspectRatio = displayAspectRatio
+    self._isPlaying = isPlaying
+  }
+
+  public var body: some View {
+    if let canvasSize = drawing.validCanvasSize {
+      GeometryReader { proxy in
+        let fitted = DoodleDrawingFittedLayout(
+          sourceSize: canvasSize,
+          containerSize: proxy.size
+        )
+
+        DoodleDrawingReplayLayer(
+          drawing: drawing,
+          inkColor: inkColor,
+          replayStart: replayStart,
+          isPlaying: $isPlaying
+        )
+        .frame(width: canvasSize.width, height: canvasSize.height)
+        .scaleEffect(fitted.scale, anchor: .topLeading)
+        .frame(width: fitted.size.width, height: fitted.size.height, alignment: .topLeading)
+        .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+      }
+      .aspectRatio(
+        doodleDisplayAspectRatio(displayAspectRatio, canvasSize: canvasSize),
+        contentMode: .fit
+      )
+      .onAppear {
+        synchronizeReplayStart()
+      }
+      .onChange(of: isPlaying) { _, _ in
+        synchronizeReplayStart()
+      }
+      .onChange(of: drawing) { _, _ in
+        if isPlaying {
+          replayStart = Date()
+        }
+      }
+    } else {
+      Color.clear
+    }
+  }
+
+  private func synchronizeReplayStart() {
+    replayStart = isPlaying ? Date() : nil
+  }
+}
+
+/// The fitted stroke layer for `DoodleDrawingReplayView`.
+private struct DoodleDrawingReplayLayer: View {
+
+  let drawing: DoodleDrawing
+  let inkColor: Color
+  let replayStart: Date?
+
+  @Binding var isPlaying: Bool
+
+  /// Gaps between strokes are shortened for viewing, matching the editor replay.
+  private static let replayMaxGap: TimeInterval = 0.35
+
+  var body: some View {
+    if let replayStart, isPlaying {
+      let replay = drawing.strokes.compressingGaps(maxGap: Self.replayMaxGap)
+      let replayDuration = replay.last?.points.last?.time ?? 0
+
+      TimelineView(.animation) { timeline in
+        let elapsed = timeline.date.timeIntervalSince(replayStart)
+        DoodleStrokesView(
+          strokes: replay,
+          liveStroke: nil,
+          inkColor: inkColor,
+          revealedTime: elapsed
+        )
+        .onChange(of: elapsed >= replayDuration) { _, finished in
+          if finished {
+            isPlaying = false
+          }
+        }
+      }
+    } else {
+      DoodleStrokesView(
+        strokes: drawing.strokes,
+        liveStroke: nil,
+        inkColor: inkColor,
+        revealedTime: nil
+      )
+    }
+  }
+}
+
+private struct DoodleDrawingFittedLayout {
+  let sourceSize: CGSize
+  let containerSize: CGSize
+
+  var scale: CGFloat {
+    guard sourceSize.width > 0, sourceSize.height > 0 else { return 1 }
+    return min(containerSize.width / sourceSize.width, containerSize.height / sourceSize.height)
+  }
+
+  var size: CGSize {
+    CGSize(
+      width: sourceSize.width * scale,
+      height: sourceSize.height * scale
+    )
+  }
+}
+
+private func doodleDisplayAspectRatio(_ displayAspectRatio: CGFloat?, canvasSize: CGSize) -> CGFloat {
+  guard let displayAspectRatio, displayAspectRatio > 0 else {
+    return canvasSize.width / canvasSize.height
+  }
+
+  return displayAspectRatio
+}
+
+private extension DoodleDrawing {
+  var validCanvasSize: CGSize? {
+    guard canvasSize.width > 0, canvasSize.height > 0 else { return nil }
+    return canvasSize
+  }
+}
+
 // MARK: - Rendering
 
 /// Batch stroke renderer used by replay and raster export, where every stroke

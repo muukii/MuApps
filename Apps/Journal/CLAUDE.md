@@ -26,14 +26,14 @@ about distribution, not product behavior).
   + the one shared-container factory). Linked by both the app and the widget;
   built extension-API-only.
 - `Sources/JournalWidget/` — **WidgetKit extension** (`.appExtension`): `JournalWidgetBundle`
-  (`@main`) + `LatestNoteWidget`, which shows the most recently created card
-  read from the shared store, including doodle thumbnails when available.
+  (`@main`) + `LatestNoteWidget`, which reads recent cards from the shared store
+  and shows the authored latest item, including doodle thumbnails when available.
 - `Sources/Capture*/` — capture frameworks (one isolated static framework each):
   `CaptureText`, `CapturePhoto`, `CaptureDoodle`, `CaptureAudio`,
   `CaptureSuggestions`.
 - `Sources/MuColor/`, `Sources/MuHaptics/` — support frameworks for themes/palette
   and Core Haptics labs.
-- `Sources/JournalUITests/` — UI tests.
+- `Tests/JournalUITests/` — UI tests.
 - `Project.swift` — Tuist manifest (targets, entitlements, Info.plist).
 
 ## Conventions specific to Journal
@@ -54,9 +54,9 @@ about distribution, not product behavior).
   the app and widget both call `JournalStore.makeModelContainer()`; never build a
   `ModelContainer` for journal data elsewhere. Models are `public` (the widget
   links them). After a write the app can refresh the widget with
-  `WidgetCenter.shared.reloadAllTimelines()` (already wired into
-  `CreationView.save()`). Widget views render a `Sendable` `NoteSnapshot`, never
-  `Card` references.
+  `WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)`
+  (already wired into `CreationView.save()`). Widget views render a `Sendable`
+  `NoteSnapshot`, never `Card` references.
 - **Theming goes through `MuColor`.** Use the palette/app shape styles
   (`.appPrimaryContainer`, etc.) and `PrimaryContainer`/`SecondaryContainer`
   rather than hard-coded colors. Five seed colors only — no new hues.

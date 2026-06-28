@@ -11,7 +11,7 @@ struct JournalApp: App {
 
   /// Syncs attachment *files* (CKAssets) in a custom zone, beside SwiftData's
   /// `.automatic` mirroring of the rows. App-process only — the widget never runs it.
-  private let mediaSync = MediaSyncEngine()
+  private let mediaSync = MediaSyncEngine.shared
 
   init() {
     do {
@@ -27,10 +27,21 @@ struct JournalApp: App {
     WindowGroup {
       RootView()
         .task { DoodleHaptics.prepareForDrawing() }
-        .task { await mediaSync.start() }
+        .task { await startMediaSync() }
         .task { SyncStatusMonitor.shared.start() }
     }
     .modelContainer(modelContainer)
+  }
+
+  @MainActor
+  private func startMediaSync() async {
+    await mediaSync.start()
+    // Older builds could create a SwiftData attachment row and a local file
+    // without queuing the matching CKAsset save. Re-enqueue only rows whose file
+    // still exists locally; imported rows whose file has not downloaded yet are
+    // handled by `MediaSyncEngine`'s fetch path instead.
+    let attachmentIDs = (try? JournalStore.localMediaAttachmentIDs(in: modelContainer.mainContext)) ?? []
+    await mediaSync.enqueueUploads(attachmentIDs: attachmentIDs)
   }
 }
 

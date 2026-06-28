@@ -77,20 +77,25 @@ extension.
 
 `JournalWidget` (`product: .appExtension`, embedded into the app bundle by an
 explicit target dependency) is a WidgetKit extension. Its single **Latest Note**
-widget (small / medium / large families) reads the single most recently created
-`Card` directly from the shared SwiftData store via
-`JournalStore.makeModelContainer()` (a `FetchDescriptor` sorted by `createdAt`
-descending, `fetchLimit = 1`) and shows kind-aware content: text cards use
+widget (small / medium / large families) reads recent `Card` rows directly from
+the shared SwiftData store via `JournalStore.makeModelContainer()` (a
+`FetchDescriptor` sorted by `createdAt` descending, limited to a small recent
+window). For multi-card thread saves it prefers the first card without an
+outgoing `.continuation`, so the widget shows the authored last item instead of
+an earlier card from the same save. It shows kind-aware content: text cards use
 `Card.body` (falling back to `title`), doodle and Bauhaus cards render matching
 attachment thumbnails, and the other media cards still show a modality label.
 It maps the `Card` to a `Sendable` `NoteSnapshot` so the timeline entry and
 views stay free of the persistence layer, capture frameworks, and media files;
 it shows an empty state when there are no notes.
 
-The widget refreshes whenever a note is written: `CreationView.save()` calls
-`WidgetCenter.shared.reloadAllTimelines()` after `JournalStore.createThread(...)`
-succeeds. WidgetKit also re-runs the timeline periodically to keep the relative
-date current.
+The widget asks for two refresh timings with different jobs. When a note is
+written, `CreationView.save()` calls
+`WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)` after
+`JournalStore.createThread(...)` succeeds, so the Latest Note widget can re-read
+the shared store and show the just-posted card. Independently, the widget requests
+a periodic 15-minute timeline refresh to keep the relative date label current
+while the app is not opened.
 
 ### Entitlements & capabilities
 
@@ -155,7 +160,18 @@ Bauhaus inputs stage encoded bytes plus thumbnails; audio inputs move the
 recording file URL into the shared media directory as an `.audio` attachment.
 The thread write still performs one final `ModelContext.save()`;
 attachment files are written or moved before that save, with orphan cleanup
-handled by `reconcileOrphanFiles(...)`.
+handled by `reconcileOrphanFiles(...)`. Cards in the same thread get save-time
+`createdAt` values offset by authored order, so date-sorted readers can identify
+the thread's final item deterministically.
+SwiftData/CloudKit mirroring delivers the `Card` / `Attachment` rows separately
+from the custom CKAsset file sync. After a thread save succeeds,
+`CreationView.save()` extracts the created attachment IDs and queues those files
+with `MediaSyncEngine`; at app launch `JournalApp` fetches attachment rows whose
+local files still exist and re-queues them, covering older builds that wrote
+media files before upload enqueue was wired. When `MediaSyncEngine` later writes
+or removes an attachment file for an already-visible row, it emits a process-local
+media file change signal so entry views retry the asynchronous file load without
+requiring the media sync actor to read SwiftData.
 `createRelationship(from:to:kind:in:)` connects existing Cards and enforces the
 app-level DAG rule: no self-edge and no edge that would create a cycle. It is
 idempotent for the same source / target / kind triplet because CloudKit
@@ -186,7 +202,7 @@ ever matters, is an app-level concern.
 `kind` is the canonical content contract. `.text` cards render `body`; media
 cards expect a matching `Attachment.kind` (`.photo`, `.audio`, `.doodle`, or
 `.bauhaus`) and do not render `body` as a caption. Bauhaus cards use `.bauhaus`
-attachments with encoded `BauhausGridArtwork` JSON plus a mirrored thumbnail.
+attachments whose file bytes are encoded `BauhausGridArtwork` JSON.
 
 ### `Tag` — a label applied to many Cards
 
@@ -217,15 +233,19 @@ references can branch from any earlier card. The app-level invariant is DAG:
 
 Attachments represent photos, audio recordings, doodles, and Bauhaus artwork
 associated with a card. The SwiftData row stores queryable metadata and a small
-thumbnail; the full bytes live as files in the App Group container and are
-reconciled by `JournalStore.reconcileOrphanFiles(...)`.
+thumbnail fallback; the full bytes live as files in the App Group container and
+are reconciled by `JournalStore.reconcileOrphanFiles(...)`. The app target's
+`MediaSyncEngine` mirrors those files through a separate private CloudKit zone as
+one immutable CKAsset record per attachment id; the widget does not run that
+engine and only reads whatever rows/files are already available in the shared App
+Group container.
 
 | Property | Type | Notes |
 |----------|------|-------|
 | `id` | `UUID` | Logical id and file name basis. |
 | `kind` | `Kind` | `.photo`, `.audio`, `.doodle`, or `.bauhaus`. |
 | `byteSize` | `Int` | Size of the on-disk file at attach time. |
-| `thumbnail` | `Data?` | Small mirrored preview data, when generated. |
+| `thumbnail` | `Data?` | Small mirrored fallback preview data, when generated. |
 | `createdAt` | `Date` | |
 | `card` | `Card?` | Owning card; inverse declared on `Card.attachments`. |
 
@@ -311,7 +331,8 @@ auto-save drafts.
 
 - `DoodleDrawing`: `Sendable, Equatable, Codable` — `strokes: [DoodleStroke]`,
   `canvasSize: CGSize`, `duration: TimeInterval`. `image(inkColor:scale:)`
-  rasterizes a tinted thumbnail on demand.
+  rasterizes a tinted thumbnail on demand; `DoodleDrawingView` renders the saved
+  vector value directly as SwiftUI content.
 - `DoodleStroke`: `points: [DoodlePoint]` (each `x, y, time`, optional
   point-level `width`), `width: Double` base brush width.
 - Supporting types: `DoodleCanvas` (controller), `DoodleStrokesView` (renderer),
@@ -329,10 +350,13 @@ shape/background colors are applied to that cell. Compact swatch rows choose the
 active primitive and cell background colors, the trash action clears the whole
 artwork, and an optional export callback lets hosts finish the capture
 explicitly. Every cell edit and clear emits the current `BauhausGridArtwork`
-through `onChange`.
+through `onChange`. Cell and swatch selection use selection haptics, shape
+application and clearing use light impact haptics, and the optional export action
+uses success feedback.
 
 - `BauhausGridArtwork`: `Sendable, Equatable, Codable` — row-major 25-cell
-  storage where each cell is either empty or a `BauhausTile`.
+  storage where each cell is either empty or a `BauhausTile`. `BauhausGridArtworkView`
+  renders the saved grid directly as SwiftUI content.
 - `BauhausGridPosition`: `Sendable, Equatable, Hashable, Codable, Identifiable`
   — a stable zero-based row/column coordinate inside the 5 x 5 grid.
 - `BauhausTile`: `Sendable, Equatable, Codable` — `shape: BauhausShapeKind`,
@@ -551,18 +575,30 @@ the gallery's **Lab** section).
   with the active palette's `secondaryContainer`: compact widths keep two
   columns, while regular-width iPad layouts add columns as space allows. Each tile
   renders exactly one card pattern based on `Card.kind`: text (`Card.body`),
-  audio (waveform chrome), image (the matching photo attachment thumbnail),
-  doodle (the matching doodle thumbnail), or Bauhaus (the matching grid
-  thumbnail). Media cards do not render `Card.body` as a caption; a captured
-  audio/image/doodle/Bauhaus grid is its own Card. Each tile is tilted by a small
-  stable angle (±3°) derived from its `Card.id`, for a loosely hand-placed look.
-  Tapping a tile pushes an **Entry** detail screen. The detail screen uses a
-  separate, non-tilted, variable-height card component so it can show full text,
-  a larger photo/doodle/Bauhaus preview, audio playback when the local recording
-  file exists, and created/updated/location metadata without inheriting the grid
-  tile's clipping and aspect-ratio limits. Each tile's context menu and the detail toolbar
-  include **Share**, which opens a pre-share preview sheet before any system
-  share sheet is shown. The preview displays the themed image export; it lays out
+  audio (waveform chrome), image (the matching photo attachment file loaded
+  asynchronously), doodle (the editable drawing JSON decoded and rendered as a
+  SwiftUI canvas view on the same 1 : 1.4144 paper aspect), or Bauhaus (the
+  editable grid JSON decoded and rendered as a SwiftUI grid view). Media cards
+  do not render `Card.body` as a caption; a
+  captured audio/image/doodle/Bauhaus grid is its own Card. Each tile is tilted
+  by a small stable angle (±3°) derived from its `Card.id`, for a loosely
+  hand-placed look. Each tile has a thin SwiftData-backed host view that owns the
+  live `Card` reference and derives the display snapshot in `body`, so imported
+  row or relationship changes can refresh the tile. Media wells also listen for
+  `MediaSyncEngine` file-change signals, covering the common CloudKit order where
+  the SwiftData record arrives before the CKAsset file has finished downloading.
+  Tapping a tile pushes an **Entry** detail screen. Summary and detail both render
+  through one adaptive saved-entry card wrapper that owns `CardSurface`, so the
+  same paper aspect ratio is preserved while the wrapper swaps only its internal
+  summary/detail layout. The detail layout shows full text inside the card with
+  internal scrolling when needed, a larger photo/doodle/Bauhaus preview, Doodle
+  stroke replay controls that keep the visible canvas on the paper aspect while
+  preserving the saved stroke geometry, audio playback when the local recording
+  file exists,
+  and created/updated/location metadata without inheriting the grid tile's tilt
+  or text truncation. Each tile's context menu and the detail toolbar include
+  **Share**, which opens a pre-share preview sheet before any system share sheet
+  is shown. The preview displays the themed image export; it lays out
   the actual 9:16 export canvas and aspect-fits that result into the sheet instead
   of reflowing the card at preview size. Doodle cards also get a **Video** tab
   that replays the stored vector timeline in the same share chrome. **Share
@@ -573,8 +609,12 @@ the gallery's **Lab** section).
   as still images using their mirrored grid thumbnail. The debug **Seed Samples**
   action and `Card Patterns` Preview exercise the independent card patterns.
   Not the real entries UI.
-- **`SettingsView`** — an iCloud sync status row, a theme picker, optional
-  Debug-only Lab links, and About actions. Selecting a theme writes
+- **`SettingsView`** — an iCloud sync status row, a drill-in **iCloud Sync**
+  diagnostics screen, a theme picker, optional Debug-only Lab links, and About
+  actions. The diagnostics screen separates iCloud account availability,
+  SwiftData row mirroring phases/recent events, custom media-file sync pending
+  counts/last activity/errors, and local attachment-file availability so a row
+  that arrived before its media file can be identified. Selecting a theme writes
   `JournalDefaults.themeID` (animated) and triggers selection haptic feedback.
   Capture demos are intentionally hidden from Settings. In Debug builds, **Lab**
   links to Haptics and Haptic Doodle so those tools can be tried from the current

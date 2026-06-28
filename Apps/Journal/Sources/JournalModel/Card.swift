@@ -130,20 +130,20 @@ extension Card {
     /// required for display.
     case text
 
-    /// A still photo card. The card expects one `.photo` attachment for its bytes
-    /// and thumbnail; `body` is not rendered as a caption.
+    /// A still photo card. The card expects one `.photo` attachment for its bytes;
+    /// `body` is not rendered as a caption.
     case photo
 
     /// An ambient audio card. The card expects one `.audio` attachment for its
     /// recording; text display is represented by audio-specific UI.
     case audio
 
-    /// A doodle card. The card expects one `.doodle` attachment for the encoded
-    /// drawing and thumbnail.
+    /// A doodle card. The card expects one `.doodle` attachment for the editable
+    /// encoded drawing.
     case doodle
 
     /// A Bauhaus grid artwork card. The card expects one `.bauhaus` attachment
-    /// for the encoded `BauhausGridArtwork` and thumbnail.
+    /// for the encoded `BauhausGridArtwork`.
     case bauhaus
   }
 

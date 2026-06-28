@@ -84,6 +84,25 @@ public struct BauhausGridArtwork: Codable, Equatable, Sendable {
   }
 }
 
+/// Read-only SwiftUI rendering for a saved `BauhausGridArtwork`.
+///
+/// This builds the grid as live SwiftUI content from the editable artwork value.
+/// Use `BauhausGridArtwork.image(...)` only when a flattened export image is
+/// explicitly needed.
+public struct BauhausGridArtworkView: View {
+
+  public let artwork: BauhausGridArtwork
+
+  public init(artwork: BauhausGridArtwork) {
+    self.artwork = artwork
+  }
+
+  public var body: some View {
+    BauhausArtworkRasterView(artwork: artwork)
+      .aspectRatio(1, contentMode: .fit)
+  }
+}
+
 /// A stable row/column coordinate inside a `BauhausGridArtwork`.
 public struct BauhausGridPosition: Codable, Equatable, Hashable, Identifiable, Sendable {
 
@@ -112,14 +131,6 @@ public struct BauhausTile: Codable, Equatable, Sendable {
 
   /// The color token used to fill the cell behind the primitive.
   public var backgroundSwatch: BauhausSwatch
-
-  /// Backward-compatible alias for artwork saved before tiles gained a
-  /// separate background color.
-  @available(*, deprecated, renamed: "shapeSwatch")
-  public var swatch: BauhausSwatch {
-    get { shapeSwatch }
-    set { shapeSwatch = newValue }
-  }
 
   public init(
     shape: BauhausShapeKind,
@@ -227,6 +238,9 @@ public struct BauhausGridCaptureView: View {
   @State private var selectedPosition: BauhausGridPosition?
   @State private var selectedShapeSwatch: BauhausSwatch = .vermilion
   @State private var selectedBackgroundSwatch: BauhausSwatch = .porcelain
+  @State private var selectionFeedbackTrigger = 0
+  @State private var editFeedbackTrigger = 0
+  @State private var completionFeedbackTrigger = 0
 
   private let onChange: (@MainActor @Sendable (BauhausGridArtwork) -> Void)?
   private let onExport: (@MainActor @Sendable (BauhausGridArtwork) -> Void)?
@@ -260,7 +274,8 @@ public struct BauhausGridCaptureView: View {
           isExportDisabled: artwork.isEmpty,
           showsExport: onExport != nil,
           onClear: clear,
-          onExport: export
+          onExport: export,
+          onSelectSwatch: triggerSelectionFeedback
         )
         .padding(.horizontal, 20)
         .padding(.bottom, 24)
@@ -281,15 +296,20 @@ public struct BauhausGridCaptureView: View {
         },
         onClear: {
           apply(nil, at: position)
-        }
+        },
+        onSelectSwatch: triggerSelectionFeedback
       )
       .presentationDetents([.height(420), .medium])
       .presentationDragIndicator(.visible)
       .presentationBackground(.background)
     }
+    .sensoryFeedback(.selection, trigger: selectionFeedbackTrigger)
+    .sensoryFeedback(.impact(weight: .light), trigger: editFeedbackTrigger)
+    .sensoryFeedback(.success, trigger: completionFeedbackTrigger)
   }
 
   private func selectCell(_ position: BauhausGridPosition) {
+    triggerSelectionFeedback()
     if let tile = artwork[position] {
       selectedShapeSwatch = tile.shapeSwatch
       selectedBackgroundSwatch = tile.backgroundSwatch
@@ -302,19 +322,35 @@ public struct BauhausGridCaptureView: View {
       artwork[position] = tile
     }
     selectedPosition = nil
+    triggerEditFeedback()
     onChange?(artwork)
   }
 
   private func clear() {
+    guard artwork.isEmpty == false else { return }
     withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) {
       artwork = .empty
     }
+    triggerEditFeedback()
     onChange?(artwork)
   }
 
   private func export() {
     guard artwork.isEmpty == false else { return }
+    triggerCompletionFeedback()
     onExport?(artwork)
+  }
+
+  private func triggerSelectionFeedback() {
+    selectionFeedbackTrigger += 1
+  }
+
+  private func triggerEditFeedback() {
+    editFeedbackTrigger += 1
+  }
+
+  private func triggerCompletionFeedback() {
+    completionFeedbackTrigger += 1
   }
 }
 
@@ -409,7 +445,8 @@ fileprivate struct BauhausGridCellButton: View {
           .fill(tile?.backgroundSwatch.color ?? BauhausGridStyle.emptyCellColor)
 
         if let tile {
-          BauhausShapeView(kind: tile.shape, swatch: tile.shapeSwatch)
+          BauhausShape(kind: tile.shape)
+            .fill(tile.shapeSwatch.color)
             .transition(.scale(scale: 0.82).combined(with: .opacity))
         }
 
@@ -436,6 +473,7 @@ fileprivate struct BauhausShapePickerSheet: View {
   let currentTile: BauhausTile?
   let onApply: @MainActor @Sendable (BauhausTile) -> Void
   let onClear: @MainActor @Sendable () -> Void
+  let onSelectSwatch: @MainActor @Sendable () -> Void
 
   private let columns = [
     GridItem(.adaptive(minimum: 56, maximum: 56), spacing: 12)
@@ -448,11 +486,13 @@ fileprivate struct BauhausShapePickerSheet: View {
           VStack(spacing: 10) {
             BauhausSwatchStrip(
               title: "Shape",
-              selectedSwatch: $selectedShapeSwatch
+              selectedSwatch: $selectedShapeSwatch,
+              onSelect: onSelectSwatch
             )
             BauhausSwatchStrip(
               title: "Background",
-              selectedSwatch: $selectedBackgroundSwatch
+              selectedSwatch: $selectedBackgroundSwatch,
+              onSelect: onSelectSwatch
             )
           }
 
@@ -500,6 +540,7 @@ fileprivate struct BauhausSwatchStrip: View {
   var title: LocalizedStringKey?
   @Binding var selectedSwatch: BauhausSwatch
   var dotSize: CGFloat = 28
+  var onSelect: @MainActor @Sendable () -> Void = {}
 
   var body: some View {
     HStack(spacing: 8) {
@@ -512,7 +553,9 @@ fileprivate struct BauhausSwatchStrip: View {
 
       ForEach(BauhausSwatch.allCases) { swatch in
         Button {
+          guard selectedSwatch != swatch else { return }
           selectedSwatch = swatch
+          onSelect()
         } label: {
           Circle()
             .fill(swatch.color)
@@ -547,7 +590,8 @@ fileprivate struct BauhausShapeLibraryTile: View {
       RoundedRectangle(cornerRadius: 8)
         .fill(tile.backgroundSwatch.color)
 
-      BauhausShapeView(kind: tile.shape, swatch: tile.shapeSwatch)
+      BauhausShape(kind: tile.shape)
+        .fill(tile.shapeSwatch.color)
         .padding(8)
     }
     .frame(width: 56, height: 56)
@@ -572,6 +616,7 @@ fileprivate struct BauhausCaptureControls: View {
   let showsExport: Bool
   let onClear: @MainActor @Sendable () -> Void
   let onExport: @MainActor @Sendable () -> Void
+  let onSelectSwatch: @MainActor @Sendable () -> Void
 
   var body: some View {
     HStack(spacing: 14) {
@@ -587,12 +632,14 @@ fileprivate struct BauhausCaptureControls: View {
         BauhausSwatchStrip(
           title: "Shape",
           selectedSwatch: $selectedShapeSwatch,
-          dotSize: 24
+          dotSize: 24,
+          onSelect: onSelectSwatch
         )
         BauhausSwatchStrip(
           title: "Background",
           selectedSwatch: $selectedBackgroundSwatch,
-          dotSize: 24
+          dotSize: 24,
+          onSelect: onSelectSwatch
         )
       }
       .frame(maxWidth: 360)
@@ -631,7 +678,8 @@ fileprivate struct BauhausArtworkThumbnail: View {
             .fill(artwork[position]?.backgroundSwatch.color ?? BauhausGridStyle.emptyCellColor)
 
           if let tile = artwork[position] {
-            BauhausShapeView(kind: tile.shape, swatch: tile.shapeSwatch)
+            BauhausShape(kind: tile.shape)
+              .fill(tile.shapeSwatch.color)
           }
         }
         .aspectRatio(1, contentMode: .fit)
@@ -664,7 +712,8 @@ fileprivate struct BauhausArtworkRasterView: View {
             .fill(artwork[position]?.backgroundSwatch.color ?? BauhausGridStyle.emptyCellColor)
 
           if let tile = artwork[position] {
-            BauhausShapeView(kind: tile.shape, swatch: tile.shapeSwatch)
+            BauhausShape(kind: tile.shape)
+              .fill(tile.shapeSwatch.color)
           }
         }
         .aspectRatio(1, contentMode: .fit)
@@ -678,19 +727,12 @@ fileprivate struct BauhausArtworkRasterView: View {
   }
 }
 
-fileprivate struct BauhausShapeView: View {
+fileprivate struct BauhausShape: Shape {
 
   let kind: BauhausShapeKind
-  let swatch: BauhausSwatch
 
-  var body: some View {
-    GeometryReader { proxy in
-      Canvas { context, size in
-        let rect = CGRect(origin: .zero, size: size)
-        context.fill(kind.path(in: rect), with: .color(swatch.color))
-      }
-      .frame(width: proxy.size.width, height: proxy.size.height)
-    }
+  func path(in rect: CGRect) -> Path {
+    kind.path(in: rect)
   }
 }
 

@@ -73,8 +73,5 @@ let package = Package(
 
     // Media conversion
     .package(url: "https://github.com/awxkee/avif.swift", from: "1.0.0"),
-
-    // Camera capture (vendored as a git submodule under Submodules/)
-    .package(path: "../Submodules/Capturer"),
   ]
 )

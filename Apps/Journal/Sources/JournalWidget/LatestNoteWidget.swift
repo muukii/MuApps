@@ -10,11 +10,11 @@ import WidgetKit
 ///
 /// The timeline provider opens the *same* SwiftData store as the app (the shared
 /// App Group container built by `JournalStore`) and reads the single newest
-/// `Card`. After a write the app nudges WidgetKit with
-/// `WidgetCenter.shared.reloadAllTimelines()` so the widget reflects the new note.
+/// `Card`. After a write the app asks WidgetKit to reload this widget kind so the
+/// widget reflects the new note.
 struct LatestNoteWidget: Widget {
 
-  private let kind = "LatestNoteWidget"
+  private let kind = JournalWidgetKind.latestNote
 
   var body: some WidgetConfiguration {
     StaticConfiguration(kind: kind, provider: LatestNoteProvider()) { entry in
@@ -56,6 +56,20 @@ enum NoteContent: Sendable, Hashable {
 
 struct LatestNoteProvider: TimelineProvider {
 
+  /// Number of recent cards inspected to find the visible latest item.
+  ///
+  /// A thread save can create multiple cards at nearly the same timestamp. Looking
+  /// at a small recent window lets the widget prefer the authored thread tail
+  /// instead of accidentally showing an earlier card from the same save.
+  private static let recentCardFetchLimit = 50
+
+  /// Requested periodic refresh cadence for relative date labels.
+  ///
+  /// New note content is refreshed by the app's post-save reload request; this
+  /// cadence only keeps strings such as "15 min ago" from becoming too stale
+  /// when the user does not open the app.
+  private static let relativeDateRefreshInterval: TimeInterval = 15 * 60
+
   func placeholder(in context: Context) -> LatestNoteEntry {
     LatestNoteEntry(date: .now, note: .sample)
   }
@@ -69,9 +83,9 @@ struct LatestNoteProvider: TimelineProvider {
 
   func getTimeline(in context: Context, completion: @escaping (Timeline<LatestNoteEntry>) -> Void) {
     let entry = LatestNoteEntry(date: .now, note: loadLatestNote())
-    // Content changes only when the user writes a note, and the app reloads the
-    // timeline then; a periodic refresh keeps the relative date ("2h ago") fresh.
-    let next = Date.now.addingTimeInterval(60 * 60)
+    // Content changes when the user writes a note, and the app requests a reload
+    // then. This periodic refresh is only for the relative date label.
+    let next = Date.now.addingTimeInterval(Self.relativeDateRefreshInterval)
     completion(Timeline(entries: [entry], policy: .after(next)))
   }
 
@@ -85,8 +99,10 @@ struct LatestNoteProvider: TimelineProvider {
       var descriptor = FetchDescriptor<Card>(
         sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
       )
-      descriptor.fetchLimit = 1
-      guard let card = try context.fetch(descriptor).first else { return nil }
+      descriptor.fetchLimit = Self.recentCardFetchLimit
+      guard let card = try context.fetch(descriptor).preferredLatestWidgetCard else {
+        return nil
+      }
       return NoteSnapshot(
         id: card.id,
         content: card.widgetContent,
@@ -243,6 +259,18 @@ private struct LatestNoteEmptyState: View {
 // MARK: - Formatting Helpers
 
 extension Card {
+
+  /// Whether this card continues into another card in the same authored thread.
+  ///
+  /// The Latest Note widget wants the visible end of a just-posted thread. Earlier
+  /// cards in that thread have an outgoing `.continuation`, while the final card
+  /// does not.
+  fileprivate var hasOutgoingContinuation: Bool {
+    (outgoingRelationships ?? []).contains { relationship in
+      relationship.kind == .continuation && relationship.target != nil
+    }
+  }
+
   /// The widget content for this card. Text cards render their written body;
   /// doodle cards render the mirrored thumbnail, and other media cards keep
   /// their modality label until they get a dedicated widget treatment.
@@ -274,6 +302,20 @@ extension Card {
     if !body.isEmpty { return body }
     let title = self.title.trimmingCharacters(in: .whitespacesAndNewlines)
     return title.isEmpty ? "Untitled" : title
+  }
+}
+
+extension Array where Element == Card {
+
+  /// Picks the card the Latest Note widget should render from a date-sorted
+  /// recent window.
+  ///
+  /// For a multi-card thread, this prefers the first card that does not point to a
+  /// later continuation, so a single thread save displays the authored last item.
+  /// The fallback preserves normal "newest by date" behavior for malformed or
+  /// partially mirrored relationship data.
+  fileprivate var preferredLatestWidgetCard: Card? {
+    first { $0.hasOutgoingContinuation == false } ?? first
   }
 }
 

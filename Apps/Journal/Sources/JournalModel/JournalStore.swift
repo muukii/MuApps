@@ -186,8 +186,15 @@ extension JournalStore {
     var previousCard = source
     var createdCards: [Card] = []
 
-    for draft in drafts {
+    // A multi-card thread is one save operation, but its authored order still
+    // matters to date-sorted readers such as the Latest Note widget.
+    let threadCreatedAt = Date()
+
+    for (offset, draft) in drafts.enumerated() {
       let card = makeCard(kind: draft.kind, body: draft.text)
+      let createdAt = threadCreatedAt.addingTimeInterval(TimeInterval(offset) / 1000)
+      card.createdAt = createdAt
+      card.updatedAt = createdAt
       card.location = draft.location
       context.insert(card)
       try stageAttachment(from: draft, to: card, in: context)
@@ -421,13 +428,37 @@ extension JournalStore {
 
 extension JournalStore {
 
+  /// Local availability summary for media attachments.
+  ///
+  /// SwiftData/CloudKit mirrors the `Attachment` rows, while the attachment bytes
+  /// are separate files. A row can therefore exist before its file has arrived,
+  /// especially after restoring iCloud sync or receiving a CloudKit row before
+  /// the custom CKAsset sync finishes.
+  public struct LocalMediaAvailability: Sendable, Equatable {
+
+    /// Number of `Attachment` rows currently present in SwiftData.
+    public var attachmentCount: Int
+
+    /// Number of attachment rows whose referenced file exists on this device.
+    public var localFileCount: Int
+
+    /// Number of attachment rows whose referenced file is missing locally.
+    public var missingFileCount: Int {
+      max(attachmentCount - localFileCount, 0)
+    }
+
+    public init(attachmentCount: Int = 0, localFileCount: Int = 0) {
+      self.attachmentCount = attachmentCount
+      self.localFileCount = localFileCount
+    }
+  }
+
   /// Directory holding attachment files, inside the shared App Group container so
   /// the widget reads the same bytes. Created on first access.
   ///
   /// Bytes are stored here as files rather than inside the SwiftData store on
-  /// purpose (see `Attachment`), so this directory is **not** CloudKit-mirrored —
-  /// cross-device media sync is a separate, deliberate step still to come. It is
-  /// covered by the device's iCloud backup in the meantime.
+  /// purpose (see `Attachment`), so this directory is **not** SwiftData-mirrored.
+  /// The app process syncs these files separately as CloudKit assets.
   public static func mediaDirectory() throws -> URL {
     guard
       let container = FileManager.default.containerURL(
@@ -444,6 +475,48 @@ extension JournalStore {
   /// On-disk location of an attachment's bytes.
   public static func fileURL(for attachment: Attachment) throws -> URL {
     try mediaDirectory().appending(path: attachment.fileName, directoryHint: .notDirectory)
+  }
+
+  /// Attachment IDs whose referenced file currently exists on this device.
+  ///
+  /// The app uses this at launch to backfill media uploads that older builds may
+  /// have missed. It is intentionally keyed by both the SwiftData row and the
+  /// local file: a row imported from iCloud before its CKAsset has downloaded
+  /// should not enqueue an upload for a file that is not here yet.
+  @MainActor
+  public static func localMediaAttachmentIDs(in context: ModelContext) throws -> [UUID] {
+    let attachments = try context.fetch(FetchDescriptor<Attachment>())
+    return attachments.compactMap { attachment in
+      guard
+        let url = try? fileURL(for: attachment),
+        FileManager.default.fileExists(atPath: url.path)
+      else {
+        return nil
+      }
+      return attachment.id
+    }
+  }
+
+  /// Counts attachment rows against the files currently present on this device.
+  ///
+  /// This is diagnostic state for Settings: it tells the user whether media rows
+  /// have arrived from SwiftData/CloudKit before their separate CKAsset files.
+  @MainActor
+  public static func localMediaAvailability(in context: ModelContext) throws -> LocalMediaAvailability {
+    let attachments = try context.fetch(FetchDescriptor<Attachment>())
+    let localFileCount = attachments.reduce(into: 0) { count, attachment in
+      guard
+        let url = try? fileURL(for: attachment),
+        FileManager.default.fileExists(atPath: url.path)
+      else {
+        return
+      }
+      count += 1
+    }
+    return LocalMediaAvailability(
+      attachmentCount: attachments.count,
+      localFileCount: localFileCount
+    )
   }
 
   /// Attaches in-memory bytes (a photo's JPEG, encoded doodle JSON, or encoded
@@ -500,14 +573,20 @@ extension JournalStore {
   /// Deletes an attachment row and its file. Cascade delete from `Card` already
   /// removes the row when a whole Card is deleted; call this to remove a single
   /// attachment on its own.
+  ///
+  /// - Returns: The deleted attachment id, so the app target can enqueue deletion
+  ///   of the matching remote CKAsset after this local transaction succeeds.
   @MainActor
-  public static func deleteAttachment(_ attachment: Attachment, in context: ModelContext) throws {
+  @discardableResult
+  public static func deleteAttachment(_ attachment: Attachment, in context: ModelContext) throws -> UUID {
+    let attachmentID = attachment.id
     let url = try? fileURL(for: attachment)
     context.delete(attachment)
     try context.save()
     if let url {
       try? FileManager.default.removeItem(at: url)
     }
+    return attachmentID
   }
 
   /// Deletes media files that no `Attachment` row references — the file lifecycle's
