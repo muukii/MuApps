@@ -134,6 +134,14 @@ public struct DoodleDrawingView: View {
   }
 }
 
+/// Timing constants shared by visual doodle replay and replay haptics.
+enum DoodleReplayTiming {
+
+  /// Gaps between points longer than this are clamped during replay, so long
+  /// pauses collapse to a short beat while stored timestamps stay faithful.
+  static let maxGap: TimeInterval = 0.35
+}
+
 /// Read-only SwiftUI replay for a saved `DoodleDrawing`.
 ///
 /// The caller owns the playback state through `isPlaying`, while this view owns
@@ -153,6 +161,7 @@ public struct DoodleDrawingReplayView: View {
 
   @Binding private var isPlaying: Bool
   @State private var replayStart: Date?
+  @State private var replayHaptics = DoodleDrawingReplayHaptics()
 
   public init(
     drawing: DoodleDrawing,
@@ -197,8 +206,11 @@ public struct DoodleDrawingReplayView: View {
       }
       .onChange(of: drawing) { _, _ in
         if isPlaying {
-          replayStart = Date()
+          synchronizeReplayStart()
         }
+      }
+      .onDisappear {
+        replayHaptics.stop()
       }
     } else {
       Color.clear
@@ -206,7 +218,14 @@ public struct DoodleDrawingReplayView: View {
   }
 
   private func synchronizeReplayStart() {
-    replayStart = isPlaying ? Date() : nil
+    if isPlaying {
+      let replay = drawing.strokes.compressingGaps(maxGap: DoodleReplayTiming.maxGap)
+      replayStart = Date()
+      replayHaptics.play(strokes: replay)
+    } else {
+      replayStart = nil
+      replayHaptics.stop()
+    }
   }
 }
 
@@ -219,12 +238,9 @@ private struct DoodleDrawingReplayLayer: View {
 
   @Binding var isPlaying: Bool
 
-  /// Gaps between strokes are shortened for viewing, matching the editor replay.
-  private static let replayMaxGap: TimeInterval = 0.35
-
   var body: some View {
     if let replayStart, isPlaying {
-      let replay = drawing.strokes.compressingGaps(maxGap: Self.replayMaxGap)
+      let replay = drawing.strokes.compressingGaps(maxGap: DoodleReplayTiming.maxGap)
       let replayDuration = replay.last?.points.last?.time ?? 0
 
       TimelineView(.animation) { timeline in
@@ -348,10 +364,7 @@ private struct DoodleStrokeLayerView: View {
 private enum DoodleStrokeRenderer {
 
   static func draw(_ stroke: DoodleStroke, upTo limit: TimeInterval?, inkColor: Color, in context: GraphicsContext) {
-    let points = DoodleSplinePathFactory.renderKnots(
-      from: stroke.visiblePoints(upTo: limit),
-      brushWidth: CGFloat(stroke.width)
-    )
+    let points = stroke.visiblePoints(upTo: limit)
     guard let first = points.first else { return }
 
     // A tap (or a replay that has only reached the first point) is a single dot;
@@ -374,7 +387,7 @@ private enum DoodleStrokeRenderer {
       drawVariableWidth(points, inkColor: inkColor, in: context)
     } else {
       context.stroke(
-        Path(doodleSpline: points.map(\.location)),
+        Path(smooth: points.map(\.location)),
         with: .color(inkColor),
         style: StrokeStyle(lineWidth: stroke.width, lineCap: .round, lineJoin: .round)
       )
@@ -386,6 +399,7 @@ private enum DoodleStrokeRenderer {
     inkColor: Color,
     in context: GraphicsContext
   ) {
+    let points = points.removingNearDuplicates()
     guard points.count > 1 else {
       if let point = points.first {
         let radius = point.width / 2
@@ -402,25 +416,16 @@ private enum DoodleStrokeRenderer {
       return
     }
 
-    // Draw dense overlapping spline spans instead of one filled offset polygon.
+    // Draw dense overlapping round segments instead of one filled offset polygon.
     // Offset polygons fold over at tight turns and crossings; overlapping round
-    // strokes keep the centerline dominant while making width changes subtle.
-    let locations = points.map(\.location)
-    for index in 0..<(points.count - 1) {
-      let previous = points[index]
-      let point = points[index + 1]
+    // strokes keep the centerline dominant and make width changes subtle.
+    for index in 1..<points.count {
+      let previous = points[index - 1]
+      let point = points[index]
       let width = (previous.width + point.width) / 2
-      let controls = DoodleSplinePathFactory.controlPoints(
-        forSegmentAt: index,
-        in: locations
-      )
       var segment = Path()
       segment.move(to: previous.location)
-      segment.addCurve(
-        to: point.location,
-        control1: controls.control1,
-        control2: controls.control2
-      )
+      segment.addLine(to: point.location)
       context.stroke(
         segment,
         with: .color(inkColor),
@@ -436,107 +441,27 @@ private struct DoodleRenderPoint {
   var hasExplicitWidth: Bool
 }
 
-/// Builds the cubic spline centerline used for every doodle render path.
-///
-/// The stored model remains a timestamped point stream. Rendering converts that
-/// stream to Catmull-Rom spans so fixed-width strokes, tapered live ink, saved
-/// drawings, replay, and thumbnail export all follow the same curved centerline.
-private enum DoodleSplinePathFactory {
-
-  private static let catmullRomControlScale: CGFloat = 1.0 / 6.0
-
-  static func renderKnots(
-    from points: [DoodleRenderPoint],
-    brushWidth: CGFloat
-  ) -> [DoodleRenderPoint] {
-    let points = points.removingNearDuplicates(minDistance: 0.75)
-    guard points.count > 2 else { return points }
-
-    let minimumSpacing = max(brushWidth * 3.0, 11)
-    let cornerAngle = CGFloat.pi * 0.26
-    var result: [DoodleRenderPoint] = [points[0]]
-
-    for index in 1..<(points.count - 1) {
-      let previous = result[result.count - 1]
-      let point = points[index]
-      let next = points[index + 1]
-      let distance = previous.location.distance(to: point.location)
-      let angle = turnAngle(
-        from: previous.location,
-        through: point.location,
-        to: next.location
-      )
-
-      if distance >= minimumSpacing || angle >= cornerAngle {
-        result.append(point)
-      }
-    }
-
-    if let last = points.last, result[result.count - 1].location.distance(to: last.location) > 0.5 {
-      result.append(last)
-    }
-
-    return result
-  }
-
-  static func controlPoints(
-    forSegmentAt index: Int,
-    in points: [CGPoint]
-  ) -> (control1: CGPoint, control2: CGPoint) {
-    let previous = clampedPoint(at: index - 1, in: points)
-    let start = clampedPoint(at: index, in: points)
-    let end = clampedPoint(at: index + 1, in: points)
-    let next = clampedPoint(at: index + 2, in: points)
-
-    return (
-      control1: CGPoint(
-        x: start.x + (end.x - previous.x) * catmullRomControlScale,
-        y: start.y + (end.y - previous.y) * catmullRomControlScale
-      ),
-      control2: CGPoint(
-        x: end.x - (next.x - start.x) * catmullRomControlScale,
-        y: end.y - (next.y - start.y) * catmullRomControlScale
-      )
-    )
-  }
-
-  private static func clampedPoint(at index: Int, in points: [CGPoint]) -> CGPoint {
-    points[min(max(index, 0), points.count - 1)]
-  }
-
-  private static func turnAngle(from start: CGPoint, through middle: CGPoint, to end: CGPoint) -> CGFloat {
-    let first = CGVector(dx: middle.x - start.x, dy: middle.y - start.y)
-    let second = CGVector(dx: end.x - middle.x, dy: end.y - middle.y)
-    let firstLength = max(hypot(first.dx, first.dy), 0.001)
-    let secondLength = max(hypot(second.dx, second.dy), 0.001)
-    let dot = (first.dx * second.dx + first.dy * second.dy) / (firstLength * secondLength)
-    return acos(min(max(dot, -1), 1))
-  }
-}
-
 extension Path {
 
-  /// An open cubic spline through `points`.
-  ///
-  /// Points are treated as Catmull-Rom knots and converted to cubic Bézier
-  /// spans. This preserves the authored centerline while removing the last
-  /// straight polyline interpretation from saved and replayed doodles.
-  fileprivate init(doodleSpline points: [CGPoint]) {
+  /// An open path through `points`, rounding each interior corner with a quadratic
+  /// curve whose endpoints are the edge midpoints and whose control point is the
+  /// vertex — the standard one-pass smoothing for a hand-drawn polyline. Gives the
+  /// line a flowing, pen-like glide on top of the centerline's own smoothing.
+  fileprivate init(smooth points: [CGPoint]) {
     self.init()
     guard let first = points.first else { return }
     move(to: first)
-
-    for index in 0..<(points.count - 1) {
-      let controls = DoodleSplinePathFactory.controlPoints(
-        forSegmentAt: index,
-        in: points
-      )
-      addCurve(
-        to: points[index + 1],
-        control1: controls.control1,
-        control2: controls.control2
-      )
+    guard points.count > 2 else {
+      for point in points.dropFirst() { addLine(to: point) }
+      return
     }
+    func midpoint(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+      CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+    }
+    for index in 1..<(points.count - 1) {
+      addQuadCurve(to: midpoint(points[index], points[index + 1]), control: points[index])
+    }
+    addQuadCurve(to: points[points.count - 1], control: points[points.count - 2])
   }
 
 }
@@ -595,14 +520,14 @@ extension DoodlePoint {
 
 extension [DoodleRenderPoint] {
 
-  fileprivate func removingNearDuplicates(minDistance: CGFloat = 0.2) -> [DoodleRenderPoint] {
+  fileprivate func removingNearDuplicates() -> [DoodleRenderPoint] {
     var result: [DoodleRenderPoint] = []
     for point in self {
       guard let previous = result.last else {
         result.append(point)
         continue
       }
-      if previous.location.distance(to: point.location) > minDistance {
+      if previous.location.distance(to: point.location) > 0.2 {
         result.append(point)
       }
     }

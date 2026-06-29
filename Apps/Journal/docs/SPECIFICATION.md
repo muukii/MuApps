@@ -317,9 +317,8 @@ front/back flip) built directly on AVFoundation. Handles authorization states
 
 `DoodleCanvasView(inkColor:initialDrawing:onExport:onChange:)` — a **SwiftUI
 vector** ink canvas. Strokes are stored as resolution-independent, **colorless**
-timestamped point streams rendered as cubic spline curves (the ink is the
-caller-supplied `inkColor`, applied at draw time, so changing the app theme
-re-tints every doodle — including ones drawn earlier).
+polylines (the ink is the caller-supplied `inkColor`, applied at draw time, so
+changing the app theme re-tints every doodle — including ones drawn earlier).
 `initialDrawing` restores existing vector strokes into the canvas, scales them
 to the current canvas size, and appends new strokes after the existing replay
 timeline. Every point carries a timestamp on a single shared timeline, so the
@@ -329,21 +328,20 @@ doodle can be **replayed** at the speed it was drawn (▶︎ button; a
 points over `0.35s` (almost always the pen-up time between strokes) is clamped to
 that beat, so playback doesn't sit idle — the stored timestamps stay faithful;
 only playback is reshaped. The default brush is a strong custom **streamline**
-engine rather than PencilKit: timestamped coalesced touches flow through a
-very heavy incremental trajectory filter, coarse saved-point sampling, and a
-streaming spline while the finger is down. The visible live centerline is the
-saved centerline: lifting the finger commits the current live points as-is, with
-no full-stroke refit, primitive snap, or catch-up tail that would move
-already-drawn geometry. Width is velocity-shaped from the same emitted timeline:
-each point stores an optional rendered width, fast spans thin out, stroke tips
-taper lightly, and every on-screen/export/replay renderer aggressively thins
-dense point streams into distance/angle-selected knots before drawing fixed-width and
-tapered strokes through the same cubic spline centerline.
+engine rather than PencilKit: timestamped coalesced touches flow through an
+incremental trajectory filter and streaming spline while the finger is down. The
+visible live centerline is the saved centerline: lifting the finger commits the
+current live points as-is, with no full-stroke refit, primitive snap, or catch-up
+tail that would move already-drawn geometry. Width is velocity-shaped from the
+same emitted timeline: each point stores an optional rendered width, fast spans thin out, stroke tips
+taper lightly, and the renderer draws dense overlapping round segments so
+tapering doesn't fold into a broken outline at tight turns.
 Default brush width is `3pt`. While drawing, supported devices bracket each
 stroke with light touch-down/lift taps and keep the in-stroke Core Haptics
 continuous texture light while its intensity and sharpness follow finger speed;
-unsupported hardware, including Simulator, no-ops. The drawable
-surface is fixed to the same portrait paper proportion as journal cards
+replay surfaces run the same boundary taps and speed-shaped texture along the
+compressed playback timeline. Unsupported hardware, including Simulator, no-ops.
+The drawable surface is fixed to the same portrait paper proportion as journal cards
 (`width / height = 1 / 1.4144`), and the toolbar is single-color: width slider,
 undo, replay, clear, and export when `onExport` is supplied. When `onChange` is
 supplied, the canvas emits the current

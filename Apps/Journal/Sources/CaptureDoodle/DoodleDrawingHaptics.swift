@@ -3,7 +3,8 @@ import CoreHaptics
 import Foundation
 import QuartzCore
 
-/// Startup and lifecycle hooks for the haptics used by the doodle canvas.
+/// Startup and lifecycle hooks for the haptics used by the doodle canvas and
+/// its read-only replay surfaces.
 public enum DoodleHaptics {
 
   /// Warms the Core Haptics engine used for drawing feedback.
@@ -13,6 +14,85 @@ public enum DoodleHaptics {
   @MainActor
   public static func prepareForDrawing() {
     DoodleDrawingHaptics.prepareSharedEngine()
+  }
+}
+
+/// Schedules authored doodle strokes through the same tactile feedback used by
+/// live drawing.
+///
+/// The replay driver receives the already re-timed playback strokes, sleeps
+/// along their point timeline, and forwards stroke boundaries plus speed changes
+/// into `DoodleDrawingHaptics`. Cancelling playback stops the continuous texture
+/// immediately so a dismissed replay cannot leave haptics running.
+@MainActor
+final class DoodleDrawingReplayHaptics {
+
+  private let drawingHaptics = DoodleDrawingHaptics()
+  private var playbackTask: Task<Void, Never>?
+
+  func play(strokes: [DoodleStroke]) {
+    stop()
+
+    playbackTask = Task { [weak self] in
+      await self?.run(strokes: strokes)
+    }
+  }
+
+  func stop() {
+    playbackTask?.cancel()
+    playbackTask = nil
+    drawingHaptics.cancel()
+  }
+
+  private func run(strokes: [DoodleStroke]) async {
+    defer {
+      drawingHaptics.cancel()
+      playbackTask = nil
+    }
+
+    var cursor: TimeInterval = 0
+
+    do {
+      for stroke in strokes {
+        guard let firstPoint = stroke.points.first else { continue }
+
+        try await sleep(from: &cursor, until: firstPoint.time)
+        guard Task.isCancelled == false else { return }
+
+        drawingHaptics.touchDown()
+        drawingHaptics.begin()
+
+        var previousPoint = firstPoint
+        for point in stroke.points.dropFirst() {
+          try await sleep(from: &cursor, until: point.time)
+          guard Task.isCancelled == false else { return }
+
+          drawingHaptics.update(
+            speed: Self.speed(from: previousPoint, to: point),
+            timestamp: CACurrentMediaTime()
+          )
+          previousPoint = point
+        }
+
+        drawingHaptics.end()
+      }
+    } catch {
+      // Cancellation is the normal way a user stops replay; the defer above
+      // owns haptic cleanup for both cancellation and unexpected sleep errors.
+    }
+  }
+
+  private func sleep(from cursor: inout TimeInterval, until target: TimeInterval) async throws {
+    let delay = max(target - cursor, 0)
+    cursor = max(cursor, target)
+    guard delay > 0 else { return }
+
+    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+  }
+
+  private static func speed(from previous: DoodlePoint, to point: DoodlePoint) -> CGFloat {
+    let elapsed = max(point.time - previous.time, 1.0 / 240.0)
+    return previous.location.distance(to: point.location) / CGFloat(elapsed)
   }
 }
 

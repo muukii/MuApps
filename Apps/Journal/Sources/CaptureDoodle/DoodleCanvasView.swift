@@ -53,12 +53,9 @@ final class DoodleCanvas {
   var isEmpty: Bool { strokes.isEmpty }
   var duration: TimeInterval { strokes.last?.points.last?.time ?? 0 }
 
-  /// The centerline resampling resolution for saved points.
-  ///
-  /// The renderer turns these points back into spline knots, so storing coarse
-  /// spacing produces an opinionated curve and avoids preserving small hand
-  /// jitter as authored geometry.
-  private var sampleDistance: CGFloat { max(CGFloat(width) * 0.20, 6) }
+  /// The centerline resampling resolution. Keeping this dense gives the renderer
+  /// enough points to form long smooth curves without visible chord edges.
+  private var sampleDistance: CGFloat { max(CGFloat(width) * 0.025, 2) }
 
   // MARK: Input (driven by DoodleInputView)
 
@@ -273,6 +270,7 @@ public struct DoodleCanvasView: View {
   @State private var canvas: DoodleCanvas
   /// Non-nil while a replay is animating; the value is the replay's start time.
   @State private var replayStart: Date?
+  @State private var replayHaptics = DoodleDrawingReplayHaptics()
 
   private let inkColor: Color
   private let onExport: (@MainActor @Sendable (DoodleDrawing) -> Void)?
@@ -291,11 +289,6 @@ public struct DoodleCanvasView: View {
     self.onChange = onChange
   }
 
-  /// Gaps between points longer than this are clamped during replay, so long
-  /// pauses (mostly the pen-up time between strokes) collapse to a short beat
-  /// instead of dead time. The stored timestamps stay faithful — this only shapes
-  /// playback.
-  private static let replayMaxGap: TimeInterval = 0.35
   /// Width divided by height for the drawable surface. Matches the journal card
   /// paper proportion so exported doodles share the same portrait geometry.
   private static let aspectRatio: CGFloat = 1 / 1.4144
@@ -321,7 +314,13 @@ public struct DoodleCanvasView: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .onChange(of: strokes) { _, _ in
+      if replayStart != nil {
+        stopReplay()
+      }
       onChange?(canvas.makeDrawing())
+    }
+    .onDisappear {
+      stopReplay()
     }
   }
 
@@ -342,13 +341,13 @@ public struct DoodleCanvasView: View {
     if let replayStart {
       // Re-time the strokes onto a gap-compressed clock for playback; the stored
       // strokes keep their real timestamps.
-      let replay = strokes.compressingGaps(maxGap: Self.replayMaxGap)
+      let replay = strokes.compressingGaps(maxGap: DoodleReplayTiming.maxGap)
       let replayDuration = replay.last?.points.last?.time ?? 0
       TimelineView(.animation) { timeline in
         let elapsed = timeline.date.timeIntervalSince(replayStart)
         DoodleStrokesView(strokes: replay, liveStroke: nil, inkColor: inkColor, revealedTime: elapsed)
           .onChange(of: elapsed >= replayDuration) { _, finished in
-            if finished { self.replayStart = nil }
+            if finished { stopReplay() }
           }
       }
     } else {
@@ -365,19 +364,21 @@ public struct DoodleCanvasView: View {
       .frame(maxWidth: 160)
 
       Button {
+        stopReplay()
         canvas.undo()
       } label: {
         Image(systemName: "arrow.uturn.backward")
       }
 
       Button {
-        replayStart = .init()
+        startReplay()
       } label: {
         Image(systemName: "play.fill")
       }
       .disabled(canvas.isEmpty || replayStart != nil)
 
       Button(role: .destructive) {
+        stopReplay()
         canvas.clear()
       } label: {
         Image(systemName: "trash")
@@ -397,6 +398,21 @@ public struct DoodleCanvasView: View {
     }
     .padding(12)
     .background(.ultraThinMaterial, in: Capsule())
+  }
+
+  private func startReplay() {
+    guard replayStart == nil, canvas.isEmpty == false else { return }
+
+    let replay = canvas.strokes.compressingGaps(maxGap: DoodleReplayTiming.maxGap)
+    guard replay.contains(where: { $0.points.isEmpty == false }) else { return }
+
+    replayStart = Date()
+    replayHaptics.play(strokes: replay)
+  }
+
+  private func stopReplay() {
+    replayStart = nil
+    replayHaptics.stop()
   }
 }
 
