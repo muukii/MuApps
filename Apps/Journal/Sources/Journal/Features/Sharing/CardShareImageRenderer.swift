@@ -70,6 +70,24 @@ enum CardShareImageRenderer {
     return renderer.uiImage
   }
 
+  /// Renders the static SwiftUI frame used behind Bauhaus replay video frames.
+  static func bauhausVideoBaseImage(
+    for snapshot: CardShareSnapshot,
+    palette: Palette = .default,
+    colorScheme: ColorScheme = .light,
+    pixelSize: CGSize = defaultPixelSize,
+    scale: CGFloat = 1
+  ) -> UIImage? {
+    let renderer = ImageRenderer(
+      content: CardShareBauhausVideoBaseFrameView(snapshot: snapshot, palette: palette)
+        .environment(\.colorScheme, colorScheme)
+        .frame(width: pixelSize.width, height: pixelSize.height)
+    )
+    renderer.scale = max(scale, 1)
+    renderer.isOpaque = true
+    return renderer.uiImage
+  }
+
   /// Writes a PNG export for `card` into a temporary file and returns the URL.
   static func pngFile(
     for card: Card,

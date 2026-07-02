@@ -27,6 +27,16 @@ private let detailMaximumCardWidth: CGFloat = 520
 /// Corner radius for large media wells inside the detail card.
 private let detailImageCornerRadius: CGFloat = 14
 
+/// Corner radius for compact media wells inside summary cards.
+private let summaryMediaCornerRadius: CGFloat = 12
+
+/// Summary media previews use a square crop so photos and grid artwork carry
+/// enough visual weight inside the fixed paper card.
+private let summaryMediaAspectRatio: CGFloat = 1
+
+/// Bauhaus artwork is authored as a grid, so square wells preserve its geometry.
+private let bauhausArtworkAspectRatio: CGFloat = 1
+
 /// Detail screen for one saved entry.
 ///
 /// The screen owns navigation chrome and actions; the actual card body is a
@@ -39,19 +49,50 @@ struct SavedEntryDetailView: View {
   @Environment(\.modelContext) private var modelContext
 
   let card: Card
+  let relationshipGroupCards: [Card]
   let onShare: @MainActor (Card) -> Void
 
   @State private var editDraft: CardEditDraft?
   @State private var isEditDraftLoading = false
   @State private var isSavingEdit = false
   @State private var editErrorMessage: String?
+  @State private var scrollTargetID: UUID?
+
+  init(
+    card: Card,
+    relationshipGroupCards: [Card] = [],
+    onShare: @escaping @MainActor (Card) -> Void
+  ) {
+    self.card = card
+    self.relationshipGroupCards = relationshipGroupCards
+    self.onShare = onShare
+    self._scrollTargetID = State(initialValue: card.id)
+  }
 
   var body: some View {
+    let items = SavedEntryDetailCardListItem.items(
+      selectedCard: card,
+      relationshipGroupCards: relationshipGroupCards
+    )
+
     ScrollView {
-      SavedEntryCard(presentation: .detail(card.detailDisplay))
-        .frame(maxWidth: detailMaximumCardWidth)
-        .frame(maxWidth: .infinity)
-        .padding(detailScreenPadding)
+      LazyVStack(alignment: .center, spacing: 24) {
+        ForEach(items) { item in
+          SavedEntryDetailCardListItemView(
+            item: item,
+            onShare: onShare
+          )
+          .id(item.id)
+          .frame(maxWidth: detailMaximumCardWidth)
+        }
+      }
+      .frame(maxWidth: .infinity)
+      .scrollTargetLayout()
+      .padding(detailScreenPadding)
+    }
+    .scrollPosition(id: $scrollTargetID, anchor: .top)
+    .onChange(of: card.id, initial: false) { _, newValue in
+      scrollTargetID = newValue
     }
     .background(.background)
     .navigationTitle("Entry")
@@ -147,6 +188,71 @@ struct SavedEntryDetailView: View {
         editErrorMessage = error.localizedDescription
       }
     }
+  }
+}
+
+/// One full-detail card row inside a relationship-aware detail screen.
+private struct SavedEntryDetailCardListItemView: View {
+
+  let item: SavedEntryDetailCardListItem
+  let onShare: @MainActor (Card) -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      SavedEntryDetailCardContextBadge(item: item)
+
+      SavedEntryCard(presentation: .detail(item.card.detailDisplay))
+    }
+    .contextMenu {
+      SavedEntrySummaryCardContextMenu(
+        card: item.card,
+        onShare: onShare
+      )
+    }
+  }
+}
+
+/// Relationship label above a non-selected detail card row.
+private struct SavedEntryDetailCardContextBadge: View {
+
+  let item: SavedEntryDetailCardListItem
+
+  var body: some View {
+    if item.isSelected == false {
+      if let relationship = item.relationship {
+        SavedEntryRelatedCardRelationshipBadge(
+          kind: relationship.kind,
+          direction: relationship.direction
+        )
+      } else {
+        Label {
+          Text("Related")
+        } icon: {
+          Image(systemName: "point.3.connected.trianglepath.dotted")
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+      }
+    }
+  }
+}
+
+/// Compact label that explains why a related card is shown.
+private struct SavedEntryRelatedCardRelationshipBadge: View {
+
+  let kind: CardRelationship.Kind
+  let direction: SavedEntryRelatedCardDirection
+
+  var body: some View {
+    Label {
+      Text(kind.savedEntryRelatedTitle(for: direction))
+    } icon: {
+      Image(systemName: kind.savedEntryRelatedSymbolName(for: direction))
+    }
+    .font(.caption.weight(.semibold))
+    .foregroundStyle(.secondary)
+    .lineLimit(1)
   }
 }
 
@@ -486,7 +592,7 @@ private struct SavedEntrySummaryImageContent: View {
     SavedEntryMediaContentView(
       asset: asset,
       fallbackSymbolName: "photo",
-      cornerRadius: 10,
+      cornerRadius: summaryMediaCornerRadius,
       fallbackFontSize: 34
     ) { image in
       SavedEntryLoadedPhotoView(
@@ -495,7 +601,7 @@ private struct SavedEntrySummaryImageContent: View {
         imagePadding: 0
       )
     }
-    .aspectRatio(4 / 3, contentMode: .fit)
+    .aspectRatio(summaryMediaAspectRatio, contentMode: .fit)
   }
 }
 
@@ -508,7 +614,7 @@ private struct SavedEntrySummaryCapturedImageContent: View {
     SavedEntryInlineMediaContentView(
       payload: image,
       fallbackSymbolName: "photo",
-      cornerRadius: 10,
+      cornerRadius: summaryMediaCornerRadius,
       fallbackFontSize: 34
     ) { image in
       SavedEntryLoadedPhotoView(
@@ -517,7 +623,7 @@ private struct SavedEntrySummaryCapturedImageContent: View {
         imagePadding: 0
       )
     }
-    .aspectRatio(4 / 3, contentMode: .fit)
+    .aspectRatio(summaryMediaAspectRatio, contentMode: .fit)
   }
 }
 
@@ -533,7 +639,7 @@ private struct SavedEntrySummaryDoodleContent: View {
     SavedEntryMediaContentView(
       asset: asset,
       fallbackSymbolName: "scribble.variable",
-      cornerRadius: 10,
+      cornerRadius: summaryMediaCornerRadius,
       fallbackFontSize: 34
     ) { drawing in
       DoodleDrawingView(
@@ -558,7 +664,7 @@ private struct SavedEntrySummaryCapturedDoodleContent: View {
     SavedEntryInlineMediaContentView(
       payload: drawing,
       fallbackSymbolName: "scribble.variable",
-      cornerRadius: 10,
+      cornerRadius: summaryMediaCornerRadius,
       fallbackFontSize: 34
     ) { drawing in
       DoodleDrawingView(
@@ -581,13 +687,13 @@ private struct SavedEntrySummaryBauhausContent: View {
     SavedEntryMediaContentView(
       asset: asset,
       fallbackSymbolName: "square.grid.3x3.square",
-      cornerRadius: 10,
+      cornerRadius: summaryMediaCornerRadius,
       fallbackFontSize: 34
     ) { document in
       BauhausGridArtworkView(artwork: document.artwork)
         .padding(12)
     }
-    .aspectRatio(4 / 3, contentMode: .fit)
+    .aspectRatio(bauhausArtworkAspectRatio, contentMode: .fit)
   }
 }
 
@@ -600,13 +706,13 @@ private struct SavedEntrySummaryCapturedBauhausContent: View {
     SavedEntryInlineMediaContentView(
       payload: document,
       fallbackSymbolName: "square.grid.3x3.square",
-      cornerRadius: 10,
+      cornerRadius: summaryMediaCornerRadius,
       fallbackFontSize: 34
     ) { document in
       BauhausGridArtworkView(artwork: document.artwork)
         .padding(12)
     }
-    .aspectRatio(4 / 3, contentMode: .fit)
+    .aspectRatio(bauhausArtworkAspectRatio, contentMode: .fit)
   }
 }
 
@@ -639,21 +745,18 @@ private struct SavedEntryInlineMediaContentView<
   var body: some View {
     ZStack {
       RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        .fill(.appOnSecondaryContainer.opacity(0.06))
+        .fill(.appOnSecondaryContainer.opacity(0.075))
 
       if let payload {
         loadedContent(payload)
       } else {
-        Image(systemName: fallbackSymbolName)
-          .font(.system(size: fallbackFontSize, weight: .semibold))
-          .foregroundStyle(.appOnSecondaryContainer.opacity(0.46))
+        SavedEntryMediaFallbackSymbol(
+          systemName: fallbackSymbolName,
+          fontSize: fallbackFontSize
+        )
       }
     }
     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-    .overlay {
-      RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        .strokeBorder(.appOnSecondaryContainer.opacity(0.08), lineWidth: 1)
-    }
   }
 }
 
@@ -700,13 +803,14 @@ private struct SavedEntryMediaContentView<
   var body: some View {
     ZStack {
       RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        .fill(.appOnSecondaryContainer.opacity(0.06))
+        .fill(.appOnSecondaryContainer.opacity(0.075))
 
       switch phase {
       case .idle, .unavailable:
-        Image(systemName: fallbackSymbolName)
-          .font(.system(size: fallbackFontSize, weight: .semibold))
-          .foregroundStyle(.appOnSecondaryContainer.opacity(0.46))
+        SavedEntryMediaFallbackSymbol(
+          systemName: fallbackSymbolName,
+          fontSize: fallbackFontSize
+        )
       case .loading:
         ProgressView()
           .controlSize(.small)
@@ -716,10 +820,6 @@ private struct SavedEntryMediaContentView<
       }
     }
     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-    .overlay {
-      RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        .strokeBorder(.appOnSecondaryContainer.opacity(0.08), lineWidth: 1)
-    }
     .task(id: SavedEntryMediaTaskID(asset: asset, reloadRevision: reloadRevision)) {
       await loadMedia()
     }
@@ -756,6 +856,29 @@ private struct SavedEntryMediaContentView<
       return true
     }
     return changedAttachmentID == asset.id
+  }
+}
+
+/// Empty-media mark shared by saved and draft cards.
+///
+/// It gives unloaded media a stable visual weight, so a missing CKAsset or a
+/// not-yet-authored draft still reads like the same card family instead of a
+/// blank rectangle.
+private struct SavedEntryMediaFallbackSymbol: View {
+
+  let systemName: String
+  let fontSize: CGFloat
+
+  var body: some View {
+    ZStack {
+      Circle()
+        .fill(.appOnSecondaryContainer.opacity(0.10))
+        .frame(width: max(44, fontSize * 1.55), height: max(44, fontSize * 1.55))
+
+      Image(systemName: systemName)
+        .font(.system(size: fontSize, weight: .semibold))
+        .foregroundStyle(.appOnSecondaryContainer.opacity(0.60))
+    }
   }
 }
 
@@ -1030,7 +1153,7 @@ private struct SavedEntryDetailBauhausContent: View {
     ) { document in
       SavedEntryBauhausReplayContent(document: document)
     }
-    .aspectRatio(4 / 3, contentMode: .fit)
+    .aspectRatio(bauhausArtworkAspectRatio, contentMode: .fit)
   }
 }
 
@@ -1048,7 +1171,7 @@ private struct SavedEntryDetailCapturedBauhausContent: View {
     ) { document in
       SavedEntryBauhausReplayContent(document: document)
     }
-    .aspectRatio(4 / 3, contentMode: .fit)
+    .aspectRatio(bauhausArtworkAspectRatio, contentMode: .fit)
   }
 }
 
@@ -1333,6 +1456,107 @@ private struct SavedEntryDetailDisplay: Identifiable {
   let createdAt: Date
   let updatedAt: Date
   let location: Coordinate?
+}
+
+/// One card row in the pushed detail screen's relationship-aware list.
+///
+/// The row identity is the `Card.id` so scroll position and SwiftUI diffing follow
+/// the persisted card, not a relationship edge. `relationship` is optional because
+/// a card can be part of the same list group without being directly connected to
+/// the initially selected card.
+private struct SavedEntryDetailCardListItem: Identifiable {
+  let id: UUID
+
+  /// Live SwiftData card rendered by this detail row.
+  let card: Card
+
+  /// Direct edge from the initially selected card to this row, when one exists.
+  let relationship: SavedEntryRelatedCardLink?
+
+  /// Whether this row is the card that opened the detail screen.
+  let isSelected: Bool
+
+  static func items(
+    selectedCard: Card,
+    relationshipGroupCards: [Card]
+  ) -> [SavedEntryDetailCardListItem] {
+    let relationships = selectedCard.relatedCardLinks
+    var itemsByCardID: [UUID: SavedEntryDetailCardListItem] = [:]
+
+    func upsert(_ card: Card, relationship: SavedEntryRelatedCardLink?) {
+      let item = SavedEntryDetailCardListItem(
+        id: card.id,
+        card: card,
+        relationship: relationship,
+        isSelected: card.id == selectedCard.id
+      )
+
+      if let existingItem = itemsByCardID[card.id] {
+        if existingItem.relationship == nil, relationship != nil {
+          itemsByCardID[card.id] = item
+        }
+      } else {
+        itemsByCardID[card.id] = item
+      }
+    }
+
+    for groupCard in relationshipGroupCards {
+      upsert(groupCard, relationship: nil)
+    }
+
+    upsert(selectedCard, relationship: nil)
+
+    for relationship in relationships {
+      upsert(relationship.card, relationship: relationship)
+    }
+
+    return Array(itemsByCardID.values).sortedForSavedEntryDetailList()
+  }
+}
+
+/// A relationship edge converted into the related card visible from a detail screen.
+///
+/// `direction` is relative to the card currently being viewed: `.incoming`
+/// means the related card is the relationship source, and `.outgoing` means the
+/// related card is the relationship target.
+private struct SavedEntryRelatedCardLink: Identifiable {
+
+  /// Uses the edge id, not the related card id, because the same card can be
+  /// connected for different reasons such as a reply and a reference.
+  let id: UUID
+
+  /// The relationship meaning that explains why the related card is visible.
+  let kind: CardRelationship.Kind
+
+  /// Whether this edge points into or out of the currently viewed card.
+  let direction: SavedEntryRelatedCardDirection
+
+  /// The opposite endpoint of the relationship from the currently viewed card.
+  let card: Card
+
+  /// Stable author-controlled order among same-kind outgoing edges.
+  let sortIndex: Int
+
+  /// Creation time of the relationship edge itself.
+  let relationshipCreatedAt: Date
+}
+
+/// Direction of a relationship from the perspective of the current detail card.
+private enum SavedEntryRelatedCardDirection {
+  /// The relationship points at the current card from the related card.
+  case incoming
+
+  /// The relationship starts from the current card and points at the related card.
+  case outgoing
+
+  var sortPriority: Int {
+    switch self {
+    case .incoming:
+      return 0
+    case .outgoing:
+      return 1
+    }
+  }
 }
 
 /// Typed reference to a persisted media attachment.
@@ -1703,12 +1927,92 @@ extension Card {
     )
   }
 
+  /// Relationship edges visible from this card's detail screen.
+  ///
+  /// Incoming and outgoing edges are both included because each gives useful
+  /// local context: what this card follows, and what follows or references it.
+  fileprivate var relatedCardLinks: [SavedEntryRelatedCardLink] {
+    let incomingLinks: [SavedEntryRelatedCardLink] = (incomingRelationships ?? [])
+      .compactMap { relationship in
+        guard let relatedCard = relationship.source, relatedCard.id != id else {
+          return nil
+        }
+
+        return SavedEntryRelatedCardLink(
+          id: relationship.id,
+          kind: relationship.kind,
+          direction: .incoming,
+          card: relatedCard,
+          sortIndex: relationship.sortIndex,
+          relationshipCreatedAt: relationship.createdAt
+        )
+      }
+
+    let outgoingLinks: [SavedEntryRelatedCardLink] = (outgoingRelationships ?? [])
+      .compactMap { relationship in
+        guard let relatedCard = relationship.target, relatedCard.id != id else {
+          return nil
+        }
+
+        return SavedEntryRelatedCardLink(
+          id: relationship.id,
+          kind: relationship.kind,
+          direction: .outgoing,
+          card: relatedCard,
+          sortIndex: relationship.sortIndex,
+          relationshipCreatedAt: relationship.createdAt
+        )
+      }
+
+    return (incomingLinks + outgoingLinks).sortedForSavedEntryDetail()
+  }
+
   /// A small, stable tilt derived from the card's id. Deriving it from the id
   /// (rather than `Double.random` inside `body`) keeps each card at a fixed
   /// angle across launches and stops it from re-rolling every time the body is
   /// re-evaluated.
   fileprivate var tiltAngle: Angle {
     id.tiltAngle
+  }
+}
+
+extension Array where Element == SavedEntryRelatedCardLink {
+
+  /// Orders relationship previews by semantic context, then by the edge order.
+  fileprivate func sortedForSavedEntryDetail() -> [SavedEntryRelatedCardLink] {
+    sorted { lhs, rhs in
+      if lhs.kind.savedEntryRelatedSortPriority != rhs.kind.savedEntryRelatedSortPriority {
+        return lhs.kind.savedEntryRelatedSortPriority < rhs.kind.savedEntryRelatedSortPriority
+      }
+
+      if lhs.direction.sortPriority != rhs.direction.sortPriority {
+        return lhs.direction.sortPriority < rhs.direction.sortPriority
+      }
+
+      if lhs.sortIndex != rhs.sortIndex {
+        return lhs.sortIndex < rhs.sortIndex
+      }
+
+      if lhs.relationshipCreatedAt != rhs.relationshipCreatedAt {
+        return lhs.relationshipCreatedAt < rhs.relationshipCreatedAt
+      }
+
+      return lhs.id.uuidString < rhs.id.uuidString
+    }
+  }
+}
+
+extension Array where Element == SavedEntryDetailCardListItem {
+
+  /// Oldest-first order for the vertical detail list, matching how a card thread is read.
+  fileprivate func sortedForSavedEntryDetailList() -> [SavedEntryDetailCardListItem] {
+    sorted { lhs, rhs in
+      if lhs.card.createdAt != rhs.card.createdAt {
+        return lhs.card.createdAt < rhs.card.createdAt
+      }
+
+      return lhs.id.uuidString < rhs.id.uuidString
+    }
   }
 }
 
@@ -1720,6 +2024,80 @@ extension UUID {
     let seed = UInt(bytes.0) &+ (UInt(bytes.7) &* 31) &+ (UInt(bytes.15) &* 131)
     let fraction = Double(seed % 1000) / 999  // 0...1
     return .degrees((fraction * 2 - 1) * cardMaxTilt)  // -max ... +max
+  }
+}
+
+extension CardRelationship.Kind {
+
+  /// Stable grouping order for the related-cards section.
+  fileprivate var savedEntryRelatedSortPriority: Int {
+    switch self {
+    case .continuation:
+      return 0
+    case .reply:
+      return 1
+    case .reference:
+      return 2
+    @unknown default:
+      return 3
+    }
+  }
+
+  /// User-facing relationship label from the current card's perspective.
+  fileprivate func savedEntryRelatedTitle(
+    for direction: SavedEntryRelatedCardDirection
+  ) -> LocalizedStringResource {
+    switch self {
+    case .continuation:
+      switch direction {
+      case .incoming:
+        return "Previous"
+      case .outgoing:
+        return "Next"
+      }
+    case .reply:
+      switch direction {
+      case .incoming:
+        return "In Reply To"
+      case .outgoing:
+        return "Reply"
+      }
+    case .reference:
+      switch direction {
+      case .incoming:
+        return "Referenced By"
+      case .outgoing:
+        return "Reference"
+      }
+    @unknown default:
+      switch direction {
+      case .incoming:
+        return "Linked From"
+      case .outgoing:
+        return "Linked To"
+      }
+    }
+  }
+
+  /// SF Symbol used for a relationship badge in the related-cards section.
+  fileprivate func savedEntryRelatedSymbolName(
+    for direction: SavedEntryRelatedCardDirection
+  ) -> String {
+    switch self {
+    case .continuation:
+      switch direction {
+      case .incoming:
+        return "arrow.backward"
+      case .outgoing:
+        return "arrow.forward"
+      }
+    case .reply:
+      return "arrowshape.turn.up.left"
+    case .reference:
+      return "link"
+    @unknown default:
+      return "point.3.connected.trianglepath.dotted"
+    }
   }
 }
 

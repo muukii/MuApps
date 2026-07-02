@@ -1,4 +1,6 @@
 @preconcurrency import AVFoundation
+import AVKit
+import CaptureBauhaus
 import CaptureDoodle
 import Foundation
 import JournalModel
@@ -8,9 +10,8 @@ import UIKit
 
 /// A pre-share review screen for one prepared card snapshot.
 ///
-/// The context menu opens this screen first so the user can inspect the final
-/// share appearance before the system activity sheet appears. Doodle cards also
-/// expose a replay preview backed by their stored vector timeline.
+/// The context menu opens this screen first so the user can inspect the actual
+/// generated PNG or mp4 before the system activity sheet appears.
 struct CardSharePreviewScreen: View {
 
   let snapshot: CardShareSnapshot
@@ -19,16 +20,19 @@ struct CardSharePreviewScreen: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.colorScheme) private var colorScheme
   @State private var selectedMode: CardSharePreviewMode
+  @State private var previewArtifacts: [CardSharePreviewRenderRequest: CardSharePreviewArtifactState] = [:]
+  @State private var renderingPreviewRequests: Set<CardSharePreviewRenderRequest> = []
+  @State private var failedPreviewRequests: Set<CardSharePreviewRenderRequest> = []
   @State private var activityPresentation: CardShareActivityPresentation?
   @State private var isPreparingShareItem: Bool = false
   @State private var isShareFailurePresented: Bool = false
 
-  private let doodleDrawing: DoodleDrawing?
+  private let videoContent: CardShareVideoContent?
 
   init(snapshot: CardShareSnapshot, palette: Palette = .default) {
     self.snapshot = snapshot
     self.palette = palette
-    self.doodleDrawing = Self.decodeDoodleDrawing(from: snapshot)
+    self.videoContent = CardShareVideoContent(snapshot: snapshot)
     _selectedMode = State(initialValue: .image)
   }
 
@@ -44,22 +48,7 @@ struct CardSharePreviewScreen: View {
 
         Divider()
 
-        CardSharePreviewScaledFrame {
-          switch selectedMode {
-          case .image:
-            CardShareImageView(snapshot: snapshot, palette: palette)
-          case .video:
-            if let doodleDrawing {
-              CardShareDoodleReplayPreview(
-                snapshot: snapshot,
-                drawing: doodleDrawing,
-                palette: palette
-              )
-            } else {
-              CardShareImageView(snapshot: snapshot, palette: palette)
-            }
-          }
-        }
+        CardSharePreviewArtifactFrame(state: currentPreviewState)
       }
       .background(.background)
       .navigationTitle("Share Preview")
@@ -76,12 +65,15 @@ struct CardSharePreviewScreen: View {
           switch selectedMode {
           case .image:
             Button("Share Image", action: shareImage)
-              .disabled(isPreparingShareItem)
+              .disabled(isShareActionDisabled)
           case .video:
             Button("Share Video", action: shareVideo)
-              .disabled(doodleDrawing == nil || isPreparingShareItem)
+              .disabled(isShareActionDisabled)
           }
         }
+      }
+      .task(id: previewRenderRequest) {
+        await renderPreview(for: previewRenderRequest)
       }
       .overlay(alignment: .center) {
         if isPreparingShareItem {
@@ -100,7 +92,43 @@ struct CardSharePreviewScreen: View {
   }
 
   private var showsModePicker: Bool {
-    doodleDrawing != nil
+    videoContent != nil
+  }
+
+  private var isShareActionDisabled: Bool {
+    isPreparingShareItem || previewArtifacts[previewRenderRequest]?.fileURL == nil
+  }
+
+  private var previewRenderRequest: CardSharePreviewRenderRequest {
+    previewRenderRequest(for: selectedMode)
+  }
+
+  private func previewRenderRequest(
+    for mode: CardSharePreviewMode
+  ) -> CardSharePreviewRenderRequest {
+    CardSharePreviewRenderRequest(
+      snapshotID: snapshot.id,
+      mode: mode,
+      usesDarkAppearance: colorScheme == .dark
+    )
+  }
+
+  private var currentPreviewState: CardSharePreviewArtifactState {
+    let request = previewRenderRequest
+
+    if let artifact = previewArtifacts[request] {
+      return artifact
+    }
+
+    if renderingPreviewRequests.contains(request) {
+      return .rendering
+    }
+
+    if failedPreviewRequests.contains(request) {
+      return .failed
+    }
+
+    return .idle
   }
 
   private var modePicker: some View {
@@ -118,53 +146,180 @@ struct CardSharePreviewScreen: View {
   }
 
   private func shareImage() {
-    do {
-      isPreparingShareItem = true
-      defer { isPreparingShareItem = false }
-      let url = try CardShareImageRenderer.pngFile(
-        for: snapshot,
-        palette: palette,
-        colorScheme: colorScheme
-      )
-      activityPresentation = CardShareActivityPresentation(fileURL: url)
-    } catch {
+    let request = previewRenderRequest(for: .image)
+    guard let fileURL = previewArtifacts[request]?.fileURL else {
       isShareFailurePresented = true
+      return
     }
+
+    presentActivitySheet(for: fileURL)
   }
 
   private func shareVideo() {
-    guard let doodleDrawing else { return }
+    let request = previewRenderRequest(for: .video)
+    guard let fileURL = previewArtifacts[request]?.fileURL else {
+      isShareFailurePresented = true
+      return
+    }
 
+    presentActivitySheet(for: fileURL)
+  }
+
+  private func presentActivitySheet(for fileURL: URL) {
     isPreparingShareItem = true
-    Task {
-      defer { isPreparingShareItem = false }
-      do {
-        await Task.yield()
-        let url = try await CardShareVideoRenderer.mp4File(
+    defer { isPreparingShareItem = false }
+    activityPresentation = CardShareActivityPresentation(fileURL: fileURL)
+  }
+
+  @MainActor
+  private func renderPreview(for request: CardSharePreviewRenderRequest) async {
+    guard previewArtifacts[request] == nil,
+          renderingPreviewRequests.contains(request) == false
+    else {
+      return
+    }
+
+    renderingPreviewRequests.insert(request)
+    failedPreviewRequests.remove(request)
+
+    do {
+      let directory = try Self.makePreviewDirectory(for: request)
+      switch request.mode {
+      case .image:
+        let fileURL = try CardShareImageRenderer.pngFile(
           for: snapshot,
-          drawing: doodleDrawing,
-          palette: palette
+          palette: palette,
+          colorScheme: request.colorScheme,
+          directory: directory
         )
-        activityPresentation = CardShareActivityPresentation(fileURL: url)
-      } catch {
-        isShareFailurePresented = true
+        try Task.checkCancellation()
+        guard let image = UIImage(contentsOfFile: fileURL.path(percentEncoded: false)) else {
+          throw CardSharePreviewRenderError.imageLoadFailed
+        }
+        previewArtifacts[request] = .image(fileURL: fileURL, image: image)
+      case .video:
+        let fileURL = try await renderVideoPreview(
+          colorScheme: request.colorScheme,
+          directory: directory
+        )
+        try Task.checkCancellation()
+        previewArtifacts[request] = .video(fileURL: fileURL)
       }
+      renderingPreviewRequests.remove(request)
+    } catch is CancellationError {
+      renderingPreviewRequests.remove(request)
+    } catch {
+      renderingPreviewRequests.remove(request)
+      failedPreviewRequests.insert(request)
     }
   }
 
-  private static func decodeDoodleDrawing(from snapshot: CardShareSnapshot) -> DoodleDrawing? {
-    guard case .doodle(let drawingData, _) = snapshot.content,
-      let drawingData
-    else {
-      return nil
+  @MainActor
+  private func renderVideoPreview(
+    colorScheme: ColorScheme,
+    directory: URL
+  ) async throws -> URL {
+    guard let videoContent else {
+      throw CardSharePreviewRenderError.missingVideoContent
     }
 
-    return try? JSONDecoder().decode(DoodleDrawing.self, from: drawingData)
+    await Task.yield()
+
+    switch videoContent {
+    case .doodle(let drawing):
+      return try await CardShareVideoRenderer.mp4File(
+        for: snapshot,
+        drawing: drawing,
+        palette: palette,
+        colorScheme: colorScheme,
+        directory: directory
+      )
+    case .bauhaus(let document):
+      return try await CardShareVideoRenderer.mp4File(
+        for: snapshot,
+        bauhausDocument: document,
+        palette: palette,
+        colorScheme: colorScheme,
+        directory: directory
+      )
+    }
+  }
+
+  private static func makePreviewDirectory(
+    for request: CardSharePreviewRenderRequest
+  ) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+      .appending(path: "Journal-SharePreview-\(request.snapshotID.uuidString)-\(request.mode.rawValue)-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+  }
+}
+
+/// Identity for one asynchronously generated preview artifact.
+private struct CardSharePreviewRenderRequest: Hashable {
+  let snapshotID: UUID
+  let mode: CardSharePreviewMode
+  let usesDarkAppearance: Bool
+
+  var colorScheme: ColorScheme {
+    usesDarkAppearance ? .dark : .light
+  }
+}
+
+/// Loading state for the actual file shown in the preview.
+private enum CardSharePreviewArtifactState {
+  case idle
+  case rendering
+  case image(fileURL: URL, image: UIImage)
+  case video(fileURL: URL)
+  case failed
+
+  var fileURL: URL? {
+    switch self {
+    case .image(let fileURL, _), .video(let fileURL):
+      return fileURL
+    case .idle, .rendering, .failed:
+      return nil
+    }
+  }
+}
+
+/// Failures while preparing the exact preview artifact.
+private enum CardSharePreviewRenderError: Error {
+  case imageLoadFailed
+  case missingVideoContent
+}
+
+/// Decoded replay payload that can produce a share video.
+private enum CardShareVideoContent: Sendable {
+  case doodle(DoodleDrawing)
+  case bauhaus(BauhausGridDocument)
+
+  init?(snapshot: CardShareSnapshot) {
+    switch snapshot.content {
+    case .doodle(let drawingData, _):
+      guard let drawingData,
+            let drawing = try? JSONDecoder().decode(DoodleDrawing.self, from: drawingData)
+      else {
+        return nil
+      }
+      self = .doodle(drawing)
+    case .bauhaus(let documentData, _):
+      guard let documentData,
+            let document = try? JSONDecoder().decode(BauhausGridDocument.self, from: documentData),
+            document.replay?.isEmpty == false
+      else {
+        return nil
+      }
+      self = .bauhaus(document)
+    default:
+      return nil
+    }
   }
 }
 
 /// The share formats the preview screen can render for visual confirmation.
-private enum CardSharePreviewMode: String, Identifiable {
+private enum CardSharePreviewMode: String, Hashable, Identifiable {
   case image
   case video
 
@@ -186,30 +341,19 @@ private struct CardShareActivityPresentation: Identifiable {
   let fileURL: URL
 }
 
-/// Scales the fixed export canvas into the preview sheet.
-///
-/// The content is laid out at the actual export pixel size first, then scaled
-/// down for on-screen inspection. That keeps fixed typography and spacing from
-/// being compressed by the smaller preview sheet layout.
-private struct CardSharePreviewScaledFrame<Content: View>: View {
+/// Displays the actual generated share artifact in the preview sheet.
+private struct CardSharePreviewArtifactFrame: View {
 
-  private let content: Content
-
-  init(@ViewBuilder content: () -> Content) {
-    self.content = content()
-  }
+  let state: CardSharePreviewArtifactState
 
   var body: some View {
     GeometryReader { proxy in
       let size = fittedSize(in: proxy.size)
-      let scale = previewScale(for: size)
 
       ScrollView {
         VStack {
-          content
-            .frame(width: exportSize.width, height: exportSize.height)
-            .scaleEffect(scale, anchor: .topLeading)
-            .frame(width: size.width, height: size.height, alignment: .topLeading)
+          CardSharePreviewArtifactContent(state: state)
+            .frame(width: size.width, height: size.height)
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .shadow(color: .black.opacity(0.16), radius: 22, x: 0, y: 12)
         }
@@ -229,15 +373,78 @@ private struct CardSharePreviewScaledFrame<Content: View>: View {
     return CGSize(width: width, height: width / aspectRatio)
   }
 
-  private func previewScale(for fittedSize: CGSize) -> CGFloat {
-    min(
-      fittedSize.width / exportSize.width,
-      fittedSize.height / exportSize.height
-    )
-  }
-
   private var exportSize: CGSize {
     CardShareImageRenderer.defaultPixelSize
+  }
+}
+
+/// Visual body for one preview artifact state.
+private struct CardSharePreviewArtifactContent: View {
+
+  let state: CardSharePreviewArtifactState
+
+  var body: some View {
+    ZStack {
+      Rectangle()
+        .fill(Color.secondary.opacity(0.08))
+
+      switch state {
+      case .idle, .rendering:
+        ProgressView()
+      case .image(_, let image):
+        Image(uiImage: image)
+          .resizable()
+          .interpolation(.high)
+          .scaledToFit()
+      case .video(let fileURL):
+        CardSharePreviewVideoPlayer(fileURL: fileURL)
+      case .failed:
+        Image(systemName: "exclamationmark.triangle")
+          .font(.system(size: 44, weight: .semibold))
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+}
+
+/// Looped playback for the generated mp4 preview file.
+private struct CardSharePreviewVideoPlayer: View {
+
+  let fileURL: URL
+
+  @State private var player: AVQueuePlayer
+  @State private var looper: AVPlayerLooper?
+  @State private var loadedURL: URL?
+
+  init(fileURL: URL) {
+    let player = AVQueuePlayer()
+    player.isMuted = true
+    _player = State(initialValue: player)
+    self.fileURL = fileURL
+  }
+
+  var body: some View {
+    VideoPlayer(player: player)
+      .onAppear {
+        configurePlayerIfNeeded()
+        player.play()
+      }
+      .onChange(of: fileURL) { _, _ in
+        configurePlayerIfNeeded()
+        player.play()
+      }
+      .onDisappear {
+        player.pause()
+      }
+  }
+
+  private func configurePlayerIfNeeded() {
+    guard loadedURL != fileURL else { return }
+
+    player.removeAllItems()
+    let item = AVPlayerItem(url: fileURL)
+    looper = AVPlayerLooper(player: player, templateItem: item)
+    loadedURL = fileURL
   }
 }
 
@@ -248,7 +455,7 @@ private struct CardSharePreviewScaledFrame<Content: View>: View {
 /// they remain inspectable after export.
 private struct CardShareVideoRecipe: Sendable, Equatable {
 
-  /// Default export frame rate for Doodle replay videos.
+  /// Default export frame rate for replay videos.
   static let defaultFrameRate: Int32 = 60
 
   /// Frames per second used for generated replay videos.
@@ -310,7 +517,7 @@ private struct CardShareVideoRecipe: Sendable, Equatable {
   }
 }
 
-/// A sendable color representation for the Doodle mp4 overlay renderer.
+/// A sendable color representation for Core Graphics mp4 overlay renderers.
 private struct CardShareVideoRGBA: Sendable, Equatable {
 
   let red: CGFloat
@@ -378,189 +585,93 @@ private struct CardShareVideoRenderRequest: Sendable {
   let inkColor: CardShareVideoRGBA
 }
 
-/// Replay preview using the same export chrome as the still-image share.
-private struct CardShareDoodleReplayPreview: View {
+/// Timing and size settings for a Bauhaus share-video render.
+private struct CardShareBauhausVideoRecipe: Sendable, Equatable {
 
-  let snapshot: CardShareSnapshot
-  let drawing: DoodleDrawing
-  let palette: Palette
+  let frameRate: Int32
+  let pixelSize: CGSize
+  let replayRecipe: BauhausGridReplayRecipe
 
-  @State private var replayStart = Date()
-
-  var body: some View {
-    CardShareExportFrame(snapshot: snapshot, palette: palette) {
-      CardShareDoodleReplayContent(
-        drawing: drawing,
-        inkColor: palette.onSecondaryContainer,
-        recipe: CardShareVideoRecipe(drawing: drawing),
-        replayStart: replayStart
-      )
-    }
-    .onAppear {
-      replayStart = Date()
-    }
-  }
-}
-
-/// Animated Doodle body placed inside the shared export paper.
-private struct CardShareDoodleReplayContent: View {
-
-  let drawing: DoodleDrawing
-  let inkColor: Color
-  let recipe: CardShareVideoRecipe
-  let replayStart: Date
-
-  var body: some View {
-    TimelineView(.animation) { timeline in
-      CardShareDoodleReplayFrameContent(
-        drawing: drawing,
-        revealedTime: revealedTime(at: timeline.date),
-        inkColor: inkColor
-      )
-    }
-  }
-
-  private func revealedTime(at date: Date) -> TimeInterval {
-    let elapsed = max(date.timeIntervalSince(replayStart), 0)
-    let cycleTime = elapsed.truncatingRemainder(dividingBy: recipe.totalDuration)
-    return recipe.sourceTime(atVideoTime: cycleTime)
-  }
-}
-
-/// One deterministic Doodle replay frame.
-///
-/// `revealedTime` is in the stored Doodle timeline, not video time. This makes
-/// the preview and mp4 renderer share exactly the same drawing frame logic.
-private struct CardShareDoodleReplayFrameContent: View {
-
-  let drawing: DoodleDrawing
-  let revealedTime: TimeInterval
-  let inkColor: Color
-
-  var body: some View {
-    ZStack {
-      RoundedRectangle(cornerRadius: 32, style: .continuous)
-        .fill(.appOnSecondaryContainer.opacity(0.06))
-
-      CardShareDoodleReplayCanvas(
-        drawing: drawing,
-        revealedTime: revealedTime,
-        inkColor: inkColor
-      )
-      .padding(32)
-    }
-    .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-  }
-}
-
-/// Canvas renderer for a partially revealed doodle.
-private struct CardShareDoodleReplayCanvas: View {
-
-  let drawing: DoodleDrawing
-  let revealedTime: TimeInterval
-  let inkColor: Color
-
-  var body: some View {
-    Canvas(opaque: false, rendersAsynchronously: true) { context, size in
-      guard drawing.canvasSize.width > 0, drawing.canvasSize.height > 0 else {
-        return
-      }
-
-      let transform = drawingTransform(in: size)
-      var context = context
-      context.translateBy(x: transform.origin.x, y: transform.origin.y)
-      context.scaleBy(x: transform.scale, y: transform.scale)
-
-      for stroke in drawing.strokes {
-        CardShareDoodleStrokeRenderer.draw(
-          stroke,
-          upTo: revealedTime,
-          inkColor: inkColor,
-          in: context
-        )
-      }
-    }
-  }
-
-  private func drawingTransform(in size: CGSize) -> (origin: CGPoint, scale: CGFloat) {
-    let scale = min(
-      size.width / drawing.canvasSize.width,
-      size.height / drawing.canvasSize.height
-    )
-    let fittedSize = CGSize(
-      width: drawing.canvasSize.width * scale,
-      height: drawing.canvasSize.height * scale
-    )
-    let origin = CGPoint(
-      x: (size.width - fittedSize.width) / 2,
-      y: (size.height - fittedSize.height) / 2
-    )
-    return (origin, scale)
-  }
-}
-
-/// Stroke drawing helpers scoped to share previews.
-private enum CardShareDoodleStrokeRenderer {
-
-  static func draw(
-    _ stroke: DoodleStroke,
-    upTo limit: TimeInterval?,
-    inkColor: Color,
-    in context: GraphicsContext
+  init(
+    replay: BauhausGridReplay,
+    pixelSize: CGSize = CardShareImageRenderer.defaultPixelSize,
+    frameRate: Int32 = CardShareVideoRecipe.defaultFrameRate
   ) {
-    let points = stroke.visibleSharePoints(upTo: limit)
-    guard let first = points.first else { return }
-
-    guard points.count > 1 else {
-      let radius = first.width / 2
-      context.fill(
-        Path(ellipseIn: CGRect(
-          x: first.location.x - radius,
-          y: first.location.y - radius,
-          width: first.width,
-          height: first.width
-        )),
-        with: .color(inkColor)
-      )
-      return
-    }
-
-    if points.contains(where: \.hasExplicitWidth) {
-      drawVariableWidth(points, inkColor: inkColor, in: context)
-    } else {
-      context.stroke(
-        Path(cardShareSmooth: points.map(\.location)),
-        with: .color(inkColor),
-        style: StrokeStyle(lineWidth: CGFloat(stroke.width), lineCap: .round, lineJoin: .round)
-      )
-    }
+    self.frameRate = max(frameRate, 1)
+    self.pixelSize = pixelSize
+    self.replayRecipe = BauhausGridReplayRecipe(replay: replay)
   }
 
-  private static func drawVariableWidth(
-    _ points: [CardShareDoodleRenderPoint],
-    inkColor: Color,
-    in context: GraphicsContext
-  ) {
-    let points = points.removingNearDuplicates()
-    guard points.count > 1 else { return }
+  nonisolated var frameCount: Int {
+    max(Int(ceil(replayRecipe.totalDuration * Double(frameRate))) + 1, 2)
+  }
+}
 
-    for index in 1..<points.count {
-      let previous = points[index - 1]
-      let point = points[index]
-      let width = (previous.width + point.width) / 2
-      var segment = Path()
-      segment.move(to: previous.location)
-      segment.addLine(to: point.location)
-      context.stroke(
-        segment,
-        with: .color(inkColor),
-        style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
-      )
+/// Complete, sendable input for a Bauhaus background mp4 render.
+private struct CardShareBauhausVideoRenderRequest: Sendable {
+  let snapshotID: UUID
+  let baseFrame: CardShareVideoBaseFrame
+  let replay: BauhausGridReplay
+  let recipe: CardShareBauhausVideoRecipe
+  let colors: CardShareBauhausVideoColors
+}
+
+/// Resolved Bauhaus colors for Core Graphics video drawing.
+private struct CardShareBauhausVideoColors: Sendable, Equatable {
+  let swatches: CardShareBauhausVideoSwatchColors
+  let paper: CardShareVideoRGBA
+  let emptyCell: CardShareVideoRGBA
+
+  @MainActor
+  init(colors: BauhausResolvedColors) {
+    self.swatches = CardShareBauhausVideoSwatchColors(colors: colors.swatches)
+    self.paper = CardShareVideoRGBA(color: colors.chrome.paper)
+    self.emptyCell = CardShareVideoRGBA(color: colors.chrome.emptyCell)
+  }
+}
+
+/// Resolved Bauhaus swatch colors for Core Graphics video drawing.
+private struct CardShareBauhausVideoSwatchColors: Sendable, Equatable {
+  let slot1: CardShareVideoRGBA
+  let slot2: CardShareVideoRGBA
+  let slot3: CardShareVideoRGBA
+  let slot4: CardShareVideoRGBA
+  let slot5: CardShareVideoRGBA
+  let slot6: CardShareVideoRGBA
+  let slot7: CardShareVideoRGBA
+
+  @MainActor
+  init(colors: BauhausSwatchColors) {
+    self.slot1 = CardShareVideoRGBA(color: colors.slot1)
+    self.slot2 = CardShareVideoRGBA(color: colors.slot2)
+    self.slot3 = CardShareVideoRGBA(color: colors.slot3)
+    self.slot4 = CardShareVideoRGBA(color: colors.slot4)
+    self.slot5 = CardShareVideoRGBA(color: colors.slot5)
+    self.slot6 = CardShareVideoRGBA(color: colors.slot6)
+    self.slot7 = CardShareVideoRGBA(color: colors.slot7)
+  }
+
+  nonisolated func color(for swatch: BauhausSwatch) -> CardShareVideoRGBA {
+    switch swatch {
+    case .slot1:
+      return slot1
+    case .slot2:
+      return slot2
+    case .slot3:
+      return slot3
+    case .slot4:
+      return slot4
+    case .slot5:
+      return slot5
+    case .slot6:
+      return slot6
+    case .slot7:
+      return slot7
     }
   }
 }
 
-/// A resolved doodle point ready for Canvas drawing.
+/// A resolved doodle point ready for Core Graphics video drawing.
 private struct CardShareDoodleRenderPoint {
   var location: CGPoint
   var width: CGFloat
@@ -630,34 +741,9 @@ private extension DoodlePoint {
   }
 }
 
-private extension Path {
-
-  /// Smooth open path used for fixed-width share preview strokes.
-  init(cardShareSmooth points: [CGPoint]) {
-    self.init()
-    guard let first = points.first else { return }
-    move(to: first)
-    guard points.count > 2 else {
-      for point in points.dropFirst() {
-        addLine(to: point)
-      }
-      return
-    }
-
-    func midpoint(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
-      CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
-    }
-
-    for index in 1..<(points.count - 1) {
-      addQuadCurve(to: midpoint(points[index], points[index + 1]), control: points[index])
-    }
-    addQuadCurve(to: points[points.count - 1], control: points[points.count - 2])
-  }
-}
-
 private enum CardShareCGPathFactory {
 
-  /// CoreGraphics equivalent of the SwiftUI smooth path used by replay preview.
+  /// Core Graphics smooth path used by the Doodle video renderer.
   nonisolated static func smoothPath(points: [CGPoint]) -> CGPath {
     let path = CGMutablePath()
     guard let first = points.first else { return path }
@@ -695,6 +781,16 @@ private extension CGPoint {
   }
 }
 
+private extension CGRect {
+
+  nonisolated func scaledAboutCenter(by scale: CGFloat) -> CGRect {
+    insetBy(
+      dx: width * (1 - scale) / 2,
+      dy: height * (1 - scale) / 2
+    )
+  }
+}
+
 private extension Array where Element == CardShareDoodleRenderPoint {
 
   nonisolated func removingNearDuplicates() -> [CardShareDoodleRenderPoint] {
@@ -720,11 +816,11 @@ private extension Array {
   }
 }
 
-/// Generates a shareable mp4 from a Doodle card replay.
+/// Generates shareable mp4 files from replay-capable cards.
 ///
 /// This MainActor boundary resolves UI-owned inputs once: the static SwiftUI
-/// share frame and the Doodle ink color. The heavy frame loop is handed to
-/// `CardShareVideoRenderWorker`, which composites the moving Doodle layer and
+/// share frame and render colors. The heavy frame loop is handed to
+/// `CardShareVideoRenderWorker`, which composites the moving replay layer and
 /// appends frames to `AVAssetWriter` off the main actor.
 @MainActor
 enum CardShareVideoRenderer {
@@ -733,6 +829,7 @@ enum CardShareVideoRenderer {
   static func mp4File(
     for snapshot: CardShareSnapshot,
     palette: Palette = .default,
+    colorScheme: ColorScheme = .light,
     pixelSize: CGSize = CardShareImageRenderer.defaultPixelSize,
     frameRate: Int32 = CardShareVideoRecipe.defaultFrameRate,
     directory: URL = FileManager.default.temporaryDirectory
@@ -748,6 +845,7 @@ enum CardShareVideoRenderer {
       for: snapshot,
       drawing: drawing,
       palette: palette,
+      colorScheme: colorScheme,
       pixelSize: pixelSize,
       frameRate: frameRate,
       directory: directory
@@ -759,6 +857,7 @@ enum CardShareVideoRenderer {
     for snapshot: CardShareSnapshot,
     drawing: DoodleDrawing,
     palette: Palette = .default,
+    colorScheme: ColorScheme = .light,
     pixelSize: CGSize = CardShareImageRenderer.defaultPixelSize,
     frameRate: Int32 = CardShareVideoRecipe.defaultFrameRate,
     directory: URL = FileManager.default.temporaryDirectory
@@ -766,6 +865,7 @@ enum CardShareVideoRenderer {
     guard let baseFrameImage = CardShareImageRenderer.doodleVideoBaseImage(
       for: snapshot,
       palette: palette,
+      colorScheme: colorScheme,
       pixelSize: pixelSize
     )?.cgImage
     else {
@@ -790,13 +890,60 @@ enum CardShareVideoRenderer {
       directory: directory
     )
   }
+
+  /// Writes a replay mp4 for an already-decoded Bauhaus document.
+  static func mp4File(
+    for snapshot: CardShareSnapshot,
+    bauhausDocument document: BauhausGridDocument,
+    palette: Palette = .default,
+    colorScheme: ColorScheme = .light,
+    pixelSize: CGSize = CardShareImageRenderer.defaultPixelSize,
+    frameRate: Int32 = CardShareVideoRecipe.defaultFrameRate,
+    directory: URL = FileManager.default.temporaryDirectory
+  ) async throws -> URL {
+    guard let replay = document.replay, replay.isEmpty == false else {
+      throw CardShareVideoRendererError.missingBauhausReplay
+    }
+
+    guard let baseFrameImage = CardShareImageRenderer.bauhausVideoBaseImage(
+      for: snapshot,
+      palette: palette,
+      colorScheme: colorScheme,
+      pixelSize: pixelSize
+    )?.cgImage
+    else {
+      throw CardShareVideoRendererError.renderingFailed
+    }
+
+    let playbackReplay = replay.presentationTimeline(
+      eventInterval: BauhausGridReplayRecipe.eventInterval
+    )
+    let request = CardShareBauhausVideoRenderRequest(
+      snapshotID: snapshot.id,
+      baseFrame: CardShareVideoBaseFrame(image: baseFrameImage),
+      replay: playbackReplay,
+      recipe: CardShareBauhausVideoRecipe(
+        replay: playbackReplay,
+        pixelSize: pixelSize,
+        frameRate: frameRate
+      ),
+      colors: CardShareBauhausVideoColors(
+        colors: BauhausColorPalette.default.colors(for: colorScheme)
+      )
+    )
+
+    return try await CardShareVideoRenderWorker().mp4File(
+      request: request,
+      directory: directory
+    )
+  }
 }
 
-/// Background writer for Doodle replay mp4 files.
+/// Background writer for replay mp4 files.
 ///
 /// This actor keeps the expensive frame loop and `AVAssetWriter` work away from
 /// the main actor. The preview and static video chrome stay SwiftUI-native;
-/// export only redraws the moving Doodle vector layer for each video frame.
+/// export only redraws the moving replay layer for each video frame.
 private actor CardShareVideoRenderWorker {
 
   /// Number of generated frames between cooperative scheduler yields.
@@ -853,6 +1000,73 @@ private actor CardShareVideoRenderWorker {
       let sourceTime = recipe.sourceTime(atVideoTime: videoTime)
       let pixelBuffer = try pixelBuffer(pixelSize: recipe.pixelSize, pool: adaptor.pixelBufferPool)
       try drawFrame(request: request, sourceTime: sourceTime, into: pixelBuffer)
+
+      guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
+        throw CardShareVideoRendererError.appendFailed
+      }
+
+      if (frameIndex + 1).isMultiple(of: Self.cooperativeYieldFrameInterval) {
+        await Task.yield()
+        try Task.checkCancellation()
+      }
+    }
+
+    input.markAsFinished()
+    try await writer.finishWritingChecked()
+    didCompleteWriting = true
+    return outputURL
+  }
+
+  func mp4File(
+    request: CardShareBauhausVideoRenderRequest,
+    directory: URL
+  ) async throws -> URL {
+    let recipe = request.recipe
+    let outputURL = directory.appending(path: "Journal-\(request.snapshotID.uuidString)-Bauhaus-Replay.mp4")
+    try? FileManager.default.removeItem(at: outputURL)
+
+    let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
+    let input = AVAssetWriterInput(
+      mediaType: .video,
+      outputSettings: outputSettings(for: recipe.pixelSize)
+    )
+    input.expectsMediaDataInRealTime = false
+
+    let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+      assetWriterInput: input,
+      sourcePixelBufferAttributes: pixelBufferAttributes(for: recipe.pixelSize)
+    )
+
+    guard writer.canAdd(input) else {
+      throw CardShareVideoRendererError.cannotAddVideoInput
+    }
+
+    writer.add(input)
+
+    guard writer.startWriting() else {
+      throw CardShareVideoRendererError.startWritingFailed
+    }
+    writer.startSession(atSourceTime: .zero)
+    var didCompleteWriting = false
+    defer {
+      if !didCompleteWriting {
+        writer.cancelWriting()
+        try? FileManager.default.removeItem(at: outputURL)
+      }
+    }
+
+    for frameIndex in 0..<recipe.frameCount {
+      try Task.checkCancellation()
+
+      while !input.isReadyForMoreMediaData {
+        try Task.checkCancellation()
+        try await Task.sleep(for: .milliseconds(8))
+      }
+
+      let presentationTime = CMTime(value: Int64(frameIndex), timescale: recipe.frameRate)
+      let videoTime = TimeInterval(frameIndex) / TimeInterval(recipe.frameRate)
+      let pixelBuffer = try pixelBuffer(pixelSize: recipe.pixelSize, pool: adaptor.pixelBufferPool)
+      try drawFrame(request: request, videoTime: videoTime, into: pixelBuffer)
 
       guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
         throw CardShareVideoRendererError.appendFailed
@@ -956,7 +1170,50 @@ private actor CardShareVideoRenderWorker {
       drawing: request.drawing,
       sourceTime: sourceTime,
       inkColor: request.inkColor,
-      in: Self.doodleContentRect(in: pixelSize),
+      in: Self.shareContentRect(in: pixelSize),
+      context: context
+    )
+  }
+
+  private func drawFrame(
+    request: CardShareBauhausVideoRenderRequest,
+    videoTime: TimeInterval,
+    into pixelBuffer: CVPixelBuffer
+  ) throws {
+    let pixelSize = request.recipe.pixelSize
+    CVPixelBufferLockBaseAddress(pixelBuffer, [])
+    defer {
+      CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
+    }
+
+    guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer),
+      let context = CGContext(
+        data: baseAddress,
+        width: Int(pixelSize.width.rounded()),
+        height: Int(pixelSize.height.rounded()),
+        bitsPerComponent: 8,
+        bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue
+          | CGImageAlphaInfo.premultipliedFirst.rawValue
+      )
+    else {
+      throw CardShareVideoRendererError.bitmapContextCreationFailed
+    }
+
+    context.clear(CGRect(origin: .zero, size: pixelSize))
+    context.translateBy(x: 0, y: pixelSize.height)
+    context.scaleBy(x: 1, y: -1)
+
+    let frameRect = CGRect(origin: .zero, size: pixelSize)
+    context.interpolationQuality = .high
+    drawBaseFrame(request.baseFrame.image, in: frameRect, context: context)
+    drawBauhausFrame(
+      replay: request.replay,
+      videoTime: videoTime,
+      recipe: request.recipe.replayRecipe,
+      colors: request.colors,
+      in: Self.shareContentRect(in: pixelSize),
       context: context
     )
   }
@@ -976,8 +1233,8 @@ private actor CardShareVideoRenderWorker {
     context.restoreGState()
   }
 
-  /// Content rect that mirrors the Doodle well in `CardShareExportFrame`.
-  private nonisolated static func doodleContentRect(in pixelSize: CGSize) -> CGRect {
+  /// Content rect that mirrors the media well in `CardShareExportFrame`.
+  private nonisolated static func shareContentRect(in pixelSize: CGSize) -> CGRect {
     let frameRect = CGRect(origin: .zero, size: pixelSize)
     let paperRect = frameRect.insetBy(dx: 72, dy: 72)
     let innerRect = paperRect.insetBy(dx: 56, dy: 56)
@@ -1043,6 +1300,100 @@ private actor CardShareVideoRenderWorker {
     context.restoreGState()
   }
 
+  private func drawBauhausFrame(
+    replay: BauhausGridReplay,
+    videoTime: TimeInterval,
+    recipe: BauhausGridReplayRecipe,
+    colors: CardShareBauhausVideoColors,
+    in rect: CGRect,
+    context: CGContext
+  ) {
+    let contentPath = CGPath(
+      roundedRect: rect,
+      cornerWidth: 32,
+      cornerHeight: 32,
+      transform: nil
+    )
+
+    let drawingRect = rect.insetBy(dx: 32, dy: 32)
+    let boardSide = min(drawingRect.width, drawingRect.height)
+    guard boardSide > 0 else { return }
+
+    let boardRect = CGRect(
+      x: drawingRect.midX - boardSide / 2,
+      y: drawingRect.midY - boardSide / 2,
+      width: boardSide,
+      height: boardSide
+    )
+    let replayFrame = BauhausGridReplayFrame(
+      replay: replay,
+      sourceTime: recipe.sourceTime(atVideoTime: videoTime)
+    )
+
+    context.saveGState()
+    context.addPath(contentPath)
+    context.clip()
+    context.setFillColor(colors.paper.cgColor())
+    context.fill(boardRect)
+    drawBauhausGrid(
+      replayFrame: replayFrame,
+      videoTime: videoTime,
+      recipe: recipe,
+      colors: colors,
+      in: boardRect.insetBy(dx: 8, dy: 8),
+      context: context
+    )
+    context.restoreGState()
+  }
+
+  private func drawBauhausGrid(
+    replayFrame: BauhausGridReplayFrame,
+    videoTime: TimeInterval,
+    recipe: BauhausGridReplayRecipe,
+    colors: CardShareBauhausVideoColors,
+    in rect: CGRect,
+    context: CGContext
+  ) {
+    let spacing: CGFloat = 2
+    let dimension = CGFloat(BauhausGridArtwork.dimension)
+    let cellSide = (min(rect.width, rect.height) - spacing * (dimension - 1)) / dimension
+    guard cellSide > 0 else { return }
+
+    for position in BauhausGridArtwork.positions {
+      let cellRect = CGRect(
+        x: rect.minX + CGFloat(position.column) * (cellSide + spacing),
+        y: rect.minY + CGFloat(position.row) * (cellSide + spacing),
+        width: cellSide,
+        height: cellSide
+      )
+
+      context.setFillColor(colors.emptyCell.cgColor())
+      context.fill(cellRect)
+
+      guard let tile = replayFrame.artwork[position] else { continue }
+
+      let appearance = replayFrame.appearanceValues(
+        for: position,
+        atVideoTime: videoTime,
+        recipe: recipe
+      )
+      let shapeRect = cellRect.scaledAboutCenter(by: appearance.scale)
+
+      context.setFillColor(
+        colors.swatches.color(for: tile.backgroundSwatch).cgColor(opacity: appearance.opacity)
+      )
+      context.fill(cellRect)
+
+      context.saveGState()
+      context.addPath(tile.shape.path(in: shapeRect).cgPath)
+      context.setFillColor(
+        colors.swatches.color(for: tile.shapeSwatch).cgColor(opacity: appearance.opacity)
+      )
+      context.fillPath()
+      context.restoreGState()
+    }
+  }
+
   private func drawStroke(
     _ stroke: DoodleStroke,
     upTo limit: TimeInterval,
@@ -1091,6 +1442,9 @@ private actor CardShareVideoRenderWorker {
 enum CardShareVideoRendererError: Error {
   /// The card did not contain decodable `DoodleDrawing` JSON.
   case missingDoodleDrawing
+
+  /// The Bauhaus document did not contain an authored replay timeline.
+  case missingBauhausReplay
 
   /// `AVAssetWriter` rejected the configured video input.
   case cannotAddVideoInput

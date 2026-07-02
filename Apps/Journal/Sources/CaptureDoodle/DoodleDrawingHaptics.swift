@@ -22,8 +22,10 @@ public enum DoodleHaptics {
 ///
 /// The replay driver receives the already re-timed playback strokes, sleeps
 /// along their point timeline, and forwards stroke boundaries plus speed changes
-/// into `DoodleDrawingHaptics`. Cancelling playback stops the continuous texture
-/// immediately so a dismissed replay cannot leave haptics running.
+/// into `DoodleDrawingHaptics`. Replay deliberately skips live touch-down/lift
+/// taps: those taps are input affordances, and they feel late or early when
+/// attached to an authored playback boundary. Cancelling playback stops the
+/// texture immediately so a dismissed replay cannot leave haptics running.
 @MainActor
 final class DoodleDrawingReplayHaptics {
 
@@ -51,6 +53,7 @@ final class DoodleDrawingReplayHaptics {
     }
 
     var cursor: TimeInterval = 0
+    let playbackTimestampBase = CACurrentMediaTime()
 
     do {
       for stroke in strokes {
@@ -59,22 +62,27 @@ final class DoodleDrawingReplayHaptics {
         try await sleep(from: &cursor, until: firstPoint.time)
         guard Task.isCancelled == false else { return }
 
-        drawingHaptics.touchDown()
-        drawingHaptics.begin()
+        guard stroke.points.count > 1 else { continue }
 
         var previousPoint = firstPoint
+        var didBeginTexture = false
         for point in stroke.points.dropFirst() {
           try await sleep(from: &cursor, until: point.time)
           guard Task.isCancelled == false else { return }
 
+          if didBeginTexture == false {
+            drawingHaptics.begin()
+            didBeginTexture = true
+          }
+
           drawingHaptics.update(
             speed: Self.speed(from: previousPoint, to: point),
-            timestamp: CACurrentMediaTime()
+            timestamp: playbackTimestampBase + point.time
           )
           previousPoint = point
         }
 
-        drawingHaptics.end()
+        drawingHaptics.cancel()
       }
     } catch {
       // Cancellation is the normal way a user stops replay; the defer above

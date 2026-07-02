@@ -17,6 +17,8 @@ import SwiftUI
 /// costs more than it saves.
 struct CardSurface<Content: View>: View {
 
+  @Environment(\.appPalette) private var palette
+
   private let content: Content
 
   init(@ViewBuilder content: () -> Content) {
@@ -33,6 +35,12 @@ struct CardSurface<Content: View>: View {
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
           .foregroundStyle(.appOnSecondaryContainer)
       }
+      .shadow(
+        color: palette.onSecondaryContainer.opacity(0.12),
+        radius: 16,
+        x: 0,
+        y: 10
+      )
   }
 }
 

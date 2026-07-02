@@ -133,6 +133,12 @@ struct SettingsView: View {
       #endif
 
       Section("About") {
+        NavigationLink {
+          PrivacyPolicyView()
+        } label: {
+          Label("Privacy Policy", systemImage: "hand.raised")
+        }
+
         Button {
           isShowingOnboarding = true
         } label: {

@@ -43,7 +43,7 @@ struct CardShareDoodleVideoBaseFrameView: View {
 
   var body: some View {
     CardShareExportFrame(snapshot: snapshot, palette: palette) {
-      CardShareDoodleVideoBaseContent()
+      CardShareReplayVideoBaseContent()
     }
   }
 }
@@ -108,8 +108,29 @@ private struct CardSharePaper<Content: View>: View {
   }
 }
 
-/// Empty Doodle content well used by the static video base frame.
-private struct CardShareDoodleVideoBaseContent: View {
+/// Export frame used as the static background for Bauhaus replay videos.
+///
+/// The animated grid is drawn by the video writer, while this view keeps the
+/// surrounding share chrome identical to image export.
+struct CardShareBauhausVideoBaseFrameView: View {
+
+  let snapshot: CardShareSnapshot
+  let palette: Palette
+
+  init(snapshot: CardShareSnapshot, palette: Palette = .default) {
+    self.snapshot = snapshot
+    self.palette = palette
+  }
+
+  var body: some View {
+    CardShareExportFrame(snapshot: snapshot, palette: palette) {
+      CardShareReplayVideoBaseContent()
+    }
+  }
+}
+
+/// Empty media well used by static video base frames.
+private struct CardShareReplayVideoBaseContent: View {
 
   var body: some View {
     RoundedRectangle(cornerRadius: 32, style: .continuous)

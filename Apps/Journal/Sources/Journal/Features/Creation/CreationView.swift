@@ -508,9 +508,8 @@ struct CreationView: View {
         await MediaSyncEngine.shared.enqueueUploads(
           attachmentIDs: mediaAttachmentIDs
         )
-        let nextDraft = ThreadDraftCard()
-        draftCards = [nextDraft]
-        attachLocationToCurrentDraftsIfNeeded()
+        draftCards.removeAll()
+        scrollTargetID = nil
         textEditorPresentation = nil
         photoCapturePresentation = nil
         doodleCanvasPresentation = nil
@@ -670,7 +669,11 @@ private struct ThreadDraftActionRow: View {
   let onSave: @MainActor @Sendable () -> Void
 
   private var canSave: Bool {
-    draftCards.allSatisfy {
+    guard draftCards.isEmpty == false else {
+      return false
+    }
+
+    return draftCards.allSatisfy {
       $0.canSave
     }
   }

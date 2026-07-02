@@ -136,7 +136,7 @@ public enum BauhausGridReplayAction: Codable, Equatable, Sendable {
   }
 }
 
-private extension BauhausGridReplay {
+public extension BauhausGridReplay {
 
   /// Returns a display-only replay that places every authored event on the same
   /// beat. The persisted authored timestamps remain unchanged.
@@ -290,7 +290,7 @@ public struct BauhausGridReplayView: View {
 
       TimelineView(.animation) { timeline in
         let elapsed = elapsedTime(at: timeline.date, recipe: recipe)
-        BauhausGridReplayArtworkView(
+        BauhausGridReplayFrameView(
           replay: playbackReplay,
           videoTime: elapsed,
           recipe: recipe,
@@ -337,16 +337,18 @@ public struct BauhausGridReplayView: View {
   }
 }
 
-/// One rendered Bauhaus replay frame plus the source timestamp that created each
-/// currently visible tile.
-private struct BauhausGridReplayFrame: Equatable {
+/// One rendered Bauhaus replay frame plus per-cell appearance timing.
+///
+/// This is a value description of a frame, not a view. Exporters can use it to
+/// draw replay videos without depending on SwiftUI's live `TimelineView`.
+public struct BauhausGridReplayFrame: Equatable, Sendable {
 
   /// Artwork reconstructed at the current replay source time.
-  var artwork: BauhausGridArtwork
+  public var artwork: BauhausGridArtwork
 
   private var appearanceSourceTimes: [BauhausGridPosition: TimeInterval]
 
-  init(
+  public init(
     replay: BauhausGridReplay,
     sourceTime: TimeInterval
   ) {
@@ -372,7 +374,7 @@ private struct BauhausGridReplayFrame: Equatable {
     self.appearanceSourceTimes = appearanceSourceTimes
   }
 
-  func appearanceProgress(
+  public func appearanceProgress(
     for position: BauhausGridPosition,
     atVideoTime videoTime: TimeInterval,
     recipe: BauhausGridReplayRecipe,
@@ -388,20 +390,50 @@ private struct BauhausGridReplayFrame: Equatable {
     let normalizedProgress = (videoTime - appearanceVideoTime) / duration
     return CGFloat(min(max(normalizedProgress, 0), 1))
   }
+
+  /// Returns the sampled appearance values for a tile at the supplied video time.
+  public func appearanceValues(
+    for position: BauhausGridPosition,
+    atVideoTime videoTime: TimeInterval,
+    recipe: BauhausGridReplayRecipe
+  ) -> BauhausTileAppearanceMotion.Values {
+    guard let appearanceSourceTime = appearanceSourceTimes[position] else {
+      return .visible
+    }
+
+    let appearanceVideoTime = recipe.videoTime(atSourceTime: appearanceSourceTime)
+    return BauhausTileAppearanceMotion.values(
+      atElapsedTime: videoTime - appearanceVideoTime
+    )
+  }
 }
 
-/// Read-only Bauhaus grid renderer that gives newly visible replay tiles a
-/// short bounce without changing the persisted artwork timeline.
-private struct BauhausGridReplayArtworkView: View {
+/// Read-only rendering for a single Bauhaus replay timestamp.
+///
+/// The caller supplies `videoTime` so previews, detail replay controls, and
+/// export pipelines can all render the same deterministic frame sequence.
+public struct BauhausGridReplayFrameView: View {
 
   @Environment(\.colorScheme) private var colorScheme
 
-  let replay: BauhausGridReplay
-  let videoTime: TimeInterval
-  let recipe: BauhausGridReplayRecipe
-  let colorPalette: BauhausColorPalette
+  public let replay: BauhausGridReplay
+  public let videoTime: TimeInterval
+  public let recipe: BauhausGridReplayRecipe
+  public let colorPalette: BauhausColorPalette
 
-  var body: some View {
+  public init(
+    replay: BauhausGridReplay,
+    videoTime: TimeInterval,
+    recipe: BauhausGridReplayRecipe,
+    colorPalette: BauhausColorPalette = .default
+  ) {
+    self.replay = replay
+    self.videoTime = videoTime
+    self.recipe = recipe
+    self.colorPalette = colorPalette
+  }
+
+  public var body: some View {
     let replayFrame = BauhausGridReplayFrame(
       replay: replay,
       sourceTime: recipe.sourceTime(atVideoTime: videoTime)
@@ -423,8 +455,6 @@ private struct BauhausGridReplayArtworkView: View {
 /// shapes scale through a short overshooting bounce.
 private struct BauhausGridReplayRasterView: View {
 
-  static let bounceDuration: TimeInterval = 0.2
-
   let replayFrame: BauhausGridReplayFrame
   let videoTime: TimeInterval
   let recipe: BauhausGridReplayRecipe
@@ -443,21 +473,20 @@ private struct BauhausGridReplayRasterView: View {
             .fill(colors.chrome.emptyCell)
 
           if let tile = replayFrame.artwork[position] {
-            let progress = replayFrame.appearanceProgress(
+            let appearance = replayFrame.appearanceValues(
               for: position,
               atVideoTime: videoTime,
-              recipe: recipe,
-              duration: Self.bounceDuration
+              recipe: recipe
             )
 
             Rectangle()
               .fill(tile.backgroundSwatch.color(in: colors))
-              .opacity(Double(progress))
+              .opacity(Double(appearance.opacity))
 
             BauhausShape(kind: tile.shape)
               .fill(tile.shapeSwatch.color(in: colors))
-              .scaleEffect(Self.bounceScale(progress))
-              .opacity(Double(progress))
+              .scaleEffect(appearance.scale)
+              .opacity(Double(appearance.opacity))
           }
         }
         .aspectRatio(1, contentMode: .fit)
@@ -470,30 +499,88 @@ private struct BauhausGridReplayRasterView: View {
     )
   }
 
-  private static func bounceScale(_ progress: CGFloat) -> CGFloat {
-    let progress = min(max(progress, 0), 1)
-    guard progress < 1 else { return 1 }
+}
 
-    let overshoot: CGFloat = 1.70158
-    let cubicOvershoot = overshoot + 1
-    let shiftedProgress = progress - 1
-    return 1
-      + cubicOvershoot * shiftedProgress * shiftedProgress * shiftedProgress
-      + overshoot * shiftedProgress * shiftedProgress
+/// Shared motion sampler for a tile as it appears in a Bauhaus replay.
+///
+/// The live SwiftUI replay and the Core Graphics video exporter both call this
+/// type with an elapsed time and apply the returned values in their own render
+/// surfaces. Keeping the sampling here lets the exported mp4 match the on-screen
+/// replay without recording SwiftUI view frames.
+public struct BauhausTileAppearanceMotion: Equatable, Sendable {
+
+  /// Render values for one sampled appearance frame.
+  public struct Values: Equatable, Sendable {
+
+    /// Fill opacity for the tile background and shape.
+    public var opacity: CGFloat
+
+    /// Scale applied to the tile shape around its cell center.
+    public var scale: CGFloat
+
+    public init(
+      opacity: CGFloat,
+      scale: CGFloat
+    ) {
+      self.opacity = opacity
+      self.scale = scale
+    }
+
+    /// Values before the tile has started appearing.
+    public static let hidden = Values(opacity: 0, scale: 0)
+
+    /// Values after the appearance motion has completed.
+    public static let visible = Values(opacity: 1, scale: 1)
+  }
+
+  /// Duration of the per-tile appearance motion.
+  public static let duration: TimeInterval = 0.2
+
+  private static let shapeScaleSpring = Spring.snappy(
+    duration: duration,
+    extraBounce: 0.18
+  )
+
+  /// Samples the tile appearance at `elapsedTime` seconds from tile insertion.
+  public static func values(atElapsedTime elapsedTime: TimeInterval) -> Values {
+    guard elapsedTime > 0 else { return .hidden }
+    guard elapsedTime < duration else { return .visible }
+
+    let progress = elapsedTime / duration
+    let opacity = CGFloat(UnitCurve.easeOut.value(at: progress))
+    let scale = CGFloat(shapeScaleSpring.value(
+      fromValue: 0.0,
+      toValue: 1.0,
+      initialVelocity: 0.0,
+      time: elapsedTime
+    ))
+
+    return Values(
+      opacity: opacity,
+      scale: max(scale, 0)
+    )
   }
 }
 
 /// Playback timing policy for discrete Bauhaus replay events.
-private struct BauhausGridReplayRecipe: Equatable {
+///
+/// Bauhaus edits are authored as discrete operations. This recipe maps the
+/// authored source timeline onto the short presentation timeline used by saved
+/// entry replay and share-video export.
+public struct BauhausGridReplayRecipe: Equatable, Sendable {
 
-  static let eventInterval: TimeInterval = 0.16
+  /// Display beat between authored operations after presentation normalization.
+  public static let eventInterval: TimeInterval = 0.16
 
-  let sourceDuration: TimeInterval
-  let replayDuration: TimeInterval
-  let leadInDuration: TimeInterval
-  let holdDuration: TimeInterval
+  /// Duration of the per-tile appearance bounce.
+  public static let bounceDuration: TimeInterval = BauhausTileAppearanceMotion.duration
 
-  init(
+  public let sourceDuration: TimeInterval
+  public let replayDuration: TimeInterval
+  public let leadInDuration: TimeInterval
+  public let holdDuration: TimeInterval
+
+  public init(
     replay: BauhausGridReplay,
     leadInDuration: TimeInterval = 0.2,
     minimumReplayDuration: TimeInterval = 0.16,
@@ -505,11 +592,11 @@ private struct BauhausGridReplayRecipe: Equatable {
     self.holdDuration = max(holdDuration, 0)
   }
 
-  var totalDuration: TimeInterval {
+  public var totalDuration: TimeInterval {
     leadInDuration + replayDuration + holdDuration
   }
 
-  func sourceTime(atVideoTime videoTime: TimeInterval) -> TimeInterval {
+  public func sourceTime(atVideoTime videoTime: TimeInterval) -> TimeInterval {
     guard replayDuration > 0 else { return sourceDuration }
     guard videoTime >= leadInDuration else { return -Double.ulpOfOne }
 
@@ -518,11 +605,19 @@ private struct BauhausGridReplayRecipe: Equatable {
     return min(sourceDuration * progress, sourceDuration)
   }
 
-  func videoTime(atSourceTime sourceTime: TimeInterval) -> TimeInterval {
+  public func videoTime(atSourceTime sourceTime: TimeInterval) -> TimeInterval {
     guard sourceDuration > 0 else { return leadInDuration }
 
     let clampedSourceTime = min(max(sourceTime, 0), sourceDuration)
     return leadInDuration + (clampedSourceTime / sourceDuration) * replayDuration
+  }
+
+  /// Overshooting scale curve used when a tile first appears.
+  public static func bounceScale(_ progress: CGFloat) -> CGFloat {
+    let progress = min(max(progress, 0), 1)
+    return BauhausTileAppearanceMotion.values(
+      atElapsedTime: TimeInterval(progress) * BauhausTileAppearanceMotion.duration
+    ).scale
   }
 }
 
@@ -1565,11 +1660,11 @@ fileprivate struct BauhausShape: Shape {
   }
 }
 
-fileprivate extension BauhausShapeKind {
+public extension BauhausShapeKind {
 
   private static let paddedCircleInsetRatio: CGFloat = 0.25
 
-  var accessibilityLabel: Text {
+  fileprivate var accessibilityLabel: Text {
     switch self {
     case .square:
       Text("Apply square")
@@ -1612,6 +1707,10 @@ fileprivate extension BauhausShapeKind {
     }
   }
 
+  /// Returns the vector path for this primitive inside `rect`.
+  ///
+  /// The shape definitions are shared by the SwiftUI renderer and video export
+  /// code so persisted Bauhaus artwork keeps one geometry contract.
   func path(in rect: CGRect) -> Path {
     switch self {
     case .square:

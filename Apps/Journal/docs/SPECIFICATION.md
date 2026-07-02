@@ -339,8 +339,9 @@ tapering doesn't fold into a broken outline at tight turns.
 Default brush width is `3pt`. While drawing, supported devices bracket each
 stroke with light touch-down/lift taps and keep the in-stroke Core Haptics
 continuous texture light while its intensity and sharpness follow finger speed;
-replay surfaces run the same boundary taps and speed-shaped texture along the
-compressed playback timeline. Unsupported hardware, including Simulator, no-ops.
+replay surfaces skip the touch boundary taps and run only the speed-shaped
+texture along the compressed playback timeline. Unsupported hardware, including
+Simulator, no-ops.
 The drawable surface is fixed to the same portrait paper proportion as journal cards
 (`width / height = 1 / 1.4144`), and the toolbar is single-color: width slider,
 undo, replay, clear, and export when `onExport` is supplied. When `onChange` is
@@ -379,7 +380,9 @@ selection haptics, shape application and clearing use light impact haptics, and
 the optional export action uses success feedback.
 Saved Bauhaus replay starts with a very short empty-grid beat, places every
 authored event on the same brisk playback interval, and introduces each tile
-with a bounce while preserving the stored authored event timeline.
+with a bounce while preserving the stored authored event timeline. Tile opacity
+and spring scale come from one shared motion sampler so the live SwiftUI replay
+and generated mp4 use the same per-frame values.
 
 - `BauhausGridDocument`: `Sendable, Equatable, Codable` — `artwork` is the
   canonical final grid for static rendering and editing; optional `replay`
@@ -635,6 +638,20 @@ the gallery's **Lab** section).
   row or relationship changes can refresh the tile. Media wells also listen for
   `MediaSyncEngine` file-change signals, covering the common CloudKit order where
   the SwiftData record arrives before the CKAsset file has finished downloading.
+  `CardSurface` uses a palette-derived shadow and tonal fill contrast so the
+  paper reads as a physical object against the primary background without border
+  chrome; summary photo and Bauhaus media wells use square previews, and Bauhaus
+  detail wells stay square to preserve the authored grid geometry.
+  Relationship-connected Cards are grouped before the day sections are rendered:
+  the default list mode collapses each multi-card group into one stacked tile
+  showing the group's newest Card plus a count badge, while the toolbar toggle
+  expands groups into their member Cards with position badges. The stacked and
+  expanded modes share matched card geometry so stack layers animate into their
+  expanded grid tiles. The collapsed stack visually shows at most three Card
+  layers to avoid noisy overdraw, but hidden geometry anchors are kept for the
+  remaining group members so every expanded Card has a matched source. A group is
+  placed in the local-calendar day of its newest Card so the archive remains
+  newest activity first.
   Tapping a tile pushes an **Entry** detail screen. Summary and detail both render
   through one adaptive saved-entry card wrapper that owns `CardSurface`, so the
   same paper aspect ratio is preserved while the wrapper swaps only its internal
@@ -653,18 +670,28 @@ the gallery's **Lab** section).
   calls `JournalStore.updateCard(_:with:in:)`, replaces old media attachments
   when the payload changes, queues uploads/deletions through `MediaSyncEngine`,
   reloads the Latest Note widget timeline, and returns to the detail screen.
+  A relationship group opens as a vertical list of full detail cards instead of a
+  single card plus preview strip: the group passed from the entries grid is merged
+  with the selected card's live incoming/outgoing relationships, duplicate Cards
+  collapse to one row, and the row for the card the user selected becomes the
+  initial scroll position. Non-selected rows keep a small relationship label when
+  the selected card has a direct edge to them, falling back to a generic related
+  label for same-group Cards reached through another Card. Row context menus keep
+  the same **Share** action as the entries grid.
   Each tile's context menu and the detail toolbar include **Share**, which opens
   a pre-share preview sheet before any system share sheet is shown. The preview
-  displays the themed image export; it lays out
-  the actual 9:16 export canvas and aspect-fits that result into the sheet instead
-  of reflowing the card at preview size. Doodle cards also get a **Video** tab
-  that replays the stored vector timeline in the same share chrome. **Share
-  Image** renders that Card into a themed 9:16 PNG sized for Instagram Reels;
-  **Share Video** renders a matching 9:16, 60 fps Doodle replay mp4 by reusing a
-  static SwiftUI-rendered share frame and compositing only the moving vector
-  strokes, then presents it through the system share sheet. Bauhaus cards share
-  as still images by decoding their stored grid document when available, falling
-  back to any mirrored thumbnail only when the JSON payload is unavailable. The
+  asynchronously generates the actual 9:16 export artifact first and aspect-fits
+  that generated file into the sheet instead of showing a separate live SwiftUI
+  approximation. Generated preview artifacts are cached in the open sheet state,
+  so switching between **Image** and **Video** tabs reuses files that were already
+  prepared for the current appearance. The **Image** mode displays the generated
+  PNG file. Doodle cards and Bauhaus cards with an authored replay timeline also
+  get a **Video** tab that displays the generated 60 fps mp4 file. **Share
+  Image** and **Share Video** hand that already-previewed file to the system
+  share sheet. Older
+  Bauhaus cards without replay data still share as still images by decoding their
+  stored grid document when available, falling back to any mirrored thumbnail
+  only when the JSON payload is unavailable. The
   debug **Seed Samples** action and `Card Patterns` Preview exercise the
   independent card patterns.
   Not the real entries UI.
@@ -685,7 +712,10 @@ the gallery's **Lab** section).
   and when disabled new draft cards are saved without location metadata.
   Capture demos are intentionally hidden from Settings. In Debug builds, **Lab**
   links to Haptics and Haptic Doodle so those tools can be tried from the current
-  app root; Release builds omit the Lab section. An **About** section has **Show
+  app root; Release builds omit the Lab section. An **About** section has
+  **Privacy Policy**, which opens an in-app policy explaining local storage,
+  iCloud Private Database sync, optional permissions, sharing, widgets, and the
+  absence of developer-operated analytics/ads/tracking, plus **Show
   Onboarding**, which re-presents `OnboardingView` in a `fullScreenCover`;
   dismissing it returns to the app without changing `hasCompletedOnboarding`.
 
