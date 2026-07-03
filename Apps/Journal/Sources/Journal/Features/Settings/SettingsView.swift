@@ -95,26 +95,22 @@ struct SettingsView: View {
         Text("Notes sync automatically across devices signed in to the same iCloud account.")
       }
 
-      Section {
-        ForEach(Theme.all) { theme in
-          ThemeRow(
-            theme: theme,
-            isSelected: theme.id == themeID,
-            onSelect: {
-              withAnimation(.spring) {
-                themeID = theme.id
-              }
-            }
-          )
+      NavigationLink {
+        ThemeSelectionView()
+      } label: {
+        HStack {
+          Label("Theme", systemImage: "paintpalette")
+
+          Spacer(minLength: 0)
+
+          Text(Theme.with(id: themeID).name)
+            .foregroundStyle(.secondary)
         }
-      } header: {
-        Text("Theme")
-      } footer: {
-        Text("Applies the color palette across the app.")
       }
 
       AppearanceSection(selectionID: $appearancePreferenceID)
       LocationSection(isEnabled: $shouldAttachLocationToNewCards)
+      WidgetInstructionsSection()
 
       #if DEBUG
       Section("Lab") {
@@ -151,7 +147,6 @@ struct SettingsView: View {
     .background(.background)
     .navigationTitle("Settings")
     .navigationBarTitleDisplayMode(.inline)
-    .sensoryFeedback(.selection, trigger: themeID)
     .sensoryFeedback(.selection, trigger: appearancePreferenceID)
     .sensoryFeedback(.selection, trigger: shouldAttachLocationToNewCards)
     .fullScreenCover(isPresented: $isShowingOnboarding) {
@@ -185,6 +180,24 @@ fileprivate struct AppearanceSection: View {
   }
 }
 
+/// A form section that links to the OS-level widget installation guide.
+fileprivate struct WidgetInstructionsSection: View {
+
+  var body: some View {
+    Section {
+      NavigationLink {
+        WidgetInstructionsView()
+      } label: {
+        Label("Add Widgets", systemImage: "square.grid.2x2")
+      }
+    } header: {
+      Text("Widgets")
+    } footer: {
+      Text("Instructions for adding Tinycurve to the Home Screen, Lock Screen, and StandBy.")
+    }
+  }
+}
+
 /// A form section for the app-wide location attachment preference.
 fileprivate struct LocationSection: View {
 
@@ -203,62 +216,6 @@ fileprivate struct LocationSection: View {
   }
 }
 
-fileprivate struct ThemeRow: View {
-
-  @Environment(\.colorScheme) private var colorScheme
-
-  let theme: Theme
-  let isSelected: Bool
-  let onSelect: @MainActor @Sendable () -> Void
-
-  var body: some View {
-    Button(action: onSelect) {
-      HStack(spacing: 12) {
-        ThemeSwatch(palette: theme.palette(for: colorScheme))
-
-        Text(theme.name)
-          .foregroundStyle(.primary)
-
-        Spacer(minLength: 0)
-
-        if isSelected {
-          Image(systemName: "checkmark")
-            .fontWeight(.semibold)
-            .foregroundStyle(.tint)
-            .transition(.scale.combined(with: .opacity))
-        }
-      }
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-  }
-}
-
-/// A compact preview of a palette: the primary surface with tint and secondary
-/// dots, so each theme is recognizable by color rather than name alone.
-fileprivate struct ThemeSwatch: View {
-
-  let palette: Palette
-
-  var body: some View {
-    ZStack {
-      RoundedRectangle(cornerRadius: 8)
-        .fill(palette.primaryContainer)
-
-      HStack(spacing: 4) {
-        Circle().fill(palette.tint)
-        Circle().fill(palette.secondaryContainer)
-      }
-      .frame(height: 14)
-      .padding(8)
-    }
-    .frame(width: 56, height: 36)
-    .overlay(
-      RoundedRectangle(cornerRadius: 8)
-        .strokeBorder(palette.outline)
-    )
-  }
-}
 
 /// Renders the coarse `SyncStatusMonitor.Summary` as an icon + label. Presentation
 /// (symbol, color, copy) lives here; the monitor only owns state.

@@ -4,7 +4,10 @@ import CaptureDoodle
 import CapturePhoto
 import Foundation
 import JournalModel
+import MuColor
 import Observation
+import SwiftUI
+import UIKit
 
 /// One editable Journal card draft.
 ///
@@ -236,6 +239,14 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
 /// the write.
 struct CardEditDraftSnapshot: Sendable, Codable {
 
+  /// Maximum pixel edge for thumbnails mirrored through SwiftData. Full authored
+  /// media stays in the attachment file; this preview is only for lightweight
+  /// surfaces such as widgets.
+  private static let thumbnailMaximumPixelLength: CGFloat = 512
+
+  /// Square output size for Bauhaus thumbnails.
+  private static let bauhausThumbnailSize = CGSize(width: 512, height: 512)
+
   var kind: Card.Kind
   var text: String
   var photo: CapturedPhoto?
@@ -245,7 +256,10 @@ struct CardEditDraftSnapshot: Sendable, Codable {
   var location: Coordinate?
 
   @MainActor
-  func storeInput() throws -> JournalStore.ThreadCardInput {
+  func storeInput(
+    palette: Palette = .default,
+    colorScheme: ColorScheme = .light
+  ) throws -> JournalStore.ThreadCardInput {
     switch kind {
     case .text:
       return JournalStore.ThreadCardInput(
@@ -272,6 +286,7 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       return JournalStore.ThreadCardInput(
         kind: .doodle,
         mediaData: try JSONEncoder().encode(doodle),
+        thumbnail: doodleThumbnailData(for: doodle, palette: palette),
         location: location
       )
     case .bauhaus:
@@ -281,6 +296,7 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       return JournalStore.ThreadCardInput(
         kind: .bauhaus,
         mediaData: try JSONEncoder().encode(bauhaus),
+        thumbnail: bauhausThumbnailData(for: bauhaus, colorScheme: colorScheme),
         location: location
       )
     case .unknown:
@@ -288,6 +304,26 @@ struct CardEditDraftSnapshot: Sendable, Codable {
     @unknown default:
       throw CardEditDraftSnapshotError.unsupportedKind
     }
+  }
+
+  @MainActor
+  private func doodleThumbnailData(for drawing: DoodleDrawing, palette: Palette) -> Data? {
+    drawing
+      .image(inkColor: palette.tint, scale: Self.thumbnailScale(for: drawing.canvasSize))
+      .flatMap { $0.pngData() }
+  }
+
+  @MainActor
+  private func bauhausThumbnailData(for document: BauhausGridDocument, colorScheme: ColorScheme) -> Data? {
+    document
+      .image(colorScheme: colorScheme, size: Self.bauhausThumbnailSize)
+      .flatMap { $0.pngData() }
+  }
+
+  private static func thumbnailScale(for canvasSize: CGSize) -> CGFloat {
+    let longestEdge = max(canvasSize.width, canvasSize.height)
+    guard longestEdge > thumbnailMaximumPixelLength else { return 1 }
+    return thumbnailMaximumPixelLength / longestEdge
   }
 }
 

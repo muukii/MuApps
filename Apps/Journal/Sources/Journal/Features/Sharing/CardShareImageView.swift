@@ -1,4 +1,5 @@
 import CaptureBauhaus
+import CaptureDoodle
 import JournalModel
 import MuColor
 import SwiftUI
@@ -177,8 +178,8 @@ private struct CardShareContentView: View {
       CardShareImageContent(imageData: imageData, fallbackSymbolName: "photo")
     case .audio(let fileURL):
       CardShareAudioContent(hasFile: fileURL != nil)
-    case .doodle(_, let thumbnailData):
-      CardShareImageContent(imageData: thumbnailData, fallbackSymbolName: "scribble.variable")
+    case .doodle(let drawingData, let thumbnailData):
+      CardShareDoodleContent(drawingData: drawingData, thumbnailData: thumbnailData)
     case .bauhaus(let documentData, let thumbnailData):
       CardShareBauhausContent(documentData: documentData, thumbnailData: thumbnailData)
     }
@@ -229,6 +230,42 @@ private struct CardShareImageContent: View {
     imageData
       .flatMap(UIImage.init(data:))
       .map(Image.init(uiImage:))
+  }
+}
+
+/// Doodle export content, preferring decoded vector strokes over fallback
+/// thumbnails so existing cards can still share as real card images.
+private struct CardShareDoodleContent: View {
+
+  @Environment(\.appPalette) private var palette
+
+  let drawingData: Data?
+  let thumbnailData: Data?
+
+  var body: some View {
+    ZStack {
+      RoundedRectangle(cornerRadius: 32, style: .continuous)
+        .fill(.appOnSecondaryContainer.opacity(0.06))
+
+      if let drawing {
+        DoodleDrawingView(
+          drawing: drawing,
+          inkColor: palette.onSecondaryContainer
+        )
+        .padding(32)
+      } else {
+        CardShareImageContent(
+          imageData: thumbnailData,
+          fallbackSymbolName: "scribble.variable"
+        )
+      }
+    }
+    .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+  }
+
+  private var drawing: DoodleDrawing? {
+    guard let drawingData else { return nil }
+    return try? JSONDecoder().decode(DoodleDrawing.self, from: drawingData)
   }
 }
 

@@ -78,15 +78,18 @@ extension.
 
 `JournalWidget` (`product: .appExtension`, embedded into the app bundle by an
 explicit target dependency) is a WidgetKit extension. Its single **Latest Note**
-widget (small / medium / large families) reads recent `Card` rows directly from
-the shared SwiftData store via `JournalStore.makeModelContainer()` (a
+widget supports Home Screen small / medium / large families plus Lock Screen
+inline / circular / rectangular accessory families. It reads recent `Card` rows
+directly from the shared SwiftData store via `JournalStore.makeModelContainer()` (a
 `FetchDescriptor` sorted by `createdAt` descending, limited to a small recent
 window). For multi-card thread saves it prefers the first card without an
 outgoing `.continuation`, so the widget shows the authored last item instead of
 an earlier card from the same save. It shows kind-aware content: text cards use
 `Card.body` (falling back to `Untitled`), doodle and Bauhaus cards use mirrored
 attachment thumbnails only when those optional bytes exist, and the other media
-cards still show a modality label.
+cards still show a modality label. The Home Screen families show the latest-card
+body/thumbnail and relative timestamp; the Lock Screen accessory families use
+short labels or symbols that fit the tighter surfaces.
 It maps the `Card` to a `Sendable` `NoteSnapshot` so the timeline entry and
 views stay free of the persistence layer, capture frameworks, and media files;
 it shows an empty state when there are no notes.
@@ -165,7 +168,8 @@ is `Codable` for crash recovery, and only encodes the draft payload; SwiftUI
 presentation identity is rebuilt after restore.
 Immediately before saving, the composer snapshots each draft and converts it into
 `ThreadCardInput`. Text inputs write into `Card.body`; photo, doodle, and
-Bauhaus inputs stage encoded bytes without generating mirrored thumbnails; audio
+Bauhaus inputs stage encoded bytes; doodle and Bauhaus inputs also generate a
+small mirrored PNG thumbnail for lightweight surfaces such as widgets. Audio
 inputs move the recording file URL into the shared media directory as an `.audio`
 attachment.
 The thread write still performs one final `ModelContext.save()`;
@@ -250,9 +254,12 @@ references can branch from any earlier card. The app-level invariant is DAG:
 Attachments represent photos, audio recordings, doodles, and Bauhaus artwork
 associated with a card. The SwiftData row stores queryable metadata; the full
 bytes live as files in the App Group container and are reconciled by
-`JournalStore.reconcileOrphanFiles(...)`. The optional `thumbnail` field remains
-as fallback metadata for rows or explicit attachment writes that provide one, but
-the current draft save path leaves it empty. The app target's
+`JournalStore.reconcileOrphanFiles(...)`. The optional `thumbnail` field stores
+small mirrored fallback preview data for lightweight surfaces; draft saves
+generate it for doodle and Bauhaus attachments while main in-app entry rendering
+still prefers the local attachment file. On app launch,
+`JournalThumbnailBackfill` fills missing doodle/Bauhaus thumbnails from any local
+attachment files created before thumbnail generation was restored. The app target's
 `MediaSyncEngine` mirrors those files through a separate private CloudKit zone as
 one immutable CKAsset record per attachment id; the widget does not run that
 engine and only reads whatever rows/files are already available in the shared App
@@ -263,7 +270,7 @@ Group container.
 | `id` | `UUID` | Logical id and file name basis. |
 | `kind` | `Kind` | `.photo`, `.audio`, `.doodle`, or `.bauhaus`. |
 | `byteSize` | `Int` | Size of the on-disk file at attach time. |
-| `thumbnail` | `Data?` | Optional mirrored fallback preview data; current draft saves do not generate it. |
+| `thumbnail` | `Data?` | Optional mirrored fallback preview data; generated for doodle and Bauhaus draft saves. |
 | `createdAt` | `Date` | |
 | `card` | `Card?` | Owning card; inverse declared on `Card.attachments`. |
 
@@ -472,8 +479,9 @@ A small palette/theme system applied app-wide.
   appearance; Swift only maps each `Theme` to its stable asset namespace and
   resolves the requested `ColorScheme` through asset traits.
 - `Theme`: an `id` + display `name` + a **light** and **dark** `Palette` pair.
-  Eight themes: **Warm Cream** (default), **Soft Mocha**, **Midnight**, **Sage**,
-  **Blush**, **Citrus**, **Lagoon**, and **Berry**. `Theme.palette(for:)`
+  Eleven themes: **Warm Cream** (default), **Soft Mocha**, **Midnight**,
+  **Sage**, **Blush**, **Citrus**, **Lagoon**, **Berry**, **Vermilion**,
+  **Cobalt**, and **Forest**. `Theme.palette(for:)`
   resolves the surface for the active
   `ColorScheme`; `Theme.with(id:)` resolves a persisted id, falling back to
   `.default`. Each theme adapts to the active Light/Dark mode, which can either
@@ -638,10 +646,10 @@ the gallery's **Lab** section).
   row or relationship changes can refresh the tile. Media wells also listen for
   `MediaSyncEngine` file-change signals, covering the common CloudKit order where
   the SwiftData record arrives before the CKAsset file has finished downloading.
-  `CardSurface` uses a palette-derived shadow and tonal fill contrast so the
-  paper reads as a physical object against the primary background without border
-  chrome; summary photo and Bauhaus media wells use square previews, and Bauhaus
-  detail wells stay square to preserve the authored grid geometry.
+  `CardSurface` keeps the paper chrome flat: no border or shadow, just the
+  palette's secondary container fill inside the fixed paper shape. Summary photo
+  and Bauhaus media wells use square previews, and Bauhaus detail wells stay
+  square to preserve the authored grid geometry.
   Relationship-connected Cards are grouped before the day sections are rendered:
   the default list mode collapses each multi-card group into one stacked tile
   showing the group's newest Card plus a count badge, while the toolbar toggle
@@ -688,17 +696,20 @@ the gallery's **Lab** section).
   PNG file. Doodle cards and Bauhaus cards with an authored replay timeline also
   get a **Video** tab that displays the generated 60 fps mp4 file. **Share
   Image** and **Share Video** hand that already-previewed file to the system
-  share sheet. Older
-  Bauhaus cards without replay data still share as still images by decoding their
-  stored grid document when available, falling back to any mirrored thumbnail
-  only when the JSON payload is unavailable. The
+  share sheet. Doodle and Bauhaus still-image exports decode their stored JSON
+  when available, so vector doodles and grid documents share as rendered images
+  even when the mirrored thumbnail is absent. Older Bauhaus cards without replay
+  data still share as still images by decoding their stored grid document,
+  falling back to any mirrored thumbnail only when the JSON payload is
+  unavailable. The
   debug **Seed Samples** action and `Card Patterns` Preview exercise the
   independent card patterns.
   Not the real entries UI.
 - **`SettingsView`** — an iCloud sync status row, a drill-in **iCloud Sync**
   diagnostics screen, a theme picker, an **Appearance** picker, a **Location**
-  toggle for automatic location attachment, optional Debug-only Lab links, and
-  About actions. The diagnostics screen separates
+  toggle for automatic location attachment, a **Widgets** section with an **Add
+  Widgets** guide, optional Debug-only Lab links, and About actions. The
+  diagnostics screen separates
   iCloud account availability,
   SwiftData row mirroring phases/recent events, custom media-file sync pending
   counts/last activity/errors, and local attachment-file availability so a row
@@ -709,7 +720,10 @@ the gallery's **Lab** section).
   setting, while **Light** and **Dark** request a fixed scene color scheme for
   Journal and update the theme palette immediately. The **Attach Location**
   toggle writes `JournalDefaults.shouldAttachLocationToNewCards`; it defaults on,
-  and when disabled new draft cards are saved without location metadata.
+  and when disabled new draft cards are saved without location metadata. **Add
+  Widgets** opens a Settings detail screen with an illustrated header and
+  step-by-step instructions for adding Tinycurve to the Home Screen, Lock Screen
+  below the clock, and StandBy.
   Capture demos are intentionally hidden from Settings. In Debug builds, **Lab**
   links to Haptics and Haptic Doodle so those tools can be tried from the current
   app root; Release builds omit the Lab section. An **About** section has

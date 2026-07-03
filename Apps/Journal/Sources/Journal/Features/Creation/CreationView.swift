@@ -13,6 +13,8 @@ import WidgetKit
 struct CreationView: View {
 
   @Environment(\.modelContext) private var modelContext
+  @Environment(\.appPalette) private var palette
+  @Environment(\.colorScheme) private var colorScheme
   @Environment(JournalNotificationCenter.self) private var notifications
 
   @AppStorage(JournalDefaults.shouldAttachLocationToNewCards)
@@ -496,7 +498,10 @@ struct CreationView: View {
 
       do {
         let storeInputs = try drafts.map {
-          try $0.storeInput()
+          try $0.storeInput(
+            palette: palette,
+            colorScheme: colorScheme
+          )
         }
         let createdCards = try JournalStore.createThread(
           cards: storeInputs,

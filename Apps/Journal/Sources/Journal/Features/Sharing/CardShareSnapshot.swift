@@ -87,8 +87,8 @@ struct CardShareSnapshot: Identifiable, Sendable, Equatable {
 /// The mutually-exclusive share payload extracted from a `Card`.
 ///
 /// Doodle carries both the encoded vector drawing and its mirrored thumbnail:
-/// the image share can use the thumbnail immediately, while replay video export
-/// can decode the vector timeline inside the Doodle-aware exporter.
+/// still-image and replay-video export can decode the vector timeline, while the
+/// thumbnail remains a fallback when the full attachment file is unavailable.
 enum CardShareContent: Sendable, Equatable {
   /// A written note.
   case text(String)

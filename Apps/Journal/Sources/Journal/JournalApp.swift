@@ -1,8 +1,10 @@
+import CaptureBauhaus
 import CaptureDoodle
 import JournalModel
 import MuColor
 import SwiftData
 import SwiftUI
+import WidgetKit
 
 @main
 struct JournalApp: App {
@@ -28,6 +30,7 @@ struct JournalApp: App {
       RootView()
         .task { DoodleHaptics.prepareForDrawing() }
         .task { await startMediaSync() }
+        .task { await backfillMediaThumbnails() }
         .task { SyncStatusMonitor.shared.start() }
     }
     .modelContainer(modelContainer)
@@ -42,6 +45,19 @@ struct JournalApp: App {
     // handled by `MediaSyncEngine`'s fetch path instead.
     let attachmentIDs = (try? JournalStore.localMediaAttachmentIDs(in: modelContainer.mainContext)) ?? []
     await mediaSync.enqueueUploads(attachmentIDs: attachmentIDs)
+  }
+
+  @MainActor
+  private func backfillMediaThumbnails() async {
+    do {
+      let updatedCount = try JournalThumbnailBackfill.run(in: modelContainer.mainContext)
+      if updatedCount > 0 {
+        WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
+      }
+    } catch {
+      // Thumbnail backfill is best-effort. The authored attachment files remain
+      // the source of truth and can be retried on a later launch.
+    }
   }
 }
 

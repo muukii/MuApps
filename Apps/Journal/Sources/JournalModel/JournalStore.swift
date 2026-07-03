@@ -87,6 +87,11 @@ extension JournalStore {
     /// Journal media directory at save time.
     public var mediaFileURL: URL?
 
+    /// Optional small raster preview mirrored through SwiftData/CloudKit for
+    /// lightweight surfaces such as widgets. The app target generates this from
+    /// capture values before crossing into `JournalModel`.
+    public var thumbnail: Data?
+
     /// Location to attach to the created card, if the user opted in and a fix
     /// was available.
     public var location: Coordinate?
@@ -96,12 +101,14 @@ extension JournalStore {
       text: String = "",
       mediaData: Data? = nil,
       mediaFileURL: URL? = nil,
+      thumbnail: Data? = nil,
       location: Coordinate? = nil
     ) {
       self.kind = kind
       self.text = text
       self.mediaData = mediaData
       self.mediaFileURL = mediaFileURL
+      self.thumbnail = thumbnail
       self.location = location
     }
   }
@@ -309,6 +316,7 @@ extension JournalStore {
           try stageDataAttachment(
             mediaData,
             kind: .photo,
+            thumbnail: draft.thumbnail,
             to: card,
             in: context
           )
@@ -321,6 +329,7 @@ extension JournalStore {
           try stageFileAttachment(
             movingFrom: mediaFileURL,
             kind: .audio,
+            thumbnail: draft.thumbnail,
             to: card,
             in: context
           )
@@ -333,6 +342,7 @@ extension JournalStore {
           try stageDataAttachment(
             mediaData,
             kind: .doodle,
+            thumbnail: draft.thumbnail,
             to: card,
             in: context
           )
@@ -345,6 +355,7 @@ extension JournalStore {
           try stageDataAttachment(
             mediaData,
             kind: .bauhaus,
+            thumbnail: draft.thumbnail,
             to: card,
             in: context
           )

@@ -58,6 +58,15 @@ extension Theme {
   /// Berry
   public static let berry = Theme(id: "berry", name: "Berry", assetName: "Berry")
 
+  /// Vermilion
+  public static let vermilion = Theme(id: "vermilion", name: "Vermilion", assetName: "Vermilion")
+
+  /// Cobalt
+  public static let cobalt = Theme(id: "cobalt", name: "Cobalt", assetName: "Cobalt")
+
+  /// Forest
+  public static let forest = Theme(id: "forest", name: "Forest", assetName: "Forest")
+
   public static let `default`: Theme = .warmCream
 
   /// All themes, in picker display order.
@@ -70,6 +79,9 @@ extension Theme {
     .citrus,
     .lagoon,
     .berry,
+    .vermilion,
+    .cobalt,
+    .forest,
   ]
 
   /// Resolves a persisted id back to a theme, falling back to `.default` for

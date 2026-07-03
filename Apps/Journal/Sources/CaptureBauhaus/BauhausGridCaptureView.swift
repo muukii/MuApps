@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 /// Persistable Bauhaus card content.
 ///
@@ -54,6 +55,24 @@ public struct BauhausGridDocument: Codable, Equatable, Sendable {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(artwork, forKey: .artwork)
     try container.encodeIfPresent(replay, forKey: .replay)
+  }
+
+  /// Rasterizes the final artwork into a square image for lightweight fallback
+  /// surfaces such as widgets. The document itself remains editable JSON; this
+  /// image is only a derived preview.
+  @MainActor
+  public func image(
+    colorScheme: ColorScheme = .light,
+    colorPalette: BauhausColorPalette = .default,
+    size: CGSize = CGSize(width: 512, height: 512),
+    scale: CGFloat = 1
+  ) -> UIImage? {
+    artwork.image(
+      colorScheme: colorScheme,
+      colorPalette: colorPalette,
+      size: size,
+      scale: scale
+    )
   }
 }
 
@@ -217,6 +236,26 @@ public struct BauhausGridArtwork: Codable, Equatable, Sendable {
   /// Whether every cell in the artwork is empty.
   public var isEmpty: Bool {
     tiles.allSatisfy { $0 == nil }
+  }
+
+  /// Rasterizes the grid artwork into a square image while keeping the stored
+  /// value as vector-like tile data.
+  @MainActor
+  public func image(
+    colorScheme: ColorScheme = .light,
+    colorPalette: BauhausColorPalette = .default,
+    size: CGSize = CGSize(width: 512, height: 512),
+    scale: CGFloat = 1
+  ) -> UIImage? {
+    guard size.width > 0, size.height > 0 else { return nil }
+    let renderer = ImageRenderer(
+      content: BauhausGridArtworkView(artwork: self, colorPalette: colorPalette)
+        .environment(\.colorScheme, colorScheme)
+        .frame(width: size.width, height: size.height)
+    )
+    renderer.scale = max(scale, 1)
+    renderer.isOpaque = true
+    return renderer.uiImage
   }
 
   private func index(for position: BauhausGridPosition) -> Int? {

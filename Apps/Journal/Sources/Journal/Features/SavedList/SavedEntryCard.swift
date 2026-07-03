@@ -47,6 +47,8 @@ private let bauhausArtworkAspectRatio: CGFloat = 1
 struct SavedEntryDetailView: View {
 
   @Environment(\.modelContext) private var modelContext
+  @Environment(\.appPalette) private var palette
+  @Environment(\.colorScheme) private var colorScheme
 
   let card: Card
   let relationshipGroupCards: [Card]
@@ -176,7 +178,10 @@ struct SavedEntryDetailView: View {
       defer { isSavingEdit = false }
 
       do {
-        let input = try draft.savingSnapshot().storeInput()
+        let input = try draft.savingSnapshot().storeInput(
+          palette: palette,
+          colorScheme: colorScheme
+        )
         let result = try JournalStore.updateCard(card, with: input, in: modelContext)
         await MediaSyncEngine.shared.enqueueUploads(attachmentIDs: result.uploadedAttachmentIDs)
         for attachmentID in result.deletedAttachmentIDs {

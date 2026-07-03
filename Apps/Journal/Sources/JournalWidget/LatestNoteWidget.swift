@@ -6,7 +6,8 @@ import WidgetKit
 
 // MARK: - Widget
 
-/// Shows the most recently created note on the Home Screen.
+/// Shows the most recently created note on Home Screen, Lock Screen, and
+/// StandBy widget surfaces.
 ///
 /// The timeline provider opens the *same* SwiftData store as the app (the shared
 /// App Group container built by `JournalStore`) and reads the single newest
@@ -15,6 +16,14 @@ import WidgetKit
 struct LatestNoteWidget: Widget {
 
   private let kind = JournalWidgetKind.latestNote
+  private let supportedFamilies: [WidgetFamily] = [
+    .systemSmall,
+    .systemMedium,
+    .systemLarge,
+    .accessoryInline,
+    .accessoryCircular,
+    .accessoryRectangular,
+  ]
 
   var body: some WidgetConfiguration {
     StaticConfiguration(kind: kind, provider: LatestNoteProvider()) { entry in
@@ -23,7 +32,7 @@ struct LatestNoteWidget: Widget {
     }
     .configurationDisplayName("Latest Note")
     .description("Shows the note you wrote most recently.")
-    .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+    .supportedFamilies(supportedFamilies)
   }
 }
 
@@ -122,14 +131,71 @@ private struct LatestNoteView: View {
   let entry: LatestNoteEntry
 
   var body: some View {
-    if let note = entry.note {
-      LatestNoteContentCard(
-        note: note,
-        family: family
-      )
-    } else {
-      LatestNoteEmptyState()
+    switch family {
+    case .accessoryInline:
+      LatestNoteInlineAccessoryView(note: entry.note)
+    case .accessoryCircular:
+      LatestNoteCircularAccessoryView(note: entry.note)
+    case .accessoryRectangular:
+      LatestNoteRectangularAccessoryView(note: entry.note)
+    default:
+      if let note = entry.note {
+        LatestNoteContentCard(
+          note: note,
+          family: family
+        )
+      } else {
+        LatestNoteEmptyState()
+      }
     }
+  }
+}
+
+private struct LatestNoteInlineAccessoryView: View {
+
+  let note: NoteSnapshot?
+
+  var body: some View {
+    Label(title, systemImage: note?.content.symbolName ?? "note.text")
+  }
+
+  private var title: String {
+    note?.content.accessoryTitle ?? "No notes yet"
+  }
+}
+
+private struct LatestNoteCircularAccessoryView: View {
+
+  let note: NoteSnapshot?
+
+  var body: some View {
+    ZStack {
+      AccessoryWidgetBackground()
+      Image(systemName: note?.content.symbolName ?? "note.text")
+        .font(.title2.weight(.semibold))
+    }
+    .widgetAccentable()
+    .accessibilityLabel(Text(note?.content.accessoryTitle ?? "No notes yet"))
+  }
+}
+
+private struct LatestNoteRectangularAccessoryView: View {
+
+  let note: NoteSnapshot?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Label("Latest", systemImage: note?.content.symbolName ?? "note.text")
+        .font(.caption2.weight(.semibold))
+
+      Text(note?.content.accessoryTitle ?? "No notes yet")
+        .font(.caption)
+        .fontWeight(.medium)
+        .lineLimit(2)
+        .multilineTextAlignment(.leading)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .widgetAccentable()
   }
 }
 
@@ -330,6 +396,19 @@ extension NoteContent {
       return "scribble.variable"
     case .bauhaus:
       return "square.grid.3x3.square"
+    }
+  }
+
+  /// Short text for constrained accessory families.
+  fileprivate var accessoryTitle: String {
+    switch self {
+    case .text(let text):
+      let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmedText.isEmpty ? "Untitled" : trimmedText
+    case .doodle:
+      return "Doodle"
+    case .bauhaus:
+      return "Bauhaus"
     }
   }
 }
