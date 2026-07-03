@@ -52,6 +52,50 @@ flowchart LR
   Share --> SharedWithYou
 ```
 
+## 実装方針
+
+この作り替えは UI rewrite ではなく、まず persistence / sync foundation の
+作り替えとして進める。UI は新しい vault store と sync state が安定してから、
+vault picker、toolbar、settings、collaboration view の順で調整する。
+
+最初の milestone は次の 2 点に集中する。
+
+1. SwiftData の CloudKit mirroring を vault store では完全に無効化する。
+2. CloudKit との同期は `VaultSyncEngine` が所有する明示的な sync layer として作る。
+
+既存の app shell は一時的に current store を読み続けてもよいが、
+新しく作る vault store API は最初から `cloudKitDatabase: .none` にする。
+`cloudKitDatabase: .automatic` を前提にした model constraint、widget query、
+media sync の分離設計は順次 target architecture に移行する。
+
+```mermaid
+flowchart LR
+  View["SwiftUI views"]
+  Store["VaultContentStore<br/>SwiftData / cloudKit: none"]
+  Metadata["SyncMetadata<br/>recordID / zoneID / changeTag"]
+  Outbox["PendingMutation"]
+  Sync["VaultSyncEngine"]
+  CloudKit["CloudKit<br/>private/shared database"]
+
+  View --> Store
+  Store --> Metadata
+  Store --> Outbox
+  Outbox --> Sync
+  Metadata --> Sync
+  Sync --> CloudKit
+  CloudKit --> Sync
+  Sync --> Store
+```
+
+画面は CloudKit を直接読まない。
+画面は SwiftData を local truth として observe し、`VaultSyncEngine` が
+remote changes を import した結果として SwiftData が更新される。
+
+`CKRecord` は local persistence ではなく transport shape として扱う。
+local model 側には `CKRecord` を丸ごと保存するのではなく、
+record ID、zone ID、change tag、encoded system fields など、再送信と
+conflict resolution に必要な metadata を保持する。
+
 ## Vault
 
 Vault は durable な collaboration boundary。
@@ -91,8 +135,7 @@ VaultCatalogStore
 
 VaultContentStore(vaultID)
   VaultInfo
-  CardGroup
-  CardGroupItem
+  CardEdge
   Card
   Attachment
   SyncMetadata
@@ -172,6 +215,27 @@ custom sync layer は次を所有する。
 sync metadata は vault store の中に置く。
 これにより、vault ごとの reset や repair を独立して実行できる。
 
+`VaultSyncEngine` は app lifetime の service として起動し、private database 用と
+shared database 用の sync path を分ける。`CKSyncEngine` を採用する場合も、
+engine state はアプリが disk に永続化する。
+
+subscription は画面ごとに作らない。
+CloudKit subscription は sync layer が idempotent に作る durable infrastructure とし、
+vault 画面を開くことは foreground sync interest として扱う。
+
+```text
+Vault screen opened
+  -> VaultSyncCoordinator.activate(vaultID)
+  -> fetchChanges / sendChanges を明示的に kick
+  -> active vault の asset download と conflict handling を優先
+  -> imported changes が VaultContentStore に merge される
+  -> SwiftUI が SwiftData observation で更新される
+```
+
+private database の owned vault では custom zone subscription を使える。
+shared database の participant vault では record zone subscription を使えないため、
+shared database subscription と change fetch のあとに zone ID で vault を振り分ける。
+
 ```mermaid
 sequenceDiagram
   participant OwnerApp as Owner app
@@ -181,7 +245,7 @@ sequenceDiagram
   participant ParticipantSync as Participant VaultSyncEngine
   participant ParticipantStore as Participant VaultContentStore
 
-  OwnerApp->>OwnerStore: Save CardGroup, Cards, Attachments
+  OwnerApp->>OwnerStore: Save CardEdges, Cards, Attachments
   OwnerSync->>OwnerStore: Read pending mutations
   OwnerSync->>CloudKit: Upload records and assets
   OwnerApp->>OwnerSync: Share vault
@@ -254,30 +318,58 @@ VaultSummary
 最初に対応する範囲は、share sheet preview、`SWCollaborationView`、share save / stop sharing の反映まで。
 Messages thread への update notice は、content edit の粒度と notification policy が固まってから入れる。
 
-## CardGroup
+## Card Tree
 
-`CardRelationship` のような任意の card-to-card graph は、core posting model には持ち込まない。
-Journal で扱いたいものは、card 同士の複雑な接続ではなく、連続している authored sequence。
+`CardGroup` のような non-card root は、core posting model には持ち込まない。
+Journal の content は、root も child も同じ shape の `CardEdge` として扱う。
 
-そのため、`CardGroup` が常に card の上位に存在する。
+GraphQL / Relay 的には、`CardEdge` が `node: Card` と edge metadata を持つ。
+UI 上は `CardEdge { card, children }` の recursive tree として組み立てる。
+永続化では `children` 配列を直接保存せず、`parentEdgeID` から導出する。
 
 ```text
-CardGroup
+Vault
+  root CardEdge
+    card
+    children: [CardEdge]
+  root CardEdge
+    card
+    children: [CardEdge]
+```
+
+target model では `CardRelationship` を廃止する。
+thread / continuation / latest item の意味は `CardEdge` で表現する。
+linear sequence では root edge と child edge を `sortIndex` で並べる。
+mind map の branch は `CardEdge.parentEdgeID` と layout metadata で表現する。
+これにより、root だけ `CardGroup` になる不自然さを避けつつ、
+任意 graph の merge、cycle 解決、relationship duplicate 解決を sync layer から外せる。
+
+`Card` は本文と attachment を持つ content atom。
+`CardEdge` はその card が vault tree 内のどこに置かれるかを表現する placement edge。
+root card も child card も、必ず 1 つの `CardEdge` を通して表示される。
+
+CloudKit には `CardEdge.parentEdgeID` を通常の field として保存する。
+必要なら `CKRecord.Reference(action: .none)` にしてもよいが、sharing boundary のために
+`CKRecord.parent` は使わない。
+削除 cascade、subtree move、cycle validation、latest item の解釈は
+CloudKit の record hierarchy ではなく domain rule として扱う。
+
+将来「この card が別の card を参照している」「この card への reply を作る」のような
+意味的な link が必要になった場合は、tree topology とは別の `CardLink` として追加する。
+`CardEdge` は placement / ordering 用、`CardLink` は semantic cross-link 用として分ける。
+
+```text
+CardEdge
   id
+  cardID
+  parentEdgeID?
+  sortIndex
+  layout?
   createdAt
   updatedAt
-  title?
-  kind
-
-CardGroupItem
-  id
-  groupID
-  cardID
-  sortIndex
 
 Card
   id
-  groupID
   kind
   body
   createdAt
@@ -294,9 +386,9 @@ Attachment
 
 ```mermaid
 erDiagram
-  VAULT_INFO ||--o{ CARD_GROUP : contains
-  CARD_GROUP ||--|{ CARD_GROUP_ITEM : orders
-  CARD ||--|| CARD_GROUP_ITEM : ordered_by
+  VAULT_INFO ||--o{ CARD_EDGE : contains
+  CARD_EDGE ||--o{ CARD_EDGE : nests
+  CARD ||--|| CARD_EDGE : placed_by
   CARD ||--o{ ATTACHMENT : owns
 
   VAULT_INFO {
@@ -304,23 +396,18 @@ erDiagram
     string title
   }
 
-  CARD_GROUP {
+  CARD_EDGE {
     uuid id
+    uuid cardID
+    uuid parentEdgeID
+    int sortIndex
+    string layout
     datetime createdAt
     datetime updatedAt
-    string title
-  }
-
-  CARD_GROUP_ITEM {
-    uuid id
-    uuid groupID
-    uuid cardID
-    int sortIndex
   }
 
   CARD {
     uuid id
-    uuid groupID
     string kind
     string body
   }
@@ -333,23 +420,32 @@ erDiagram
   }
 ```
 
-概念としては `CardGroup` が ordered card IDs を持つ。
-local store 上では、`CardGroup.orderedCardIDs` のような ordered value として表現してもよい。
-ただし sync-friendly な default は `CardGroupItem`。
-ordering の変更を通常の row mutation として扱えるため、大きな array field を毎回 mutate しなくて済む。
+概念としては Vault が root `CardEdge` の list を持つ。
+root edge は `parentEdgeID == nil`。
+child edge は同じ vault 内の parent edge を指す。
+ordering、nesting、layout の変更を通常の edge row mutation として扱えるため、
+大きな array field を毎回 mutate しなくて済む。
 
 ルールは次の通り。
 
-- すべての card は必ず 1 つの `CardGroup` に属する。
-- single-card post も、card を 1 つだけ持つ `CardGroup` として表現する。
-- thread-like post は、複数 card を authored order で持つ 1 つの `CardGroup` として表現する。
-- cross-vault grouping は許可しない。
-- cross-group reference は最初の collaboration design では scope 外にする。
+- すべての visible card は必ず 1 つの `CardEdge` から参照される。
+- single-card post は、children を持たない root `CardEdge` として表現する。
+- thread-like post は、root `CardEdge` と child edge の authored order で表現する。
+- mind-map-like post は、`CardEdge.parentEdgeID` で tree を表現する。
+- `CardEdge.parentEdgeID` は同じ vault 内の edge だけを指せる。
+- cycle は許可しない。
+- cross-vault tree は許可しない。
+- cross-tree semantic reference は最初の collaboration design では scope 外にする。
+- CloudKit の `CKRecord.parent` は hierarchy sharing 用には使わない。
+  vault は zone-wide share なので、共有境界は custom zone が表現する。
 
-この形にすると cycle detection が不要になる。
-また widget の「最新 item」の意味も明確になる。
-group 内の最新 authored item は最後に ordered された card、
-最新 post は最も新しい group として扱える。
+この形にすると任意 graph の cycle detection は不要になる。
+mind map の cycle validation は `parentEdgeID` の parent chain が同じ vault 内で
+自分自身に戻らないことだけを確認すればよい。
+また widget の「最新 item」の意味も sequence tree では明確になる。
+sequence tree 内の最新 authored item は最後に ordered された edge、
+最新 post は最も新しい root edge として扱える。
+mind map tree の widget 表示は、root edge の card または tree summary を使う。
 
 ## Media
 
@@ -383,7 +479,7 @@ Vault は別々の `ModelContainer` に分かれるため、
 
 その代わり、`VaultCatalogStore` に denormalized summary を持つ。
 
-- vault ごとの latest group
+- vault ごとの latest root edge / tree
 - vault ごとの latest visible card
 - unread / activity state
 - vault display metadata
@@ -394,7 +490,6 @@ full card content が必要な場合は vault ID から該当する `VaultConten
 
 ## 未決定事項
 
-- sync actor は open 中の vault だけ alive にするか、全 vault に background sync engine を持たせるか。
 - doodle JSON のような小さな authored data は SwiftData row に直接持つか、attachment asset として扱うか。
 - text edit の最初の conflict policy をどうするか。field-wise last write wins、explicit version、append-only replacement のどれに寄せるか。
 - `VaultCatalogStore` のうち、どこまでを user 自身の device 間で sync し、どこからを local-only にするか。
@@ -402,16 +497,80 @@ full card content が必要な場合は vault ID から該当する `VaultConten
 
 ## 最初の Spike
 
-最小の useful spike は次の順番で作る。
+最小の useful spike は UI の完成ではなく、SwiftData cloudKit off と sync layer の
+境界を確実に作ることを目的にする。
+
+Phase 1: Local vault foundation
 
 1. Personal、Friends、Partner の 3 つの vault row を持つ `VaultCatalogStore` を作る。
 2. vault ごとに separate vault store file を作る。
-3. `CardGroup` と `Card` を作り、すべての save が group を生成するようにする。
-4. vault store では SwiftData CloudKit mirroring を無効化する。
+3. vault store では SwiftData CloudKit mirroring を無効化する。
+4. `SyncMetadata` と `PendingMutation` を vault store に置く。
 5. network なしの `VaultSyncEngine` protocol と logging stub を実装する。
-6. active `ModelContainer` を差し替えて UI が vault を切り替えられることを確認する。
+6. local write が `PendingMutation` に積まれることを確認する。
 
-CloudKit zone 作成、`CKShare`、share acceptance は、この spike のあとに追加する。
+Phase 2: Content model
+
+1. `CardEdge` と `Card` を作り、すべての save が root edge を生成するようにする。
+2. `CardRelationship` の continuation 用途を `CardEdge.parentEdgeID` と `sortIndex` に置き換える。
+3. attachment row と media file を vault directory 配下へ移す。
+4. active `ModelContainer` を差し替えて UI が vault を切り替えられることを確認する。
+
+Phase 3: CloudKit transport
+
+1. owned vault ごとに custom record zone を作る。
+2. `PendingMutation` から `CKRecord` を作って private database に送る。
+3. remote changes を fetch して `VaultContentStore` に import する。
+4. `CKAsset` を attachment record と同じ vault zone で upload / download する。
+
+Phase 4: Vault lifecycle UI
+
+foundation が固まった後、UI は vault lifecycle を操作する surface として作る。
+画面は CloudKit object を直接所有せず、`VaultCatalogStore` の state と
+`VaultSyncCoordinator` の action を通して操作する。
+
+1. Vault を切り替える。
+   - vault picker / sidebar / menu は `VaultCatalogStore` の `VaultSummary` を読む。
+   - 選択された vault は `ActiveVaultSession` が `VaultContentStore(vaultID)` として開く。
+   - vault を開いたら `VaultSyncCoordinator.activate(vaultID)` を呼び、foreground fetch と asset download を優先する。
+2. Vault を作る。
+   - local catalog row、vault directory、vault content store を作る。
+   - 初期状態は unshared vault とし、CloudKit zone と `CKShare` は必要になったタイミングで作る。
+   - preset として Personal、Friends、Partner を作れるが、CloudKit 上の扱いは share の有無だけで分ける。
+3. Vault に招待する。
+   - owner 権限の vault だけ invite action を出す。
+   - sync layer が vault zone と最小 record を CloudKit に確保し、`CKShare(recordZoneID:)` を作る。
+   - share sheet / Shared with You に渡す preview title、image、permission options は vault summary から作る。
+   - share save / stop sharing は catalog の share state に反映する。
+4. Vault に参加する。
+   - app / scene delegate が `CKShare.Metadata` を受け取る。
+   - sync layer が share を accept し、shared database の zone view を local catalog row に materialize する。
+   - 初回 import が終わったら、その vault を `ActiveVaultSession` で開ける。
+   - read-only participant では compose / edit / delete UI を permission state で制限する。
+
+```mermaid
+flowchart LR
+  Picker["Vault picker"]
+  Catalog["VaultCatalogStore"]
+  Active["ActiveVaultSession"]
+  Content["VaultContentStore"]
+  Sync["VaultSyncCoordinator"]
+  ShareUI["Share / Join UI"]
+  CloudKit["CloudKit"]
+
+  Picker --> Catalog
+  Picker --> Active
+  Active --> Content
+  Active --> Sync
+  ShareUI --> Sync
+  Sync --> Catalog
+  Sync --> CloudKit
+  CloudKit --> Sync
+  Sync --> Content
+```
+
+CloudKit zone 作成、`CKShare`、share acceptance は、この local foundation と
+CloudKit transport のあとに UI action として接続する。
 
 ## Collaboration Spike
 
