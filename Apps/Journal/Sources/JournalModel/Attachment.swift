@@ -13,7 +13,9 @@ import SwiftData
 /// downloads it. The app process syncs the files deliberately through its own
 /// CKAsset records, keeping that lifecycle independent from SwiftData's mirrored
 /// rows. The trade-off is that the file lifecycle becomes the app's job — see
-/// `JournalStore.reconcileOrphanFiles` and the app target's `MediaSyncEngine`.
+/// `JournalStore.reconcileOrphanFiles` in the legacy stack. The app target no
+/// longer syncs these files directly; product migration should read the legacy
+/// CloudKit asset source and `VaultSyncEngine` owns future asset sync.
 ///
 /// CloudKit-mirroring constraints apply as on `Card`: every stored property is
 /// optional-or-defaulted, no `.unique`, and the relationship is optional.

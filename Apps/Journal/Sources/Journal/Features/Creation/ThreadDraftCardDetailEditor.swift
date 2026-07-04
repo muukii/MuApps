@@ -1,5 +1,5 @@
 import CaptureBauhaus
-import JournalModel
+import JournalVault
 import SwiftUI
 
 /// Detail editor for one creation draft card.
@@ -118,6 +118,8 @@ private struct CardEditDraftKindEditor: View {
       switch draft.kind {
       case .text:
         ThreadDraftTextDetailEditor(text: $draft.text)
+      case .link:
+        ThreadDraftLinkDetailEditor(text: $draft.text)
       case .photo:
         ThreadDraftPhotoDetailEditor(card: draft)
       case .audio:
@@ -142,6 +144,16 @@ private struct ThreadDraftTextDetailEditor: View {
 
   var body: some View {
     ThreadDraftTextEditorContent(text: $text)
+  }
+}
+
+/// URL editor for a link draft.
+private struct ThreadDraftLinkDetailEditor: View {
+
+  @Binding var text: String
+
+  var body: some View {
+    ThreadDraftLinkEditorContent(urlString: $text)
   }
 }
 
@@ -232,6 +244,8 @@ extension Card.Kind {
     switch self {
     case .text:
       return "Text Card"
+    case .link:
+      return "Link Card"
     case .photo:
       return "Photo Card"
     case .audio:

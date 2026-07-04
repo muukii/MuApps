@@ -1,6 +1,6 @@
 # Tinycurve Privacy Policy
 
-Last updated: July 2, 2026
+Last updated: July 4, 2026
 
 Tinycurve is a personal journaling app. It is designed so the developer does not
 run a server for your journal content and does not sell, track, or advertise
@@ -8,9 +8,10 @@ with your data.
 
 ## Data you create
 
-When you create cards, Tinycurve can store the text you type, photos you capture,
-audio recordings, doodles, Bauhaus artwork, timestamps, relationships between
-cards, attachment metadata, and optional location coordinates.
+When you create cards, Tinycurve can store the text you type, photos you capture
+or choose from Photos, audio recordings, doodles, Bauhaus artwork, timestamps,
+relationships between cards, attachment metadata, and optional location
+coordinates.
 
 If you choose a Journaling Suggestion, Apple presents the system picker.
 Tinycurve receives only the suggestion content you select, such as a title,
@@ -32,6 +33,9 @@ developer does not receive a copy of your journal content from this sync.
 Camera access is used only when you open photo capture and take a photo for a
 card.
 
+Photos access is used through Apple's system picker. Tinycurve receives only the
+photo you choose for a card.
+
 Microphone access is used only when you record an ambient audio card.
 
 Location access is optional. When Attach Location is enabled in Settings and iOS
@@ -47,8 +51,8 @@ When you use a share action, Tinycurve creates the selected image or video expor
 on device and hands that file to the system share sheet. The destination you
 choose controls what happens after that.
 
-The Tinycurve widget reads recent cards from the same on-device store. Widget
-content is generated locally by the widget extension.
+The Tinycurve widget reads cards from the vault you choose for that widget.
+Widget content is generated locally by the widget extension.
 
 ## Analytics, ads, and tracking
 

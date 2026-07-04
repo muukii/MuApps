@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// The shared persistence layer for the Journal app and its extensions.
+/// Legacy shared persistence layer for the Journal app and its extensions.
 ///
 /// The SwiftData store lives in the **App Group** container so the app process
 /// and the Widget process read the same database; CloudKit mirroring keeps it
@@ -9,8 +9,9 @@ import SwiftData
 /// journal data must declare `appGroupIdentifier` in their entitlements, or the
 /// shared container is inaccessible and `makeModelContainer()` throws.
 ///
-/// This is the single source of truth for the schema and store location — never
-/// build a `ModelContainer` for journal data anywhere else.
+/// This remains the single source of truth for the legacy schema and store
+/// location while the app migrates to `JournalVault`. New persistence work
+/// should use `VaultContentStore` through the app target's active vault runtime.
 ///
 /// - Tag: JournalStore
 public enum JournalStore {
@@ -29,13 +30,18 @@ public enum JournalStore {
     CardRelationship.self,
   ])
 
-  /// Builds the shared `ModelContainer`. Called by the app at launch and by the
-  /// widget's timeline provider.
+  /// Builds the shared `ModelContainer`. Called only by legacy surfaces such as
+  /// the widget's timeline provider.
   ///
   /// `groupContainer: .identifier(...)` places the store inside the App Group
   /// container so both processes see the same file; `cloudKitDatabase:
   /// .automatic` mirrors it through the iCloud container declared in
   /// entitlements (`iCloud.app.muukii.journal`).
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel mirrored store. Use JournalVaultRuntime.selectedVault/VaultContentStore for new persistence."
+  )
   public static func makeModelContainer() throws -> ModelContainer {
     let configuration = ModelConfiguration(
       schema: schema,
@@ -43,6 +49,58 @@ public enum JournalStore {
       cloudKitDatabase: .automatic
     )
     return try ModelContainer(for: schema, configurations: configuration)
+  }
+
+  /// Opens the legacy store as a local-only reader.
+  ///
+  /// This points at the same App Group SQLite store as `makeModelContainer()`,
+  /// but disables CloudKit for this process. It remains for widget/local tooling;
+  /// product vault migration must read legacy CloudKit records and write the
+  /// destination vault zone instead of trusting one device's SQLite cache.
+  public static func makeLocalOnlyModelContainer() throws -> ModelContainer {
+    let configuration = ModelConfiguration(
+      schema: schema,
+      groupContainer: .identifier(appGroupIdentifier),
+      cloudKitDatabase: .none
+    )
+    return try ModelContainer(for: schema, configurations: configuration)
+  }
+
+  /// Opens the legacy store as a local migration source.
+  @available(
+    *,
+    deprecated,
+    message: "Local SwiftData SQLite is not the product migration source. Use CloudKit legacy query/write migration."
+  )
+  public static func makeMigrationSourceModelContainer() throws -> ModelContainer {
+    try makeLocalOnlyModelContainer()
+  }
+
+  /// On-disk location of a legacy attachment's bytes for local tooling.
+  ///
+  /// This intentionally remains separate from `fileURL(for:)`, which is
+  /// deprecated for product code.
+  @available(
+    *,
+    deprecated,
+    message: "Local attachment files are not the product migration source. Use CloudKit CKAsset migration."
+  )
+  public static func migrationSourceFileURL(for attachment: Attachment) throws -> URL {
+    try migrationSourceMediaDirectory()
+      .appending(path: attachment.fileName, directoryHint: .notDirectory)
+  }
+
+  private static func migrationSourceMediaDirectory() throws -> URL {
+    guard
+      let container = FileManager.default.containerURL(
+        forSecurityApplicationGroupIdentifier: appGroupIdentifier
+      )
+    else {
+      throw Error.appGroupContainerUnavailable
+    }
+    let directory = container.appending(path: "Media", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
   }
 }
 
@@ -72,12 +130,18 @@ extension JournalStore {
   /// App-side draft state may keep rich capture values while the user edits. The
   /// store only receives normalized bytes / file URLs at the write boundary so
   /// `JournalModel` stays independent of capture frameworks.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel write input. Use VaultContentStore.CardDraft."
+  )
   public struct ThreadCardInput: Sendable {
 
     /// Primary modality of the card to create.
     public var kind: Card.Kind
 
-    /// Text body for `.text` cards. Media cards ignore it.
+    /// Textual payload for body-backed cards. `.text` stores written content;
+    /// `.link` stores the canonical URL string. Media cards ignore it.
     public var text: String
 
     /// In-memory attachment bytes for photo, doodle, and Bauhaus cards.
@@ -118,6 +182,11 @@ extension JournalStore {
   /// The app target uses these IDs after the SwiftData transaction succeeds to
   /// enqueue matching media uploads and remote CKAsset deletions without passing
   /// SwiftData model objects across actor boundaries.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel media-sync result. Use VaultContentStore writes and VaultSyncEngine outbox state."
+  )
   public struct CardUpdateResult: Sendable {
 
     /// Newly written attachments whose files should be uploaded.
@@ -156,6 +225,11 @@ extension JournalStore {
   ///     Passing `nil` creates a standalone card.
   ///   - context: The `ModelContext` to insert into (the app's main context).
   /// - Returns: The inserted `Card`.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel writer. Use VaultContentStore.createThread(cards:) and CardEdge."
+  )
   @MainActor
   @discardableResult
   public static func createCard(
@@ -197,6 +271,11 @@ extension JournalStore {
   ///   - source: Existing card this thread continues from, if any.
   ///   - context: The `ModelContext` to insert into.
   /// - Returns: The inserted cards in the same order as `drafts`.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel writer. Use VaultContentStore.createThread(cards:)."
+  )
   @MainActor
   @discardableResult
   public static func createThread(
@@ -248,6 +327,11 @@ extension JournalStore {
   /// and file are removed after the new payload has been staged and the SwiftData
   /// save succeeds. That keeps readers pointed at either the old complete card
   /// or the new complete card, never at an intentionally empty media slot.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel editor. Use VaultContentStore update/delete APIs."
+  )
   @MainActor
   @discardableResult
   public static func updateCard(
@@ -260,7 +344,12 @@ extension JournalStore {
     let oldFileURLs = oldAttachments.compactMap { try? fileURL(for: $0) }
 
     card.kind = input.kind
-    card.body = input.kind == .text ? input.text : ""
+    switch input.kind {
+    case .text, .link:
+      card.body = input.text
+    case .photo, .audio, .doodle, .bauhaus, .unknown:
+      card.body = ""
+    }
     card.location = input.location
     card.updatedAt = Date()
 
@@ -285,6 +374,8 @@ extension JournalStore {
     switch kind {
     case .text:
       return Card(text: body)
+    case .link:
+      return Card(linkURLString: body)
     case .photo:
       return Card(photo: nil)
     case .audio:
@@ -302,13 +393,18 @@ extension JournalStore {
 
   @MainActor
   @discardableResult
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel media staging. Use VaultContentStore attachment writes."
+  )
   private static func stageAttachment(
     from draft: ThreadCardInput,
     to card: Card,
     in context: ModelContext
   ) throws -> [Attachment] {
     switch draft.kind {
-    case .text:
+    case .text, .link:
       return []
     case .photo:
       if let mediaData = draft.mediaData {
@@ -386,6 +482,11 @@ extension JournalStore {
   ///   - kind: The domain meaning of the edge.
   ///   - context: The `ModelContext` to insert into.
   /// - Returns: The inserted relationship, or the existing equivalent edge.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy CardRelationship writer. Use CardEdge in the vault store."
+  )
   @MainActor
   @discardableResult
   public static func createRelationship(
@@ -542,6 +643,11 @@ extension JournalStore {
   /// Bytes are stored here as files rather than inside the SwiftData store on
   /// purpose (see `Attachment`), so this directory is **not** SwiftData-mirrored.
   /// The app process syncs these files separately as CloudKit assets.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel media directory. Use VaultContentStore.mediaDirectoryURL."
+  )
   public static func mediaDirectory() throws -> URL {
     guard
       let container = FileManager.default.containerURL(
@@ -556,6 +662,11 @@ extension JournalStore {
   }
 
   /// On-disk location of an attachment's bytes.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel media path. Use VaultContentStore.fileURL(for:)."
+  )
   public static func fileURL(for attachment: Attachment) throws -> URL {
     try mediaDirectory().appending(path: attachment.fileName, directoryHint: .notDirectory)
   }
@@ -566,6 +677,11 @@ extension JournalStore {
   /// have missed. It is intentionally keyed by both the SwiftData row and the
   /// local file: a row imported from iCloud before its CKAsset has downloaded
   /// should not enqueue an upload for a file that is not here yet.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy MediaSyncEngine backfill query. Use VaultSyncEngine outbox/asset state."
+  )
   @MainActor
   public static func localMediaAttachmentIDs(in context: ModelContext) throws -> [UUID] {
     let attachments = try context.fetch(FetchDescriptor<Attachment>())
@@ -584,6 +700,11 @@ extension JournalStore {
   ///
   /// This is diagnostic state for Settings: it tells the user whether media rows
   /// have arrived from SwiftData/CloudKit before their separate CKAsset files.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy row/media diagnostic. Use VaultSyncEngine and VaultCatalogStore sync state."
+  )
   @MainActor
   public static func localMediaAvailability(in context: ModelContext) throws -> LocalMediaAvailability {
     let attachments = try context.fetch(FetchDescriptor<Attachment>())
@@ -610,6 +731,11 @@ extension JournalStore {
   /// orphan file (reclaimed by `reconcileOrphanFiles`) rather than a row pointing at
   /// missing bytes. The host generates `thumbnail` and converts capture-component
   /// values into these primitives, so the capture frameworks stay persistence-agnostic.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel media writer. Use VaultContentStore.createThread(cards:) or vault attachment writes."
+  )
   @MainActor
   @discardableResult
   public static func attachData(
@@ -633,6 +759,11 @@ extension JournalStore {
   /// Attaches a file already on disk (an audio recording in the temporary directory)
   /// by **moving** it into the media directory — no second copy in memory, which
   /// matters for large recordings.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel media writer. Use VaultContentStore.createThread(cards:) or vault attachment writes."
+  )
   @MainActor
   @discardableResult
   public static func attachFile(
@@ -659,6 +790,11 @@ extension JournalStore {
   ///
   /// - Returns: The deleted attachment id, so the app target can enqueue deletion
   ///   of the matching remote CKAsset after this local transaction succeeds.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel media delete. Use VaultContentStore delete/cascade APIs."
+  )
   @MainActor
   @discardableResult
   public static func deleteAttachment(_ attachment: Attachment, in context: ModelContext) throws -> UUID {
@@ -679,6 +815,11 @@ extension JournalStore {
   ///
   /// Safe to run at launch and after a sync import: it is keyed off the store as the
   /// source of truth, so it never removes a file that still has a live row.
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel media repair. Use vault-scoped media repair under VaultContentStore."
+  )
   @MainActor
   public static func reconcileOrphanFiles(in context: ModelContext) throws {
     let directory = try mediaDirectory()
@@ -694,6 +835,11 @@ extension JournalStore {
 
   @MainActor
   @discardableResult
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel media staging. Use VaultContentStore attachment writes."
+  )
   private static func stageDataAttachment(
     _ data: Data,
     kind: Attachment.Kind,
@@ -712,6 +858,11 @@ extension JournalStore {
 
   @MainActor
   @discardableResult
+  @available(
+    *,
+    deprecated,
+    message: "Legacy JournalModel media staging. Use VaultContentStore attachment writes."
+  )
   private static func stageFileAttachment(
     movingFrom sourceURL: URL,
     kind: Attachment.Kind,

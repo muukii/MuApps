@@ -1,6 +1,7 @@
 #if DEBUG
 import MuHaptics
 #endif
+import JournalVault
 import MuColor
 import SwiftUI
 
@@ -18,9 +19,19 @@ enum JournalDefaults {
   /// coordinate when system location permission allows it.
   static let shouldAttachLocationToNewCards = "journal.creation.attachLocation"
 
-  /// Whether the first-run onboarding has been completed. While `false`,
-  /// `RootView` shows `OnboardingView` instead of the main app.
+  /// Whether first-run onboarding has been completed.
+  ///
+  /// `RootView` uses this only after launch-time vault recovery has determined
+  /// that no local or remote vaults exist. Existing vault state routes directly
+  /// to the main vault flow, even after reinstall.
   static let hasCompletedOnboarding = "journal.onboarding.completed"
+
+  /// Whether the app has resolved its first vault availability decision.
+  ///
+  /// `RootView` uses this as a presentation cache only. The vault runtime still
+  /// starts on every launch, but only the first install launch blocks while the
+  /// app decides whether to recover iCloud vaults or continue from local-only state.
+  static let hasResolvedInitialVaultAvailability = "journal.vault.initialAvailability.resolved"
 }
 
 /// The user's app-wide appearance preference.
@@ -70,6 +81,8 @@ struct SettingsScreen: View {
 
 struct SettingsView: View {
 
+  @Environment(JournalVaultRuntime.self) private var vaultRuntime
+
   @AppStorage(JournalDefaults.themeID) private var themeID: String = Theme.default.id
   @AppStorage(JournalDefaults.appearancePreferenceID)
   private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
@@ -83,17 +96,20 @@ struct SettingsView: View {
 
   var body: some View {
     Form {
+      #if DEBUG
       Section {
         NavigationLink {
-          SyncDetailsView()
+          VaultRuntimeDebugView(runtime: vaultRuntime)
         } label: {
-          SyncStatusRow(summary: SyncStatusMonitor.shared.summary)
+          VaultRuntimeSummaryRow(runtime: vaultRuntime)
         }
       } header: {
-        Text("iCloud Sync")
+        Text("Vault Runtime")
       } footer: {
-        Text("Notes sync automatically across devices signed in to the same iCloud account.")
+        Text("Debug surface for the selected vault instance and explicit sync runtime.")
       }
+      .settingsListRowBackground()
+      #endif
 
       NavigationLink {
         ThemeSelectionView()
@@ -107,6 +123,7 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
         }
       }
+      .settingsListRowBackground()
 
       AppearanceSection(selectionID: $appearancePreferenceID)
       LocationSection(isEnabled: $shouldAttachLocationToNewCards)
@@ -126,6 +143,7 @@ struct SettingsView: View {
           Label("Haptic Doodle", systemImage: "hand.tap")
         }
       }
+      .settingsListRowBackground()
       #endif
 
       Section("About") {
@@ -141,8 +159,8 @@ struct SettingsView: View {
           Label("Show Onboarding", systemImage: "sparkles")
         }
       }
+      .settingsListRowBackground()
     }
-//    .listRowBackground(Rectangle().fill(.appSecondaryContainer))
     .scrollContentBackground(.hidden)
     .background(.background)
     .navigationTitle("Settings")
@@ -177,6 +195,7 @@ fileprivate struct AppearanceSection: View {
     } footer: {
       Text("System follows the device setting. Light and Dark override it for Journal.")
     }
+    .settingsListRowBackground()
   }
 }
 
@@ -195,6 +214,7 @@ fileprivate struct WidgetInstructionsSection: View {
     } footer: {
       Text("Instructions for adding Tinycurve to the Home Screen, Lock Screen, and StandBy.")
     }
+    .settingsListRowBackground()
   }
 }
 
@@ -213,94 +233,181 @@ fileprivate struct LocationSection: View {
     } footer: {
       Text("When enabled, new cards attach your current location automatically if iOS allows Journal to access it.")
     }
+    .settingsListRowBackground()
   }
 }
 
+fileprivate extension View {
 
-/// Renders the coarse `SyncStatusMonitor.Summary` as an icon + label. Presentation
-/// (symbol, color, copy) lives here; the monitor only owns state.
-struct SyncStatusRow: View {
+  /// Gives `Form` rows the same themed surface as Journal's custom list cells.
+  ///
+  /// SwiftUI's grouped `Form` row background does not inherit the app palette
+  /// automatically, so each Settings row/section opts into the theme explicitly.
+  func settingsListRowBackground() -> some View {
+    listRowBackground(Rectangle().fill(.appSecondaryContainer))
+  }
+}
 
-  let summary: SyncStatusMonitor.Summary
+#if DEBUG
+/// Compact Settings row for the target vault runtime.
+fileprivate struct VaultRuntimeSummaryRow: View {
+
+  let runtime: JournalVaultRuntime
 
   var body: some View {
     HStack(spacing: 12) {
-      Image(systemName: symbol)
+      Image(systemName: "shippingbox")
         .font(.title3)
         .foregroundStyle(iconStyle)
         .frame(width: 28)
 
       VStack(alignment: .leading, spacing: 2) {
-        Text(title)
+        Text("Vault Runtime")
           .foregroundStyle(.primary)
-        if let detail {
-          Text(detail)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
+        Text(detailText)
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
 
       Spacer(minLength: 0)
-
-      if isSyncing {
-        ProgressView()
-      }
     }
   }
 
-  private var isSyncing: Bool {
-    if case .syncing = summary { return true }
-    return false
-  }
-
-  private var symbol: String {
-    switch summary {
-    case .checking: "icloud"
-    case .accountUnavailable: "lock.icloud"
-    case .syncing: "arrow.clockwise.icloud"
-    case .failed: "exclamationmark.icloud"
-    case .idle: "checkmark.icloud"
+  private var detailText: String {
+    if let vault = runtime.selectedVault {
+      return "\(vault.title) • \(runtime.selectedVaultState.displayTitle)"
     }
+    return runtime.state.displayTitle
   }
 
   private var iconStyle: AnyShapeStyle {
-    switch summary {
-    case .checking, .accountUnavailable: AnyShapeStyle(.secondary)
-    case .syncing: AnyShapeStyle(.tint)
-    case .failed: AnyShapeStyle(.red)
-    case .idle: AnyShapeStyle(.green)
-    }
-  }
-
-  private var title: String {
-    switch summary {
-    case .checking: "Checking iCloud…"
-    case .accountUnavailable(let reason): reason
-    case .syncing(let label): label
-    case .failed: "Sync error"
-    case .idle: "Synced"
-    }
-  }
-
-  private var detail: String? {
-    switch summary {
-    case .checking, .syncing:
-      return nil
-    case .accountUnavailable:
-      return "Sign in to iCloud in the Settings app to sync."
-    case .failed(let message):
-      return message
-    case .idle(let lastSyncedAt):
-      guard let lastSyncedAt else { return "iCloud sync is on." }
-      return "Last synced \(lastSyncedAt.formatted(.relative(presentation: .named)))."
+    switch runtime.state {
+    case .starting:
+      AnyShapeStyle(.secondary)
+    case .ready:
+      AnyShapeStyle(.green)
+    case .failed:
+      AnyShapeStyle(.red)
     }
   }
 }
 
+/// Debug screen for checking that `JournalVault` is alive inside the app shell.
+fileprivate struct VaultRuntimeDebugView: View {
+
+  let runtime: JournalVaultRuntime
+
+  var body: some View {
+    Form {
+      Section {
+        LabeledContent("Runtime", value: runtime.state.displayTitle)
+        if let detail = runtime.state.displayDetail {
+          LabeledContent("Runtime Error", value: detail)
+        }
+        if let resolution = runtime.lastInitialAvailabilityResolution {
+          LabeledContent("Initial Availability", value: resolution.displayTitle)
+          if let detail = resolution.displayDetail {
+            LabeledContent("Availability Detail", value: detail)
+          }
+        }
+        LabeledContent("Selected Vault", value: runtime.selectedVaultState.displayTitle)
+        if let detail = runtime.selectedVaultState.displayDetail {
+          LabeledContent("Selected Vault Error", value: detail)
+        }
+        LabeledContent("Vault Count", value: runtime.vaults.count.formatted())
+        if let pending = runtime.selectedVault?.pendingMutationCount {
+          LabeledContent("Selected Outbox", value: pending.formatted())
+        }
+        if let lastRefreshedAt = runtime.lastRefreshedAt {
+          LabeledContent(
+            "Refreshed",
+            value: lastRefreshedAt.formatted(date: .omitted, time: .standard)
+          )
+        }
+        if let lastMessage = runtime.lastMessage {
+          LabeledContent("Message", value: lastMessage)
+        }
+      } header: {
+        Text("Status")
+      }
+      .settingsListRowBackground()
+
+      Section {
+        ForEach(runtime.vaults, id: \.vaultID) { vault in
+          Button {
+            Task { await runtime.selectVault(vault.vaultID) }
+          } label: {
+            HStack {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(vault.title)
+                  .foregroundStyle(.primary)
+                Text(vault.ownership.displayTitle)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+
+              Spacer(minLength: 0)
+
+              if runtime.selectedVault?.vaultID == vault.vaultID {
+                Image(systemName: "checkmark")
+                  .foregroundStyle(.tint)
+              }
+            }
+          }
+        }
+      } header: {
+        Text("Vaults")
+      }
+      .settingsListRowBackground()
+
+      Section {
+        Button {
+          Task { await runtime.refresh() }
+        } label: {
+          Label("Refresh", systemImage: "arrow.clockwise")
+        }
+
+        Button {
+          Task { await runtime.createDebugTextCard() }
+        } label: {
+          Label("Write Debug Card", systemImage: "square.and.pencil")
+        }
+      } header: {
+        Text("Actions")
+      } footer: {
+        Text("Debug writes go through the selected vault instance and wake the configured sync engine.")
+      }
+      .settingsListRowBackground()
+    }
+    .scrollContentBackground(.hidden)
+    .background(.background)
+    .navigationTitle("Vault Runtime")
+    .navigationBarTitleDisplayMode(.inline)
+    .task { await runtime.refresh() }
+  }
+}
+
+private extension VaultOwnership {
+
+  /// Developer-facing ownership label for the vault runtime debug UI.
+  var displayTitle: String {
+    switch self {
+    case .owned:
+      "Owned"
+    case .participant:
+      "Participant"
+    }
+  }
+}
+#endif
+
+
 // MARK: - Previews
 
 #Preview {
+  let vaultRuntime = JournalVaultRuntime.previewRuntime()
   NavigationStack {
     SettingsView()
   }
+  .environment(vaultRuntime)
 }

@@ -3,7 +3,7 @@ import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
 import Foundation
-import JournalModel
+import JournalVault
 import MuColor
 import Observation
 import SwiftUI
@@ -62,8 +62,15 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   var kind: Card.Kind
 
   /// Written content for text drafts. Media drafts do not treat this as a
-  /// caption, but it stays available if the user switches the draft back to text.
+  /// caption. Link drafts use this same body slot as raw URL text until save
+  /// time normalizes it.
   var text: String
+
+  /// Normalized URL for a link draft, or `nil` while the typed value is not a
+  /// previewable web URL.
+  var linkURL: JournalLinkURL? {
+    JournalLinkURL(text)
+  }
 
   /// Captured still photo kept in the component's own value type until save.
   var photo: CapturedPhoto?
@@ -91,6 +98,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     switch kind {
     case .text:
       return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    case .link:
+      return linkURL != nil
     case .photo:
       return photo != nil
     case .audio:
@@ -187,6 +196,12 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     self.photo = photo
   }
 
+  /// Stores raw URL text and switches the draft to link mode.
+  func setLinkURLString(_ urlString: String) {
+    kind = .link
+    text = urlString
+  }
+
   /// Stores a completed audio recording and switches the draft to audio mode.
   func setAudio(_ audio: AudioRecording) {
     kind = .audio
@@ -235,8 +250,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
 /// Save-time copy of a draft card.
 ///
 /// The snapshot freezes capture values and any already-attached coordinate,
-/// then converts them into JournalModel's persistence input immediately before
-/// the write.
+/// then converts them into vault persistence input immediately before the write.
 struct CardEditDraftSnapshot: Sendable, Codable {
 
   /// Maximum pixel edge for thumbnails mirrored through SwiftData. Full authored
@@ -256,34 +270,43 @@ struct CardEditDraftSnapshot: Sendable, Codable {
   var location: Coordinate?
 
   @MainActor
-  func storeInput(
+  func vaultDraft(
     palette: Palette = .default,
     colorScheme: ColorScheme = .light
-  ) throws -> JournalStore.ThreadCardInput {
+  ) throws -> VaultContentStore.CardDraft {
     switch kind {
     case .text:
-      return JournalStore.ThreadCardInput(
+      return VaultContentStore.CardDraft(
         kind: .text,
         text: text,
         location: location
       )
+    case .link:
+      guard let linkURL = JournalLinkURL(text) else {
+        throw CardEditDraftSnapshotError.invalidLinkURL
+      }
+      return VaultContentStore.CardDraft(
+        kind: .link,
+        text: linkURL.storageString,
+        location: location
+      )
     case .photo:
       guard let photo else { throw CardEditDraftSnapshotError.missingMediaPayload }
-      return JournalStore.ThreadCardInput(
+      return VaultContentStore.CardDraft(
         kind: .photo,
         mediaData: photo.imageData,
         location: location
       )
     case .audio:
       guard let audio else { throw CardEditDraftSnapshotError.missingMediaPayload }
-      return JournalStore.ThreadCardInput(
+      return VaultContentStore.CardDraft(
         kind: .audio,
         mediaFileURL: audio.fileURL,
         location: location
       )
     case .doodle:
       guard let doodle else { throw CardEditDraftSnapshotError.missingMediaPayload }
-      return JournalStore.ThreadCardInput(
+      return VaultContentStore.CardDraft(
         kind: .doodle,
         mediaData: try JSONEncoder().encode(doodle),
         thumbnail: doodleThumbnailData(for: doodle, palette: palette),
@@ -293,7 +316,7 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       guard let bauhaus, bauhaus.artwork.isEmpty == false else {
         throw CardEditDraftSnapshotError.missingMediaPayload
       }
-      return JournalStore.ThreadCardInput(
+      return VaultContentStore.CardDraft(
         kind: .bauhaus,
         mediaData: try JSONEncoder().encode(bauhaus),
         thumbnail: bauhausThumbnailData(for: bauhaus, colorScheme: colorScheme),
@@ -329,6 +352,7 @@ struct CardEditDraftSnapshot: Sendable, Codable {
 
 enum CardEditDraftSnapshotError: Error {
   case missingMediaPayload
+  case invalidLinkURL
   case unsupportedKind
 }
 

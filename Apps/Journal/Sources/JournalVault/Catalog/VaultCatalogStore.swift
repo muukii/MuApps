@@ -1,0 +1,230 @@
+import Foundation
+import SwiftData
+
+/// Sendable snapshot of one catalog row, safe to hand to the sync engine.
+public struct VaultDescriptor: Hashable, Sendable {
+  public let vaultID: VaultID
+  public let title: String
+  public let ownership: VaultOwnership
+  public let zoneOwnerName: String?
+
+  public init(
+    vaultID: VaultID,
+    title: String,
+    ownership: VaultOwnership,
+    zoneOwnerName: String? = nil
+  ) {
+    self.vaultID = vaultID
+    self.title = title
+    self.ownership = ownership
+    self.zoneOwnerName = zoneOwnerName
+  }
+}
+
+/// The small catalog store behind the vault picker, launch routing, and widget
+/// summaries. Holds no card content — those live in each vault's own
+/// `VaultContentStore`.
+///
+/// CloudKit mirroring is disabled here too: how much of the catalog should sync
+/// between the user's own devices is an open design question, and vaults
+/// discovered remotely are materialized by the sync engine anyway.
+public struct VaultCatalogStore: Sendable {
+
+  public static let schema = Schema([
+    VaultIndex.self,
+    VaultLocalState.self,
+    VaultSummary.self,
+  ])
+
+  public let container: ModelContainer
+  public let layout: VaultStoreLayout
+
+  /// Opens (creating on first launch) the catalog store at
+  /// `layout.catalogStoreURL`.
+  public static func open(layout: VaultStoreLayout) throws -> VaultCatalogStore {
+    try layout.ensureRootDirectories()
+    let configuration = ModelConfiguration(
+      schema: schema,
+      url: layout.catalogStoreURL,
+      cloudKitDatabase: .none
+    )
+    let container = try ModelContainer(for: schema, configurations: configuration)
+    return VaultCatalogStore(container: container, layout: layout)
+  }
+}
+
+// MARK: - Reading
+
+extension VaultCatalogStore {
+
+  /// All known vaults in picker order.
+  @MainActor
+  public func vaultDescriptors() throws -> [VaultDescriptor] {
+    let descriptor = FetchDescriptor<VaultIndex>(sortBy: [SortDescriptor(\.sortIndex)])
+    return try container.mainContext.fetch(descriptor).map { index in
+      VaultDescriptor(
+        vaultID: VaultID(rawValue: index.vaultID),
+        title: index.title,
+        ownership: index.ownership,
+        zoneOwnerName: index.zoneOwnerName
+      )
+    }
+  }
+}
+
+// MARK: - Writing
+
+extension VaultCatalogStore {
+
+  /// Creates a new owned vault: its directory, content store, seeded
+  /// `VaultInfo` row (queued for upload), and the catalog rows.
+  ///
+  /// The CloudKit zone is **not** created here — the sync engine creates it
+  /// lazily when the vault's first record upload reports `zoneNotFound`.
+  ///
+  /// Ordering note: the content store is seeded before the catalog rows are
+  /// saved. A crash in between leaves an orphan vault directory, which is inert
+  /// — the catalog is the source of truth for which vaults exist.
+  @MainActor
+  @discardableResult
+  public func createVault(title: String, using registry: VaultStoreRegistry) throws -> VaultID {
+    let vaultID = VaultID()
+    try layout.ensureVaultDirectories(for: vaultID)
+
+    let store = try registry.store(for: vaultID)
+    try store.seedVaultInfo(title: title)
+
+    let context = container.mainContext
+    context.insert(
+      VaultIndex(
+        vaultID: vaultID.rawValue,
+        title: title,
+        ownership: .owned,
+        sortIndex: try nextSortIndex(in: context)
+      )
+    )
+    context.insert(VaultLocalState(vaultID: vaultID.rawValue))
+    context.insert(VaultSummary(vaultID: vaultID.rawValue, title: title))
+    try context.save()
+    return vaultID
+  }
+
+  /// Materializes catalog rows for a vault discovered remotely — a zone fetched
+  /// from CloudKit that this device has no row for (created on the user's other
+  /// device, or a newly joined share). Idempotent.
+  ///
+  /// The title is typically empty at this point; it arrives with the vault's
+  /// `VaultInfo` record via `applyImportedVaultInfo`.
+  @MainActor
+  public func materializeRemoteVault(_ descriptor: VaultDescriptor) throws {
+    let context = container.mainContext
+    guard try fetchIndex(vaultID: descriptor.vaultID, in: context) == nil else { return }
+    try layout.ensureVaultDirectories(for: descriptor.vaultID)
+
+    context.insert(
+      VaultIndex(
+        vaultID: descriptor.vaultID.rawValue,
+        title: descriptor.title,
+        ownership: descriptor.ownership,
+        zoneOwnerName: descriptor.zoneOwnerName,
+        sortIndex: try nextSortIndex(in: context)
+      )
+    )
+    context.insert(VaultLocalState(vaultID: descriptor.vaultID.rawValue))
+    context.insert(
+      VaultSummary(
+        vaultID: descriptor.vaultID.rawValue,
+        title: descriptor.title,
+        // A participant vault is by definition shared; permission details
+        // arrive later with the share metadata.
+        isShared: descriptor.ownership == .participant,
+        permission: {
+          switch descriptor.ownership {
+          case .owned:
+            return .owner
+          case .participant:
+            return .readWrite
+          }
+        }()
+      )
+    )
+    try context.save()
+  }
+
+  /// Applies a vault title imported from its `VaultInfo` record.
+  @MainActor
+  public func applyImportedVaultInfo(vaultID: VaultID, title: String) throws {
+    let context = container.mainContext
+    guard let index = try fetchIndex(vaultID: vaultID, in: context) else { return }
+    index.title = title
+    if let summary = try fetchSummary(vaultID: vaultID, in: context) {
+      summary.title = title
+    }
+    try context.save()
+  }
+
+  /// Records that the sync layer finished importing remote changes.
+  @MainActor
+  public func noteVaultSynced(_ vaultID: VaultID, at date: Date = Date()) throws {
+    let context = container.mainContext
+    guard let localState = try fetchLocalState(vaultID: vaultID, in: context) else { return }
+    localState.lastSyncedAt = date
+    try context.save()
+  }
+
+  /// Persists the latest CloudKit share summary for lightweight UI surfaces.
+  ///
+  /// `VaultSummary` stores only display and routing metadata. The live
+  /// `CKShare` stays owned by `VaultSyncEngine`, and participant membership is
+  /// refreshed by the sharing flow as the system UI saves changes.
+  @MainActor
+  public func applyShareInfo(
+    vaultID: VaultID,
+    isShared: Bool,
+    shareURL: URL?,
+    shareRecordName: String?,
+    participantCount: Int,
+    permission: VaultPermissionSummary
+  ) throws {
+    let context = container.mainContext
+    guard let summary = try fetchSummary(vaultID: vaultID, in: context) else { return }
+    summary.isShared = isShared
+    summary.shareURL = shareURL?.absoluteString
+    summary.shareRecordName = shareRecordName
+    summary.participantCount = participantCount
+    summary.permission = permission
+    try context.save()
+  }
+
+  // MARK: - Fetch helpers
+
+  @MainActor
+  private func nextSortIndex(in context: ModelContext) throws -> Int {
+    let indices = try context.fetch(FetchDescriptor<VaultIndex>())
+    return (indices.map(\.sortIndex).max() ?? -1) + 1
+  }
+
+  @MainActor
+  private func fetchIndex(vaultID: VaultID, in context: ModelContext) throws -> VaultIndex? {
+    let rawValue = vaultID.rawValue
+    var descriptor = FetchDescriptor<VaultIndex>(predicate: #Predicate { $0.vaultID == rawValue })
+    descriptor.fetchLimit = 1
+    return try context.fetch(descriptor).first
+  }
+
+  @MainActor
+  private func fetchSummary(vaultID: VaultID, in context: ModelContext) throws -> VaultSummary? {
+    let rawValue = vaultID.rawValue
+    var descriptor = FetchDescriptor<VaultSummary>(predicate: #Predicate { $0.vaultID == rawValue })
+    descriptor.fetchLimit = 1
+    return try context.fetch(descriptor).first
+  }
+
+  @MainActor
+  private func fetchLocalState(vaultID: VaultID, in context: ModelContext) throws -> VaultLocalState? {
+    let rawValue = vaultID.rawValue
+    var descriptor = FetchDescriptor<VaultLocalState>(predicate: #Predicate { $0.vaultID == rawValue })
+    descriptor.fetchLimit = 1
+    return try context.fetch(descriptor).first
+  }
+}

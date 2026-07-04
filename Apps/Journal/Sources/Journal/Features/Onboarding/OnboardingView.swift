@@ -117,7 +117,7 @@ fileprivate struct WelcomePage: View {
         Text("Welcome to Journal")
           .font(.largeTitle.bold())
           .multilineTextAlignment(.center)
-        Text("Capture text, photos, doodles, and sound — each kept as a simple card that syncs across your devices.")
+        Text("Capture text, links, photos, doodles, and sound — each kept as a simple card that syncs across your devices.")
           .font(.body)
           .foregroundStyle(.secondary)
           .multilineTextAlignment(.center)
@@ -242,6 +242,7 @@ private struct CaptureMethod: Identifiable {
 
   static let all: [CaptureMethod] = [
     .init(id: "text", icon: "text.alignleft", name: "Text", summary: "Jot down what's on your mind."),
+    .init(id: "link", icon: "link", name: "Link", summary: "Save a web page with a native preview."),
     .init(id: "photo", icon: "camera", name: "Photo", summary: "Capture a moment with the camera."),
     .init(id: "doodle", icon: "scribble.variable", name: "Doodle", summary: "Sketch a quick ink drawing."),
     .init(id: "audio", icon: "waveform", name: "Ambient Sound", summary: "Record the sound around you."),

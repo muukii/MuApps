@@ -9,8 +9,9 @@ import SwiftData
 /// kept deliberately minimal — the journaling UI is still being designed, so
 /// fields will grow as the feature takes shape.
 ///
-/// Lives in `JournalModel` (not the app target) so both the app and the Widget
-/// extension can read the same store. See [`JournalStore`](x-source-tag://JournalStore).
+/// Lives in `JournalModel` (not the app target) for legacy migration and local
+/// tooling. Product UI and widgets should read `JournalVault` instead. See
+/// [`JournalStore`](x-source-tag://JournalStore).
 @Model
 public final class Card {
 
@@ -21,7 +22,8 @@ public final class Card {
   public var id: UUID = UUID()
 
   /// Primary modality of this card, and therefore the contract for which content
-  /// fields are meaningful. `.text` cards read `body`; media cards expect a
+  /// fields are meaningful. `.text` cards read `body` as written content,
+  /// `.link` cards read `body` as a URL string, and media cards expect a
   /// matching `Attachment` row and do not treat `body` as a caption.
   public var kind: Kind = Card.Kind.text
 
@@ -58,6 +60,9 @@ public final class Card {
 
   // MARK: - Content
 
+  /// Body-backed payload for textual card kinds. `.text` stores written content;
+  /// `.link` stores the canonical URL string. Media kinds keep this empty and
+  /// point at `Attachment` rows instead.
   public var body: String = ""
 
   private init(
@@ -75,6 +80,12 @@ public final class Card {
   /// content and do not require an attachment.
   public convenience init(text: String) {
     self.init(kind: .text, body: text)
+  }
+
+  /// Creates a link card. Link cards store the canonical URL string in `body`
+  /// and let app UI resolve rich preview metadata at display time.
+  public convenience init(linkURLString: String) {
+    self.init(kind: .link, body: linkURLString)
   }
 
   /// Creates a photo card. When an attachment is provided, it is linked as the
@@ -127,6 +138,10 @@ extension Card {
     /// required for display.
     case text
 
+    /// A web link card. `body` stores the canonical URL string and attachments
+    /// are not required for display.
+    case link
+
     /// A still photo card. The card expects one `.photo` attachment for its bytes;
     /// `body` is not rendered as a caption.
     case photo
@@ -150,7 +165,8 @@ extension Card {
     case unknown
   }
 
-  /// The media attachment kind this card should carry, or `nil` for text cards.
+  /// The media attachment kind this card should carry, or `nil` for textual
+  /// card kinds that store their payload in `body`.
   public var expectedAttachmentKind: Attachment.Kind? {
     kind.expectedAttachmentKind
   }
@@ -173,10 +189,11 @@ extension Card.Kind {
   }
 
   /// The attachment kind required for this card kind to have complete media
-  /// content. Text cards return `nil` because their content is stored in `body`.
+  /// content. Textual cards return `nil` because their content is stored in
+  /// `body`.
   public var expectedAttachmentKind: Attachment.Kind? {
     switch self {
-    case .text:
+    case .text, .link:
       return nil
     case .photo:
       return .photo

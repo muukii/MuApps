@@ -1,3 +1,4 @@
+import MuColor
 import SwiftUI
 
 /// Native sheet shell for editing a text card from the composer.
@@ -43,5 +44,80 @@ struct ThreadDraftTextEditorContent: View {
     }
     .font(.system(size: 32, weight: .bold))
     .onAppear { isFocused = true }
+  }
+}
+
+/// Native sheet shell for editing a link card from the composer.
+///
+/// Link edits bind directly to the draft. The entered URL is normalized when the
+/// user submits or dismisses the editor so the saved card stores a canonical
+/// URL string.
+struct ThreadDraftLinkEditorSheet: View {
+
+  @Bindable var card: ThreadDraftCard
+
+  var body: some View {
+    NavigationStack {
+      ThreadDraftLinkEditorContent(urlString: $card.text)
+        .navigationTitle("Link")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+  }
+}
+
+/// URL input and live native preview for a link draft.
+struct ThreadDraftLinkEditorContent: View {
+
+  /// Raw URL text for the draft card.
+  @Binding var urlString: String
+
+  @FocusState private var isFocused: Bool
+
+  private var linkURL: JournalLinkURL? {
+    JournalLinkURL(urlString)
+  }
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 18) {
+        TextField("https://example.com", text: $urlString)
+          .keyboardType(.URL)
+          .textInputAutocapitalization(.never)
+          .textContentType(.URL)
+          .autocorrectionDisabled()
+          .submitLabel(.done)
+          .focused($isFocused)
+          .font(.title2.weight(.semibold))
+          .padding(16)
+          .background(
+            .appSecondaryContainer,
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+          )
+          .foregroundStyle(.appOnSecondaryContainer)
+          .onSubmit {
+            normalizeURLStringIfPossible()
+          }
+
+        if let linkURL {
+          JournalLinkPreview(url: linkURL.url, mode: .detail)
+        } else if urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+          Label("Enter a valid web URL", systemImage: "exclamationmark.triangle")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+      }
+      .padding(20)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .background(.background)
+    .onAppear { isFocused = true }
+    .onDisappear {
+      normalizeURLStringIfPossible()
+    }
+  }
+
+  private func normalizeURLStringIfPossible() {
+    guard let linkURL else { return }
+    urlString = linkURL.storageString
   }
 }

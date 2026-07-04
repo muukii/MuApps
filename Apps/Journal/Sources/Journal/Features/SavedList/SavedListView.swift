@@ -1,296 +1,500 @@
-import JournalModel
+import AVFoundation
+import CaptureAudio
+import CaptureBauhaus
+import CaptureDoodle
+import CapturePhoto
+import JournalVault
 import MuColor
 import SwiftData
 import SwiftUI
+import UIKit
+import WidgetKit
 
-/// SwiftData + iCloud entries list.
+/// Vault-backed entries list.
 ///
-/// Cards are grouped into local-calendar day sections, then laid out as a
-/// responsive grid of portrait tiles shaped like a sheet of paper (1 : 1.4144,
-/// via `CardSurface`). Compact widths keep the original two-column rhythm;
-/// regular widths add columns as space allows. Each tile renders one captured
-/// modality — text, audio, image, or doodle — because a captured thing becomes
-/// its own Card rather than media-with-caption.
+/// This screen intentionally reads only the selected `VaultInstance`. It does
+/// not receive the legacy `JournalModel` container; legacy data enters the
+/// current UI only after the sync layer has imported it into a vault store.
 struct SavedListView: View {
 
   @Environment(\.calendar) private var calendar
-  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @Environment(\.appPalette) private var palette
-  @Query(sort: \Card.createdAt, order: .reverse) private var cards: [Card]
+  @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+  @Environment(JournalVaultRuntime.self) private var vaultRuntime
 
-  @State private var sharePreviewPresentation: CardSharePreviewPresentation?
-  @State private var groupPresentation: SavedListGroupPresentation = .stacked
-
-  @Namespace var namespace
+  @State private var sections: [VaultSavedDaySection] = []
+  @State private var childEntriesByParentID: [UUID: [VaultSavedEntrySnapshot]] = [:]
+  @State private var isLoading = false
+  @State private var loadErrorMessage: String?
+  @State private var editPresentation: VaultSavedEntryEditPresentation?
+  @State private var isEditDraftLoading = false
+  @State private var isSavingEdit = false
+  @State private var editErrorMessage: String?
+  @Namespace private var navigationTransitionNamespace
 
   var body: some View {
     let columns = SavedListGrid.columns(for: horizontalSizeClass)
-    // TODO: If Entries grows large enough for full-list grouping to show up in
-    // profiling, move this boundary into persistence instead of adding a shallow
-    // fetchLimit: store a day section key on `Card`, or fetch by month/year
-    // ranges and group only the visible archive window.
-    let groups = SavedListCardGroup.groups(for: cards)
-    let daySections = SavedListDaySection.sections(
-      for: groups,
-      presentation: groupPresentation,
-      calendar: calendar
-    )
 
     ScrollView {
       LazyVStack(alignment: .leading, spacing: daySectionSpacing) {
-        ForEach(daySections) { section in
-          SavedListDaySectionView(
+        ForEach(sections) { section in
+          VaultSavedDaySectionView(
             section: section,
             columns: columns,
-            onShare: presentSharePreview,
-            namespace: namespace
+            childEntriesByParentID: childEntriesByParentID,
+            isEditingDisabled: isEditDraftLoading || isSavingEdit,
+            transitionNamespace: navigationTransitionNamespace,
+            onEdit: presentEditDraft
           )
         }
       }
       .padding(cardSpacing)
     }
     .overlay {
-      if cards.isEmpty {
+      if isLoading {
+        ProgressView()
+      } else if vaultRuntime.selectedVaultState != .active {
+        ContentUnavailableView("Vault Not Ready", systemImage: "externaldrive")
+      } else if sections.isEmpty {
         ContentUnavailableView("No Cards", systemImage: "book.closed")
       }
     }
     .scrollContentBackground(.hidden)
     .background(.background)
-    .navigationTitle("Entries")
+    .navigationTitle(vaultRuntime.selectedVault?.title ?? "Entries")
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         Button {
-          withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
-            groupPresentation.toggle()
-          }
+          loadEntries()
         } label: {
-          Image(systemName: groupPresentation.toggleSymbolName)
+          Image(systemName: "arrow.clockwise")
         }
-        .accessibilityLabel(groupPresentation.toggleAccessibilityLabel)
+        .disabled(isLoading)
+        .accessibilityLabel("Reload Entries")
       }
     }
-    .sheet(item: $sharePreviewPresentation) { presentation in
-      CardSharePreviewScreen(
-        snapshot: presentation.snapshot,
-        palette: presentation.palette
+    .refreshable {
+      loadEntries()
+    }
+    .sheet(item: $editPresentation) { presentation in
+      VaultSavedEntryEditSheet(
+        draft: presentation.draft,
+        isSaving: isSavingEdit,
+        onSave: {
+          saveEdit(presentation)
+        },
+        onCancel: {
+          editPresentation = nil
+        }
       )
+      .presentationBackground(.background)
+    }
+    .alert("Could Not Load Entries", isPresented: loadErrorPresentation) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      if let loadErrorMessage {
+        Text(loadErrorMessage)
+      }
+    }
+    .alert("Could Not Edit Card", isPresented: editErrorPresentation) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      if let editErrorMessage {
+        Text(editErrorMessage)
+      }
+    }
+    .task(id: vaultRuntime.selectedVault?.vaultID.rawValue) {
+      loadEntries()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: VaultMediaFileChange.name)) { notification in
+      guard shouldReload(for: notification) else { return }
+      loadEntries()
     }
   }
 
-  private func presentSharePreview(for card: Card) {
-    sharePreviewPresentation = CardSharePreviewPresentation(
-      snapshot: CardShareSnapshot(card: card),
-      palette: palette
+  private var loadErrorPresentation: Binding<Bool> {
+    Binding {
+      loadErrorMessage != nil
+    } set: { isPresented in
+      if isPresented == false {
+        loadErrorMessage = nil
+      }
+    }
+  }
+
+  private var editErrorPresentation: Binding<Bool> {
+    Binding {
+      editErrorMessage != nil
+    } set: { isPresented in
+      if isPresented == false {
+        editErrorMessage = nil
+      }
+    }
+  }
+
+  private func loadEntries() {
+    guard let vault = vaultRuntime.selectedVault else {
+      sections = []
+      childEntriesByParentID = [:]
+      return
+    }
+
+    isLoading = true
+    defer { isLoading = false }
+
+    do {
+      let reader = VaultSavedEntryReader(store: vault.contentStore, calendar: calendar)
+      let snapshot = try reader.snapshot()
+      sections = snapshot.sections
+      childEntriesByParentID = snapshot.childEntriesByParentID
+      loadErrorMessage = nil
+    } catch {
+      sections = []
+      childEntriesByParentID = [:]
+      loadErrorMessage = error.localizedDescription
+    }
+  }
+
+  private func shouldReload(for notification: Notification) -> Bool {
+    guard let vaultID = notification.userInfo?[VaultMediaFileChange.vaultIDKey] as? VaultID else {
+      return false
+    }
+    return vaultID == vaultRuntime.selectedVault?.vaultID
+  }
+
+  private func presentEditDraft(for entry: VaultSavedEntrySnapshot) {
+    guard isEditDraftLoading == false, isSavingEdit == false else {
+      return
+    }
+
+    isEditDraftLoading = true
+
+    Task { @MainActor in
+      defer { isEditDraftLoading = false }
+
+      do {
+        editPresentation = VaultSavedEntryEditPresentation(
+          cardID: entry.cardID,
+          draft: try await entry.editDraft()
+        )
+      } catch {
+        editErrorMessage = error.localizedDescription
+      }
+    }
+  }
+
+  private func saveEdit(_ presentation: VaultSavedEntryEditPresentation) {
+    guard isSavingEdit == false else {
+      return
+    }
+
+    isSavingEdit = true
+
+    Task { @MainActor in
+      defer { isSavingEdit = false }
+
+      do {
+        guard let vault = vaultRuntime.selectedVault else {
+          throw VaultSavedEntryEditDraftError.vaultUnavailable
+        }
+
+        let draft = try presentation.draft.savingSnapshot().vaultDraft(
+          palette: palette,
+          colorScheme: colorScheme
+        )
+        try vault.contentStore.updateCard(cardID: presentation.cardID, with: draft)
+        await vaultRuntime.refresh()
+        WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
+        editPresentation = nil
+        loadEntries()
+      } catch {
+        editErrorMessage = error.localizedDescription
+      }
+    }
+  }
+}
+
+/// One modal editing session for a saved vault card.
+///
+/// The sheet edits a detached `CardEditDraft`; only the save action writes the
+/// edited payload back to the selected vault store.
+private struct VaultSavedEntryEditPresentation: Identifiable {
+  let id = UUID()
+  let cardID: UUID
+  let draft: CardEditDraft
+}
+
+// MARK: - Reading
+
+private struct VaultSavedEntryReader {
+
+  let store: VaultContentStore
+  let calendar: Calendar
+
+  @MainActor
+  func snapshot() throws -> VaultSavedListSnapshot {
+    let context = store.container.mainContext
+    let cards = try context.fetch(
+      FetchDescriptor<JournalVault.Card>(
+        sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+      )
+    )
+    let edges = try context.fetch(
+      FetchDescriptor<JournalVault.CardEdge>(
+        sortBy: [
+          SortDescriptor(\.createdAt, order: .reverse),
+          SortDescriptor(\.sortIndex),
+        ]
+      )
+    )
+    let attachments = try context.fetch(
+      FetchDescriptor<JournalVault.Attachment>(
+        sortBy: [SortDescriptor(\.createdAt)]
+      )
+    )
+
+    let cardsByID = Dictionary(uniqueKeysWithValues: cards.map { ($0.id, $0) })
+    let edgeIDs = Set(edges.map(\.id))
+    let attachmentByCardID = attachments.reduce(into: [UUID: JournalVault.Attachment]()) { result, attachment in
+      if result[attachment.cardID] == nil {
+        result[attachment.cardID] = attachment
+      }
+    }
+
+    let entries = edges.compactMap { edge -> VaultSavedEntrySnapshot? in
+      guard let card = cardsByID[edge.cardID] else { return nil }
+      return VaultSavedEntrySnapshot(
+        edgeID: edge.id,
+        cardID: card.id,
+        parentEdgeID: edge.parentEdgeID,
+        sortIndex: edge.sortIndex,
+        kind: card.kind,
+        body: card.body,
+        createdAt: card.createdAt,
+        updatedAt: card.updatedAt,
+        location: card.location,
+        attachment: attachmentByCardID[card.id].map { attachment in
+          VaultSavedAttachmentSnapshot(
+            id: attachment.id,
+            kind: attachment.kind,
+            byteSize: attachment.byteSize,
+            thumbnail: attachment.thumbnail,
+            fileURL: store.fileURL(for: attachment)
+          )
+        }
+      )
+    }
+
+    let childEntriesByParentID = entries
+      .filter { entry in
+        entry.parentEdgeID.map(edgeIDs.contains) ?? false
+      }
+      .reduce(into: [UUID: [VaultSavedEntrySnapshot]]()) { result, entry in
+        guard let parentEdgeID = entry.parentEdgeID else { return }
+        result[parentEdgeID, default: []].append(entry)
+      }
+      .mapValues { $0.sortedForVaultListSiblings() }
+
+    let rootEntries = entries
+      .filter { entry in
+        entry.parentEdgeID.map(edgeIDs.contains) != true
+      }
+      .sortedForVaultList()
+    let sections = VaultSavedDaySection.sections(for: rootEntries, calendar: calendar)
+
+    return VaultSavedListSnapshot(
+      sections: sections,
+      childEntriesByParentID: childEntriesByParentID
     )
   }
 }
 
-/// Presentation payload for the pre-share preview screen.
-private struct CardSharePreviewPresentation: Identifiable {
-  let id = UUID()
-  let snapshot: CardShareSnapshot
-  let palette: Palette
+private struct VaultSavedListSnapshot {
+  var sections: [VaultSavedDaySection]
+  var childEntriesByParentID: [UUID: [VaultSavedEntrySnapshot]]
 }
 
-/// How relationship groups are represented in the entries grid.
-private enum SavedListGroupPresentation {
-  /// Relationship groups are collapsed to one stacked tile.
-  case stacked
-
-  /// Relationship groups are expanded into their member cards.
-  case expanded
-
-  mutating func toggle() {
-    switch self {
-    case .stacked:
-      self = .expanded
-    case .expanded:
-      self = .stacked
-    }
-  }
-
-  var toggleSymbolName: String {
-    switch self {
-    case .stacked:
-      return "square.grid.2x2"
-    case .expanded:
-      return "square.stack.3d.up"
-    }
-  }
-
-  var toggleAccessibilityLabel: LocalizedStringResource {
-    switch self {
-    case .stacked:
-      return "Show expanded card groups"
-    case .expanded:
-      return "Show stacked card groups"
-    }
-  }
-}
-
-/// A relationship-connected group of cards in the saved entries list.
+/// Value snapshot used by the list and detail UI.
 ///
-/// The grouping treats `CardRelationship` as an undirected edge for list
-/// presentation. The relationship still keeps its directed meaning in detail
-/// views; the list only needs to know which cards should travel together.
-private struct SavedListCardGroup: Identifiable {
-  let id: UUID
-  let cards: [Card]
+/// The live SwiftData models stay behind `VaultSavedEntryReader`; views render
+/// stable value snapshots and explicitly reload when the selected vault or media
+/// file availability changes.
+private struct VaultSavedEntrySnapshot: Identifiable, Hashable {
+  var id: UUID { edgeID }
 
-  var primaryCard: Card {
-    cards[0]
-  }
+  let edgeID: UUID
+  let cardID: UUID
+  let parentEdgeID: UUID?
+  let sortIndex: Int
+  let kind: JournalVault.Card.Kind
+  let body: String
+  let createdAt: Date
+  let updatedAt: Date
+  let location: JournalVault.Coordinate?
+  let attachment: VaultSavedAttachmentSnapshot?
+}
 
-  var sectionDate: Date {
-    primaryCard.createdAt
-  }
+extension VaultSavedEntrySnapshot {
 
-  var isStackable: Bool {
-    cards.count > 1
-  }
-
-  func gridItems(for presentation: SavedListGroupPresentation) -> [SavedListDayGridItem] {
-    switch presentation {
-    case .stacked where isStackable:
-      return [.stack(self)]
-    case .stacked, .expanded:
-      return cards.enumerated().map { index, card in
-        .card(
-          SavedListCardGridItem(
-            card: card,
-            relationshipGroupCards: cards,
-            groupPosition: isStackable ? index + 1 : nil,
-            groupCount: isStackable ? cards.count : nil
-          )
-        )
+  /// Rehydrates this saved card into the shared editing draft model.
+  ///
+  /// Media cards require the full vault media file. Thumbnails are display-only
+  /// fallbacks and are intentionally not used to create a lossy edit draft.
+  @MainActor
+  fileprivate func editDraft() async throws -> CardEditDraft {
+    switch kind {
+    case .text:
+      return CardEditDraft(kind: .text, text: body, location: location)
+    case .link:
+      return CardEditDraft(kind: .link, text: body, location: location)
+    case .photo:
+      let data = try await mediaData(matching: .photo)
+      guard let image = UIImage(data: data) else {
+        throw VaultSavedEntryEditDraftError.mediaDecodeFailed
       }
-    }
-  }
-
-  static func groups(for cards: [Card]) -> [SavedListCardGroup] {
-    guard cards.isEmpty == false else { return [] }
-
-    var unionFind = SavedListCardUnionFind(cards: cards)
-
-    for card in cards {
-      for relationship in card.outgoingRelationships ?? [] {
-        guard let targetID = relationship.target?.id else { continue }
-        unionFind.union(card.id, targetID)
-      }
-
-      for relationship in card.incomingRelationships ?? [] {
-        guard let sourceID = relationship.source?.id else { continue }
-        unionFind.union(card.id, sourceID)
-      }
-    }
-
-    var groupedCards: [UUID: [Card]] = [:]
-    for card in cards {
-      let groupID = unionFind.root(of: card.id)
-      groupedCards[groupID, default: []].append(card)
-    }
-
-    return groupedCards.map { groupID, cards in
-      SavedListCardGroup(
-        id: groupID,
-        cards: cards.sortedForSavedListGroup()
+      return CardEditDraft(
+        kind: .photo,
+        photo: CapturedPhoto(imageData: data, pixelSize: image.pixelSize),
+        location: location
       )
+    case .audio:
+      let fileURL = try mediaFileURL(matching: .audio)
+      let editableURL = try VaultSavedEntryEditMediaPreparer.audioCopy(from: fileURL)
+      return CardEditDraft(
+        kind: .audio,
+        audio: AudioRecording(
+          fileURL: editableURL,
+          duration: VaultSavedEntryEditMediaPreparer.audioDuration(from: editableURL)
+        ),
+        location: location
+      )
+    case .doodle:
+      let data = try await mediaData(matching: .doodle)
+      guard let drawing = try? JSONDecoder().decode(DoodleDrawing.self, from: data) else {
+        throw VaultSavedEntryEditDraftError.mediaDecodeFailed
+      }
+      return CardEditDraft(kind: .doodle, doodle: drawing, location: location)
+    case .bauhaus:
+      let data = try await mediaData(matching: .bauhaus)
+      guard let document = try? JSONDecoder().decode(BauhausGridDocument.self, from: data) else {
+        throw VaultSavedEntryEditDraftError.mediaDecodeFailed
+      }
+      return CardEditDraft(kind: .bauhaus, bauhaus: document, location: location)
+    case .unknown:
+      throw VaultSavedEntryEditDraftError.unsupportedKind
+    @unknown default:
+      throw VaultSavedEntryEditDraftError.unsupportedKind
     }
-    .sortedForSavedList()
+  }
+
+  private func mediaFileURL(matching kind: JournalVault.Attachment.Kind) throws -> URL {
+    guard attachment?.kind == kind,
+          let fileURL = attachment?.fileURL,
+          FileManager.default.fileExists(atPath: fileURL.path) else {
+      throw VaultSavedEntryEditDraftError.mediaUnavailable
+    }
+    return fileURL
+  }
+
+  private func mediaData(matching kind: JournalVault.Attachment.Kind) async throws -> Data {
+    let fileURL = try mediaFileURL(matching: kind)
+    guard let data = await VaultSavedEntryMediaFileReader.data(from: fileURL) else {
+      throw VaultSavedEntryEditDraftError.mediaUnavailable
+    }
+    return data
   }
 }
 
-/// One flattened item that the day grid can render.
-private enum SavedListDayGridItem: Identifiable {
-  case card(SavedListCardGridItem)
-  case stack(SavedListCardGroup)
+private struct VaultSavedAttachmentSnapshot: Hashable {
+  let id: UUID
+  let kind: JournalVault.Attachment.Kind
+  let byteSize: Int
+  let thumbnail: Data?
+  let fileURL: URL
+}
 
-  var id: String {
+/// Errors surfaced when a saved vault entry cannot be reopened as an editable draft.
+private enum VaultSavedEntryEditDraftError: LocalizedError {
+  case vaultUnavailable
+  case mediaUnavailable
+  case mediaDecodeFailed
+  case audioCopyFailed
+  case unsupportedKind
+
+  var errorDescription: String? {
     switch self {
-    case .card(let item):
-      return "card-\(item.card.id.uuidString)"
-    case .stack(let group):
-      return "stack-\(group.id.uuidString)"
+    case .vaultUnavailable:
+      return "The selected vault is not available."
+    case .mediaUnavailable:
+      return "This card's media file is not available on this device yet."
+    case .mediaDecodeFailed:
+      return "This card's media file could not be read for editing."
+    case .audioCopyFailed:
+      return "This audio recording could not be prepared for editing."
+    case .unsupportedKind:
+      return "This card type is not editable yet."
     }
   }
 }
 
-/// A single card plus optional relationship-group position metadata.
-private struct SavedListCardGridItem {
-  let card: Card
-  let relationshipGroupCards: [Card]
-  let groupPosition: Int?
-  let groupCount: Int?
+/// File I/O shared by saved-entry edit rehydration.
+private enum VaultSavedEntryMediaFileReader {
+  nonisolated static func data(from fileURL: URL) async -> Data? {
+    await Task.detached(priority: .utility) {
+      try? Data(contentsOf: fileURL)
+    }.value
+  }
 }
 
-/// Stable component builder for relationship-connected list groups.
-private struct SavedListCardUnionFind {
-  private var parentByID: [UUID: UUID]
+/// File preparation needed before persisted media can re-enter the edit pipeline.
+private enum VaultSavedEntryEditMediaPreparer {
 
-  init(cards: [Card]) {
-    var parentByID: [UUID: UUID] = [:]
-    for card in cards {
-      parentByID[card.id] = card.id
+  @MainActor
+  static func audioCopy(from sourceURL: URL) throws -> URL {
+    guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+      throw VaultSavedEntryEditDraftError.mediaUnavailable
     }
-    self.parentByID = parentByID
+
+    let pathExtension = sourceURL.pathExtension.isEmpty ? "m4a" : sourceURL.pathExtension
+    let destinationURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("journal-vault-edit-audio-\(UUID().uuidString)")
+      .appendingPathExtension(pathExtension)
+
+    do {
+      try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+      return destinationURL
+    } catch {
+      throw VaultSavedEntryEditDraftError.audioCopyFailed
+    }
   }
 
-  mutating func root(of id: UUID) -> UUID {
-    guard let parent = parentByID[id] else { return id }
-    guard parent != id else { return id }
-
-    let rootID = root(of: parent)
-    parentByID[id] = rootID
-    return rootID
-  }
-
-  mutating func union(_ lhs: UUID, _ rhs: UUID) {
-    guard parentByID[lhs] != nil, parentByID[rhs] != nil else { return }
-
-    let lhsRoot = root(of: lhs)
-    let rhsRoot = root(of: rhs)
-
-    guard lhsRoot != rhsRoot else { return }
-
-    let orderedRoots = [lhsRoot, rhsRoot].sortedByUUIDString()
-    parentByID[orderedRoots[1]] = orderedRoots[0]
+  @MainActor
+  static func audioDuration(from fileURL: URL) -> TimeInterval {
+    (try? AVAudioPlayer(contentsOf: fileURL).duration) ?? 0
   }
 }
 
-/// One local-calendar date bucket in the saved entries list.
-///
-/// Identity is the start-of-day `Date` in the active SwiftUI calendar
-/// environment, so the section stays stable while cards are inserted, deleted,
-/// or edited within the same day.
-private struct SavedListDaySection: Identifiable {
+private struct VaultSavedDaySection: Identifiable {
   let id: Date
   let day: Date
-  var items: [SavedListDayGridItem]
-
-  init(day: Date, items: [SavedListDayGridItem]) {
-    self.id = day
-    self.day = day
-    self.items = items
-  }
+  var entries: [VaultSavedEntrySnapshot]
 
   static func sections(
-    for groups: [SavedListCardGroup],
-    presentation: SavedListGroupPresentation,
+    for entries: [VaultSavedEntrySnapshot],
     calendar: Calendar
-  ) -> [SavedListDaySection] {
+  ) -> [VaultSavedDaySection] {
     var sectionIndexesByDay: [Date: Int] = [:]
-    var sections: [SavedListDaySection] = []
+    var sections: [VaultSavedDaySection] = []
 
-    for group in groups {
-      let day = calendar.startOfDay(for: group.sectionDate)
-      let items = group.gridItems(for: presentation)
-
+    for entry in entries {
+      let day = calendar.startOfDay(for: entry.createdAt)
       if let sectionIndex = sectionIndexesByDay[day] {
-        sections[sectionIndex].items.append(contentsOf: items)
+        sections[sectionIndex].entries.append(entry)
       } else {
         sectionIndexesByDay[day] = sections.count
-        sections.append(SavedListDaySection(day: day, items: items))
+        sections.append(VaultSavedDaySection(id: day, day: day, entries: [entry]))
       }
     }
 
@@ -298,15 +502,15 @@ private struct SavedListDaySection: Identifiable {
   }
 }
 
-/// Column strategy for the entries grid.
-///
-/// Compact widths intentionally preserve the original two-column composition.
-/// Regular widths use an adaptive item so iPad gains more visible entries
-/// without letting the paper tile become oversized.
+// MARK: - Layout
+
 private enum SavedListGrid {
   static func columns(for horizontalSizeClass: UserInterfaceSizeClass?) -> [GridItem] {
     if horizontalSizeClass == .compact {
-      return compactColumns
+      return [
+        GridItem(.flexible(), spacing: cardSpacing),
+        GridItem(.flexible(), spacing: cardSpacing),
+      ]
     }
 
     return [
@@ -316,68 +520,111 @@ private enum SavedListGrid {
       )
     ]
   }
-
-  private static let compactColumns = [
-    GridItem(.flexible(), spacing: cardSpacing),
-    GridItem(.flexible(), spacing: cardSpacing),
-  ]
 }
 
-/// Gutter between cards and around the grid, kept equal so columns and edges
-/// share the same rhythm.
 private let cardSpacing: CGFloat = 16
-
-/// Vertical gap between date sections.
 private let daySectionSpacing: CGFloat = 28
-
-/// Gap between a date header and the cards for that day.
 private let dayHeaderSpacing: CGFloat = 12
-
-/// Smallest card width used by the iPad/regular-width grid.
 private let regularMinimumCardWidth: CGFloat = 168
-
-/// Largest card width used by the iPad/regular-width grid before adding another
-/// column.
 private let regularMaximumCardWidth: CGFloat = 220
+private let detailScreenPadding: CGFloat = 16
+private let detailMaximumCardWidth: CGFloat = 520
 
-// MARK: - Fileprivate Views
+// MARK: - Views
 
-/// A single date section in the entries list.
-private struct SavedListDaySectionView: View {
+/// Modal editor for an existing vault card.
+///
+/// The sheet owns cancellation chrome while `CardEditDraftEditor` owns the
+/// card-specific editing controls. Saving is lifted to `SavedListView` so the
+/// selected vault, reload, and outbox refresh all happen at the screen boundary.
+private struct VaultSavedEntryEditSheet: View {
 
-  let section: SavedListDaySection
-  let columns: [GridItem]
-  let onShare: @MainActor (Card) -> Void
-  let namespace: Namespace.ID
+  @Bindable var draft: CardEditDraft
+  let isSaving: Bool
+  let onSave: @MainActor () -> Void
+  let onCancel: @MainActor () -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: dayHeaderSpacing) {
-      SavedListDayHeader(day: section.day)
-
-      LazyVGrid(columns: columns, spacing: cardSpacing) {
-        ForEach(section.items) { item in
-          switch item {
-          case .card(let item):
-            SavedListCardNavigationTile(
-              item: item,
-              onShare: onShare,
-              namespace: namespace
-            )
-          case .stack(let group):
-            SavedListStackedCardGroupNavigationTile(
-              group: group,
-              onShare: onShare,
-              namespace: namespace
-            )
+    NavigationStack {
+      CardEditDraftEditor(
+        draft: draft,
+        isSaving: isSaving,
+        confirmationTitle: "Save",
+        showsKindPicker: false,
+        onConfirm: onSave
+      )
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancel") {
+            onCancel()
           }
+          .disabled(isSaving)
         }
       }
     }
   }
 }
 
-/// Localized date label for a saved-entry section.
-private struct SavedListDayHeader: View {
+private struct VaultSavedDaySectionView: View {
+
+  let section: VaultSavedDaySection
+  let columns: [GridItem]
+  let childEntriesByParentID: [UUID: [VaultSavedEntrySnapshot]]
+  let isEditingDisabled: Bool
+  let transitionNamespace: Namespace.ID
+  let onEdit: @MainActor (VaultSavedEntrySnapshot) -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: dayHeaderSpacing) {
+      VaultSavedDayHeader(day: section.day)
+
+      LazyVGrid(columns: columns, spacing: cardSpacing) {
+        ForEach(section.entries) { entry in
+          NavigationLink {
+            VaultSavedEntryDetailView(
+              entries: subtreeEntries(startingAt: entry),
+              rootTitle: entry.kind.vaultListDisplayTitle,
+              isEditingDisabled: isEditingDisabled,
+              onEdit: onEdit
+            )
+            .navigationTransition(.zoom(sourceID: entry.edgeID, in: transitionNamespace))
+          } label: {
+            VaultSavedEntryTile(
+              entry: entry,
+              childCount: subtreeEntries(startingAt: entry).count - 1
+            )
+            .matchedTransitionSource(id: entry.edgeID, in: transitionNamespace)
+          }
+          .buttonStyle(.plain)
+          .contextMenu {
+            Button {
+              onEdit(entry)
+            } label: {
+              Label("Edit", systemImage: "square.and.pencil")
+            }
+            .disabled(isEditingDisabled)
+          }
+        }
+      }
+    }
+  }
+
+  private func subtreeEntries(startingAt root: VaultSavedEntrySnapshot) -> [VaultSavedEntrySnapshot] {
+    var result = [root]
+
+    func appendChildren(of parentID: UUID) {
+      for child in childEntriesByParentID[parentID] ?? [] {
+        result.append(child)
+        appendChildren(of: child.edgeID)
+      }
+    }
+
+    appendChildren(of: root.edgeID)
+    return result
+  }
+}
+
+private struct VaultSavedDayHeader: View {
 
   let day: Date
 
@@ -389,305 +636,352 @@ private struct SavedListDayHeader: View {
   }
 }
 
-/// A normal saved-entry card tile, with optional group-position chrome.
-private struct SavedListCardNavigationTile: View {
+private struct VaultSavedEntryTile: View {
 
-  let item: SavedListCardGridItem
-  let onShare: @MainActor (Card) -> Void
-  let namespace: Namespace.ID
+  let entry: VaultSavedEntrySnapshot
+  let childCount: Int
 
   var body: some View {
-    NavigationLink {
-      SavedEntryDetailView(
-        card: item.card,
-        relationshipGroupCards: item.relationshipGroupCards,
-        onShare: onShare
-      )
-      .navigationTransition(.zoom(sourceID: item.card, in: namespace))
-    } label: {
-      ZStack(alignment: .topTrailing) {
-        SavedListMatchedSummaryCard(
-          card: item.card,
-          namespace: namespace,
-          isNavigationSource: true
-        )
+    CardSurface {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack(spacing: 8) {
+          Image(systemName: entry.kind.vaultListSymbolName)
+          Text(entry.kind.vaultListDisplayTitle)
+          Spacer(minLength: 0)
+          if childCount > 0 {
+            Label {
+              Text(childCount + 1, format: .number)
+            } icon: {
+              Image(systemName: "point.3.connected.trianglepath.dotted")
+            }
+            .labelStyle(.iconOnly)
+            .accessibilityLabel("\(childCount + 1) cards")
+          }
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.appOnSecondaryContainer.opacity(0.70))
 
-        if let groupPosition = item.groupPosition, let groupCount = item.groupCount {
-          SavedListCardGroupPositionBadge(
-            position: groupPosition,
-            count: groupCount
+        VaultSavedEntryPreviewContent(entry: entry, isDetail: false)
+
+        Spacer(minLength: 0)
+
+        Text(entry.createdAt, format: .dateTime.hour().minute())
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.appOnSecondaryContainer.opacity(0.56))
+      }
+    }
+  }
+}
+
+private struct VaultSavedEntryDetailView: View {
+
+  let entries: [VaultSavedEntrySnapshot]
+  let rootTitle: LocalizedStringResource
+  let isEditingDisabled: Bool
+  let onEdit: @MainActor (VaultSavedEntrySnapshot) -> Void
+
+  var body: some View {
+    ScrollView {
+      LazyVStack(alignment: .center, spacing: 24) {
+        ForEach(entries) { entry in
+          VaultSavedEntryDetailCard(
+            entry: entry,
+            isEditingDisabled: isEditingDisabled,
+            onEdit: onEdit
           )
-          .padding(8)
+          .frame(maxWidth: detailMaximumCardWidth)
         }
       }
+      .frame(maxWidth: .infinity)
+      .padding(detailScreenPadding)
     }
-    .buttonStyle(.plain)
-    .contextMenu {
-      SavedEntrySummaryCardContextMenu(
-        card: item.card,
-        onShare: onShare
-      )
+    .background(.background)
+    .navigationTitle(rootTitle)
+    .navigationBarTitleDisplayMode(.inline)
+  }
+}
+
+private struct VaultSavedEntryDetailCard: View {
+
+  let entry: VaultSavedEntrySnapshot
+  let isEditingDisabled: Bool
+  let onEdit: @MainActor (VaultSavedEntrySnapshot) -> Void
+
+  var body: some View {
+    CardSurface {
+      VStack(alignment: .leading, spacing: 16) {
+        HStack(spacing: 8) {
+          Image(systemName: entry.kind.vaultListSymbolName)
+          Text(entry.kind.vaultListDisplayTitle)
+          Spacer(minLength: 0)
+          Text(entry.createdAt, format: .dateTime.month().day().hour().minute())
+          Button {
+            onEdit(entry)
+          } label: {
+            Image(systemName: "square.and.pencil")
+          }
+          .buttonStyle(.plain)
+          .disabled(isEditingDisabled)
+          .accessibilityLabel("Edit Card")
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.appOnSecondaryContainer.opacity(0.70))
+
+        VaultSavedEntryPreviewContent(entry: entry, isDetail: true)
+
+        Spacer(minLength: 0)
+
+        VaultSavedEntryMetadata(entry: entry)
+      }
     }
   }
 }
 
-/// A collapsed relationship group represented as a stack of cards.
-private struct SavedListStackedCardGroupNavigationTile: View {
+private struct VaultSavedEntryPreviewContent: View {
 
-  let group: SavedListCardGroup
-  let onShare: @MainActor (Card) -> Void
-  let namespace: Namespace.ID
+  let entry: VaultSavedEntrySnapshot
+  let isDetail: Bool
 
   var body: some View {
-    NavigationLink {
-      SavedEntryDetailView(
-        card: group.primaryCard,
-        relationshipGroupCards: group.cards,
-        onShare: onShare
+    switch entry.kind {
+    case .text:
+      Text(entry.body.isEmpty ? "Empty text card" : entry.body)
+        .font(isDetail ? .title3.weight(.semibold) : .headline.weight(.semibold))
+        .lineLimit(isDetail ? nil : 8)
+    case .link:
+      VaultSavedLinkPreview(urlString: entry.body, isDetail: isDetail)
+    case .photo:
+      VaultSavedMediaPreview(
+        attachment: entry.attachment,
+        fallbackSystemImage: "photo",
+        isDetail: isDetail
       )
-      .navigationTransition(.zoom(sourceID: group.primaryCard, in: namespace))
-    } label: {
-      SavedListStackedCardGroupTile(
-        group: group,
-        namespace: namespace
+    case .audio:
+      VaultSavedAudioPreview(isDetail: isDetail)
+    case .doodle:
+      VaultSavedMediaPreview(
+        attachment: entry.attachment,
+        fallbackSystemImage: "scribble",
+        isDetail: isDetail
       )
-    }
-    .buttonStyle(.plain)
-    .contextMenu {
-      SavedEntrySummaryCardContextMenu(
-        card: group.primaryCard,
-        onShare: onShare
+    case .bauhaus:
+      VaultSavedMediaPreview(
+        attachment: entry.attachment,
+        fallbackSystemImage: "square.grid.3x3",
+        isDetail: isDetail
       )
+    case .unknown:
+      VaultSavedUnknownPreview()
+    @unknown default:
+      VaultSavedUnknownPreview()
     }
   }
 }
 
-/// Visual treatment for a collapsed relationship group.
-private struct SavedListStackedCardGroupTile: View {
+private struct VaultSavedLinkPreview: View {
 
-  let group: SavedListCardGroup
-  let namespace: Namespace.ID
+  let urlString: String
+  let isDetail: Bool
 
   var body: some View {
-    ZStack(alignment: .topTrailing) {
-      ZStack(alignment: .topLeading) {
-        Color.clear
-          .aspectRatio(CardMetrics.aspectRatio, contentMode: .fit)
+    if let linkURL = JournalLinkURL(urlString) {
+      JournalLinkPreview(
+        url: linkURL.url,
+        mode: isDetail ? .detail : .summary
+      )
+    } else {
+      Text(urlString.isEmpty ? "Empty link card" : urlString)
+        .font(isDetail ? .title3.weight(.semibold) : .headline.weight(.semibold))
+        .lineLimit(isDetail ? nil : 8)
+    }
+  }
+}
 
-        ForEach(SavedListStackCardLayer.layers(for: group.cards)) { layer in
-          SavedListStackCardLayerView(
-            layer: layer,
-            namespace: namespace
-          )
+private struct VaultSavedMediaPreview: View {
+
+  let attachment: VaultSavedAttachmentSnapshot?
+  let fallbackSystemImage: String
+  let isDetail: Bool
+
+  var body: some View {
+    if let image = image {
+      Image(uiImage: image)
+        .resizable()
+        .scaledToFill()
+        .frame(maxWidth: .infinity)
+        .aspectRatio(isDetail ? 4 / 3 : 1, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    } else {
+      VaultSavedMediaPlaceholder(systemImage: fallbackSystemImage)
+        .aspectRatio(isDetail ? 4 / 3 : 1, contentMode: .fit)
+    }
+  }
+
+  private var image: UIImage? {
+    if let fileURL = attachment?.fileURL,
+       FileManager.default.fileExists(atPath: fileURL.path),
+       let image = UIImage(contentsOfFile: fileURL.path) {
+      return image
+    }
+
+    if let thumbnail = attachment?.thumbnail {
+      return UIImage(data: thumbnail)
+    }
+
+    return nil
+  }
+}
+
+private struct VaultSavedAudioPreview: View {
+
+  let isDetail: Bool
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      Label("Audio", systemImage: "waveform")
+        .font(.headline.weight(.semibold))
+
+      HStack(alignment: .center, spacing: 4) {
+        ForEach(VaultSavedAudioWaveformSample.samples) { sample in
+          Capsule()
+            .fill(.appOnSecondaryContainer.opacity(0.62))
+            .frame(width: 4, height: sample.height)
         }
       }
-
-      SavedListCardStackCountBadge(count: group.cards.count)
-        .padding(8)
-    }
-    .accessibilityElement(children: .combine)
-    .accessibilityLabel("\(group.cards.count) related cards")
-  }
-}
-
-/// One visible or hidden card layer inside a collapsed stack.
-private struct SavedListStackCardLayerView: View {
-
-  let layer: SavedListStackCardLayer
-  let namespace: Namespace.ID
-
-  var body: some View {
-    if layer.isVisible {
-      SavedListMatchedSummaryCard(
-        card: layer.card,
-        namespace: namespace,
-        isNavigationSource: layer.isPrimary
-      )
-      .scaleEffect(layer.scale, anchor: .topLeading)
-      .offset(x: layer.offset.width, y: layer.offset.height)
-      .opacity(layer.opacity)
-      .zIndex(layer.zIndex)
-      .allowsHitTesting(layer.isPrimary)
-    } else {
-      SavedListHiddenMatchedCardAnchor(
-        card: layer.card,
-        namespace: namespace
-      )
-      .scaleEffect(layer.scale, anchor: .topLeading)
-      .offset(x: layer.offset.width, y: layer.offset.height)
-      .zIndex(layer.zIndex)
+      .frame(maxWidth: .infinity, minHeight: isDetail ? 96 : 52, alignment: .center)
     }
   }
 }
 
-/// Summary card with identities shared by stacked and expanded list modes.
-private struct SavedListMatchedSummaryCard: View {
+private struct VaultSavedAudioWaveformSample: Identifiable {
+  let id = UUID()
+  let height: CGFloat
 
-  let card: Card
-  let namespace: Namespace.ID
-  let isNavigationSource: Bool
+  static let samples: [VaultSavedAudioWaveformSample] = [
+    18, 30, 24, 42, 34, 58, 46, 70, 38, 54, 28, 44, 64, 50, 36, 22,
+  ].map { VaultSavedAudioWaveformSample(height: CGFloat($0)) }
+}
+
+private struct VaultSavedMediaPlaceholder: View {
+
+  let systemImage: String
 
   var body: some View {
-    let cardView = SavedEntrySummaryCardHost(card: card)
-      .matchedGeometryEffect(
-        id: SavedListCardGeometryID(cardID: card.id),
-        in: namespace,
-        properties: .frame,
-        anchor: .topLeading
-      )
-
-    if isNavigationSource {
-      cardView
-        .matchedTransitionSource(id: card, in: namespace)
-    } else {
-      cardView
-    }
-  }
-}
-
-/// Invisible collapsed-state source for cards hidden behind the visual stack cap.
-///
-/// The card content is intentionally not loaded here; the view only contributes
-/// a matched frame so every expanded card has a collapsed counterpart.
-private struct SavedListHiddenMatchedCardAnchor: View {
-
-  let card: Card
-  let namespace: Namespace.ID
-
-  var body: some View {
-    Color.clear
-      .aspectRatio(CardMetrics.aspectRatio, contentMode: .fit)
-      .matchedGeometryEffect(
-        id: SavedListCardGeometryID(cardID: card.id),
-        in: namespace,
-        properties: .frame,
-        anchor: .topLeading
-      )
-      .opacity(0)
-      .accessibilityHidden(true)
-      .allowsHitTesting(false)
-  }
-}
-
-/// Stable namespace id for card-to-card list expansion geometry.
-private struct SavedListCardGeometryID: Hashable {
-  let cardID: UUID
-}
-
-/// Backing layer geometry for one visible card in the collapsed stack tile.
-private struct SavedListStackCardLayer: Identifiable {
-  let id: UUID
-  let card: Card
-  let isPrimary: Bool
-  let isVisible: Bool
-  let offset: CGSize
-  let scale: CGFloat
-  let opacity: Double
-  let zIndex: Double
-
-  static func layers(for cards: [Card]) -> [SavedListStackCardLayer] {
-    cards
-      .enumerated()
-      .reversed()
-      .map { index, card in
-        let visibleIndex = min(index, visibleStackCardLimit - 1)
-        let isVisible = index < visibleStackCardLimit
-
-        return SavedListStackCardLayer(
-          id: card.id,
-          card: card,
-          isPrimary: index == 0,
-          isVisible: isVisible,
-          offset: CGSize(width: CGFloat(visibleIndex) * 7, height: CGFloat(visibleIndex) * 7),
-          scale: 1 - CGFloat(visibleIndex) * 0.035,
-          opacity: index == 0 ? 1 : 0.72,
-          zIndex: isVisible ? Double(visibleStackCardLimit - index) : -Double(index)
-        )
-      }
-  }
-
-  /// More than three visible cards reads as noise; hidden anchors keep animation complete.
-  private static let visibleStackCardLimit = 3
-}
-
-/// Count badge shown on collapsed relationship stacks.
-private struct SavedListCardStackCountBadge: View {
-
-  let count: Int
-
-  var body: some View {
-    Label {
-      Text(count, format: .number)
-    } icon: {
-      Image(systemName: "square.stack.3d.up")
-    }
-    .font(.caption2.weight(.bold))
-    .foregroundStyle(.appOnSecondaryContainer)
-    .padding(.horizontal, 8)
-    .padding(.vertical, 5)
-    .background(.appSecondaryContainer.opacity(0.92), in: Capsule())
-    .overlay {
-      Capsule()
-        .strokeBorder(.appOnSecondaryContainer.opacity(0.10), lineWidth: 1)
-    }
-    .accessibilityLabel("\(count) related cards")
-  }
-}
-
-/// Position badge shown while a relationship group is expanded.
-private struct SavedListCardGroupPositionBadge: View {
-
-  let position: Int
-  let count: Int
-
-  var body: some View {
-    Text("\(position)/\(count)")
-      .font(.caption2.weight(.bold))
-      .foregroundStyle(.appOnSecondaryContainer)
-      .padding(.horizontal, 8)
-      .padding(.vertical, 5)
-      .background(.appSecondaryContainer.opacity(0.92), in: Capsule())
+    RoundedRectangle(cornerRadius: 12, style: .continuous)
+      .fill(.appOnSecondaryContainer.opacity(0.08))
       .overlay {
-        Capsule()
-          .strokeBorder(.appOnSecondaryContainer.opacity(0.10), lineWidth: 1)
+        Image(systemName: systemImage)
+          .font(.system(size: 34, weight: .semibold))
+          .foregroundStyle(.appOnSecondaryContainer.opacity(0.42))
       }
-      .accessibilityLabel("Card \(position) of \(count) in group")
   }
 }
 
-extension Array where Element == Card {
+private struct VaultSavedUnknownPreview: View {
 
-  /// Newest-first card order used inside one relationship group.
-  fileprivate func sortedForSavedListGroup() -> [Card] {
+  var body: some View {
+    VaultSavedMediaPlaceholder(systemImage: "questionmark.square.dashed")
+  }
+}
+
+private struct VaultSavedEntryMetadata: View {
+
+  let entry: VaultSavedEntrySnapshot
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Label {
+        Text(entry.updatedAt, format: .dateTime.month().day().hour().minute())
+      } icon: {
+        Image(systemName: "clock.arrow.circlepath")
+      }
+
+      if let location = entry.location {
+        Label {
+          Text(
+            "\(location.latitude.formatted(.number.precision(.fractionLength(4)))), \(location.longitude.formatted(.number.precision(.fractionLength(4))))"
+          )
+        } icon: {
+          Image(systemName: "location")
+        }
+      }
+    }
+    .font(.caption)
+    .foregroundStyle(.appOnSecondaryContainer.opacity(0.62))
+  }
+}
+
+// MARK: - Sorting
+
+private extension Array where Element == VaultSavedEntrySnapshot {
+
+  func sortedForVaultList() -> [VaultSavedEntrySnapshot] {
     sorted { lhs, rhs in
       if lhs.createdAt != rhs.createdAt {
         return lhs.createdAt > rhs.createdAt
       }
-
-      return lhs.id.uuidString < rhs.id.uuidString
+      return lhs.edgeID.uuidString < rhs.edgeID.uuidString
     }
   }
-}
 
-extension Array where Element == SavedListCardGroup {
-
-  /// Newest-active group first, matching the old card-level list ordering.
-  fileprivate func sortedForSavedList() -> [SavedListCardGroup] {
+  func sortedForVaultListSiblings() -> [VaultSavedEntrySnapshot] {
     sorted { lhs, rhs in
-      if lhs.sectionDate != rhs.sectionDate {
-        return lhs.sectionDate > rhs.sectionDate
+      if lhs.sortIndex != rhs.sortIndex {
+        return lhs.sortIndex < rhs.sortIndex
       }
-
-      return lhs.id.uuidString < rhs.id.uuidString
+      if lhs.createdAt != rhs.createdAt {
+        return lhs.createdAt < rhs.createdAt
+      }
+      return lhs.edgeID.uuidString < rhs.edgeID.uuidString
     }
   }
 }
 
-extension Array where Element == UUID {
+private extension UIImage {
 
-  fileprivate func sortedByUUIDString() -> [UUID] {
-    sorted { lhs, rhs in
-      lhs.uuidString < rhs.uuidString
+  /// Pixel dimensions for persistence metadata derived from reloaded image data.
+  var pixelSize: CGSize {
+    CGSize(width: size.width * scale, height: size.height * scale)
+  }
+}
+
+private extension JournalVault.Card.Kind {
+
+  var vaultListDisplayTitle: LocalizedStringResource {
+    switch self {
+    case .text:
+      "Text"
+    case .link:
+      "Link"
+    case .photo:
+      "Photo"
+    case .audio:
+      "Audio"
+    case .doodle:
+      "Doodle"
+    case .bauhaus:
+      "Bauhaus"
+    case .unknown:
+      "Card"
+    }
+  }
+
+  var vaultListSymbolName: String {
+    switch self {
+    case .text:
+      "text.alignleft"
+    case .link:
+      "link"
+    case .photo:
+      "photo"
+    case .audio:
+      "waveform"
+    case .doodle:
+      "scribble"
+    case .bauhaus:
+      "square.grid.3x3"
+    case .unknown:
+      "questionmark.square.dashed"
     }
   }
 }

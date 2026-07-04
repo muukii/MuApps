@@ -28,13 +28,14 @@ let journalInfoPlist: InfoPlist = .extendingDefault(with: journalVersionInfoPlis
   "CFBundleName": journalBundleName,
   "ITSAppUsesNonExemptEncryption": false,
   "LSApplicationCategoryType": "public.app-category.lifestyle",
-  // CloudKit pushes remote changes to the device; this lets SwiftData's
-  // CloudKit mirroring pull updates while the app is in the background.
+  // CloudKit pushes remote changes to the device; the explicit vault sync
+  // layer consumes these notifications for per-vault zones.
   "UIBackgroundModes": .array(["remote-notification"]),
   "UILaunchScreen": .dictionary([:]),
-  // Capture components. Both the camera (CapturePhoto) and the microphone
-  // (CaptureAudio) require usage descriptions to function.
+  // Capture components. Camera and microphone require direct permission; Photos
+  // import uses the system picker and receives only the image the user selects.
   "NSCameraUsageDescription": "Take a photo to attach to a journal entry.",
+  "NSPhotoLibraryUsageDescription": "Choose a photo to attach to a journal entry.",
   "NSMicrophoneUsageDescription": "Record the ambient sound around you to attach to a journal entry.",
   // Optional authored-card location: when the Journal setting is enabled, new
   // cards record where they were written (LocationManager → Card.location).
@@ -104,9 +105,9 @@ let project = Project(
       // value is the string array `["suggestions"]`, NOT a boolean — it must match
       // exactly what the App ID's Journaling Suggestions capability writes into the
       // provisioning profile, or signing fails with an entitlement-mismatch error.
-      // `com.apple.security.application-groups` is shared with `JournalWidget`: the
-      // SwiftData store lives in this App Group container so both processes read
-      // the same database (see `JournalStore` in the `JournalModel` framework).
+      // `com.apple.security.application-groups` is shared with `JournalWidget`
+      // and the vault store layout. The app writes vault stores here; the widget
+      // reads configured vault stores from the same App Group.
       entitlements: .dictionary([
         "com.apple.developer.icloud-container-identifiers": ["iCloud.app.muukii.journal"],
         "com.apple.developer.icloud-services": ["CloudKit"],
@@ -116,10 +117,11 @@ let project = Project(
       ]),
       dependencies: [
         .sdk(name: "CloudKit", type: .framework),
+        .sdk(name: "LinkPresentation", type: .framework),
         .external(name: "SwiftUIIntrospect"),
         .external(name: "ScrollEdgeEffect"),
         .external(name: "Algorithms"),
-        .target(name: "JournalModel"),
+        .target(name: "JournalVault"),
         // Embeds the widget extension into the app bundle.
         .target(name: "JournalWidget"),
         .target(name: "MuColor"),
@@ -150,15 +152,13 @@ let project = Project(
       )
     ),
 
-    // MARK: - Shared data layer
+    // MARK: - Legacy data layer
 
-    // The SwiftData models (`Card`, `Tag`, `Attachment`, `CardRelationship`,
-    // `Coordinate`) and the shared store factory (`JournalStore`). A *dynamic*
-    // framework — unlike the capture
-    // components (static, app-only), this is linked by both the app and the
-    // `JournalWidget` extension, so a dynamic framework embeds it once and lets
-    // the extension reference it. `APPLICATION_EXTENSION_API_ONLY` keeps it safe
-    // to link into the extension.
+    // The legacy CloudKit-mirrored SwiftData models (`Card`, `Tag`,
+    // `Attachment`, `CardRelationship`, `Coordinate`) and store factory
+    // (`JournalStore`). Product migration should read legacy CloudKit records,
+    // not this module's local SQLite store. `APPLICATION_EXTENSION_API_ONLY`
+    // keeps it safe for narrow tooling that may still link it from extensions.
     .target(
       name: "JournalModel",
       destinations: .app,
@@ -179,12 +179,63 @@ let project = Project(
       )
     ),
 
+    // MARK: - Vault data layer (target architecture)
+
+    // The vault persistence + sync foundation from `docs/VAULT_SYNC_DESIGN.md`:
+    // a small catalog store plus per-vault SwiftData stores with CloudKit
+    // mirroring *disabled*, and the explicit sync layer (`VaultSyncEngine`,
+    // CKSyncEngine-backed) that owns CloudKit zones/records/assets. A dynamic
+    // dynamic framework so the widget extension can link the vault reader while
+    // the app shell opens the runtime, lets the user choose a vault, and uses
+    // the selected VaultInstance for save/list UI.
+    .target(
+      name: "JournalVault",
+      destinations: .app,
+      product: .framework,
+      bundleId: "app.muukii.journal.JournalVault",
+      deploymentTargets: .app,
+      infoPlist: .default,
+      buildableFolders: ["Sources/JournalVault"],
+      dependencies: [
+        .sdk(name: "CloudKit", type: .framework),
+      ],
+      settings: .settings(
+        base: .frameworkTarget.merging([
+          "APPLICATION_EXTENSION_API_ONLY": "YES",
+        ]),
+        configurations: [
+          .debug(name: "Debug"),
+          .release(name: "Release"),
+        ]
+      )
+    ),
+
+    .target(
+      name: "JournalVaultTests",
+      destinations: .app,
+      product: .unitTests,
+      bundleId: "app.muukii.journal.JournalVaultTests",
+      deploymentTargets: .app,
+      infoPlist: .default,
+      buildableFolders: ["Tests/JournalVaultTests"],
+      dependencies: [
+        .target(name: "JournalVault"),
+      ],
+      settings: .settings(
+        base: [:],
+        configurations: [
+          .debug(name: "Debug"),
+          .release(name: "Release"),
+        ]
+      )
+    ),
+
     // MARK: - Widget extension
 
-    // Reads the shared SwiftData store (via `JournalModel`/`JournalStore`) to
-    // render recent cards. It carries the same App Group and iCloud entitlements
-    // as the app so it can open the identical CloudKit-mirrored store; the
-    // `aps-environment` value is expanded per configuration like the app's.
+    // Reads the vault catalog and the configured vault content store from the
+    // App Group via `JournalVault`. It carries the same App Group and iCloud
+    // entitlements as the app; the `aps-environment` value is expanded per
+    // configuration like the app's.
     .target(
       name: "JournalWidget",
       destinations: .app,
@@ -210,7 +261,7 @@ let project = Project(
         "aps-environment": "$(APS_ENVIRONMENT)",
       ]),
       dependencies: [
-        .target(name: "JournalModel"),
+        .target(name: "JournalVault"),
       ],
       settings: .settings(
         base: .base.merging([

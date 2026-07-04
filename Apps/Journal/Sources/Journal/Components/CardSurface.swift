@@ -3,11 +3,10 @@ import SwiftUI
 
 /// The shared visual identity of a journal card.
 ///
-/// A card is a portrait sheet of paper — the A-series proportion
-/// (1 : √2 ≈ 1 : 1.4144) — with continuous rounded corners and the palette's
-/// paper fill. Every place a card appears (the compose surface, the list tiles,
-/// and eventually the widget) is built on this, so they read as the *same*
-/// object rather than three look-alikes that drift apart.
+/// A card is a 4:5 portrait sheet with continuous rounded corners and the
+/// palette's paper fill. Every place a card appears (the compose surface, the
+/// list tiles, and eventually the widget) is built on this, so they read as the
+/// *same* object rather than three look-alikes that drift apart.
 ///
 /// `CardSurface` owns only the **chrome**: proportion, shape, fill, and inset.
 /// What sits inside — an editable body, a saved note, a date header — stays with
@@ -39,9 +38,8 @@ struct CardSurface<Content: View>: View {
 /// Dimensions shared by every card so the look stays identical wherever a card
 /// is drawn. Centralized here rather than re-declared per call site.
 enum CardMetrics {
-  /// Width ÷ height. A portrait sheet of paper in the A-series proportion (1 : √2),
-  /// so the value passed to `aspectRatio` is `width / height`.
-  static let aspectRatio: CGFloat = 1 / 1.4144
+  /// Width ÷ height for the canonical 4:5 portrait card.
+  static let aspectRatio: CGFloat = 4 / 5
   static let cornerRadius: CGFloat = 16
   static let padding: CGFloat = 16
 }

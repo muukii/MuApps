@@ -31,7 +31,7 @@ struct PrivacyPolicyView: View {
 /// Static policy copy shared by the section views on this screen.
 fileprivate enum PrivacyPolicyContent {
 
-  static let lastUpdated: LocalizedStringResource = "Last updated: July 2, 2026"
+  static let lastUpdated: LocalizedStringResource = "Last updated: July 4, 2026"
 
   static let introduction: LocalizedStringResource =
     "Tinycurve is a personal journaling app. It is designed so the developer does not run a server for your journal content and does not sell, track, or advertise with your data."
@@ -43,7 +43,7 @@ fileprivate enum PrivacyPolicyContent {
       paragraphs: [
         PrivacyPolicyParagraph(
           id: "content",
-          body: "When you create cards, Tinycurve can store the text you type, photos you capture, audio recordings, doodles, Bauhaus artwork, timestamps, relationships between cards, attachment metadata, and optional location coordinates."
+          body: "When you create cards, Tinycurve can store the text you type, photos you capture or choose from Photos, audio recordings, doodles, Bauhaus artwork, timestamps, relationships between cards, attachment metadata, and optional location coordinates."
         ),
         PrivacyPolicyParagraph(
           id: "suggestions",
@@ -74,6 +74,10 @@ fileprivate enum PrivacyPolicyContent {
           body: "Camera access is used only when you open photo capture and take a photo for a card."
         ),
         PrivacyPolicyParagraph(
+          id: "photos",
+          body: "Photos access is used through Apple's system picker. Tinycurve receives only the photo you choose for a card."
+        ),
+        PrivacyPolicyParagraph(
           id: "microphone",
           body: "Microphone access is used only when you record an ambient audio card."
         ),
@@ -97,7 +101,7 @@ fileprivate enum PrivacyPolicyContent {
         ),
         PrivacyPolicyParagraph(
           id: "widget",
-          body: "The Tinycurve widget reads recent cards from the same on-device store. Widget content is generated locally by the widget extension."
+          body: "The Tinycurve widget reads cards from the vault you choose for that widget. Widget content is generated locally by the widget extension."
         ),
       ]
     ),

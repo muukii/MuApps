@@ -31,7 +31,7 @@ struct WidgetInstructionsView: View {
 fileprivate enum WidgetInstructionContent {
 
   static let introduction: LocalizedStringResource =
-    "Add Tinycurve widgets for a quick view of your latest card."
+    "Add Tinycurve widgets for a quick view of the latest card in a vault you choose."
 
   static let instructions: [WidgetInstruction] = [
     WidgetInstruction(

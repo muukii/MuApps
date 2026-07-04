@@ -3,25 +3,33 @@ import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
 import CoreLocation
-import JournalModel
+import JournalVault
 import MuColor
+import PhotosUI
 import ScrollEdgeEffect
-import SwiftData
 import SwiftUI
+import UIKit
 import WidgetKit
 
 struct CreationView: View {
 
-  @Environment(\.modelContext) private var modelContext
+  private let onChangeVault: (@MainActor @Sendable () -> Void)?
+
   @Environment(\.appPalette) private var palette
   @Environment(\.colorScheme) private var colorScheme
   @Environment(JournalNotificationCenter.self) private var notifications
+  @Environment(JournalVaultRuntime.self) private var vaultRuntime
+
+  init(onChangeVault: (@MainActor @Sendable () -> Void)? = nil) {
+    self.onChangeVault = onChangeVault
+  }
 
   @AppStorage(JournalDefaults.shouldAttachLocationToNewCards)
   private var shouldAttachLocationToNewCards: Bool = true
 
   @State private var draftCards: [ThreadDraftCard] = []
   @State private var textEditorPresentation: TextEditorPresentation?
+  @State private var linkEditorPresentation: LinkEditorPresentation?
   @State private var photoCapturePresentation: PhotoCapturePresentation?
   @State private var doodleCanvasPresentation: DoodleCanvasPresentation?
   @State private var bauhausGridPresentation: BauhausGridPresentation?
@@ -32,6 +40,8 @@ struct CreationView: View {
   @State private var quickBauhausSheetDetent: PresentationDetent = .large
   @State private var scrollTargetID: ThreadDraftCard?
   @State private var isSettingsPresented: Bool = false
+  @State private var isChangeVaultConfirmationPresented = false
+  @State private var isImportingPhotoFromLibrary: Bool = false
   @Namespace private var namespace
 
   /// Shared one-shot location bridge. Each draft card stores the resolved
@@ -80,6 +90,16 @@ struct CreationView: View {
       }
       .toolbarTitleDisplayMode(.inlineLarge)
       .toolbar(content: {
+        if onChangeVault != nil {
+          ToolbarItem(placement: .navigationBarLeading) {
+            Button {
+              requestVaultChange()
+            } label: {
+              Label(vaultRuntime.selectedVault?.title ?? "Vault", systemImage: "shippingbox")
+            }
+            .accessibilityLabel("Change Vault")
+          }
+        }
               
         ToolbarItem(placement: .navigationBarTrailing) {
           NavigationLink.init {
@@ -108,12 +128,18 @@ struct CreationView: View {
       .safeAreaInset(edge: .bottom) {
         ThreadDraftActionRow(
           draftCards: draftCards,
-          isSaving: isSaving,
+          isSaving: isSaving || isImportingPhotoFromLibrary,
           onComposeText: {
             presentTextCapture()
           },
+          onComposeLink: {
+            presentLinkCapture()
+          },
           onCapturePhoto: {
             presentPhotoCapture()
+          },
+          onChoosePhotoFromLibrary: { item in
+            importPhotoFromLibrary(item)
           },
           onDrawDoodle: {
             presentDoodleCanvas()
@@ -131,6 +157,14 @@ struct CreationView: View {
     }
     .sheet(item: $textEditorPresentation) { presentation in
       ThreadDraftTextEditorSheet(
+        card: presentation.target
+      )
+      .presentationDetents([.medium, .large])
+      .presentationDragIndicator(.visible)
+      .presentationBackground(.background)
+    }
+    .sheet(item: $linkEditorPresentation) { presentation in
+      ThreadDraftLinkEditorSheet(
         card: presentation.target
       )
       .presentationDetents([.medium, .large])
@@ -211,6 +245,18 @@ struct CreationView: View {
         .navigationTransition(.zoom(sourceID: "settings", in: namespace))
         .presentationBackground(.background)
     }
+    .confirmationDialog(
+      "Discard Drafts?",
+      isPresented: $isChangeVaultConfirmationPresented,
+      titleVisibility: .visible
+    ) {
+      Button("Discard and Change Vault", role: .destructive) {
+        onChangeVault?()
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("Drafts are kept only in the current composer.")
+    }
     .appNavigationBarStyle()
     .onAppear {
       attachLocationToCurrentDraftsIfNeeded()
@@ -238,6 +284,16 @@ struct CreationView: View {
       }
     }
 
+  }
+
+  private func requestVaultChange() {
+    guard let onChangeVault else { return }
+
+    if draftCards.isEmpty {
+      onChangeVault()
+    } else {
+      isChangeVaultConfirmationPresented = true
+    }
   }
 
   private func presentTextCapture() {
@@ -273,13 +329,35 @@ struct CreationView: View {
       )
     case .text:
       presentTextEditor(for: draft)
+    case .link:
+      presentLinkEditor(for: draft)
     case .unknown:
-      presentTextEditor(for: draft)   
+      presentTextEditor(for: draft)
     }
   }
 
   private func presentTextEditor(for draft: ThreadDraftCard) {
     textEditorPresentation = TextEditorPresentation(target: draft)
+  }
+
+  private func presentLinkCapture() {
+    let draft: ThreadDraftCard
+
+    if let lastDraft = draftCards.last, lastDraft.isEmptyTextDraft {
+      draft = lastDraft
+      draft.kind = .link
+    } else {
+      draft = ThreadDraftCard(kind: .link)
+      draftCards.append(draft)
+    }
+
+    scrollTargetID = draft
+    attachLocationToCurrentDraftsIfNeeded()
+    presentLinkEditor(for: draft)
+  }
+
+  private func presentLinkEditor(for draft: ThreadDraftCard) {
+    linkEditorPresentation = LinkEditorPresentation(target: draft)
   }
 
   private func presentPhotoCapture() {
@@ -314,6 +392,25 @@ struct CreationView: View {
     draft.setPhoto(photo)
     scrollTargetID = draft
     attachLocationToCurrentDraftsIfNeeded()
+  }
+
+  private func importPhotoFromLibrary(_ item: PhotosPickerItem) {
+    guard isImportingPhotoFromLibrary == false else {
+      return
+    }
+
+    isImportingPhotoFromLibrary = true
+
+    Task { @MainActor in
+      defer { isImportingPhotoFromLibrary = false }
+
+      do {
+        let photo = try await PhotoLibraryImport.capturedPhoto(from: item)
+        finishPhotoCapture(photo, target: nil)
+      } catch {
+        notifications.post(.photoImportFailed)
+      }
+    }
   }
 
   private func updateDoodle(
@@ -493,40 +590,34 @@ struct CreationView: View {
     // the user had authored at the moment they tapped save.
     isSaving = true
 
-    Task {
+    Task { @MainActor in
       defer { isSaving = false }
 
       do {
-        let storeInputs = try drafts.map {
-          try $0.storeInput(
+        guard let vault = vaultRuntime.selectedVault else {
+          notifications.post(.threadSaveFailed)
+          return
+        }
+
+        let vaultDrafts = try drafts.map {
+          try $0.vaultDraft(
             palette: palette,
             colorScheme: colorScheme
           )
         }
-        let createdCards = try JournalStore.createThread(
-          cards: storeInputs,
-          in: modelContext
-        )
-        let mediaAttachmentIDs = createdCards.flatMap { card in
-          (card.attachments ?? []).map(\.id)
-        }
-        await MediaSyncEngine.shared.enqueueUploads(
-          attachmentIDs: mediaAttachmentIDs
-        )
+        try vault.createThread(cards: vaultDrafts)
+        await vaultRuntime.refresh()
+        WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
         draftCards.removeAll()
         scrollTargetID = nil
         textEditorPresentation = nil
+        linkEditorPresentation = nil
         photoCapturePresentation = nil
         doodleCanvasPresentation = nil
         bauhausGridPresentation = nil
         voiceRecorderPresentation = nil
         quickDoodleCanvasPresentation = nil
         quickBauhausGridPresentation = nil
-        // The store the widget reads just changed; request a targeted reload so
-        // the "Latest Note" widget can show what was just written.
-        WidgetCenter.shared.reloadTimelines(
-          ofKind: JournalWidgetKind.latestNote
-        )
         notifications.post(.threadSaved)
       } catch {
         // The draft is left on screen so nothing the user typed is lost.
@@ -545,6 +636,17 @@ private struct TextEditorPresentation: Identifiable {
   let id = UUID()
 
   /// Draft being edited by the text sheet.
+  let target: ThreadDraftCard
+}
+
+/// Presentation payload for one link editor session.
+private struct LinkEditorPresentation: Identifiable {
+
+  /// A stable identity for one editor presentation. Reopening the same card gets
+  /// a fresh value so SwiftUI rebuilds focus and keyboard state cleanly.
+  let id = UUID()
+
+  /// Draft being edited by the link sheet.
   let target: ThreadDraftCard
 }
 
@@ -657,6 +759,166 @@ private struct ThreadDraftCardEditor: View {
   }
 }
 
+/// Card-shaped summary for an unsaved draft.
+///
+/// This view intentionally knows only about `CardEditDraft` and capture payloads.
+/// It does not bridge to legacy saved-entry rendering or any persistence model.
+private struct DraftEntrySummaryCard: View {
+
+  let draft: CardEditDraft
+
+  @Environment(\.appPalette) private var palette
+  @Environment(\.colorScheme) private var colorScheme
+
+  var body: some View {
+    CardSurface {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack(spacing: 8) {
+          Image(systemName: draft.kind.creationSymbolName)
+          Text(draft.kind.displayTitle)
+          Spacer(minLength: 0)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.appOnSecondaryContainer.opacity(0.70))
+
+        summaryContent
+
+        Spacer(minLength: 0)
+
+        Text(draft.createdAt, format: .dateTime.hour().minute())
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.appOnSecondaryContainer.opacity(0.56))
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var summaryContent: some View {
+    switch draft.kind {
+    case .text:
+      Text(draft.text.isEmpty ? "Text" : draft.text)
+        .font(.headline.weight(.semibold))
+        .lineLimit(8)
+        .foregroundStyle(draft.text.isEmpty ? .secondary : .primary)
+    case .link:
+      if let linkURL = draft.linkURL {
+        JournalLinkPreview(url: linkURL.url, mode: .summary)
+      } else {
+        Text(draft.text.isEmpty ? "Link" : draft.text)
+          .font(.headline.weight(.semibold))
+          .lineLimit(8)
+          .foregroundStyle(draft.text.isEmpty ? .secondary : .primary)
+      }
+    case .photo:
+      if let image = draft.photo.flatMap({ UIImage(data: $0.imageData) }) {
+        Image(uiImage: image)
+          .resizable()
+          .scaledToFill()
+          .aspectRatio(1, contentMode: .fit)
+          .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+      } else {
+        DraftMediaPlaceholder(systemImage: "photo")
+      }
+    case .audio:
+      DraftAudioSummary()
+    case .doodle:
+      if let image = draft.doodle?
+        .image(inkColor: palette.tint, scale: 1) {
+        Image(uiImage: image)
+          .resizable()
+          .scaledToFit()
+          .aspectRatio(CardMetrics.aspectRatio, contentMode: .fit)
+      } else {
+        DraftMediaPlaceholder(systemImage: "scribble")
+      }
+    case .bauhaus:
+      if let image = draft.bauhaus?
+        .image(colorScheme: colorScheme, size: CGSize(width: 512, height: 512)) {
+        Image(uiImage: image)
+          .resizable()
+          .scaledToFit()
+          .aspectRatio(1, contentMode: .fit)
+      } else {
+        DraftMediaPlaceholder(systemImage: "square.grid.3x3")
+      }
+    case .unknown:
+      DraftMediaPlaceholder(systemImage: "questionmark.square.dashed")
+    @unknown default:
+      DraftMediaPlaceholder(systemImage: "questionmark.square.dashed")
+    }
+  }
+}
+
+private struct DraftMediaPlaceholder: View {
+
+  let systemImage: String
+
+  var body: some View {
+    RoundedRectangle(cornerRadius: 12, style: .continuous)
+      .fill(.appOnSecondaryContainer.opacity(0.08))
+      .aspectRatio(1, contentMode: .fit)
+      .overlay {
+        Image(systemName: systemImage)
+          .font(.system(size: 34, weight: .semibold))
+          .foregroundStyle(.appOnSecondaryContainer.opacity(0.42))
+      }
+  }
+}
+
+private struct DraftAudioSummary: View {
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 4) {
+      ForEach(DraftAudioWaveformSample.samples) { sample in
+        Capsule()
+          .fill(.appOnSecondaryContainer.opacity(0.62))
+          .frame(width: 4, height: sample.height)
+      }
+    }
+    .frame(maxWidth: .infinity, minHeight: 68, alignment: .center)
+  }
+}
+
+private struct DraftAudioWaveformSample: Identifiable {
+  let id: Int
+  let height: CGFloat
+
+  static let samples: [DraftAudioWaveformSample] = [
+    18, 30, 24, 42, 34, 58, 46, 70, 38, 54, 28, 44,
+  ].enumerated().map { index, height in
+    DraftAudioWaveformSample(id: index, height: CGFloat(height))
+  }
+}
+
+/// Converts a user-selected Photos item into the same draft payload as camera
+/// capture, keeping the composer persistence path source-agnostic.
+private enum PhotoLibraryImport {
+
+  @MainActor
+  static func capturedPhoto(from item: PhotosPickerItem) async throws -> CapturedPhoto {
+    guard let data = try await item.loadTransferable(type: Data.self) else {
+      throw PhotoLibraryImportError.missingImageData
+    }
+
+    guard let image = UIImage(data: data) else {
+      throw PhotoLibraryImportError.undecodableImage
+    }
+
+    guard let jpegData = image.jpegData(compressionQuality: 0.9) else {
+      throw PhotoLibraryImportError.missingJPEGData
+    }
+
+    return CapturedPhoto(imageData: jpegData, pixelSize: image.size)
+  }
+}
+
+/// Failure cases from importing one selected Photos image.
+private enum PhotoLibraryImportError: Error {
+  case missingImageData
+  case undecodableImage
+  case missingJPEGData
+}
+
 /// Bottom action row for building and posting a thread.
 ///
 /// Owns the `canSave` check so card payload changes are observed *here* rather
@@ -667,7 +929,9 @@ private struct ThreadDraftActionRow: View {
   let draftCards: [ThreadDraftCard]
   let isSaving: Bool
   let onComposeText: @MainActor @Sendable () -> Void
+  let onComposeLink: @MainActor @Sendable () -> Void
   let onCapturePhoto: @MainActor @Sendable () -> Void
+  let onChoosePhotoFromLibrary: @MainActor @Sendable (PhotosPickerItem) -> Void
   let onDrawDoodle: @MainActor @Sendable () -> Void
   let onComposeBauhaus: @MainActor @Sendable () -> Void
   let onRecordVoice: @MainActor @Sendable () -> Void
@@ -690,7 +954,9 @@ private struct ThreadDraftActionRow: View {
           HStack(spacing: 12) {
             ThreadDraftContentActionGroup(
               onComposeText: onComposeText,
+              onComposeLink: onComposeLink,
               onCapturePhoto: onCapturePhoto,
+              onChoosePhotoFromLibrary: onChoosePhotoFromLibrary,
               onDrawDoodle: onDrawDoodle,
               onComposeBauhaus: onComposeBauhaus,
               onRecordVoice: onRecordVoice
@@ -721,10 +987,14 @@ private struct ThreadDraftActionRow: View {
   private struct ThreadDraftContentActionGroup: View {
 
     let onComposeText: @MainActor @Sendable () -> Void
+    let onComposeLink: @MainActor @Sendable () -> Void
     let onCapturePhoto: @MainActor @Sendable () -> Void
+    let onChoosePhotoFromLibrary: @MainActor @Sendable (PhotosPickerItem) -> Void
     let onDrawDoodle: @MainActor @Sendable () -> Void
     let onComposeBauhaus: @MainActor @Sendable () -> Void
     let onRecordVoice: @MainActor @Sendable () -> Void
+
+    @State private var selectedLibraryPhotoItem: PhotosPickerItem?
 
     var body: some View {
       HStack(spacing: 12) {
@@ -735,10 +1005,32 @@ private struct ThreadDraftActionRow: View {
         )
 
         ThreadDraftActionIconButton(
+          systemName: "link",
+          accessibilityLabel: "Link",
+          action: onComposeLink
+        )
+
+        ThreadDraftActionIconButton(
           systemName: "camera",
           accessibilityLabel: "Photo",
           action: onCapturePhoto
         )
+
+        PhotosPicker(
+          selection: $selectedLibraryPhotoItem,
+          matching: .images,
+          preferredItemEncoding: .compatible
+        ) {
+          ThreadDraftActionIconLabel(systemName: "photo.on.rectangle.angled")
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .accessibilityLabel(Text("Choose Photo"))
+        .onChange(of: selectedLibraryPhotoItem) { _, item in
+          guard let item else { return }
+          selectedLibraryPhotoItem = nil
+          onChoosePhotoFromLibrary(item)
+        }
 
         ThreadDraftActionIconButton(
           systemName: "scribble.variable",
@@ -760,6 +1052,20 @@ private struct ThreadDraftActionRow: View {
       }
     }
 
+    /// Shared visual payload for icon-only compose controls.
+    private struct ThreadDraftActionIconLabel: View {
+
+      let systemName: String
+
+      var body: some View {
+        Image(systemName: systemName)
+          .font(.system(size: 18, weight: .semibold))
+          .foregroundStyle(.appOnSecondaryContainer)
+          .frame(width: 52, height: 42)
+          .contentShape(Capsule())
+      }
+    }
+
     /// Compact icon button for the compose action row.
     private struct ThreadDraftActionIconButton: View {
 
@@ -769,11 +1075,7 @@ private struct ThreadDraftActionRow: View {
 
       var body: some View {
         Button(action: action) {
-          Image(systemName: systemName)
-            .font(.system(size: 18, weight: .semibold))
-            .foregroundStyle(.appOnSecondaryContainer)
-            .frame(width: 52, height: 42)
-            .contentShape(Capsule())
+          ThreadDraftActionIconLabel(systemName: systemName)
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .capsule)
@@ -792,6 +1094,8 @@ extension Card.Kind {
     switch self {
     case .text:
       return "Text"
+    case .link:
+      return "Link"
     case .photo:
       return "Photo"
     case .audio:
@@ -812,6 +1116,8 @@ extension Card.Kind {
     switch self {
     case .text:
       return "text.alignleft"
+    case .link:
+      return "link"
     case .photo:
       return "camera"
     case .audio:

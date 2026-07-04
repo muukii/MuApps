@@ -9,28 +9,29 @@ functional change lands (see [Documentation Policy](#documentation-policy)).
 
 `Journal` is a journaling app for iPhone and iPad. Each thing a user records —
 text, a photo, a doodle, Bauhaus grid artwork, ambient sound, a Journaling
-Suggestion — becomes one **Card**. iCloud sync across a user's devices is a hard
-product requirement, so persistence is **SwiftData with CloudKit mirroring**.
+Suggestion — becomes one **Card**. iCloud sync and vault collaboration are hard
+product requirements, so the app is moving to **per-vault SwiftData stores with
+CloudKit mirroring disabled** and explicit CloudKit sync through `JournalVault`.
 
 ### Project status
 
 The app is **pre-product**: the real journaling UI is still being designed. What
 exists today is:
 
-- A working **SwiftData + CloudKit persistence stack** (the `Card` / `Tag` /
-  `Attachment` / `CardRelationship` model graph, verified to initialize and
-  pass CloudKit schema validation).
+- A working **JournalVault persistence foundation**: a catalog store, per-vault
+  content stores, `CardEdge` / `Card` / `Attachment` rows, outbox mutations, and
+  an explicit CloudKit sync boundary.
 - Six **capture components**, each built as an isolated framework so it can be
   developed and exercised on its own, independent of the undecided UI.
-- A **compose-first app shell** (`CreationView`) that writes text, photo, audio,
-  doodle, and Bauhaus Cards through card-specific editors, plus a **dev gallery**
+- A **vault-first app shell** (`VaultSelectionView` → `CreationView`) that asks
+  for a vault before composing, then writes text, link, photo, audio, doodle, and
+  Bauhaus Cards into the selected `VaultInstance` through card-specific editors,
+  plus a **dev gallery**
   (`CaptureGalleryView`) that launches each component standalone for on-device
   testing. The dev gallery is scaffolding, **not the shipping entry point**.
 - A **theming system** (`MuColor`) and **Core Haptics labs** (`MuHaptics`).
-- A **widget-ready structure**: the data layer lives in a shared `JournalModel`
-  framework and the SwiftData store is in an App Group container, so the
-  `JournalWidget` extension reads the same Cards as the app. A minimal "Recent
-  Cards" widget ships as a scaffold proving the structure works end-to-end.
+- A **vault-selectable widget**: `JournalWidget` lets each widget instance choose
+  one vault and reads the latest card from that vault's App Group store.
 
 Because the product shell is undecided, capture components are deliberately
 **persistence-agnostic**: each emits a plain `Sendable` value through a
@@ -54,10 +55,11 @@ and the WidgetKit extension bundle display name is `Tinycurve Widget`.
 ```
 Journal (app, app.muukii.journal)
 ├── JournalWidget      — WidgetKit extension (app.muukii.journal.JournalWidget)
-│   └── JournalModel    (reads the shared store)
+│   └── JournalVault    (vault catalog/content reader)
 ├── JournalModel       — data layer: Card/Tag/Attachment/CardRelationship/Coordinate
 │                        + JournalStore
-│                        (dynamic framework, linked by both app and widget)
+│                        (legacy migration/local tooling framework)
+├── JournalVault       — vault catalog/content stores + explicit CloudKit sync
 ├── MuColor            — color themes / palette + container views
 ├── MuHaptics          — Core Haptics pattern editor, tap sequencer & engine (Lab)
 ├── CaptureText        — text note capture
@@ -68,39 +70,59 @@ Journal (app, app.muukii.journal)
 └── CaptureSuggestions — Apple Journaling Suggestions picker demo
 ```
 
-`JournalModel` is a **dynamic** framework (unlike the capture components, which
-are static and app-only) because it is linked by *both* the app and the widget
-extension; a dynamic framework embeds it once and lets the extension reference
-it. It is built `APPLICATION_EXTENSION_API_ONLY` so it is safe to link into the
-extension.
+`JournalVault` is the app shell's active persistence framework and the widget's
+vault reader. `JournalModel` remains a legacy migration/local tooling framework.
+The app target no longer opens it for startup migration. It is built
+`APPLICATION_EXTENSION_API_ONLY` for compatibility with narrow extension-side
+tooling, but product widget behavior should not read it.
+
+### Vault migration direction
+
+`JournalApp` creates `JournalVaultRuntime` on launch. The runtime starts the
+sync layer and leaves the catalog empty when CloudKit recovery finds no owned or
+accepted shared vaults. That empty catalog is the new-user state; the app does
+not create preset vaults at install time and does not open the old App Group
+SwiftData SQLite store.
+
+Product migration should be implemented as a CloudKit operation owned by the
+sync layer: query legacy CloudKit records / CKAssets, write the new records into
+a migration target vault zone only when legacy content exists, then let the
+vault sync import materialize those records into `VaultContentStore`. The
+migration should run only when the target vault has no cards, so existing vault
+content is never merged with legacy data. Local-only SwiftData SQLite import can
+exist only as developer tooling; it is not the product migration path.
 
 ### Widget extension
 
 `JournalWidget` (`product: .appExtension`, embedded into the app bundle by an
 explicit target dependency) is a WidgetKit extension. Its single **Latest Note**
 widget supports Home Screen small / medium / large families plus Lock Screen
-inline / circular / rectangular accessory families. It reads recent `Card` rows
-directly from the shared SwiftData store via `JournalStore.makeModelContainer()` (a
-`FetchDescriptor` sorted by `createdAt` descending, limited to a small recent
-window). For multi-card thread saves it prefers the first card without an
-outgoing `.continuation`, so the widget shows the authored last item instead of
-an earlier card from the same save. It shows kind-aware content: text cards use
+inline / circular / rectangular accessory families. It uses
+`AppIntentConfiguration` so each widget instance can choose one vault from
+`VaultCatalogStore`; already-placed widgets with no explicit vault fall back to
+the first catalog vault.
+
+The timeline provider opens the configured vault's `VaultContentStore` from the
+App Group and fetches a small recent `Card` window sorted by `createdAt`
+descending. It resolves visibility through `CardEdge`: parent cards that have
+children are skipped so a multi-card thread save displays the authored last
+visible card instead of its root. It shows kind-aware content: text cards use
 `Card.body` (falling back to `Untitled`), doodle and Bauhaus cards use mirrored
 attachment thumbnails only when those optional bytes exist, and the other media
-cards still show a modality label. The Home Screen families show the latest-card
-body/thumbnail and relative timestamp; the Lock Screen accessory families use
-short labels or symbols that fit the tighter surfaces.
+cards still show a modality label. The Home Screen families show the selected
+vault title, latest-card body/thumbnail, and relative timestamp; the Lock Screen
+accessory families use short labels or symbols that fit the tighter surfaces.
 It maps the `Card` to a `Sendable` `NoteSnapshot` so the timeline entry and
-views stay free of the persistence layer, capture frameworks, and media files;
-it shows an empty state when there are no notes.
+views stay free of live SwiftData model references, capture frameworks, and
+media files; it shows an empty state when there are no vaults or when the chosen
+vault has no cards.
 
-The widget asks for two refresh timings with different jobs. When a note is
-written, `CreationView.save()` calls
-`WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)` after
-`JournalStore.createThread(...)` succeeds, so the Latest Note widget can re-read
-the shared store and show the just-posted card. Independently, the widget requests
-a periodic 15-minute timeline refresh to keep the relative date label current
-while the app is not opened.
+New card saves and saved-card edits request
+`WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)` so
+configured widgets refresh promptly. The 15-minute periodic timeline refresh
+remains only for relative-date freshness. Future optimization can denormalize
+latest-card previews into `VaultSummary`, but current product behavior reads the
+selected vault store directly.
 
 ### Entitlements & capabilities
 
@@ -109,8 +131,8 @@ Declared in `Project.swift` on the app target:
 - `com.apple.developer.icloud-container-identifiers` = `iCloud.app.muukii.journal`
 - `com.apple.developer.icloud-services` = `CloudKit`
 - `com.apple.security.application-groups` = `["group.app.muukii.journal"]` —
-  backs the shared SwiftData store. Declared on **both** the app and the
-  `JournalWidget` target so the two processes open the same database file.
+  backs the vault store layout and widget access to configured vaults. Declared
+  on **both** the app and the `JournalWidget` target.
 - `aps-environment` = `$(APS_ENVIRONMENT)` — expanded per configuration
   (`development` for Debug, `production` for Release). Required so shipped builds
   receive CloudKit's silent pushes for background sync.
@@ -121,158 +143,102 @@ Declared in `Project.swift` on the app target:
   signing fails.
 
 The `JournalWidget` target carries the same App Group, iCloud container,
-CloudKit, and `aps-environment` entitlements as the app — it opens the identical
-CloudKit-mirrored store, so it needs the same access.
+CloudKit, and `aps-environment` entitlements as the app. Its live timeline read
+is local App Group storage; CloudKit access remains available for future
+extension-side recovery or summary refresh work.
 
 ### Usage descriptions (Info.plist)
 
 - `NSCameraUsageDescription` — CapturePhoto.
+- `NSPhotoLibraryUsageDescription` — choosing an existing Photos image for a
+  photo card through the system picker.
 - `NSMicrophoneUsageDescription` — CaptureAudio.
 - `NSLocationWhenInUseUsageDescription` — automatic location attachment for
   newly authored cards when the Journal setting is enabled.
-- `UIBackgroundModes` = `["remote-notification"]` — lets SwiftData's CloudKit
-  mirroring pull updates while backgrounded.
+- `UIBackgroundModes` = `["remote-notification"]` — lets the explicit CloudKit
+  sync layer wake for remote change notifications while backgrounded.
 
 ---
 
 ## Data Model
 
-Defined in the **`JournalModel`** framework (so both the app and the widget can
-read it). `JournalStore` owns the schema and the single shared container factory
-(`makeModelContainer()`), which places the store in the App Group container
-(`groupContainer: .identifier("group.app.muukii.journal")`) and mirrors it
-through CloudKit (`cloudKitDatabase: .automatic`). The app calls it at launch and
-the widget's timeline provider calls it to read Cards — never build a
-`ModelContainer` for journal data anywhere else. The schema is `Card.self`,
-`Tag.self`, `Attachment.self`, and `CardRelationship.self`.
+Active app data lives in **`JournalVault`**. SwiftData is local persistence and
+SwiftUI observation only; every vault content store is opened with
+`cloudKitDatabase: .none`. CloudKit rows, assets, zones, shares, and remote
+imports belong to the CloudKit sync coordinator.
 
-`JournalStore` also owns the **write path**:
-`createCard(body:location:continuingFrom:in:)` builds a `Card` from captured
-text, optionally stores where it was written, optionally connects it to a
-previous Card as a `.continuation`, inserts everything into the given
-`ModelContext`, and saves immediately (explicitly, not via SwiftData autosave, so
-the caller can react to a failure). Card creation funnels through here rather
-than scattered `context.insert(Card(...))` calls.
-`createThread(cards:continuingFrom:in:)` accepts `JournalStore.ThreadCardInput`
-values and saves them as one linear thread write, connecting each Card to the
-previous one with `.continuation`.
-`updateCard(_:with:in:)` applies the same normalized `ThreadCardInput` shape to
-an existing card, replacing its body/location and replacing old media
-attachments with newly staged attachment rows/files. It returns uploaded and
-deleted attachment IDs so the app target can enqueue CKAsset uploads/deletions
-only after the SwiftData transaction succeeds. The app-side `CardEditDraft`
-keeps editable media in the capture components' own value types
-(`CapturedPhoto`, `AudioRecording`, `DoodleDrawing`, `BauhausGridDocument`) so
-creation, saved-entry editing, and previews share one draft model. `CardEditDraft`
-is `Codable` for crash recovery, and only encodes the draft payload; SwiftUI
-presentation identity is rebuilt after restore.
-Immediately before saving, the composer snapshots each draft and converts it into
-`ThreadCardInput`. Text inputs write into `Card.body`; photo, doodle, and
-Bauhaus inputs stage encoded bytes; doodle and Bauhaus inputs also generate a
-small mirrored PNG thumbnail for lightweight surfaces such as widgets. Audio
-inputs move the recording file URL into the shared media directory as an `.audio`
-attachment.
-The thread write still performs one final `ModelContext.save()`;
-attachment files are written or moved before that save, with orphan cleanup
-handled by `reconcileOrphanFiles(...)`. Cards in the same thread get save-time
-`createdAt` values offset by authored order, so date-sorted readers can identify
-the thread's final item deterministically.
-SwiftData/CloudKit mirroring delivers the `Card` / `Attachment` rows separately
-from the custom CKAsset file sync. After a thread save succeeds,
-`CreationView.save()` extracts the created attachment IDs and queues those files
-with `MediaSyncEngine`; at app launch `JournalApp` fetches attachment rows whose
-local files still exist and re-queues them, covering older builds that wrote
-media files before upload enqueue was wired. When `MediaSyncEngine` later writes
-or removes an attachment file for an already-visible row, it emits a process-local
-media file change signal so entry views retry the asynchronous file load without
-requiring the media sync actor to read SwiftData.
-`createRelationship(from:to:kind:in:)` connects existing Cards and enforces the
-app-level DAG rule: no self-edge and no edge that would create a cycle. It is
-idempotent for the same source / target / kind triplet because CloudKit
-mirroring cannot enforce uniqueness.
+The legacy **`JournalModel`** schema still exists for migration and local
+tooling. New app UI and product widget code must not write to it.
 
-All models obey **CloudKit-mirroring constraints**: every stored property is
-optional or has a default, no `.unique` attributes, and every relationship is
-optional. A consequence is that uniqueness cannot be enforced — the same logical
-record created on two devices can produce duplicate rows; de-duplication, if it
-ever matters, is an app-level concern.
+### `VaultInstance` — UI-facing vault object
 
-### `Card` — a single post
+Each vault has one UI-facing `VaultInstance` in the app process. It owns the
+vault's `VaultContentStore`, cached outbox count, foreground sync interest, and
+future permission/share state. App screens use the selected `VaultInstance`
+rather than reaching for CloudKit transport objects or opening their own
+`ModelContainer`.
+
+### `VaultContentStore` — one vault database
+
+Each vault has its own SQLite store and media directory under the App Group
+layout:
+
+```text
+Journal/
+  catalog.sqlite
+  Vaults/
+    <vault-id>/
+      store.sqlite
+      media/
+      sync-state/
+```
+
+`VaultContentStore.createThread(cards:)` writes a root `CardEdge` plus child
+edges in one transaction. The same transaction writes `PendingMutation` rows, so
+local content never exists without a pending CloudKit upload.
+
+### `Card` — a content atom
 
 | Property | Type | Notes |
 |----------|------|-------|
-| `id` | `UUID` | Logical id; not unique-enforced (see above). |
-| `kind` | `Kind` | Primary modality: `.text`, `.photo`, `.audio`, `.doodle`, `.bauhaus`, or `.unknown`. Determines which content field/attachment is meaningful. |
+| `id` | `UUID` | Unique inside the vault store. Legacy migration preserves old card IDs. |
+| `kindRawValue` | `String` | Stored/synced modality string. `kind` maps unknown values to `.unknown`. |
+| `body` | `String` | Text content for `.text`; canonical URL string for `.link`; media cards keep this empty. |
 | `createdAt` | `Date` | |
 | `updatedAt` | `Date` | |
-| `tags` | `[Tag]?` | Many-to-many; inverse declared on `Tag.cards`. |
-| `attachments` | `[Attachment]?` | Media metadata rows owned by the card; bytes live outside SwiftData. |
-| `outgoingRelationships` | `[CardRelationship]?` | Directed edges that start from this card. |
-| `incomingRelationships` | `[CardRelationship]?` | Directed edges that point at this card. |
-| `location` | `Coordinate?` | `nil` = no location (not permitted or unavailable). |
-| `body` | `String` | |
+| `location` | `Coordinate?` | `nil` = no location. |
 
-`kind` is the canonical content contract. `.text` cards render `body`; media
-cards expect a matching `Attachment.kind` (`.photo`, `.audio`, `.doodle`, or
-`.bauhaus`) and do not render `body` as a caption. Bauhaus cards use `.bauhaus`
-attachments whose file bytes are encoded `BauhausGridDocument` JSON; the
-document decoder also accepts older final-only `BauhausGridArtwork` JSON and
-treats it as non-replayable. `.unknown` is a forward-compatibility fallback for a
-card whose modality this build does not recognize (e.g. one synced from a newer
-app version). The app never creates `.unknown` cards and omits the kind from the
-editor's kind picker; saved-list summary and detail render such a card as a
-neutral placeholder ("This card was made in a newer version…") instead of
-failing.
+### `CardEdge` — a card placement in the vault tree
 
-### `Tag` — a label applied to many Cards
+`CardEdge` is the fractal structure for both roots and children. A root edge has
+`parentEdgeID == nil`; children point to another edge. A linear thread is a root
+edge plus ordered child edges, and future mind-map layouts can attach layout data
+without changing `Card`.
 
 | Property | Type | Notes |
 |----------|------|-------|
-| `id` | `UUID` | |
-| `name` | `String` | |
+| `id` | `UUID` | Unique edge id. Migration derives deterministic edge IDs from legacy card/relationship IDs. |
+| `cardID` | `UUID` | Referenced `Card`. |
+| `parentEdgeID` | `UUID?` | Parent edge in the same vault, or `nil` for roots. |
+| `sortIndex` | `Int` | Order among siblings. |
+| `layout` | `Data?` | Reserved layout metadata. |
 | `createdAt` | `Date` | |
-| `cards` | `[Card]?` | `@Relationship(inverse: \Card.tags)`. Declared on this side only. |
-
-### `CardRelationship` — a directed edge between Cards
-
-`CardRelationship` is stored as its own model so Card-to-Card links are a graph,
-not a single-parent tree. A thread is a path through this graph; replies and
-references can branch from any earlier card. The app-level invariant is DAG:
-`JournalStore.createRelationship(...)` rejects self-links and cycles.
-
-| Property | Type | Notes |
-|----------|------|-------|
-| `id` | `UUID` | Logical id; not unique-enforced. |
-| `kind` | `Kind` | `.continuation`, `.reply`, or `.reference`. |
-| `createdAt` | `Date` | Timestamp for the edge itself. |
-| `sortIndex` | `Int` | Stable order among same-kind outgoing relationships from a source card. |
-| `source` | `Card?` | Start of the directed edge. |
-| `target` | `Card?` | Destination of the directed edge. |
+| `updatedAt` | `Date` | |
 
 ### `Attachment` — media metadata for a Card
 
-Attachments represent photos, audio recordings, doodles, and Bauhaus artwork
-associated with a card. The SwiftData row stores queryable metadata; the full
-bytes live as files in the App Group container and are reconciled by
-`JournalStore.reconcileOrphanFiles(...)`. The optional `thumbnail` field stores
-small mirrored fallback preview data for lightweight surfaces; draft saves
-generate it for doodle and Bauhaus attachments while main in-app entry rendering
-still prefers the local attachment file. On app launch,
-`JournalThumbnailBackfill` fills missing doodle/Bauhaus thumbnails from any local
-attachment files created before thumbnail generation was restored. The app target's
-`MediaSyncEngine` mirrors those files through a separate private CloudKit zone as
-one immutable CKAsset record per attachment id; the widget does not run that
-engine and only reads whatever rows/files are already available in the shared App
-Group container.
+Attachment bytes live as files in the vault's `media/` directory. The row and
+file share the same vault boundary, and `CloudKitVaultSyncEngine` uploads the
+file as a CKAsset when a local file exists.
 
 | Property | Type | Notes |
 |----------|------|-------|
-| `id` | `UUID` | Logical id and file name basis. |
-| `kind` | `Kind` | `.photo`, `.audio`, `.doodle`, or `.bauhaus`. |
+| `id` | `UUID` | Unique attachment id and file name. Legacy migration preserves old attachment IDs. |
+| `cardID` | `UUID` | Referenced `Card`. |
+| `kindRawValue` | `String` | `.photo`, `.audio`, `.doodle`, `.bauhaus`, or unknown raw value. |
 | `byteSize` | `Int` | Size of the on-disk file at attach time. |
-| `thumbnail` | `Data?` | Optional mirrored fallback preview data; generated for doodle and Bauhaus draft saves. |
+| `thumbnail` | `Data?` | Optional small preview data. |
 | `createdAt` | `Date` | |
-| `card` | `Card?` | Owning card; inverse declared on `Card.attachments`. |
 
 ### `Coordinate` — a geographic point
 
@@ -296,8 +262,9 @@ Each is an isolated framework that emits a value type through a callback and own
 no persistence. The dev gallery hosts each in a standalone demo view; the
 compose detail editors also host Photo, Doodle, Bauhaus, and Ambient Sound and
 convert their callbacks into `CardEditDraft` payloads. Text composition uses an
-app-shell `TextEditor` bound directly to `CardEditDraft.text`, so typed changes
-are reflected in the draft immediately.
+app-shell `TextEditor` bound directly to `CardEditDraft.text`; Link composition
+uses an app-shell URL field and LinkPresentation preview over the same draft
+body slot, so typed changes are reflected in the draft immediately.
 
 ### CaptureText → `CapturedText`
 
@@ -349,8 +316,8 @@ continuous texture light while its intensity and sharpness follow finger speed;
 replay surfaces skip the touch boundary taps and run only the speed-shaped
 texture along the compressed playback timeline. Unsupported hardware, including
 Simulator, no-ops.
-The drawable surface is fixed to the same portrait paper proportion as journal cards
-(`width / height = 1 / 1.4144`), and the toolbar is single-color: width slider,
+The drawable surface is fixed to the same 4:5 portrait paper proportion as journal cards
+(`width / height = 4 / 5`), and the toolbar is single-color: width slider,
 undo, replay, clear, and export when `onExport` is supplied. When `onChange` is
 supplied, the canvas emits the current
 `DoodleDrawing?` after committed stroke changes, undo, or clear so hosts can
@@ -523,31 +490,58 @@ the gallery's **Lab** section).
 
 ## App Entry & Screens
 
-- **`JournalApp`** (`@main`) — builds the `ModelContainer` for the `Card` + `Tag`
-  schema with `ModelConfiguration(cloudKitDatabase: .automatic)`, and injects the
-  persisted theme palette via `RootView` → `PrimaryContainer`.
+- **`JournalApp`** (`@main`) — builds `JournalVaultRuntime` and injects the
+  persisted theme palette via `RootView` → `PrimaryContainer`. It does not open
+  or inject the legacy `ModelContainer`.
 - **`RootView`** — reads the persisted theme (`@AppStorage(JournalDefaults.themeID)`)
   and appearance preference
   (`@AppStorage(JournalDefaults.appearancePreferenceID)`), applies the palette,
   and requests the chosen scene color scheme. `System` follows the device
-  appearance; `Light` and `Dark` override it for Journal. It is also the
-  first-run gate: while
-  `@AppStorage(JournalDefaults.hasCompletedOnboarding)` is `false` it hosts
-  `OnboardingView`; once completed it cross-fades (`.transition(.opacity)`) to
-  `CreationView`. The completion flag is flipped by the closure `RootView` passes
-  to `OnboardingView`, not by the onboarding view itself. It also owns the
+  appearance; `Light` and `Dark` override it for Journal. It is also the root
+  router. On a fresh install, it starts in **Loading** while
+  `JournalVaultRuntime` resolves initial vault availability: if iCloud is
+  available, it performs the first CloudKit vault discovery pass; if iCloud is
+  unavailable or unused, it resolves to local-only state; if iCloud is
+  temporarily unavailable or cannot be determined, it resolves with deferred
+  CloudKit recovery instead of blocking forever. A resolved decision records
+  `JournalDefaults.hasResolvedInitialVaultAvailability`. Later launches restore
+  a route immediately from that cached decision and
+  `JournalDefaults.hasCompletedOnboarding`, while `JournalVaultRuntime` still
+  starts and runs recovery in the background. Existing local or recovered vault
+  state routes to the existing-user vault flow (`VaultSelectionView` →
+  `CreationView`). If no vault state exists and onboarding has not been
+  completed, it routes to **New User** onboarding. Completing onboarding records
+  `@AppStorage(JournalDefaults.hasCompletedOnboarding)` and then enters the
+  vault picker, where the user can create the first vault. When initial iCloud
+  recovery was deferred, the vault picker shows a compact diagnostic banner and
+  Settings' debug-only **Vault Runtime** screen shows the last availability
+  resolution. It also owns the
   scene-local `JournalNotificationCenter` and wraps the app content in
   `JournalNotificationHost`, which injects that model through the SwiftUI
   environment and overlays app-wide bottom capsule notifications above the
-  current screen.
+  current screen. Incoming CloudKit vault invitations are bridged from UIKit
+  scene metadata into `JournalVaultRuntime.acceptShare(metadata:)`; success
+  completes onboarding if needed and returns the user to the vault picker.
+- **`VaultSelectionView`** — the post-onboarding entry screen. It reads
+  `JournalVaultRuntime.vaults`, shows the catalog in picker order as a standard
+  SwiftUI `List`, and calls `JournalVaultRuntime.selectVault(_:)` before
+  entering the composer. The toolbar
+  also opens a **New Vault** sheet; creating a vault calls
+  `JournalVaultRuntime.createVault(title:)`, seeds the local vault store, reloads
+  the catalog, opens the new vault, and then enters the composer. Settings are
+  reachable from this screen so app-wide preferences remain available before a
+  vault is active. Owned vault rows also show an **Invite People** affordance
+  that prepares the vault's saved zone-wide CloudKit share and then presents the
+  system `UICloudSharingController` with private invite / read-write options;
+  participant vault rows do not offer invite issuance.
 - **`OnboardingView`** — the first-run introduction, also re-showable on demand
   from Settings. Four horizontally-paged screens (`TabView` with
   `.tabViewStyle(.page)`) plus a fixed **Get Started** / **Next** call-to-action
   and a **Skip** affordance on every page but the last:
   1. **Welcome** — a decorative `CardSurface` stating the core idea ("Every little
      thing becomes a card") over a short welcome blurb.
-  2. **Capture methods** — the five modalities (Text, Photo, Doodle, Ambient
-     Sound, Suggestions) as icon + name + one-line summary.
+  2. **Capture methods** — the six modalities (Text, Link, Photo, Doodle,
+     Ambient Sound, Suggestions) as icon + name + one-line summary.
   3. **Permissions** — optional priming for Camera, Microphone, and Location. Each
      row shows the live authorization status and an **Allow** button that triggers
      the system prompt on demand (`AVCaptureDevice.requestAccess(for:)`,
@@ -561,13 +555,13 @@ the gallery's **Lab** section).
   wraps its body in its own `PrimaryContainer` keyed to the stored theme so the
   palette resolves whether shown inline (first run) or over the app (Settings
   cover).
-- **`CreationView`** (current app root) — the compose screen: a date header
+- **`CreationView`** — the selected-vault compose screen: a date header
   (`DateView`) showing today's weekday, month, and day, then
   a vertical `ScrollView` of card-shaped draft summaries. The header is rendered
   with the standard `Date.FormatStyle` field selection, so its field order and
   separators follow the user's locale (en: "Sat, Jun 27"; ja: "6月27日(土)").
   Drafts render through the same adaptive saved-entry summary card wrapper used
-  by Entries; the wrapper still owns the paper aspect ratio, footer, tilt, and
+  by Entries; the wrapper still owns the 4:5 paper aspect ratio, footer, tilt, and
   modality-specific summary layout, while draft-only media payloads are fed in
   directly instead of being loaded from attachment files. Tapping a text card
   opens a native **Text** sheet with a focused `TextEditor`. Tapping a photo card
@@ -579,42 +573,52 @@ the gallery's **Lab** section).
   sheet that restores the existing `BauhausGridDocument`; tapping a cell presents
   the shape picker sheet, and choosing a shape applies it into the selected 5 x 5
   grid cell while recording replay events when the document has a replay
-  timeline. Tapping an audio card opens a native **Voice Record** sheet, showing
+  timeline. Tapping a link card opens a native **Link** sheet with URL keyboard
+  input; values such as `example.com` are normalized to HTTPS before save, and
+  valid web URLs show iOS's native LinkPresentation preview in the composer.
+  Tapping an audio card opens a native **Voice Record** sheet, showing
   **Play** and **Record Again** for an existing
   `AudioRecording` or `AudioCaptureView` for a new take. The bottom composer
-  controls put the concrete content-type icons — Text, Photo, Doodle, Bauhaus,
-  and Voice — in separated Liquid Glass buttons inside one shared
+  controls put the concrete content-type icons — Text, Link, Camera, Photos,
+  Doodle, Bauhaus, and Voice — in separated Liquid Glass buttons inside one shared
   `GlassEffectContainer`, with the save action remaining a separate prominent
   glass button. Tapping one of those quick-capture icons presents the matching
-  native sheet. Text opens the last untouched text placeholder when one exists;
-  otherwise it creates a new text draft and opens the Text sheet. Text, Doodle,
-  and Bauhaus sheets reflect edits into the draft as the user works and rely on
-  interactive dismissal rather than **Done** or **Cancel** buttons. Photo and
-  Voice create/reuse a draft only after capture finishes, then dismiss back to
-  the composer. Doodle and Bauhaus present native sheets at the large detent and
-  resolve a draft on the first non-empty canvas/grid change, reusing the first
-  untouched text placeholder when possible and restoring/removing that quick draft
-  if the canvas/grid is cleared. The doodle canvas and Bauhaus grid auto-sync
-  committed changes into the draft; there is no separate save button for those
-  visual editors. The glass up-arrow saves the current draft cards as a linear
-  thread via `JournalStore.createThread(cards:in:)`, then clears the composer.
+  native sheet or picker. Text opens the last untouched text placeholder when one
+  exists; otherwise it creates a new text draft and opens the Text sheet. Text,
+  Doodle, and Bauhaus sheets reflect edits into the draft as the user works and
+  rely on interactive dismissal rather than **Done** or **Cancel** buttons. Camera
+  and Voice create/reuse a draft only after capture finishes, then dismiss back
+  to the composer. Photos opens Apple's system photo picker; after the selected
+  image is loaded and normalized into the app's `CapturedPhoto` payload, the
+  composer creates/reuses the same photo draft type used by camera capture. If a
+  selected image cannot be loaded, the composer leaves drafts unchanged and shows
+  a persistent failure notification. Doodle and Bauhaus present native sheets at
+  the large detent and resolve a draft on the first non-empty canvas/grid change,
+  reusing the first untouched text placeholder when possible and
+  restoring/removing that quick draft if the canvas/grid is cleared. The doodle
+  canvas and Bauhaus grid auto-sync committed changes into the draft; there is no
+  separate save button for those visual editors. The glass up-arrow converts the
+  current draft cards into `VaultContentStore.CardDraft` values, saves them
+  through the selected `VaultInstance` as one root `CardEdge` tree, then clears
+  the composer.
   A successful save shows a transient bottom capsule notification ("Saved to
   Journal") with success haptics; if saving fails, the draft remains on screen
   and a persistent bottom capsule notification explains that the save did not
   complete with failure haptics. Notifications fade, blur, and scale in place
   with a slight bounce instead of sliding from an edge.
   The save button is disabled until every draft can be persisted (text requires
-  non-empty trimmed text; media kinds require a captured payload). Existing-Card
-  continuation selection is not wired yet; this composer creates a new thread
-  from the first draft.
-  Toolbar links to the entries list (`ListView`) and Settings. Capture demos are
+  non-empty trimmed text, link requires a valid HTTP(S) URL, and media kinds
+  require a captured payload). Existing-Card continuation selection is not wired
+  yet; this composer creates a new thread from the first draft.
+  Toolbar links back to vault selection, to the vault-backed entries list
+  (`SavedListView`), and to Settings. Capture demos are
   kept in the dev gallery rather than Settings; suggestions remain a dev-gallery
   component rather than a compose-surface card kind.
 - **`CaptureGalleryView`** (dev scaffolding, not currently wired into the app
   root) — a `List` with:
   - **Capture**: Text, Photo, Doodle, Bauhaus Grid, Ambient Sound, Suggestions.
   - **Lab**: Haptics, Haptic Doodle in Debug builds only.
-  - **Storage**: Entries (SwiftData / iCloud) → `ListView`.
+  - **Storage**: Entries (vault store) → `SavedListView`.
   - Toolbar → **Settings**.
   - Navigation-bar title and icons follow the active palette
     (`onPrimaryContainer` / `tint`) via `appNavigationBarStyle` (see below).
@@ -627,93 +631,30 @@ the gallery's **Lab** section).
   only matches when 26 is the current major, so it would no-op on iOS 27+).
   iOS 26+'s system (Liquid Glass) background is preserved unless an explicit
   `backgroundColor` is passed; the global appearance proxy is never touched.
-- **`ListView`** — a `@Query`-backed entries harness over `Card` that exists only
-  to exercise the SwiftData + CloudKit stack end-to-end. Cards are grouped into
-  local-calendar day sections, each with a localized date header and a responsive
-  `LazyVGrid` of portrait tiles shaped like a sheet of paper (1 : 1.4144), filled
-  with the active palette's `secondaryContainer`: compact widths keep two
-  columns, while regular-width iPad layouts add columns as space allows. Each tile
-  renders exactly one card pattern based on `Card.kind`: text (`Card.body`),
-  audio (waveform chrome), image (the matching photo attachment file loaded
-  asynchronously), doodle (the editable drawing JSON decoded and rendered as a
-  SwiftUI canvas view on the same 1 : 1.4144 paper aspect), or Bauhaus (the
-  editable grid JSON decoded and rendered as a SwiftUI grid view). Media cards
-  do not render `Card.body` as a caption; a
-  captured audio/image/doodle/Bauhaus grid is its own Card. Each tile is tilted
-  by a small stable angle (±3°) derived from its `Card.id`, for a loosely
-  hand-placed look. Each tile has a thin SwiftData-backed host view that owns the
-  live `Card` reference and derives the display snapshot in `body`, so imported
-  row or relationship changes can refresh the tile. Media wells also listen for
-  `MediaSyncEngine` file-change signals, covering the common CloudKit order where
-  the SwiftData record arrives before the CKAsset file has finished downloading.
-  `CardSurface` keeps the paper chrome flat: no border or shadow, just the
-  palette's secondary container fill inside the fixed paper shape. Summary photo
-  and Bauhaus media wells use square previews, and Bauhaus detail wells stay
-  square to preserve the authored grid geometry.
-  Relationship-connected Cards are grouped before the day sections are rendered:
-  the default list mode collapses each multi-card group into one stacked tile
-  showing the group's newest Card plus a count badge, while the toolbar toggle
-  expands groups into their member Cards with position badges. The stacked and
-  expanded modes share matched card geometry so stack layers animate into their
-  expanded grid tiles. The collapsed stack visually shows at most three Card
-  layers to avoid noisy overdraw, but hidden geometry anchors are kept for the
-  remaining group members so every expanded Card has a matched source. A group is
-  placed in the local-calendar day of its newest Card so the archive remains
-  newest activity first.
-  Tapping a tile pushes an **Entry** detail screen. Summary and detail both render
-  through one adaptive saved-entry card wrapper that owns `CardSurface`, so the
-  same paper aspect ratio is preserved while the wrapper swaps only its internal
-  summary/detail layout. The detail layout shows full text inside the card with
-  internal scrolling when needed, a larger photo/doodle/Bauhaus preview, Doodle
-  stroke replay controls that keep the visible canvas on the paper aspect while
-  preserving the saved stroke geometry, Bauhaus replay controls when the stored
-  document has an authored event timeline, audio playback when the local recording
-  file exists,
-  and created/updated/location metadata without inheriting the grid tile's tilt
-  or text truncation. The detail toolbar includes **Edit**, which rehydrates the
-  live `Card` into a shared `CardEditDraft` from the local attachment file and
-  presents the shared card editor with the card type fixed and only the
-  kind-specific editor. If a media card's local file has not arrived yet, editing
-  is blocked with an alert rather than creating a lossy draft. Saving an edit
-  calls `JournalStore.updateCard(_:with:in:)`, replaces old media attachments
-  when the payload changes, queues uploads/deletions through `MediaSyncEngine`,
-  reloads the Latest Note widget timeline, and returns to the detail screen.
-  A relationship group opens as a vertical list of full detail cards instead of a
-  single card plus preview strip: the group passed from the entries grid is merged
-  with the selected card's live incoming/outgoing relationships, duplicate Cards
-  collapse to one row, and the row for the card the user selected becomes the
-  initial scroll position. Non-selected rows keep a small relationship label when
-  the selected card has a direct edge to them, falling back to a generic related
-  label for same-group Cards reached through another Card. Row context menus keep
-  the same **Share** action as the entries grid.
-  Each tile's context menu and the detail toolbar include **Share**, which opens
-  a pre-share preview sheet before any system share sheet is shown. The preview
-  asynchronously generates the actual 9:16 export artifact first and aspect-fits
-  that generated file into the sheet instead of showing a separate live SwiftUI
-  approximation. Generated preview artifacts are cached in the open sheet state,
-  so switching between **Image** and **Video** tabs reuses files that were already
-  prepared for the current appearance. The **Image** mode displays the generated
-  PNG file. Doodle cards and Bauhaus cards with an authored replay timeline also
-  get a **Video** tab that displays the generated 60 fps mp4 file. **Share
-  Image** and **Share Video** hand that already-previewed file to the system
-  share sheet. Doodle and Bauhaus still-image exports decode their stored JSON
-  when available, so vector doodles and grid documents share as rendered images
-  even when the mirrored thumbnail is absent. Older Bauhaus cards without replay
-  data still share as still images by decoding their stored grid document,
-  falling back to any mirrored thumbnail only when the JSON payload is
-  unavailable. The
-  debug **Seed Samples** action and `Card Patterns` Preview exercise the
-  independent card patterns.
-  Not the real entries UI.
-- **`SettingsView`** — an iCloud sync status row, a drill-in **iCloud Sync**
-  diagnostics screen, a theme picker, an **Appearance** picker, a **Location**
+- **`SavedListView`** — a vault-backed entries list over the selected
+  `VaultInstance`. It reads `CardEdge`, `Card`, and `Attachment` rows from
+  the selected vault container, creates value snapshots, groups root edges into
+  local-calendar day sections, and displays them as 4:5 `CardSurface` tiles. Child
+  edges are shown in the pushed detail view as a flattened subtree; grid tiles
+  are matched transition sources so opening a detail view uses the system zoom
+  navigation transition from the tapped card. Link cards
+  use iOS's LinkPresentation preview in both tiles and detail cards, fetching
+  metadata at display time and caching it for the app session. Media previews
+  prefer the vault media file when it exists and fall back to attachment
+  thumbnails or a modality placeholder. The list listens for
+  `VaultMediaFileChange` notifications for the selected vault and reloads snapshots
+  when files arrive. Saved cards can be edited from a grid tile's context menu or
+  from each detail card's pencil button. Editing rehydrates the saved card into
+  `CardEditDraftEditor`, requires the full media file for media cards, and saves
+  back through `VaultContentStore.updateCard(cardID:with:)`; thumbnails are not
+  used as lossy edit sources. Legacy saved-entry export/share UI was removed with
+  the migration and still needs to be rebuilt against `VaultInstance` snapshots.
+- **`SettingsView`** — a theme picker, an **Appearance** picker, a **Location**
   toggle for automatic location attachment, a **Widgets** section with an **Add
-  Widgets** guide, optional Debug-only Lab links, and About actions. The
-  diagnostics screen separates
-  iCloud account availability,
-  SwiftData row mirroring phases/recent events, custom media-file sync pending
-  counts/last activity/errors, and local attachment-file availability so a row
-  that arrived before its media file can be identified. Selecting a theme writes
+  Widgets** guide, optional Debug-only **Vault Runtime** and Lab links, and About
+  actions. Settings is a grouped `Form`, but every cell background opts into the
+  active `MuColor` secondary container because SwiftUI form rows do not inherit
+  the app theme surface automatically. Selecting a theme writes
   `JournalDefaults.themeID` (animated) and triggers selection haptic feedback.
   The Appearance segmented picker writes
   `JournalDefaults.appearancePreferenceID`; **System** follows the device
@@ -723,7 +664,8 @@ the gallery's **Lab** section).
   and when disabled new draft cards are saved without location metadata. **Add
   Widgets** opens a Settings detail screen with an illustrated header and
   step-by-step instructions for adding Tinycurve to the Home Screen, Lock Screen
-  below the clock, and StandBy.
+  below the clock, and StandBy. The guide frames the widget as showing the
+  latest card in a chosen vault.
   Capture demos are intentionally hidden from Settings. In Debug builds, **Lab**
   links to Haptics and Haptic Doodle so those tools can be tried from the current
   app root; Release builds omit the Lab section. An **About** section has
@@ -755,15 +697,24 @@ OS 27.0**.
 
 ### iCloud / CloudKit verification
 
-The stack is runtime-verified on Simulator: `NSPersistentCloudKitContainer`
-initializes against `iCloud.app.muukii.journal` (Private DB) and passes Apple's
-`PFCloudKitOptionsValidator` (confirm via the simulator log line referencing
-`containerIdentifier:iCloud.app.muukii.journal`). Mirroring engages even without
-an iCloud account (schema validation runs; no actual sync).
+The active app shell disables SwiftData CloudKit mirroring for vault stores.
+CloudKit verification now belongs to `CloudKitVaultSyncEngine`: zone creation,
+record upload/download, CKAsset file transfer, subscriptions, share creation,
+share invitation acceptance, and shared-database imports. The app runtime now
+uses `CloudKitVaultSyncEngine`; `LoggingVaultSyncEngine` remains for previews,
+debug probes, and narrow tests.
+On every launch, the runtime should kick a lightweight CloudKit vault recovery:
+enumerate Journal-owned zones in the private database, accepted shared zones in
+the shared database, materialize any missing catalog rows, and then hand record
+imports back to the normal sync path. If recovery finds no local or remote
+vaults, the runtime treats the install as a new-user state and leaves the vault
+picker empty until the user creates a vault.
+Live CloudKit account/network behavior, including two-account invite
+acceptance, still needs device or signed simulator verification.
 
 **Before sync works on real devices:** create/let Xcode auto-create the
-`iCloud.app.muukii.journal` container, run signed into iCloud to push the
-**Development** schema, verify Record Types in the CloudKit Console, test on two
+`iCloud.app.muukii.journal` container, verify the vault record types in the
+CloudKit Console during Development, test private and shared vaults on two
 physical devices, then **Deploy Schema to Production** before any
 Release/TestFlight build (TestFlight + App Store use the Production environment
 only).

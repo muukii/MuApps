@@ -158,4 +158,37 @@ extension JournalNotification {
       lifetime: .persistent
     )
   }
+
+  /// Failure shown when the selected Photos item cannot become a photo card.
+  static var photoImportFailed: JournalNotification {
+    JournalNotification(
+      semantics: .failure,
+      title: "Could not import photo",
+      message: "Try choosing another image from Photos.",
+      systemImage: "photo.badge.exclamationmark",
+      lifetime: .persistent
+    )
+  }
+
+  /// Confirmation shown after a CloudKit vault invitation is accepted.
+  static var vaultInviteAccepted: JournalNotification {
+    JournalNotification(
+      semantics: .success,
+      title: "Joined Vault",
+      message: "The shared vault is now available in your picker.",
+      systemImage: "person.2.fill",
+      lifetime: .transient(.seconds(3))
+    )
+  }
+
+  /// Failure shown when a CloudKit vault invitation cannot be accepted.
+  static var vaultInviteAcceptanceFailed: JournalNotification {
+    JournalNotification(
+      semantics: .failure,
+      title: "Could not join vault",
+      message: "Try opening the invitation again.",
+      systemImage: "person.crop.circle.badge.exclamationmark",
+      lifetime: .persistent
+    )
+  }
 }

@@ -1,5 +1,5 @@
 import CoreLocation
-import JournalModel
+import JournalVault
 import Observation
 
 /// Bridges Core Location into the card-creation flow, where the only question is:

@@ -23,9 +23,9 @@ Shared with You は「共有を Apple platform 上で collaboration として見
 ```text
 SwiftUI
   observes
-SwiftData ModelContainer
-  stores one local vault
-VaultSyncEngine
+VaultInstance
+  owns one local vault database
+CloudKit sync coordinator
   maps to and from
 CloudKit zone / CKShare
 Shared with You
@@ -35,18 +35,20 @@ Shared with You
 ```mermaid
 flowchart LR
   SwiftUI["SwiftUI views"]
-  ActiveVault["ActiveVaultSession"]
+  Runtime["JournalVaultRuntime<br/>selectedVault"]
+  VaultInstance["VaultInstance(vaultID)"]
   CatalogStore["VaultCatalogStore<br/>ModelContainer"]
   ContentStore["VaultContentStore(vaultID)<br/>ModelContainer"]
-  SyncEngine["VaultSyncEngine"]
+  SyncEngine["CloudKit sync coordinator<br/>CKSyncEngine per database scope"]
   CloudKitZone["CloudKit custom zone"]
   Share["CKShare"]
   SharedWithYou["Shared with You<br/>Messages / FaceTime / Share Sheet"]
 
-  SwiftUI --> ActiveVault
-  ActiveVault --> CatalogStore
-  ActiveVault --> ContentStore
-  ContentStore --> SyncEngine
+  SwiftUI --> Runtime
+  Runtime --> VaultInstance
+  Runtime --> CatalogStore
+  VaultInstance --> ContentStore
+  VaultInstance --> SyncEngine
   SyncEngine --> CloudKitZone
   CloudKitZone --> Share
   Share --> SharedWithYou
@@ -58,26 +60,37 @@ flowchart LR
 作り替えとして進める。UI は新しい vault store と sync state が安定してから、
 vault picker、toolbar、settings、collaboration view の順で調整する。
 
+実装 task の管理は `VAULT_TASKS.md` で行う。ここでは architecture と境界を記述し、
+どの task を誰がいつ触るか、並行作業の file ownership、Done 条件は task document に寄せる。
+
 最初の milestone は次の 2 点に集中する。
 
 1. SwiftData の CloudKit mirroring を vault store では完全に無効化する。
 2. CloudKit との同期は `VaultSyncEngine` が所有する明示的な sync layer として作る。
 
-既存の app shell は一時的に current store を読み続けてもよいが、
-新しく作る vault store API は最初から `cloudKitDatabase: .none` にする。
+app shell の user-facing save / read UI は `VaultInstance` を使う。
+`VaultInstance` は 1 vault の local database、media directory、sync/outbox status、
+permission/share state、vault-scoped action を UI に見せる domain object とする。
+内部では `VaultContentStore` を所有するが、画面は CloudKit transport object を直接持たない。
+旧 `JournalModel` store は app shell の startup path では開かない。
+legacy data migration は CloudKit query / write operation として sync layer が所有し、
+SwiftUI tree には legacy `ModelContainer` を注入しない。
 `cloudKitDatabase: .automatic` を前提にした model constraint、widget query、
-media sync の分離設計は順次 target architecture に移行する。
+media sync の分離設計は target architecture に順次移行する。
 
 ```mermaid
 flowchart LR
   View["SwiftUI views"]
+  Instance["VaultInstance"]
   Store["VaultContentStore<br/>SwiftData / cloudKit: none"]
   Metadata["SyncMetadata<br/>recordID / zoneID / changeTag"]
   Outbox["PendingMutation"]
-  Sync["VaultSyncEngine"]
-  CloudKit["CloudKit<br/>private/shared database"]
+  Sync["CloudKit sync coordinator"]
+  CloudKit["CloudKit<br/>private/shared CKDatabase"]
 
-  View --> Store
+  View --> Instance
+  Instance --> Store
+  Instance --> Sync
   Store --> Metadata
   Store --> Outbox
   Outbox --> Sync
@@ -96,6 +109,61 @@ local model 側には `CKRecord` を丸ごと保存するのではなく、
 record ID、zone ID、change tag、encoded system fields など、再送信と
 conflict resolution に必要な metadata を保持する。
 
+## 既存 SyncEngine の扱い
+
+旧 `MediaSyncEngine` は app shell から削除済みで、最終形には残さない。
+その責務は `VaultSyncEngine` に吸収する。
+
+旧 architecture では SwiftData CloudKit mirroring が `Card` / `Attachment` row を同期し、
+`MediaSyncEngine` が attachment file / `CKAsset` を別 zone で補助同期している。
+これは legacy architecture のための bridge だったため、app shell の save / list が
+vault store へ移った時点で削除した。
+
+target architecture では、vault store は `cloudKitDatabase: .none` で作り、
+`VaultSyncEngine` が row、asset、zone、`CKShare`、subscription、remote change import を
+vault boundary の中でまとめて扱う。shared vault でも row と media は同じ shared zone に
+含めるため、participant が row だけを受け取り、media file だけ別 boundary から待つ形にしない。
+
+```mermaid
+flowchart LR
+  subgraph Legacy["Migration source only"]
+    LegacyStore["JournalModel<br/>SwiftData CloudKit mirroring"]
+    MediaSync["MediaSyncEngine<br/>file / CKAsset sync only"]
+    LegacyStore --> MediaSync
+  end
+
+  subgraph Target["Target vault architecture"]
+    VaultStore["VaultContentStore<br/>SwiftData / cloudKit: none"]
+    VaultSync["VaultSyncEngine<br/>row + asset + share sync"]
+    Zone["CloudKit vault zone<br/>records + CKAsset + CKShare"]
+    VaultStore --> VaultSync
+    VaultSync --> Zone
+    Zone --> VaultSync
+    VaultSync --> VaultStore
+  end
+
+  MediaSync -.->|"責務を吸収して削除"| VaultSync
+```
+
+`MediaSyncEngine` を消す条件として次の境界を置いた。
+
+1. app shell の save / read が selected `VaultInstance` 経由で `VaultContentStore` を使う。
+2. attachment row と media file が vault directory 配下に保存される。
+3. asset upload / download と file availability signal が `VaultSyncEngine` 経由になる。
+4. widget / global view が `VaultCatalogStore` の summary を読む。
+5. CloudKit query / write migration または export / import により旧 data からの移行手段がある。
+
+`SyncStatusMonitor` も同じ境界で置き換える。
+旧実装の SwiftData mirroring と `MediaSyncEngine` queue を監視する UI ではなく、
+CloudKit sync coordinator と `VaultInstance` の upload / download / conflict / share state と
+`VaultCatalogStore` の vault summary を見る UI にする。
+
+2026-07 の app shell 移行では、1、2、3、5 を先に満たした。
+`MediaSyncEngine` / `SyncStatusMonitor` / 旧 sync status UI は削除済み。
+production runtime は `CloudKitVaultSyncEngine` を使う。`LoggingVaultSyncEngine` は
+preview / debug / narrow tests 用の network-less stub として残す。
+4 は widget migration の次フェーズで行う。
+
 ## Vault
 
 Vault は durable な collaboration boundary。
@@ -106,8 +174,12 @@ Vault は durable な collaboration boundary。
 - パートナーと
 
 各 vault は local SQLite store と SwiftData `ModelContainer` を個別に持つ。
-CloudKit 側では 1 vault が 1 custom record zone に対応する。
+local persistence の意味では `Vault == store.sqlite == ModelContainer == VaultContentStore`。
+CloudKit content boundary の意味では `Vault == custom record zone`。
 shared vault の場合は、その zone を他の iCloud user と共有する。
+CloudKit transport database の意味では `Vault != CKDatabase`。
+owned vault は current user's private database の zone、participant として参加した vault は
+current user's shared database から見える zone になる。
 personal vault は特別な data model ではなく、まだ `CKShare` が作られていない vault として扱う。
 
 ```text
@@ -184,6 +256,12 @@ card content は持たない。
 SwiftData model instance は別の vault container にまたがって持ち回らない。
 vault 間で content を移動する場合、それは relationship の移動ではなく export/import として扱う。
 
+`VaultInstance` は UI が触る vault の domain object。
+1 つの `VaultContentStore`、foreground sync interest、outbox count、permission/share state、
+vault-scoped actions を束ねる。`VaultInstanceRegistry` は process 内で vault ごとに
+stable な `VaultInstance` を返し、`VaultStoreRegistry` はその内側で vault ごとに
+単一の `ModelContainer` を保証する。
+
 以前話していた `JournalIndexStore` はここでいう `VaultCatalogStore`、
 `VaultStore` はここでいう `VaultContentStore` に相当する。
 
@@ -215,9 +293,83 @@ custom sync layer は次を所有する。
 sync metadata は vault store の中に置く。
 これにより、vault ごとの reset や repair を独立して実行できる。
 
-`VaultSyncEngine` は app lifetime の service として起動し、private database 用と
-shared database 用の sync path を分ける。`CKSyncEngine` を採用する場合も、
+CloudKit sync coordinator は app lifetime の service として起動し、private database 用と
+shared database 用の sync path を分ける。`CKSyncEngine` を採用する場合、
+engine は vault ごとではなく CloudKit database scope ごとに持つ。
 engine state はアプリが disk に永続化する。
+
+起動時には毎回 CloudKit vault recovery / reconciliation を kick する。
+これは重い migration ではなく、local catalog と CloudKit 上の visible vault zones を
+照合する lightweight repair path。
+
+1. private database の Journal vault zones を enumerate し、missing catalog row を
+   owned vault として materialize する。
+2. shared database の accepted shared zones を enumerate し、missing catalog row を
+   participant vault として materialize する。
+3. zone-wide share は `CKRecordZone.share` または `CKRecordNameZoneWideShare` の
+   `CKShare` record fetch で再発見し、local summary を補正する。
+4. materialize 後は `CKSyncEngine.fetchChanges(.all)` を kick して通常 import path に戻す。
+
+この recovery は UI を block しない。iCloud account unavailable、network failure、
+CloudKit server error は non-fatal として記録し、次回起動または手動 refresh で再試行する。
+毎回 full record import / CKAsset download をやり直すのではなく、catalog 欠落と
+engine state 欠落を self-heal するのが目的。
+
+recovery 後も CloudKit 上に visible vault がなく、local catalog も空の場合は、
+onboarding 未完了なら新規 user onboarding、onboarding 完了済みなら空の vault picker を表示する。
+preset vault は自動作成しない。user が最初の vault を作った時点で local catalog row、
+vault store、CloudKit outbox が作られる。
+
+Root screen routing は、fresh install だけ blocking Loading から始める。
+初回は `JournalVaultRuntime.resolveInitialVaultAvailability()` を待ち、
+iCloud available なら private / shared database の初回 vault discovery を行う。
+iCloud no account / restricted では local-only state として resolution を完了し、
+CloudKit を使っていない user を Loading に閉じ込めない。
+iCloud temporarily unavailable、account status could not determine、network failure では
+deferred CloudKit recovery として resolution を完了し、次回以降の background sync / recovery に任せる。
+resolved decision 後に `hasResolvedInitialVaultAvailability` を保存する。
+次回以降はこの cached decision と `hasCompletedOnboarding` から即座に route を復元し、
+`JournalVaultRuntime.start()` / background CloudKit sync は毎回走らせる。
+`hasCompletedOnboarding` は「vault が存在しない user に onboarding を再表示するか」を決める
+補助 flag であり、既存 vault / recovered vault がある user を onboarding に戻す primary gate ではない。
+
+```mermaid
+flowchart TD
+  Root["RootView"]
+  Cache{"Initial vault availability resolved?"}
+  Loading["Loading<br/>resolve initial vault availability"]
+  CachedRoute["Restore cached route immediately"]
+  Resolve["resolveInitialVaultAvailability"]
+  CloudKit["iCloud available<br/>fetch private + shared vault changes"]
+  LocalOnly["iCloud unavailable<br/>resolve local-only state"]
+  Runtime["Start vault runtime + background sync"]
+  Existing["Existing user flow"]
+  NewUser["New user onboarding"]
+  Picker["VaultSelectionView"]
+  Creation["CreationView"]
+
+  Root --> Cache
+  Cache -->|"no"| Loading
+  Cache -->|"yes"| CachedRoute
+  CachedRoute -->|"onboarding completed"| Existing
+  CachedRoute -->|"onboarding not completed"| NewUser
+  Loading --> Resolve
+  Resolve -->|"available"| CloudKit
+  Resolve -->|"no account / restricted"| LocalOnly
+  Resolve -->|"temporary unavailable / network error"| Deferred["Deferred CloudKit recovery"]
+  CloudKit --> Runtime
+  LocalOnly --> Runtime
+  Deferred --> Runtime
+  CachedRoute -.-> Runtime
+  Runtime -->|"local or recovered vaults exist"| Existing
+  Runtime -->|"no vaults and onboarding not completed"| NewUser
+  Runtime -->|"no vaults but onboarding completed"| Existing
+  Runtime -->|"resolved"| Decision["Save hasResolvedInitialVaultAvailability"]
+  NewUser -->|"complete onboarding"| Existing
+  Existing --> Picker
+  Picker -->|"select or create vault"| Creation
+  Creation -->|"change vault"| Picker
+```
 
 subscription は画面ごとに作らない。
 CloudKit subscription は sync layer が idempotent に作る durable infrastructure とし、
@@ -227,7 +379,7 @@ vault 画面を開くことは foreground sync interest として扱う。
 Vault screen opened
   -> VaultSyncCoordinator.activate(vaultID)
   -> fetchChanges / sendChanges を明示的に kick
-  -> active vault の asset download と conflict handling を優先
+  -> selected vault の asset download と conflict handling を優先
   -> imported changes が VaultContentStore に merge される
   -> SwiftUI が SwiftData observation で更新される
 ```
@@ -486,7 +638,9 @@ Vault は別々の `ModelContainer` に分かれるため、
 
 Widget はまず `VaultCatalogStore` を読む。
 full card content が必要な場合は vault ID から該当する `VaultContentStore` を開ける。
-ただし default path は小さな summary snapshot を読む形にする。
+2026-07 時点の widget first pass は `WidgetConfigurationIntent` で vault を選ばせ、
+選択された `VaultContentStore` から latest visible card snapshot を直接作る。
+将来の default path は小さな summary snapshot を読む形に最適化する。
 
 ## 未決定事項
 
@@ -502,7 +656,7 @@ full card content が必要な場合は vault ID から該当する `VaultConten
 
 Phase 1: Local vault foundation
 
-1. Personal、Friends、Partner の 3 つの vault row を持つ `VaultCatalogStore` を作る。
+1. 空の `VaultCatalogStore` を作り、user action で vault row を作れるようにする。
 2. vault ごとに separate vault store file を作る。
 3. vault store では SwiftData CloudKit mirroring を無効化する。
 4. `SyncMetadata` と `PendingMutation` を vault store に置く。
@@ -531,12 +685,14 @@ foundation が固まった後、UI は vault lifecycle を操作する surface �
 
 1. Vault を切り替える。
    - vault picker / sidebar / menu は `VaultCatalogStore` の `VaultSummary` を読む。
-   - 選択された vault は `ActiveVaultSession` が `VaultContentStore(vaultID)` として開く。
-   - vault を開いたら `VaultSyncCoordinator.activate(vaultID)` を呼び、foreground fetch と asset download を優先する。
+   - 選択された vault は `JournalVaultRuntime.selectedVault` が `VaultInstance` として保持する。
+   - `VaultInstance` は `VaultContentStore(vaultID)` を所有し、UI は instance 経由で read/write する。
+   - vault を開いたら `VaultInstance.activateForeground()` を呼び、foreground fetch と asset download を優先する。
 2. Vault を作る。
    - local catalog row、vault directory、vault content store を作る。
    - 初期状態は unshared vault とし、CloudKit zone と `CKShare` は必要になったタイミングで作る。
-   - preset として Personal、Friends、Partner を作れるが、CloudKit 上の扱いは share の有無だけで分ける。
+   - app install 時に preset vault は作らない。recovery 後に local / remote vault が
+     0 件なら、新規 user として空の picker を出す。
 3. Vault に招待する。
    - owner 権限の vault だけ invite action を出す。
    - sync layer が vault zone と最小 record を CloudKit に確保し、`CKShare(recordZoneID:)` を作る。
@@ -545,23 +701,25 @@ foundation が固まった後、UI は vault lifecycle を操作する surface �
 4. Vault に参加する。
    - app / scene delegate が `CKShare.Metadata` を受け取る。
    - sync layer が share を accept し、shared database の zone view を local catalog row に materialize する。
-   - 初回 import が終わったら、その vault を `ActiveVaultSession` で開ける。
+   - 初回 import が終わったら、その vault を `VaultInstance` として開ける。
    - read-only participant では compose / edit / delete UI を permission state で制限する。
 
 ```mermaid
 flowchart LR
   Picker["Vault picker"]
   Catalog["VaultCatalogStore"]
-  Active["ActiveVaultSession"]
+  Runtime["JournalVaultRuntime<br/>selectedVault"]
+  Instance["VaultInstance"]
   Content["VaultContentStore"]
-  Sync["VaultSyncCoordinator"]
+  Sync["CloudKit sync coordinator"]
   ShareUI["Share / Join UI"]
   CloudKit["CloudKit"]
 
   Picker --> Catalog
-  Picker --> Active
-  Active --> Content
-  Active --> Sync
+  Picker --> Runtime
+  Runtime --> Instance
+  Instance --> Content
+  Instance --> Sync
   ShareUI --> Sync
   Sync --> Catalog
   Sync --> CloudKit
@@ -569,8 +727,24 @@ flowchart LR
   Sync --> Content
 ```
 
-CloudKit zone 作成、`CKShare`、share acceptance は、この local foundation と
-CloudKit transport のあとに UI action として接続する。
+CloudKit zone 作成と owned vault の invite issuance は UI action として接続済み。
+`VaultSelectionView` の owned vault row から `VaultSyncEngine.prepareShare(for:)` を呼び、
+`CloudKitVaultSyncEngine` が private database の custom zone を保存し、
+pending outbox を一度 `CKSyncEngine` へ流したうえで
+`CKRecordNameZoneWideShare` を fetch する。既存 share がなければ
+`CKShare(recordZoneID:)` を作成して保存し、saved `CKShare` と `CKContainer` を
+`UICloudSharingController(share:container:)` に渡す。初期 UI は private invite と
+read-write permission に絞り、public link はまだ出さない。
+
+Invite acceptance は SwiftUI app に UIKit scene delegate を差し込み、
+running-scene callback と cold-launch `UIScene.ConnectionOptions.cloudKitShareMetadata`
+の両方から `CKShare.Metadata` を `JournalVaultRuntime.acceptShare(metadata:)` に渡す。
+runtime は `VaultSyncEngine.acceptShare(metadata:)` を通じて share を accept し、
+shared database の `CKSyncEngine` に accepted zone 優先の fetch をかける。
+fetched zone は既存の shared-zone materialization/import path で local catalog と
+vault store に反映される。実 iCloud の二アカウント手動検証はまだ残っている。
+
+Shared With You、collaboration preview / notice は別 milestone。
 
 ## Collaboration Spike
 
@@ -583,6 +757,93 @@ CloudKit zone と `CKShare` が作れるようになった後、Shared with You 
 5. `CKSystemSharingUIObserver` で share save / stop sharing を拾い、`VaultCatalogStore` を更新する。
 6. owner / participant の permission と `participantCount` の見え方を確認する。
 7. content edit notice を 1 種類だけ `SWHighlightChangeEvent` として post するか判断する。
+
+## 実装状況
+
+2026-07 時点。実装は `Sources/JournalVault/`(dynamic framework、
+`Tests/JournalVaultTests/` にユニットテスト)。app shell は
+`JournalVaultRuntime` / `VaultInstance` を起動し、
+Debug-only Settings から catalog、selected vault、outbox depth、debug write を確認できる。
+Owned vault invite issuance is implemented through
+`VaultSyncEngine.prepareShare(for:)` and `VaultSelectionView`'s system sharing UI
+bridge. Invite acceptance is implemented through the scene metadata router,
+`JournalVaultRuntime.acceptShare(metadata:)`, and the shared-database
+`CloudKitVaultSyncEngine` import path; live two-account acceptance verification
+is still pending. Shared With You surfacing and legacy migration are not
+implemented in this slice.
+
+起動時には sync engine を start し、毎回 CloudKit vault recovery / reconciliation を
+kick する。remote/private/shared vault が見つからず local catalog も空の場合は
+新規 user 状態として扱い、空の vault picker を表示する。
+app shell は旧 `JournalModel` App Group SQLite を startup migration source として開かない。
+legacy migration は `VaultSyncEngine` 側の CloudKit operation として実装する。
+旧 CloudKit records / CKAssets を query し、legacy content が見つかった場合だけ
+migration target vault zone へ新しい `VaultInfo` / `Card` / `CardEdge` / `Attachment` records を write し、
+その後 vault sync import により local `VaultContentStore` へ materialize する。
+この migration は target vault の card count が 0 の時だけ実行し、既に content がある
+vault へ legacy data を merge しない。
+ユーザーが `VaultSelectionView` で vault を選んだ時点で
+`JournalVaultRuntime.selectVault(_:)` が `VaultInstance` を開き、
+`CreationView` と `SavedListView` はその selected instance だけを使う。
+
+user-facing save は `CreationView` から `VaultInstance.createThread(cards:)` に書く。
+user-facing edit は `SavedListView` から selected `VaultInstance` の
+`VaultContentStore.updateCard(cardID:with:)` に書く。
+user-facing list は selected `VaultInstance` の `CardEdge` / `Card` / `Attachment` snapshot を読む。
+旧 saved-entry edit / export share UI、旧 sync status UI、`MediaSyncEngine`、
+`SyncStatusMonitor` は削除済み。share / edit は vault-backed UI として作り直す。
+
+実装済み:
+
+- `VaultStoreLayout` — App Group 配下 `Journal/` の directory layout。
+- `VaultCatalogStore` + `VaultIndex` / `VaultLocalState` / `VaultSummary`
+  (cloudKitDatabase: .none、user-created vault、remote vault の materialize)。
+- `VaultContentStore(vaultID)` + `VaultInfo` / `Card` / `CardEdge` /
+  `Attachment` / `SyncMetadata` / `PendingMutation`。
+  すべての write は同一 transaction で outbox(`PendingMutation`)を積む。
+  save は必ず root `CardEdge` を作る。card edit は `Card` save と attachment replacement を
+  同一 transaction で扱う。削除 cascade は domain rule として実装。
+- `VaultStoreRegistry` — process 内で vault ごとに単一 `ModelContainer` を保証し、
+  local mutation を `AsyncStream<VaultID>` で sync layer へ流す。
+- `VaultInstanceRegistry` / `VaultInstance` — process 内で vault ごとに stable な
+  UI-facing domain object を返す。`VaultInstance` は `VaultContentStore`、
+  foreground sync interest、outbox count、将来の permission/share state、
+  vault-scoped actions を束ねる。
+- `VaultSyncEngine` protocol + `LoggingVaultSyncEngine`(network なしの stub)。
+- `CloudKitVaultSyncEngine` — `CKSyncEngine` を private / shared database で
+  1 つずつ所有。zone 名に vault ID を埋め込み、fetched changes を zone 名で
+  vault へ routing。未知 zone は catalog へ materialize。zone は最初の save が
+  `zoneNotFound` を返したときに lazy に作成。engine state は
+  `SyncState/{private,shared}-database.json` に永続化。
+  `CKAsset` の upload / download(vault の `media/` に保存、
+  `VaultMediaFileChange` notification で file 到着を通知)。
+- `JournalVaultRuntime` — `JournalApp` 起動時に
+  App Group layout、catalog store、store registry、`CloudKitVaultSyncEngine` を作る。
+  preset vault は自動作成しない。`previewRuntime()` と debug 用 factory は
+  `LoggingVaultSyncEngine` を使い、CloudKit に触らず local vault store を検証できる。
+  product UI の selected `VaultInstance` は `VaultSelectionView` の選択で開く。
+  Settings の Debug-only `Vault Runtime` 画面から refresh、vault 切り替え、
+  debug text card write を実行できる。
+- `CreationView` / `SavedListView` — UI は selected `VaultInstance` だけを使う。
+  legacy `ModelContainer` は SwiftUI environment に存在しない。
+
+暫定判断(コード側にも記載):
+
+- conflict policy は record 単位で local-pending-wins。
+  server の system fields だけ採用して再送する。field-wise merge は未決定のまま。
+- remote の record deletion は local edit より優先。
+- zone-level deletion(owner の削除 / share revoke)は log のみ。repair flow 未設計。
+
+未実装(次フェーズ):
+
+- `LegacyCloudKitMigration` — 旧 SwiftData mirroring / media sync が作った
+  CloudKit records と CKAssets を query し、legacy content が見つかった時だけ
+  migration target vault zone へ write する。
+  source は local SQLite ではなく CloudKit。target import は `VaultSyncEngine` の
+  通常 path に乗せる。
+- Shared with You 連携。
+- `VaultSummary` の latest card denormalize。
+- vault-backed saved-entry export share UI。
 
 ## 参考
 
