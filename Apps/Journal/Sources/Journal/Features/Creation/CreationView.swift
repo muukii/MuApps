@@ -1066,12 +1066,8 @@ private enum PhotoLibraryImport {
       .appendingPathExtension(pathExtension)
   }
 
-  private static func byteSize(for resource: PHAssetResource) -> Int? {
-    if #available(iOS 27.0, *) {
-      return resource.dataSize
-    }
-
-    return nil
+  private static func byteSize(for _: PHAssetResource) -> Int? {
+    nil
   }
 
   fileprivate static func ensurePhotoLibraryReadAccess() async throws {
