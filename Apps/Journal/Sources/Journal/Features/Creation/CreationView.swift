@@ -1,22 +1,29 @@
+import AppUIComponents
+import AVFoundation
 import CaptureAudio
 import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
+import CoreTransferable
 import CoreLocation
 import JournalVault
+import MediaProcessing
 import MuColor
+import OSLog
+import Photos
 import PhotosUI
 import ScrollEdgeEffect
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 import WidgetKit
+
+private let photoLibraryImportLog = Logger(subsystem: "app.muukii.journal", category: "PhotoLibraryImport")
 
 struct CreationView: View {
 
   private let onChangeVault: (@MainActor @Sendable () -> Void)?
 
-  @Environment(\.appPalette) private var palette
-  @Environment(\.colorScheme) private var colorScheme
   @Environment(JournalNotificationCenter.self) private var notifications
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
 
@@ -41,7 +48,8 @@ struct CreationView: View {
   @State private var scrollTargetID: ThreadDraftCard?
   @State private var isSettingsPresented: Bool = false
   @State private var isChangeVaultConfirmationPresented = false
-  @State private var isImportingPhotoFromLibrary: Bool = false
+  @State private var isImportingMediaFromLibrary: Bool = false
+  @State private var collaborationError: CollaborationErrorMessage?
   @Namespace private var namespace
 
   /// Shared one-shot location bridge. Each draft card stores the resolved
@@ -95,12 +103,26 @@ struct CreationView: View {
             Button {
               requestVaultChange()
             } label: {
-              Label(vaultRuntime.selectedVault?.title ?? "Vault", systemImage: "shippingbox")
+              Label(vaultRuntime.selectedVault?.title ?? String(localized: "Vault"), systemImage: "shippingbox")
             }
             .accessibilityLabel("Change Vault")
           }
         }
-              
+
+        if let collaborationVault = selectedCollaborationVault {
+          ToolbarItem(placement: .navigationBarTrailing) {
+            VaultCollaborationControl(
+              vaultID: collaborationVault.vaultID,
+              title: collaborationVault.title,
+              prepareShare: prepareCollaborationShare,
+              onSharingStopped: noteCollaborationSharingStopped,
+              onError: presentCollaborationError
+            )
+            .id(collaborationVault.vaultID)
+            .frame(width: 36, height: 36)
+          }
+        }
+
         ToolbarItem(placement: .navigationBarTrailing) {
           NavigationLink.init {
             SavedListView()
@@ -120,7 +142,7 @@ struct CreationView: View {
           .matchedTransitionSource(id: "settings", in: namespace)
         }
       })
-      .safeAreaInset(edge: .top, content: { 
+      .safeAreaInset(edge: .top, content: {
         DateView()
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(.horizontal)
@@ -128,7 +150,7 @@ struct CreationView: View {
       .safeAreaInset(edge: .bottom) {
         ThreadDraftActionRow(
           draftCards: draftCards,
-          isSaving: isSaving || isImportingPhotoFromLibrary,
+          isSaving: isSaving || isImportingMediaFromLibrary,
           onComposeText: {
             presentTextCapture()
           },
@@ -138,8 +160,11 @@ struct CreationView: View {
           onCapturePhoto: {
             presentPhotoCapture()
           },
-          onChoosePhotoFromLibrary: { item in
-            importPhotoFromLibrary(item)
+          onChooseMediaFromLibrary: { item in
+            importMediaFromLibrary(item)
+          },
+          onMediaPickerUnavailable: {
+            notifications.post(.mediaImportFailed)
           },
           onDrawDoodle: {
             presentDoodleCanvas()
@@ -257,6 +282,13 @@ struct CreationView: View {
     } message: {
       Text("Drafts are kept only in the current composer.")
     }
+    .alert(item: $collaborationError) { error in
+      Alert(
+        title: Text("Could Not Manage Collaboration"),
+        message: Text(error.message),
+        dismissButton: .default(Text("OK"))
+      )
+    }
     .appNavigationBarStyle()
     .onAppear {
       attachLocationToCurrentDraftsIfNeeded()
@@ -284,6 +316,24 @@ struct CreationView: View {
       }
     }
 
+  }
+
+  private var selectedVaultDescriptor: VaultDescriptor? {
+    guard let selectedVault = vaultRuntime.selectedVault else {
+      return nil
+    }
+
+    return vaultRuntime.vaults.first { $0.vaultID == selectedVault.vaultID } ?? selectedVault.descriptor
+  }
+
+  private var selectedCollaborationVault: VaultDescriptor? {
+    guard let descriptor = selectedVaultDescriptor,
+          descriptor.ownership == .owned,
+          descriptor.isShared else {
+      return nil
+    }
+
+    return descriptor
   }
 
   private func requestVaultChange() {
@@ -315,6 +365,8 @@ struct CreationView: View {
     switch draft.kind {
     case .photo:
       photoCapturePresentation = PhotoCapturePresentation(target: draft)
+    case .video, .livePhoto:
+      break
     case .audio:
       voiceRecorderPresentation = VoiceRecorderPresentation(target: draft)
     case .doodle:
@@ -394,23 +446,48 @@ struct CreationView: View {
     attachLocationToCurrentDraftsIfNeeded()
   }
 
-  private func importPhotoFromLibrary(_ item: PhotosPickerItem) {
-    guard isImportingPhotoFromLibrary == false else {
+  private func importMediaFromLibrary(_ item: PhotosPickerItem) {
+    guard isImportingMediaFromLibrary == false else {
       return
     }
 
-    isImportingPhotoFromLibrary = true
+    isImportingMediaFromLibrary = true
 
     Task { @MainActor in
-      defer { isImportingPhotoFromLibrary = false }
+      defer { isImportingMediaFromLibrary = false }
 
       do {
-        let photo = try await PhotoLibraryImport.capturedPhoto(from: item)
-        finishPhotoCapture(photo, target: nil)
+        let media = try await PhotoLibraryImport.importedMedia(from: item)
+        finishLibraryMediaImport(media)
       } catch {
-        notifications.post(.photoImportFailed)
+        let supportedContentTypes = item.supportedContentTypes
+          .map(\.identifier)
+          .joined(separator: ",")
+        photoLibraryImportLog.error(
+          """
+          Media import failed: \(String(describing: error), privacy: .public); \
+          itemIdentifier: \(item.itemIdentifier ?? "nil", privacy: .private); \
+          supportedContentTypes: \(supportedContentTypes, privacy: .public)
+          """
+        )
+        notifications.post(.mediaImportFailed)
       }
     }
+  }
+
+  private func finishLibraryMediaImport(_ media: PhotoLibraryImportedMedia) {
+    let draft = draftForNewQuickCapture()
+    switch media {
+    case .photo(let photo):
+      draft.setPhoto(photo)
+    case .video(let video):
+      draft.setVideo(video)
+    case .livePhoto(let livePhoto):
+      draft.setLivePhoto(livePhoto)
+    }
+
+    scrollTargetID = draft
+    attachLocationToCurrentDraftsIfNeeded()
   }
 
   private func updateDoodle(
@@ -580,6 +657,18 @@ struct CreationView: View {
     }
   }
 
+  private func prepareCollaborationShare(_ vaultID: VaultID) async throws -> VaultSharePreparation {
+    try await vaultRuntime.prepareShare(for: vaultID)
+  }
+
+  private func noteCollaborationSharingStopped(_ vaultID: VaultID) async {
+    await vaultRuntime.noteSharingStopped(for: vaultID)
+  }
+
+  private func presentCollaborationError(_ error: any Error) {
+    collaborationError = CollaborationErrorMessage(message: error.localizedDescription)
+  }
+
   private func save() {
 
     let drafts = draftCards.map { $0.savingSnapshot() }
@@ -599,12 +688,7 @@ struct CreationView: View {
           return
         }
 
-        let vaultDrafts = try drafts.map {
-          try $0.vaultDraft(
-            palette: palette,
-            colorScheme: colorScheme
-          )
-        }
+        let vaultDrafts = try drafts.map { try $0.vaultDraft() }
         try vault.createThread(cards: vaultDrafts)
         await vaultRuntime.refresh()
         WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
@@ -626,6 +710,16 @@ struct CreationView: View {
     }
   }
 
+}
+
+/// Presentation payload for a collaboration management error.
+private struct CollaborationErrorMessage: Identifiable {
+
+  /// Stable identity for one alert presentation.
+  let id = UUID()
+
+  /// User-facing failure reason from the system sharing boundary.
+  let message: String
 }
 
 /// Presentation payload for one text editor session.
@@ -755,7 +849,7 @@ private struct ThreadDraftCardEditor: View {
     }
     .buttonStyle(.plain)
     .disabled(isSaving)
-    .accessibilityLabel("Edit card")
+    .accessibilityLabel("Edit Card")
   }
 }
 
@@ -766,9 +860,6 @@ private struct ThreadDraftCardEditor: View {
 private struct DraftEntrySummaryCard: View {
 
   let draft: CardEditDraft
-
-  @Environment(\.appPalette) private var palette
-  @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
     CardSurface {
@@ -781,7 +872,7 @@ private struct DraftEntrySummaryCard: View {
         .font(.caption.weight(.semibold))
         .foregroundStyle(.appOnSecondaryContainer.opacity(0.70))
 
-        summaryContent
+        CardPreviewContent(payload: draft.previewPayload, presentation: .draftSummary)
 
         Spacer(minLength: 0)
 
@@ -791,110 +882,63 @@ private struct DraftEntrySummaryCard: View {
       }
     }
   }
-
-  @ViewBuilder
-  private var summaryContent: some View {
-    switch draft.kind {
-    case .text:
-      Text(draft.text.isEmpty ? "Text" : draft.text)
-        .font(.headline.weight(.semibold))
-        .lineLimit(8)
-        .foregroundStyle(draft.text.isEmpty ? .secondary : .primary)
-    case .link:
-      if let linkURL = draft.linkURL {
-        JournalLinkPreview(url: linkURL.url, mode: .summary)
-      } else {
-        Text(draft.text.isEmpty ? "Link" : draft.text)
-          .font(.headline.weight(.semibold))
-          .lineLimit(8)
-          .foregroundStyle(draft.text.isEmpty ? .secondary : .primary)
-      }
-    case .photo:
-      if let image = draft.photo.flatMap({ UIImage(data: $0.imageData) }) {
-        Image(uiImage: image)
-          .resizable()
-          .scaledToFill()
-          .aspectRatio(1, contentMode: .fit)
-          .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-      } else {
-        DraftMediaPlaceholder(systemImage: "photo")
-      }
-    case .audio:
-      DraftAudioSummary()
-    case .doodle:
-      if let image = draft.doodle?
-        .image(inkColor: palette.tint, scale: 1) {
-        Image(uiImage: image)
-          .resizable()
-          .scaledToFit()
-          .aspectRatio(CardMetrics.aspectRatio, contentMode: .fit)
-      } else {
-        DraftMediaPlaceholder(systemImage: "scribble")
-      }
-    case .bauhaus:
-      if let image = draft.bauhaus?
-        .image(colorScheme: colorScheme, size: CGSize(width: 512, height: 512)) {
-        Image(uiImage: image)
-          .resizable()
-          .scaledToFit()
-          .aspectRatio(1, contentMode: .fit)
-      } else {
-        DraftMediaPlaceholder(systemImage: "square.grid.3x3")
-      }
-    case .unknown:
-      DraftMediaPlaceholder(systemImage: "questionmark.square.dashed")
-    @unknown default:
-      DraftMediaPlaceholder(systemImage: "questionmark.square.dashed")
-    }
-  }
 }
 
-private struct DraftMediaPlaceholder: View {
-
-  let systemImage: String
-
-  var body: some View {
-    RoundedRectangle(cornerRadius: 12, style: .continuous)
-      .fill(.appOnSecondaryContainer.opacity(0.08))
-      .aspectRatio(1, contentMode: .fit)
-      .overlay {
-        Image(systemName: systemImage)
-          .font(.system(size: 34, weight: .semibold))
-          .foregroundStyle(.appOnSecondaryContainer.opacity(0.42))
-      }
-  }
+/// Media value produced by one Photos library picker selection.
+private enum PhotoLibraryImportedMedia {
+  case photo(CapturedPhoto)
+  case video(CapturedVideo)
+  case livePhoto(CapturedLivePhoto)
 }
 
-private struct DraftAudioSummary: View {
-
-  var body: some View {
-    HStack(alignment: .center, spacing: 4) {
-      ForEach(DraftAudioWaveformSample.samples) { sample in
-        Capsule()
-          .fill(.appOnSecondaryContainer.opacity(0.62))
-          .frame(width: 4, height: sample.height)
-      }
-    }
-    .frame(maxWidth: .infinity, minHeight: 68, alignment: .center)
-  }
-}
-
-private struct DraftAudioWaveformSample: Identifiable {
-  let id: Int
-  let height: CGFloat
-
-  static let samples: [DraftAudioWaveformSample] = [
-    18, 30, 24, 42, 34, 58, 46, 70, 38, 54, 28, 44,
-  ].enumerated().map { index, height in
-    DraftAudioWaveformSample(id: index, height: CGFloat(height))
-  }
-}
-
-/// Converts a user-selected Photos item into the same draft payload as camera
-/// capture, keeping the composer persistence path source-agnostic.
+/// Converts a user-selected Photos item into a draft payload while preserving
+/// compound resources such as Live Photo paired movies.
 private enum PhotoLibraryImport {
 
   @MainActor
+  static func importedMedia(from item: PhotosPickerItem) async throws -> PhotoLibraryImportedMedia {
+    let isLivePhoto = isLivePhotoItem(item)
+    if isLivePhoto {
+      try await ensurePhotoLibraryReadAccess()
+    }
+
+    guard let itemIdentifier = item.itemIdentifier else {
+      if isLivePhoto {
+        throw PhotoLibraryImportError.livePhotoAssetUnavailable
+      }
+      if isVideoOnlyItem(item) {
+        return .video(try await capturedVideo(from: item))
+      }
+      return .photo(try await capturedPhoto(from: item))
+    }
+
+    let result = PHAsset.fetchAssets(withLocalIdentifiers: [itemIdentifier], options: nil)
+    guard let asset = result.firstObject else {
+      if isLivePhoto {
+        throw PhotoLibraryImportError.livePhotoAssetUnavailable
+      }
+      if isVideoOnlyItem(item) {
+        return .video(try await capturedVideo(from: item))
+      }
+      return .photo(try await capturedPhoto(from: item))
+    }
+
+    switch asset.mediaType {
+    case .image where asset.mediaSubtypes.contains(.photoLive):
+      return .livePhoto(try await capturedLivePhoto(from: asset))
+    case .image:
+      return .photo(try await capturedPhoto(from: item))
+    case .video:
+      do {
+        return .video(try await capturedVideo(from: asset))
+      } catch {
+        return .video(try await capturedVideo(from: item))
+      }
+    default:
+      throw PhotoLibraryImportError.unsupportedAsset
+    }
+  }
+
   static func capturedPhoto(from item: PhotosPickerItem) async throws -> CapturedPhoto {
     guard let data = try await item.loadTransferable(type: Data.self) else {
       throw PhotoLibraryImportError.missingImageData
@@ -910,13 +954,255 @@ private enum PhotoLibraryImport {
 
     return CapturedPhoto(imageData: jpegData, pixelSize: image.size)
   }
+
+  private static func capturedVideo(from asset: PHAsset) async throws -> CapturedVideo {
+    let resource = try resource(
+      in: PHAssetResource.assetResources(for: asset),
+      preferredTypes: [.video, .fullSizeVideo]
+    )
+    let fileURL = try await export(resource)
+    let thumbnail = try? MediaThumbnailGenerator.videoThumbnail(from: fileURL).data
+
+    return CapturedVideo(
+      fileURL: fileURL,
+      thumbnailData: thumbnail,
+      pixelSize: asset.pixelSize,
+      duration: asset.duration,
+      contentTypeIdentifier: resource.contentType.identifier,
+      byteSize: byteSize(for: resource)
+    )
+  }
+
+  private static func capturedVideo(from item: PhotosPickerItem) async throws -> CapturedVideo {
+    guard let movie = try await item.loadTransferable(type: TransferredMovie.self) else {
+      throw PhotoLibraryImportError.missingVideoFile
+    }
+
+    let metadata = try? await videoMetadata(from: movie.fileURL)
+    let thumbnail = try? MediaThumbnailGenerator.videoThumbnail(from: movie.fileURL).data
+
+    return CapturedVideo(
+      fileURL: movie.fileURL,
+      thumbnailData: thumbnail,
+      pixelSize: metadata?.pixelSize ?? .zero,
+      duration: metadata?.duration ?? 0,
+      contentTypeIdentifier: videoContentTypeIdentifier(for: item, fileURL: movie.fileURL),
+      byteSize: fileByteSize(movie.fileURL)
+    )
+  }
+
+  private static func capturedLivePhoto(from asset: PHAsset) async throws -> CapturedLivePhoto {
+    let resources = PHAssetResource.assetResources(for: asset)
+    let stillResource = try resource(
+      in: resources,
+      preferredTypes: [.photo, .fullSizePhoto]
+    )
+    let pairedVideoResource = try resource(
+      in: resources,
+      preferredTypes: [.pairedVideo, .fullSizePairedVideo]
+    )
+
+    let stillFileURL = try await export(stillResource)
+    let stillData = try Data(contentsOf: stillFileURL)
+    try? FileManager.default.removeItem(at: stillFileURL)
+
+    let pairedVideoFileURL = try await export(pairedVideoResource)
+    let thumbnail = try? MediaThumbnailGenerator.imageThumbnail(from: stillData).data
+
+    return CapturedLivePhoto(
+      stillImageData: stillData,
+      pairedVideoFileURL: pairedVideoFileURL,
+      thumbnailData: thumbnail,
+      pixelSize: asset.pixelSize,
+      duration: asset.duration,
+      stillImageContentTypeIdentifier: stillResource.contentType.identifier,
+      pairedVideoContentTypeIdentifier: pairedVideoResource.contentType.identifier,
+      stillImageByteSize: byteSize(for: stillResource) ?? stillData.count,
+      pairedVideoByteSize: byteSize(for: pairedVideoResource)
+    )
+  }
+
+  private static func resource(
+    in resources: [PHAssetResource],
+    preferredTypes: [PHAssetResourceType]
+  ) throws -> PHAssetResource {
+    for type in preferredTypes {
+      if let resource = resources.first(where: { $0.type == type }) {
+        return resource
+      }
+    }
+
+    throw PhotoLibraryImportError.missingResource
+  }
+
+  private static func export(_ resource: PHAssetResource) async throws -> URL {
+    let fileURL = temporaryFileURL(for: resource)
+    let options = PHAssetResourceRequestOptions()
+    options.isNetworkAccessAllowed = true
+
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+      PHAssetResourceManager.default().writeData(
+        for: resource,
+        toFile: fileURL,
+        options: options
+      ) { error in
+        if let error {
+          continuation.resume(throwing: error)
+        } else {
+          continuation.resume()
+        }
+      }
+    }
+
+    return fileURL
+  }
+
+  private static func temporaryFileURL(for resource: PHAssetResource) -> URL {
+    let originalExtension = URL(fileURLWithPath: resource.originalFilename).pathExtension
+    let fallbackExtension = resource.contentType.preferredFilenameExtension ?? "dat"
+    let pathExtension = originalExtension.isEmpty ? fallbackExtension : originalExtension
+    return FileManager.default.temporaryDirectory
+      .appendingPathComponent("journal-library-\(UUID().uuidString)")
+      .appendingPathExtension(pathExtension)
+  }
+
+  private static func byteSize(for resource: PHAssetResource) -> Int? {
+    if #available(iOS 27.0, *) {
+      return resource.dataSize
+    }
+
+    return nil
+  }
+
+  fileprivate static func ensurePhotoLibraryReadAccess() async throws {
+    switch PHPhotoLibrary.authorizationStatus(for: .readWrite) {
+    case .authorized, .limited:
+      return
+    case .notDetermined:
+      let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+      guard status == .authorized || status == .limited else {
+        throw PhotoLibraryImportError.photoLibraryReadAccessDenied
+      }
+    case .denied, .restricted:
+      throw PhotoLibraryImportError.photoLibraryReadAccessDenied
+    @unknown default:
+      throw PhotoLibraryImportError.photoLibraryReadAccessDenied
+    }
+  }
+
+  private static func isVideoOnlyItem(_ item: PhotosPickerItem) -> Bool {
+    item.supportedContentTypes.contains(where: isVideoContentType)
+      && item.supportedContentTypes.contains(where: { $0.conforms(to: .image) }) == false
+  }
+
+  private static func isLivePhotoItem(_ item: PhotosPickerItem) -> Bool {
+    item.supportedContentTypes.contains(where: isLivePhotoContentType)
+  }
+
+  private static func isLivePhotoContentType(_ contentType: UTType) -> Bool {
+    guard let livePhotoContentType = UTType("com.apple.live-photo") else {
+      return false
+    }
+
+    return contentType == livePhotoContentType
+      || contentType.conforms(to: livePhotoContentType)
+  }
+
+  private static func isVideoContentType(_ contentType: UTType) -> Bool {
+    contentType.conforms(to: .movie)
+      || contentType.conforms(to: .video)
+      || contentType.conforms(to: .audiovisualContent)
+  }
+
+  private static func videoContentTypeIdentifier(
+    for item: PhotosPickerItem,
+    fileURL: URL
+  ) -> String {
+    item.supportedContentTypes.first(where: isVideoContentType)?.identifier
+      ?? UTType(filenameExtension: fileURL.pathExtension)?.identifier
+      ?? UTType.movie.identifier
+  }
+
+  private static func videoMetadata(from fileURL: URL) async throws -> VideoFileMetadata {
+    let asset = AVURLAsset(url: fileURL)
+    let duration = try await asset.load(.duration)
+    let tracks = try await asset.loadTracks(withMediaType: .video)
+
+    guard let track = tracks.first else {
+      return VideoFileMetadata(pixelSize: .zero, duration: duration.safeSeconds)
+    }
+
+    let naturalSize = try await track.load(.naturalSize)
+    let preferredTransform = try await track.load(.preferredTransform)
+    let transformedSize = naturalSize.applying(preferredTransform)
+    return VideoFileMetadata(
+      pixelSize: CGSize(
+        width: abs(transformedSize.width),
+        height: abs(transformedSize.height)
+      ),
+      duration: duration.safeSeconds
+    )
+  }
+
+  private static func fileByteSize(_ fileURL: URL) -> Int {
+    (try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+  }
 }
 
-/// Failure cases from importing one selected Photos image.
+/// Movie file copied out of a PhotosPicker transfer.
+///
+/// `PHPicker` can vend media without exposing a `PHAsset` identifier. In that
+/// case, videos still need to enter Journal as files instead of going through
+/// the still-image `Data` fallback.
+private struct TransferredMovie: Transferable {
+  var fileURL: URL
+
+  static var transferRepresentation: some TransferRepresentation {
+    FileRepresentation(contentType: .movie) { movie in
+      SentTransferredFile(movie.fileURL)
+    } importing: { received in
+      let pathExtension = received.file.pathExtension.isEmpty ? "mov" : received.file.pathExtension
+      let copyURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("journal-picker-video-\(UUID().uuidString)")
+        .appendingPathExtension(pathExtension)
+      try FileManager.default.copyItem(at: received.file, to: copyURL)
+      return TransferredMovie(fileURL: copyURL)
+    }
+  }
+}
+
+/// Lightweight metadata needed to render and persist a transferred video.
+private struct VideoFileMetadata {
+  var pixelSize: CGSize
+  var duration: TimeInterval
+}
+
+/// Failure cases from importing one selected Photos media item.
 private enum PhotoLibraryImportError: Error {
   case missingImageData
   case undecodableImage
   case missingJPEGData
+  case missingResource
+  case missingVideoFile
+  /// PhotoKit read access is required when Journal needs to export the paired
+  /// movie resource for a Live Photo.
+  case photoLibraryReadAccessDenied
+  /// The picker identified a Live Photo, but Journal could not resolve the
+  /// backing `PHAsset` required to export its still image and paired movie.
+  case livePhotoAssetUnavailable
+  case unsupportedAsset
+}
+
+private extension PHAsset {
+  var pixelSize: CGSize {
+    CGSize(width: pixelWidth, height: pixelHeight)
+  }
+}
+
+private extension CMTime {
+  var safeSeconds: TimeInterval {
+    seconds.isFinite ? seconds : 0
+  }
 }
 
 /// Bottom action row for building and posting a thread.
@@ -931,7 +1217,8 @@ private struct ThreadDraftActionRow: View {
   let onComposeText: @MainActor @Sendable () -> Void
   let onComposeLink: @MainActor @Sendable () -> Void
   let onCapturePhoto: @MainActor @Sendable () -> Void
-  let onChoosePhotoFromLibrary: @MainActor @Sendable (PhotosPickerItem) -> Void
+  let onChooseMediaFromLibrary: @MainActor @Sendable (PhotosPickerItem) -> Void
+  let onMediaPickerUnavailable: @MainActor @Sendable () -> Void
   let onDrawDoodle: @MainActor @Sendable () -> Void
   let onComposeBauhaus: @MainActor @Sendable () -> Void
   let onRecordVoice: @MainActor @Sendable () -> Void
@@ -956,7 +1243,8 @@ private struct ThreadDraftActionRow: View {
               onComposeText: onComposeText,
               onComposeLink: onComposeLink,
               onCapturePhoto: onCapturePhoto,
-              onChoosePhotoFromLibrary: onChoosePhotoFromLibrary,
+              onChooseMediaFromLibrary: onChooseMediaFromLibrary,
+              onMediaPickerUnavailable: onMediaPickerUnavailable,
               onDrawDoodle: onDrawDoodle,
               onComposeBauhaus: onComposeBauhaus,
               onRecordVoice: onRecordVoice
@@ -989,12 +1277,14 @@ private struct ThreadDraftActionRow: View {
     let onComposeText: @MainActor @Sendable () -> Void
     let onComposeLink: @MainActor @Sendable () -> Void
     let onCapturePhoto: @MainActor @Sendable () -> Void
-    let onChoosePhotoFromLibrary: @MainActor @Sendable (PhotosPickerItem) -> Void
+    let onChooseMediaFromLibrary: @MainActor @Sendable (PhotosPickerItem) -> Void
+    let onMediaPickerUnavailable: @MainActor @Sendable () -> Void
     let onDrawDoodle: @MainActor @Sendable () -> Void
     let onComposeBauhaus: @MainActor @Sendable () -> Void
     let onRecordVoice: @MainActor @Sendable () -> Void
 
-    @State private var selectedLibraryPhotoItem: PhotosPickerItem?
+    @State private var selectedLibraryMediaItem: PhotosPickerItem?
+    @State private var isLibraryMediaPickerPresented = false
 
     var body: some View {
       HStack(spacing: 12) {
@@ -1016,20 +1306,25 @@ private struct ThreadDraftActionRow: View {
           action: onCapturePhoto
         )
 
-        PhotosPicker(
-          selection: $selectedLibraryPhotoItem,
-          matching: .images,
-          preferredItemEncoding: .compatible
-        ) {
+        Button {
+          presentLibraryMediaPicker()
+        } label: {
           ThreadDraftActionIconLabel(systemName: "photo.on.rectangle.angled")
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .capsule)
-        .accessibilityLabel(Text("Choose Photo"))
-        .onChange(of: selectedLibraryPhotoItem) { _, item in
+        .accessibilityLabel(Text("Choose Media"))
+        .photosPicker(
+          isPresented: $isLibraryMediaPickerPresented,
+          selection: $selectedLibraryMediaItem,
+          matching: .any(of: [.images, .livePhotos, .videos]),
+          preferredItemEncoding: .current,
+          photoLibrary: .shared()
+        )
+        .onChange(of: selectedLibraryMediaItem) { _, item in
           guard let item else { return }
-          selectedLibraryPhotoItem = nil
-          onChoosePhotoFromLibrary(item)
+          selectedLibraryMediaItem = nil
+          onChooseMediaFromLibrary(item)
         }
 
         ThreadDraftActionIconButton(
@@ -1049,6 +1344,20 @@ private struct ThreadDraftActionRow: View {
           accessibilityLabel: "Voice",
           action: onRecordVoice
         )
+      }
+    }
+
+    private func presentLibraryMediaPicker() {
+      Task { @MainActor in
+        do {
+          try await PhotoLibraryImport.ensurePhotoLibraryReadAccess()
+          isLibraryMediaPickerPresented = true
+        } catch {
+          photoLibraryImportLog.error(
+            "Photo library permission request failed: \(String(describing: error), privacy: .public)"
+          )
+          onMediaPickerUnavailable()
+        }
       }
     }
 
@@ -1098,6 +1407,10 @@ extension Card.Kind {
       return "Link"
     case .photo:
       return "Photo"
+    case .video:
+      return "Video"
+    case .livePhoto:
+      return "Live Photo"
     case .audio:
       return "Audio"
     case .doodle:
@@ -1120,6 +1433,10 @@ extension Card.Kind {
       return "link"
     case .photo:
       return "camera"
+    case .video:
+      return "video"
+    case .livePhoto:
+      return "livephoto"
     case .audio:
       return "waveform"
     case .doodle:

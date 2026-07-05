@@ -26,6 +26,12 @@ enum JournalDefaults {
   /// to the main vault flow, even after reinstall.
   static let hasCompletedOnboarding = "journal.onboarding.completed"
 
+  /// Last vault the user successfully opened from the vault picker.
+  ///
+  /// Stored as a `VaultID.uuidString` because this is a per-device presentation
+  /// preference, not catalog data that should sync through `JournalVault`.
+  static let lastSelectedVaultID = "journal.vault.lastSelected.id"
+
   /// Whether the app has resolved its first vault availability decision.
   ///
   /// `RootView` uses this as a presentation cache only. The vault runtime still
@@ -127,6 +133,7 @@ struct SettingsView: View {
 
       AppearanceSection(selectionID: $appearancePreferenceID)
       LocationSection(isEnabled: $shouldAttachLocationToNewCards)
+      CloudStorageEstimateSection(runtime: vaultRuntime)
       WidgetInstructionsSection()
 
       #if DEBUG
@@ -234,6 +241,465 @@ fileprivate struct LocationSection: View {
       Text("When enabled, new cards attach your current location automatically if iOS allows Journal to access it.")
     }
     .settingsListRowBackground()
+  }
+}
+
+/// A form section that opens Journal's local CloudKit storage estimate.
+fileprivate struct CloudStorageEstimateSection: View {
+
+  let runtime: JournalVaultRuntime
+
+  @State private var estimate: JournalCloudStorageEstimate?
+
+  var body: some View {
+    Section {
+      NavigationLink {
+        CloudStorageEstimateView(runtime: runtime)
+      } label: {
+        HStack {
+          Label("Cloud Storage", systemImage: "icloud")
+
+          Spacer(minLength: 0)
+
+          if let estimate {
+            Text(estimate.ownedEstimatedPayloadBytes.storageByteCountText)
+              .foregroundStyle(.secondary)
+          }
+        }
+      }
+    } header: {
+      Text("Storage")
+    } footer: {
+      Text("Shows Journal's estimate for vault data stored through CloudKit.")
+    }
+    .settingsListRowBackground()
+    .task {
+      estimate = try? runtime.cloudStorageEstimate()
+    }
+  }
+}
+
+/// User-facing Settings screen for Journal-owned CloudKit payload estimates.
+fileprivate struct CloudStorageEstimateView: View {
+
+  let runtime: JournalVaultRuntime
+
+  @State private var loadState = CloudStorageEstimateLoadState.loading
+
+  var body: some View {
+    Form {
+      switch loadState {
+      case .loading:
+        CloudStorageEstimateLoadingSection()
+
+      case .loaded(let estimate):
+        CloudStorageEstimateSummarySection(estimate: estimate)
+        CloudStorageEstimateBreakdownSection(estimate: estimate)
+        CloudStorageEstimateVaultsSection(estimate: estimate)
+
+      case .failed(let message):
+        CloudStorageEstimateFailureSection(message: message)
+      }
+    }
+    .scrollContentBackground(.hidden)
+    .background(.background)
+    .navigationTitle("Cloud Storage")
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItem(placement: .topBarTrailing) {
+        Button {
+          Task { await refresh() }
+        } label: {
+          Image(systemName: "arrow.clockwise")
+        }
+        .accessibilityLabel("Refresh")
+      }
+    }
+    .task {
+      await refresh()
+    }
+  }
+
+  @MainActor
+  private func refresh() async {
+    loadState = .loading
+    await runtime.refresh()
+
+    do {
+      loadState = .loaded(try runtime.cloudStorageEstimate())
+    } catch {
+      loadState = .failed(error.localizedDescription)
+    }
+  }
+}
+
+/// Loading state for the Cloud Storage estimate screen.
+fileprivate enum CloudStorageEstimateLoadState {
+  case loading
+  case loaded(JournalCloudStorageEstimate)
+  case failed(String)
+}
+
+/// Initial loading section for the Cloud Storage estimate screen.
+fileprivate struct CloudStorageEstimateLoadingSection: View {
+
+  var body: some View {
+    Section {
+      HStack {
+        ProgressView()
+        Text("Calculating")
+          .foregroundStyle(.secondary)
+      }
+    }
+    .settingsListRowBackground()
+  }
+}
+
+/// Error section shown when the local estimate cannot be read.
+fileprivate struct CloudStorageEstimateFailureSection: View {
+
+  let message: String
+
+  var body: some View {
+    Section {
+      Label {
+        Text(message)
+      } icon: {
+        Image(systemName: "exclamationmark.triangle")
+          .foregroundStyle(.orange)
+      }
+    } header: {
+      Text("Could Not Calculate")
+    }
+    .settingsListRowBackground()
+  }
+}
+
+/// High-level totals for Journal's local CloudKit storage estimate.
+fileprivate struct CloudStorageEstimateSummarySection: View {
+
+  let estimate: JournalCloudStorageEstimate
+
+  var body: some View {
+    Section {
+      LabeledContent(
+        "Your iCloud Quota",
+        value: estimate.ownedEstimatedPayloadBytes.storageByteCountText
+      )
+
+      if estimate.participantEstimatedPayloadBytes > 0 {
+        LabeledContent(
+          "Shared Vaults",
+          value: estimate.participantEstimatedPayloadBytes.storageByteCountText
+        )
+      }
+
+      LabeledContent("Records", value: estimate.recordCount.formatted())
+
+      LabeledContent(
+        "Updated",
+        value: estimate.generatedAt.formatted(date: .omitted, time: .shortened)
+      )
+    } header: {
+      Text("Estimate")
+    } footer: {
+      Text("CloudKit does not expose exact iCloud usage to apps. This estimate uses Journal rows and attachment byte sizes, excluding CloudKit overhead and other apps.")
+    }
+    .settingsListRowBackground()
+  }
+}
+
+/// App-wide byte totals grouped by payload category and attachment modality.
+fileprivate struct CloudStorageEstimateBreakdownSection: View {
+
+  let estimate: JournalCloudStorageEstimate
+
+  var body: some View {
+    Section {
+      StorageBreakdownRow(
+        title: "Text and Links",
+        systemImage: "text.alignleft",
+        detail: nil,
+        byteSize: estimate.cardBodyBytes
+      )
+
+      StorageBreakdownRow(
+        title: "Media Files",
+        systemImage: "paperclip",
+        detail: nil,
+        byteSize: estimate.mediaBytes
+      )
+
+      StorageBreakdownRow(
+        title: "Thumbnails",
+        systemImage: "photo.on.rectangle",
+        detail: nil,
+        byteSize: estimate.thumbnailBytes
+      )
+
+      ForEach(estimate.mediaBreakdowns) { breakdown in
+        StorageBreakdownRow(
+          title: breakdown.kind.storageTitle,
+          systemImage: breakdown.kind.storageSystemImage,
+          detail: "\(breakdown.count.formatted()) attachments",
+          byteSize: breakdown.byteSize
+        )
+      }
+    } header: {
+      Text("By Type")
+    }
+    .settingsListRowBackground()
+  }
+}
+
+/// Per-vault navigation rows for storage estimate details.
+fileprivate struct CloudStorageEstimateVaultsSection: View {
+
+  let estimate: JournalCloudStorageEstimate
+
+  var body: some View {
+    Section {
+      if estimate.vaults.isEmpty {
+        Text("No vaults")
+          .foregroundStyle(.secondary)
+      } else {
+        ForEach(estimate.vaults) { vaultEstimate in
+          NavigationLink {
+            VaultCloudStorageEstimateDetailView(vaultEstimate: vaultEstimate)
+          } label: {
+            VaultStorageEstimateRow(vaultEstimate: vaultEstimate)
+          }
+        }
+      }
+    } header: {
+      Text("Vaults")
+    }
+    .settingsListRowBackground()
+  }
+}
+
+/// Compact row for one vault's estimated payload.
+fileprivate struct VaultStorageEstimateRow: View {
+
+  let vaultEstimate: JournalVaultCloudStorageEstimate
+
+  var body: some View {
+    HStack(spacing: 12) {
+      Image(systemName: vaultEstimate.descriptor.ownership.storageSystemImage)
+        .foregroundStyle(.tint)
+        .frame(width: 24)
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text(vaultEstimate.descriptor.storageDisplayTitle)
+          .foregroundStyle(.primary)
+        Text(vaultEstimate.descriptor.ownership.storageTitle)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
+      Spacer(minLength: 0)
+
+      Text(vaultEstimate.estimate.estimatedPayloadBytes.storageByteCountText)
+        .foregroundStyle(.secondary)
+    }
+  }
+}
+
+/// Detail screen for one vault's CloudKit payload estimate.
+fileprivate struct VaultCloudStorageEstimateDetailView: View {
+
+  let vaultEstimate: JournalVaultCloudStorageEstimate
+
+  var body: some View {
+    Form {
+      Section {
+        LabeledContent(
+          "Estimated Payload",
+          value: vaultEstimate.estimate.estimatedPayloadBytes.storageByteCountText
+        )
+        LabeledContent("Records", value: vaultEstimate.estimate.recordCount.formatted())
+        LabeledContent("Storage Owner") {
+          Text(vaultEstimate.descriptor.ownership.storageTitle)
+        }
+      } header: {
+        Text("Vault")
+      } footer: {
+        Text(vaultEstimate.descriptor.ownership.storageQuotaNote)
+      }
+      .settingsListRowBackground()
+
+      Section {
+        StorageBreakdownRow(
+          title: "Text and Links",
+          systemImage: "text.alignleft",
+          detail: nil,
+          byteSize: vaultEstimate.estimate.cardBodyBytes
+        )
+        StorageBreakdownRow(
+          title: "Media Files",
+          systemImage: "paperclip",
+          detail: nil,
+          byteSize: vaultEstimate.estimate.mediaBytes
+        )
+        StorageBreakdownRow(
+          title: "Thumbnails",
+          systemImage: "photo.on.rectangle",
+          detail: nil,
+          byteSize: vaultEstimate.estimate.thumbnailBytes
+        )
+      } header: {
+        Text("By Type")
+      }
+      .settingsListRowBackground()
+
+      Section {
+        if vaultEstimate.estimate.mediaBreakdowns.isEmpty {
+          Text("No media files")
+            .foregroundStyle(.secondary)
+        } else {
+          ForEach(vaultEstimate.estimate.mediaBreakdowns) { breakdown in
+            StorageBreakdownRow(
+              title: breakdown.kind.storageTitle,
+              systemImage: breakdown.kind.storageSystemImage,
+              detail: "\(breakdown.count.formatted()) attachments",
+              byteSize: breakdown.byteSize
+            )
+          }
+        }
+      } header: {
+        Text("Media")
+      }
+      .settingsListRowBackground()
+    }
+    .scrollContentBackground(.hidden)
+    .background(.background)
+    .navigationTitle(vaultEstimate.descriptor.storageDisplayTitle)
+    .navigationBarTitleDisplayMode(.inline)
+  }
+}
+
+/// Shared row style for a storage byte total.
+fileprivate struct StorageBreakdownRow: View {
+
+  let title: LocalizedStringResource
+  let systemImage: String
+  let detail: String?
+  let byteSize: Int
+
+  var body: some View {
+    HStack(spacing: 12) {
+      Image(systemName: systemImage)
+        .foregroundStyle(.tint)
+        .frame(width: 24)
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+          .foregroundStyle(.primary)
+        if let detail {
+          Text(detail)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+
+      Spacer(minLength: 0)
+
+      Text(byteSize.storageByteCountText)
+        .foregroundStyle(.secondary)
+    }
+  }
+}
+
+fileprivate extension VaultDescriptor {
+
+  /// User-facing title for Settings, with a fallback for remotely discovered
+  /// vaults whose `VaultInfo` title has not arrived yet.
+  var storageDisplayTitle: String {
+    title.isEmpty ? String(localized: "Untitled Vault") : title
+  }
+}
+
+fileprivate extension VaultOwnership {
+
+  /// User-facing ownership label for storage surfaces.
+  var storageTitle: LocalizedStringResource {
+    switch self {
+    case .owned:
+      "Owned by You"
+    case .participant:
+      "Shared with You"
+    }
+  }
+
+  /// SF Symbol that communicates who owns the storage quota.
+  var storageSystemImage: String {
+    switch self {
+    case .owned:
+      "icloud"
+    case .participant:
+      "person.2"
+    }
+  }
+
+  /// Explains which iCloud account is charged for this vault's CloudKit data.
+  var storageQuotaNote: LocalizedStringResource {
+    switch self {
+    case .owned:
+      "Owned vault records are stored in your private CloudKit database and count toward your iCloud storage."
+    case .participant:
+      "Shared vault records are visible to you, but CloudKit charges the originating owner's iCloud storage."
+    }
+  }
+}
+
+fileprivate extension JournalVault.Attachment.Kind {
+
+  /// User-facing modality label for storage breakdowns.
+  var storageTitle: LocalizedStringResource {
+    switch self {
+    case .photo:
+      "Photos"
+    case .video:
+      "Videos"
+    case .livePhoto:
+      "Live Photos"
+    case .audio:
+      "Audio"
+    case .doodle:
+      "Doodles"
+    case .bauhaus:
+      "Bauhaus"
+    case .unknown:
+      "Unknown Media"
+    }
+  }
+
+  /// SF Symbol for storage breakdown rows.
+  var storageSystemImage: String {
+    switch self {
+    case .photo:
+      "photo"
+    case .video:
+      "video"
+    case .livePhoto:
+      "livephoto"
+    case .audio:
+      "waveform"
+    case .doodle:
+      "pencil.line"
+    case .bauhaus:
+      "square.grid.3x3"
+    case .unknown:
+      "questionmark.square"
+    }
+  }
+}
+
+fileprivate extension Int {
+
+  /// Localized file-size string for storage totals.
+  var storageByteCountText: String {
+    ByteCountFormatter.string(fromByteCount: Int64(self), countStyle: .file)
   }
 }
 

@@ -29,7 +29,11 @@ struct VaultSyncDatabaseTests {
     let attachment = try #require(
       try store.container.mainContext.fetch(FetchDescriptor<JournalVault.Attachment>()).first
     )
-    return (store, edges[0].id, attachment.id, store.fileURL(for: attachment))
+    let resource = try #require(
+      try store.container.mainContext.fetch(FetchDescriptor<JournalVault.AttachmentResource>()).first
+    )
+    #expect(attachment.primaryResourceID == resource.id)
+    return (store, edges[0].id, attachment.id, store.fileURL(for: resource))
   }
 
   private func fetchPendingMutation(

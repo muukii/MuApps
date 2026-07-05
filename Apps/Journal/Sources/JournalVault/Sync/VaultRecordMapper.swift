@@ -40,7 +40,21 @@ enum VaultRecordMapper {
     static let cardID = "cardID"
     static let kind = "kind"
     static let byteSize = "byteSize"
+    static let primaryResourceID = "primaryResourceID"
     static let thumbnail = "thumbnail"
+    static let createdAt = "createdAt"
+  }
+
+  enum AttachmentResourceKey {
+    static let attachmentID = "attachmentID"
+    static let role = "role"
+    static let byteSize = "byteSize"
+    static let contentType = "contentType"
+    static let pixelWidth = "pixelWidth"
+    static let pixelHeight = "pixelHeight"
+    static let duration = "duration"
+    static let isHDR = "isHDR"
+    static let colorSpaceName = "colorSpaceName"
     static let createdAt = "createdAt"
     static let file = "file"
   }
@@ -74,18 +88,35 @@ enum VaultRecordMapper {
     record[CardEdgeKey.updatedAt] = edge.updatedAt
   }
 
-  /// `assetFileURL` is the local media file to upload, or `nil` when the bytes
-  /// aren't on this device (an imported row) — the record then updates without
-  /// touching the existing remote asset... the server keeps the previous value
-  /// for fields the record doesn't set.
-  static func applyFields(of attachment: Attachment, assetFileURL: URL?, to record: CKRecord) {
+  static func applyFields(of attachment: Attachment, to record: CKRecord) {
     record[AttachmentKey.cardID] = attachment.cardID.uuidString
     record[AttachmentKey.kind] = attachment.kindRawValue
     record[AttachmentKey.byteSize] = attachment.byteSize
+    record[AttachmentKey.primaryResourceID] = attachment.primaryResourceID.uuidString
     record[AttachmentKey.thumbnail] = attachment.thumbnail
     record[AttachmentKey.createdAt] = attachment.createdAt
+  }
+
+  /// `assetFileURL` is the local resource file to upload. When the file is not
+  /// available locally, the record updates its metadata without touching the
+  /// existing remote asset.
+  static func applyFields(
+    of resource: AttachmentResource,
+    assetFileURL: URL?,
+    to record: CKRecord
+  ) {
+    record[AttachmentResourceKey.attachmentID] = resource.attachmentID.uuidString
+    record[AttachmentResourceKey.role] = resource.roleRawValue
+    record[AttachmentResourceKey.byteSize] = resource.byteSize
+    record[AttachmentResourceKey.contentType] = resource.contentType
+    record[AttachmentResourceKey.pixelWidth] = resource.pixelWidth
+    record[AttachmentResourceKey.pixelHeight] = resource.pixelHeight
+    record[AttachmentResourceKey.duration] = resource.duration
+    record[AttachmentResourceKey.isHDR] = resource.isHDR
+    record[AttachmentResourceKey.colorSpaceName] = resource.colorSpaceName
+    record[AttachmentResourceKey.createdAt] = resource.createdAt
     if let assetFileURL {
-      record[AttachmentKey.file] = CKAsset(fileURL: assetFileURL)
+      record[AttachmentResourceKey.file] = CKAsset(fileURL: assetFileURL)
     }
   }
 
@@ -143,9 +174,33 @@ enum VaultRecordMapper {
       attachment.kindRawValue = kind
     }
     attachment.byteSize = record[AttachmentKey.byteSize] as? Int ?? 0
+    if let primaryResourceID = (record[AttachmentKey.primaryResourceID] as? String)
+      .flatMap(UUID.init(uuidString:))
+    {
+      attachment.primaryResourceID = primaryResourceID
+    }
     attachment.thumbnail = record[AttachmentKey.thumbnail] as? Data
     if let createdAt = record[AttachmentKey.createdAt] as? Date {
       attachment.createdAt = createdAt
+    }
+  }
+
+  static func update(_ resource: AttachmentResource, from record: CKRecord) {
+    if let attachmentID = (record[AttachmentResourceKey.attachmentID] as? String).flatMap(UUID.init(uuidString:)) {
+      resource.attachmentID = attachmentID
+    }
+    if let role = record[AttachmentResourceKey.role] as? String {
+      resource.roleRawValue = role
+    }
+    resource.byteSize = record[AttachmentResourceKey.byteSize] as? Int ?? 0
+    resource.contentType = record[AttachmentResourceKey.contentType] as? String
+    resource.pixelWidth = record[AttachmentResourceKey.pixelWidth] as? Int
+    resource.pixelHeight = record[AttachmentResourceKey.pixelHeight] as? Int
+    resource.duration = record[AttachmentResourceKey.duration] as? Double
+    resource.isHDR = record[AttachmentResourceKey.isHDR] as? Bool ?? false
+    resource.colorSpaceName = record[AttachmentResourceKey.colorSpaceName] as? String
+    if let createdAt = record[AttachmentResourceKey.createdAt] as? Date {
+      resource.createdAt = createdAt
     }
   }
 

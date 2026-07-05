@@ -36,9 +36,9 @@ let journalInfoPlist: InfoPlist = .extendingDefault(with: journalVersionInfoPlis
   "UIBackgroundModes": .array(["remote-notification"]),
   "UILaunchScreen": .dictionary([:]),
   // Capture components. Camera and microphone require direct permission; Photos
-  // import uses the system picker and receives only the image the user selects.
+  // import uses the system picker and receives only the media the user selects.
   "NSCameraUsageDescription": "Take a photo to attach to a journal entry.",
-  "NSPhotoLibraryUsageDescription": "Choose a photo to attach to a journal entry.",
+  "NSPhotoLibraryUsageDescription": "Choose a photo, Live Photo, or video to attach to a journal entry.",
   "NSMicrophoneUsageDescription": "Record the ambient sound around you to attach to a journal entry.",
   // Optional authored-card location: when the Journal setting is enabled, new
   // cards record where they were written (LocationManager → Card.location).
@@ -47,19 +47,20 @@ let journalInfoPlist: InfoPlist = .extendingDefault(with: journalVersionInfoPlis
 
 // MARK: - Journal-local frameworks
 
-/// A Journal-scoped static framework. Used for the capture components (each an
+/// A Journal-scoped framework. Used for the capture components (each an
 /// isolated modality, developed/run on its own) and for shared foundations like
 /// `MuColor`. Sources live under `Sources/<TargetName>` so the app directory
 /// stays compact while keeping these modules app-scoped instead of `Shared/`.
 func journalFramework(
   name: String,
+  product: Product = .staticFramework,
   resources: ResourceFileElements? = nil,
   dependencies: [TargetDependency] = []
 ) -> Target {
   .target(
     name: name,
     destinations: .app,
-    product: .staticFramework,
+    product: product,
     bundleId: "app.muukii.journal.\(name)",
     deploymentTargets: .app,
     infoPlist: .default,
@@ -96,6 +97,9 @@ let project = Project(
       bundleId: "app.muukii.journal",
       deploymentTargets: .app,
       infoPlist: journalInfoPlist,
+      resources: [
+        "Resources/Journal/**",
+      ],
       buildableFolders: ["Sources/Journal"],
       // iCloud + CloudKit for SwiftData cross-device sync. The container id is
       // the single source of truth read by `ModelConfiguration(cloudKitDatabase:)`.
@@ -119,11 +123,15 @@ let project = Project(
         "com.apple.developer.journal.allow": ["suggestions"],
       ]),
       dependencies: [
+        .sdk(name: "AVFoundation", type: .framework),
         .sdk(name: "CloudKit", type: .framework),
         .sdk(name: "LinkPresentation", type: .framework),
-        .external(name: "SwiftUIIntrospect"),
+        .sdk(name: "Photos", type: .framework),
+        .sdk(name: "PhotosUI", type: .framework),
+        .sdk(name: "SharedWithYou", type: .framework),
         .external(name: "ScrollEdgeEffect"),
         .external(name: "Algorithms"),
+        .target(name: "AppUIComponents"),
         .target(name: "JournalVault"),
         // Embeds the widget extension into the app bundle.
         .target(name: "JournalWidget"),
@@ -131,6 +139,7 @@ let project = Project(
         .target(name: "MuHaptics"),
         .target(name: "CaptureText"),
         .target(name: "CapturePhoto"),
+        .target(name: "MediaProcessing"),
         .target(name: "CaptureDoodle"),
         .target(name: "CaptureBauhaus"),
         .target(name: "CaptureAudio"),
@@ -151,33 +160,6 @@ let project = Project(
             settings: ["APS_ENVIRONMENT": "production"],
             xcconfig: "xcconfig/Version.xcconfig"
           ),
-        ]
-      )
-    ),
-
-    // MARK: - Legacy data layer
-
-    // The legacy CloudKit-mirrored SwiftData models (`Card`, `Tag`,
-    // `Attachment`, `CardRelationship`, `Coordinate`) and store factory
-    // (`JournalStore`). Product migration should read legacy CloudKit records,
-    // not this module's local SQLite store. `APPLICATION_EXTENSION_API_ONLY`
-    // keeps it safe for narrow tooling that may still link it from extensions.
-    .target(
-      name: "JournalModel",
-      destinations: .app,
-      product: .framework,
-      bundleId: "app.muukii.journal.JournalModel",
-      deploymentTargets: .app,
-      infoPlist: .default,
-      buildableFolders: ["Sources/JournalModel"],
-      dependencies: [],
-      settings: .settings(
-        base: .frameworkTarget.merging([
-          "APPLICATION_EXTENSION_API_ONLY": "YES",
-        ]),
-        configurations: [
-          .debug(name: "Debug"),
-          .release(name: "Release"),
         ]
       )
     ),
@@ -256,6 +238,9 @@ let project = Project(
           "NSExtensionPointIdentifier": "com.apple.widgetkit-extension",
         ]),
       ]),
+      resources: [
+        "Resources/JournalWidget/**",
+      ],
       buildableFolders: ["Sources/JournalWidget"],
       entitlements: .dictionary([
         "com.apple.developer.icloud-container-identifiers": ["iCloud.app.muukii.journal"],
@@ -264,6 +249,8 @@ let project = Project(
         "aps-environment": "$(APS_ENVIRONMENT)",
       ]),
       dependencies: [
+        .target(name: "CaptureBauhaus"),
+        .target(name: "CaptureDoodle"),
         .target(name: "JournalVault"),
       ],
       settings: .settings(
@@ -287,22 +274,48 @@ let project = Project(
 
     journalFramework(
       name: "MuColor",
+      product: .framework,
       resources: [
         "Resources/MuColor/Assets.xcassets",
+      ]
+    ),
+    journalFramework(
+      name: "AppUIComponents",
+      product: .framework,
+      dependencies: [
+        .sdk(name: "AVFoundation", type: .framework),
+        .sdk(name: "CloudKit", type: .framework),
+        .sdk(name: "LinkPresentation", type: .framework),
+        .sdk(name: "SharedWithYou", type: .framework),
+        .external(name: "SwiftUIIntrospect"),
+        .target(name: "CaptureBauhaus"),
+        .target(name: "CaptureDoodle"),
+        .target(name: "JournalVault"),
+        .target(name: "MuColor"),
       ]
     ),
     journalFramework(name: "MuHaptics"),
     journalFramework(name: "CaptureText"),
     journalFramework(name: "CapturePhoto"),
+    // Save-time raster derivatives for large media such as photos and videos.
+    journalFramework(
+      name: "MediaProcessing",
+      dependencies: [
+        .sdk(name: "AVFoundation", type: .framework),
+        .sdk(name: "ImageIO", type: .framework),
+        .sdk(name: "UniformTypeIdentifiers", type: .framework),
+      ]
+    ),
     // Pure SwiftUI vector canvas (Canvas/Path) with drawing-time haptics.
     journalFramework(
       name: "CaptureDoodle",
+      product: .framework,
       dependencies: [
         .sdk(name: "CoreHaptics", type: .framework),
       ]
     ),
     // Pure SwiftUI grid composer for Bauhaus-style geometric journal artwork.
-    journalFramework(name: "CaptureBauhaus"),
+    journalFramework(name: "CaptureBauhaus", product: .framework),
     journalFramework(
       name: "CaptureAudio",
       dependencies: [

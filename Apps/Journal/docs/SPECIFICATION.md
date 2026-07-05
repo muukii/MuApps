@@ -44,7 +44,7 @@ before persistence sees them.
 ## Architecture
 
 Tuist project (`Apps/Journal/Project.swift`) with an app target, a **widget
-extension**, a shared **data-layer framework**, and several **Journal-local
+extension**, the vault **data-layer framework**, and several **Journal-local
 static frameworks**. The frameworks live inside the app (not in the repo's
 `Shared/`) because they are app-scoped, not cross-app. All Journal target source
 roots are grouped under `Apps/Journal/Sources/<TargetName>/`; the app icon
@@ -55,15 +55,15 @@ and the WidgetKit extension bundle display name is `Tinycurve Widget`.
 ```
 Journal (app, app.muukii.journal)
 ├── JournalWidget      — WidgetKit extension (app.muukii.journal.JournalWidget)
-│   └── JournalVault    (vault catalog/content reader)
-├── JournalModel       — data layer: Card/Tag/Attachment/CardRelationship/Coordinate
-│                        + JournalStore
-│                        (legacy migration/local tooling framework)
+│   ├── JournalVault    (vault catalog/content reader)
+│   ├── CaptureDoodle   (read-only widget renderer)
+│   └── CaptureBauhaus  (read-only widget renderer)
 ├── JournalVault       — vault catalog/content stores + explicit CloudKit sync
 ├── MuColor            — color themes / palette + container views
 ├── MuHaptics          — Core Haptics pattern editor, tap sequencer & engine (Lab)
 ├── CaptureText        — text note capture
 ├── CapturePhoto       — camera capture (AVFoundation)
+├── MediaProcessing    — save-time media derivatives (Image I/O thumbnails)
 ├── CaptureDoodle      — SwiftUI vector ink canvas (depends on CoreHaptics)
 ├── CaptureBauhaus     — 5 x 5 Bauhaus-style grid composer
 ├── CaptureAudio       — ambient sound recording (depends on AVFoundation)
@@ -71,12 +71,26 @@ Journal (app, app.muukii.journal)
 ```
 
 `JournalVault` is the app shell's active persistence framework and the widget's
-vault reader. `JournalModel` remains a legacy migration/local tooling framework.
-The app target no longer opens it for startup migration. It is built
-`APPLICATION_EXTENSION_API_ONLY` for compatibility with narrow extension-side
-tooling, but product widget behavior should not read it.
+vault reader. The legacy `JournalModel` module has been removed; product
+migration code is not kept in the app while Journal is still pre-release.
 
-### Vault migration direction
+### Localization
+
+The app target includes localized resources under
+`Apps/Journal/Resources/Journal/`. `Localizable.xcstrings` covers the current
+English and Japanese product-facing app shell: onboarding, composer actions,
+vault selection, saved entries, settings, widget instructions, privacy policy,
+and capture permission/capture surfaces. The app target also ships
+`InfoPlist.xcstrings` so iOS permission dialogs show localized camera, Photos,
+microphone, and location usage descriptions.
+
+The widget extension has its own bundle resources under
+`Apps/Journal/Resources/JournalWidget/` because WidgetKit and App Intents resolve
+their display names, descriptions, configuration labels, empty states, and
+content fallback labels from the extension bundle rather than from the app
+bundle.
+
+### Fresh schema startup
 
 `JournalApp` creates `JournalVaultRuntime` on launch. The runtime starts the
 sync layer and leaves the catalog empty when CloudKit recovery finds no owned or
@@ -84,13 +98,17 @@ accepted shared vaults. That empty catalog is the new-user state; the app does
 not create preset vaults at install time and does not open the old App Group
 SwiftData SQLite store.
 
-Product migration should be implemented as a CloudKit operation owned by the
-sync layer: query legacy CloudKit records / CKAssets, write the new records into
-a migration target vault zone only when legacy content exists, then let the
-vault sync import materialize those records into `VaultContentStore`. The
-migration should run only when the target vault has no cards, so existing vault
-content is never merged with legacy data. Local-only SwiftData SQLite import can
-exist only as developer tooling; it is not the product migration path.
+Because the app has not shipped with user data, Journal does not keep product
+migration APIs or legacy import DTOs. Schema changes can replace the pre-release
+store shape directly; developer-only recovery can be built outside the app if it
+is ever needed.
+
+If a pre-release vault content store cannot be opened after a schema break,
+`VaultContentStore.open` discards that vault's local `store.sqlite*` files and
+`media/` directory, then recreates the store. It also clears CKSyncEngine state
+and asks the sync engine to refetch, so CloudKit records and CKAssets can
+materialize the fresh store. The reset does not remove the catalog row or sibling
+vault content stores.
 
 ### Widget extension
 
@@ -107,15 +125,18 @@ App Group and fetches a small recent `Card` window sorted by `createdAt`
 descending. It resolves visibility through `CardEdge`: parent cards that have
 children are skipped so a multi-card thread save displays the authored last
 visible card instead of its root. It shows kind-aware content: text cards use
-`Card.body` (falling back to `Untitled`), doodle and Bauhaus cards use mirrored
-attachment thumbnails only when those optional bytes exist, and the other media
-cards still show a modality label. The Home Screen families show the selected
-vault title, latest-card body/thumbnail, and relative timestamp; the Lock Screen
-accessory families use short labels or symbols that fit the tighter surfaces.
+`Card.body` (falling back to `Untitled`), link cards use their stored URL string,
+photo cards use the save-time raster thumbnail stored on their attachment, and
+doodle / Bauhaus cards decode their authored JSON attachment and render
+`DoodleDrawingView` / `BauhausGridArtworkView`. Audio cards still show a typed
+modality label because there is not yet a visual authored renderer for audio.
+The Home Screen families show the selected vault title, latest-card body,
+rendered visual media, or audio label plus the relative timestamp; the Lock
+Screen accessory families use short labels or symbols that fit the tighter
+surfaces.
 It maps the `Card` to a `Sendable` `NoteSnapshot` so the timeline entry and
-views stay free of live SwiftData model references, capture frameworks, and
-media files; it shows an empty state when there are no vaults or when the chosen
-vault has no cards.
+views stay free of live SwiftData model references; it shows an empty state when
+there are no vaults or when the chosen vault has no cards.
 
 New card saves and saved-card edits request
 `WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)` so
@@ -150,8 +171,8 @@ extension-side recovery or summary refresh work.
 ### Usage descriptions (Info.plist)
 
 - `NSCameraUsageDescription` — CapturePhoto.
-- `NSPhotoLibraryUsageDescription` — choosing an existing Photos image for a
-  photo card through the system picker.
+- `NSPhotoLibraryUsageDescription` — choosing existing Photos media and reading
+  Live Photo resources when a selected Live Photo needs its paired movie.
 - `NSMicrophoneUsageDescription` — CaptureAudio.
 - `NSLocationWhenInUseUsageDescription` — automatic location attachment for
   newly authored cards when the Journal setting is enabled.
@@ -169,8 +190,9 @@ SwiftUI observation only; every vault content store is opened with
 `cloudKitDatabase: .none`. CloudKit rows, assets, zones, shares, and remote
 imports belong to the CloudKit sync coordinator.
 
-The legacy **`JournalModel`** schema still exists for migration and local
-tooling. New app UI and product widget code must not write to it.
+The legacy local **`JournalModel`** schema is no longer part of the app project.
+Journal does not keep a product migration path for that schema while the app is
+pre-release.
 
 ### `VaultInstance` — UI-facing vault object
 
@@ -203,8 +225,8 @@ local content never exists without a pending CloudKit upload.
 
 | Property | Type | Notes |
 |----------|------|-------|
-| `id` | `UUID` | Unique inside the vault store. Legacy migration preserves old card IDs. |
-| `kindRawValue` | `String` | Stored/synced modality string. `kind` maps unknown values to `.unknown`. |
+| `id` | `UUID` | Unique inside the vault store. |
+| `kindRawValue` | `String` | Stored/synced modality string: `.text`, `.link`, `.photo`, `.video`, `.livePhoto`, `.audio`, `.doodle`, `.bauhaus`, or a newer unknown value. `kind` maps unknown values to `.unknown`. |
 | `body` | `String` | Text content for `.text`; canonical URL string for `.link`; media cards keep this empty. |
 | `createdAt` | `Date` | |
 | `updatedAt` | `Date` | |
@@ -219,7 +241,7 @@ without changing `Card`.
 
 | Property | Type | Notes |
 |----------|------|-------|
-| `id` | `UUID` | Unique edge id. Migration derives deterministic edge IDs from legacy card/relationship IDs. |
+| `id` | `UUID` | Unique edge id. |
 | `cardID` | `UUID` | Referenced `Card`. |
 | `parentEdgeID` | `UUID?` | Parent edge in the same vault, or `nil` for roots. |
 | `sortIndex` | `Int` | Order among siblings. |
@@ -229,18 +251,59 @@ without changing `Card`.
 
 ### `Attachment` — media metadata for a Card
 
-Attachment bytes live as files in the vault's `media/` directory. The row and
-file share the same vault boundary, and `CloudKitVaultSyncEngine` uploads the
-file as a CKAsset when a local file exists.
+`Attachment` is the user-visible logical media item on a `Card`. Concrete files
+belong to `AttachmentResource` rows, so one attachment can later represent a
+compound media item such as a Live Photo.
 
 | Property | Type | Notes |
 |----------|------|-------|
-| `id` | `UUID` | Unique attachment id and file name. Legacy migration preserves old attachment IDs. |
+| `id` | `UUID` | Unique attachment id. |
 | `cardID` | `UUID` | Referenced `Card`. |
-| `kindRawValue` | `String` | `.photo`, `.audio`, `.doodle`, `.bauhaus`, or unknown raw value. |
-| `byteSize` | `Int` | Size of the on-disk file at attach time. |
-| `thumbnail` | `Data?` | Optional small preview data. |
+| `kindRawValue` | `String` | `.photo`, `.video`, `.livePhoto`, `.audio`, `.doodle`, `.bauhaus`, or unknown raw value. |
+| `byteSize` | `Int` | Denormalized primary-resource byte size kept for summaries. |
+| `primaryResourceID` | `UUID` | Primary resource used by normal rendering. |
+| `thumbnail` | `Data?` | Optional save-time raster derivative for photo, video poster, and Live Photo still surfaces. Doodle/Bauhaus leave it empty and render from authored media. |
 | `createdAt` | `Date` | |
+
+### `AttachmentResource` — one CKAsset-backed media file
+
+`AttachmentResource` is a domain row and local file identity, not a direct
+reference to a `CKAsset`. The sync mapper turns its local file into a CKAsset
+field when uploading and copies a downloaded CKAsset into the vault media
+directory before the CloudKit temporary file disappears.
+
+| Property | Type | Notes |
+|----------|------|-------|
+| `id` | `UUID` | Unique resource id and `media/<resource-id>` file name. |
+| `attachmentID` | `UUID` | Referenced logical attachment. |
+| `roleRawValue` | `String` | `.originalImage`, `.stillImage`, `.pairedVideo`, `.originalVideo`, `.authoredJSON`, `.audio`, or unknown raw value. |
+| `byteSize` | `Int` | Resource file byte size. |
+| `contentType` | `String?` | UTI/MIME-style content type when known. |
+| `pixelWidth` / `pixelHeight` | `Int?` | Image/video dimensions when known. |
+| `duration` | `Double?` | Video/audio duration in seconds when known. |
+| `isHDR` | `Bool` | Whether the resource contains HDR media. |
+| `colorSpaceName` | `String?` | Color space name when known. |
+| `createdAt` | `Date` | |
+
+### Card rendering boundary
+
+Normal card surfaces render from the authored value when that value is cheap and
+lossless to render. Text and link cards render their stored body/URL in SwiftUI.
+Doodle and Bauhaus cards decode their saved JSON attachment and render
+`DoodleDrawingView` / `BauhausGridArtworkView` directly as SwiftUI content; if
+the vault media file has not arrived locally yet, the UI shows a modality
+placeholder until `VaultMediaFileChange` triggers a reload.
+
+Large raster media is the exception. Photo summary surfaces and Widget Home
+Screen photo previews use the save-time `Attachment.thumbnail` created by
+`MediaProcessing`, so scrolling lists and Widget timelines do not decode
+original-size image files. Detail and editing flows still read the full media
+file when they need the original captured payload. Future video cards should use
+the same boundary for poster frames.
+
+Raster images are generated only at explicit raster boundaries: media
+thumbnails/posters, share/export images, video frames, APIs that require an
+image payload, or narrow dev/debug previews.
 
 ### `Coordinate` — a geographic point
 
@@ -288,6 +351,14 @@ front/back flip) built directly on AVFoundation. Handles authorization states
   `pixelSize: CGSize`, lazy `image: UIImage?`.
 - `CameraController` owns the `AVCaptureSession`, camera input, and still-photo
   output; `CameraPreviewView` mounts an `AVCaptureVideoPreviewLayer` in SwiftUI.
+- Saving a photo card passes the JPEG bytes through `MediaProcessing`, which
+  uses Image I/O to create an orientation-corrected thumbnail with a bounded
+  maximum pixel length. The full JPEG remains the editable vault media file.
+- Photos library import accepts still images, Live Photos, and videos. Live
+  Photos become `.livePhoto` cards with one logical attachment: the still image
+  is the primary `.stillImage` resource and the motion component is a
+  `.pairedVideo` resource. Videos become `.video` cards with an `.originalVideo`
+  primary resource and a save-time poster thumbnail.
 
 ### CaptureDoodle → `DoodleDrawing`
 
@@ -326,9 +397,10 @@ supplied, the canvas emits the current
 auto-save drafts.
 
 - `DoodleDrawing`: `Sendable, Equatable, Codable` — `strokes: [DoodleStroke]`,
-  `canvasSize: CGSize`, `duration: TimeInterval`. `image(inkColor:scale:)`
-  rasterizes a tinted thumbnail on demand; `DoodleDrawingView` renders the saved
-  vector value directly as SwiftUI content.
+  `canvasSize: CGSize`, `duration: TimeInterval`. `DoodleDrawingView` renders
+  the saved vector value directly as SwiftUI content; `image(inkColor:scale:)`
+  is reserved for explicit raster outputs such as share/export or debug
+  previews.
 - `DoodleStroke`: `points: [DoodlePoint]` (each `x, y, time`, optional
   point-level `width`), `width: Double` base brush width.
 - Supporting types: `DoodleCanvas` (controller), `DoodleStrokesView` (renderer),
@@ -448,9 +520,11 @@ A small palette/theme system applied app-wide.
   appearance; Swift only maps each `Theme` to its stable asset namespace and
   resolves the requested `ColorScheme` through asset traits.
 - `Theme`: an `id` + display `name` + a **light** and **dark** `Palette` pair.
-  Eleven themes: **Warm Cream** (default), **Soft Mocha**, **Midnight**,
-  **Sage**, **Blush**, **Citrus**, **Lagoon**, **Berry**, **Vermilion**,
-  **Cobalt**, and **Forest**. `Theme.palette(for:)`
+  Ten themes: **Warm Cream** (default), **Black & White**, **Midnight**,
+  **Sage**, **Blush**, **Citrus**, **Lagoon**, **Vermilion**, **Cobalt**, and
+  **Forest**. `Black & White` is the colorless neutral theme:
+  white/black surfaces in Light mode and black/white surfaces in Dark mode, with
+  only neutral gray secondary surfaces for separation. `Theme.palette(for:)`
   resolves the surface for the active
   `ColorScheme`; `Theme.with(id:)` resolves a persisted id, falling back to
   `.default`. Each theme adapts to the active Light/Dark mode, which can either
@@ -511,8 +585,14 @@ the gallery's **Lab** section).
   `JournalDefaults.hasCompletedOnboarding`, while `JournalVaultRuntime` still
   starts and runs recovery in the background. Existing local or recovered vault
   state routes to the existing-user vault flow (`VaultSelectionView` →
-  `CreationView`). If no vault state exists and onboarding has not been
-  completed, it routes to **New User** onboarding. Completing onboarding records
+  `CreationView`). If `JournalDefaults.lastSelectedVaultID` names a catalog
+  vault after launch refresh, the root keeps the launch loading surface visible,
+  opens that vault without a user-visible picker-to-composer transition, and
+  restores the composer as the default selected vault. Missing, invalid, or
+  unopened vault IDs are cleared and then reveal the normal vault picker. If no
+  vault state exists and onboarding has not been completed, it routes to **New
+  User** onboarding.
+  Completing onboarding records
   `@AppStorage(JournalDefaults.hasCompletedOnboarding)` and then enters the
   vault picker, where the user can create the first vault. When initial iCloud
   recovery was deferred, the vault picker shows a compact diagnostic banner and
@@ -527,15 +607,28 @@ the gallery's **Lab** section).
 - **`VaultSelectionView`** — the post-onboarding entry screen. It reads
   `JournalVaultRuntime.vaults`, shows the catalog in picker order as a standard
   SwiftUI `List`, and calls `JournalVaultRuntime.selectVault(_:)` before
-  entering the composer. The toolbar
+  entering the composer. A successful manual selection, including a newly
+  created vault, records that vault as `JournalDefaults.lastSelectedVaultID` for
+  the next launch. The toolbar
   also opens a **New Vault** sheet; creating a vault calls
   `JournalVaultRuntime.createVault(title:)`, seeds the local vault store, reloads
   the catalog, opens the new vault, and then enters the composer. Settings are
   reachable from this screen so app-wide preferences remain available before a
-  vault is active. Owned vault rows also show an **Invite People** affordance
-  that prepares the vault's saved zone-wide CloudKit share and then presents the
-  system `UICloudSharingController` with private invite / read-write options;
-  participant vault rows do not offer invite issuance.
+  vault is active. Owned vault rows always show a separate share button inside
+  the cell; once the catalog knows the vault has a CloudKit share, the row also
+  shows a system `SWCollaborationView` control. This matches the Notes-style
+  split between explicit invite issuance and collaboration state/management. The
+  collaboration control registers an `NSItemProvider` for the vault's zone-wide
+  `CKShare`, resolves that share only when the user opens the system
+  collaboration UI, and limits sharing to specified recipients with read-write
+  permission. The share button and row context menu both present the direct
+  `UICloudSharingController` invite sheet; participant vault rows do not offer
+  invite issuance. Vault rows can be deleted from swipe actions or the row
+  context menu after a destructive confirmation.
+  Owned vault deletion removes the CloudKit custom zone before deleting local
+  catalog/content files, so the vault disappears for everyone with access.
+  Participant vault deletion targets the accepted shared zone and then removes
+  the local catalog/content files for this user.
 - **`OnboardingView`** — the first-run introduction, also re-showable on demand
   from Settings. Four horizontally-paged screens (`TabView` with
   `.tabViewStyle(.page)`) plus a fixed **Get Started** / **Next** call-to-action
@@ -544,11 +637,14 @@ the gallery's **Lab** section).
      thing becomes a card") over a short welcome blurb.
   2. **Capture methods** — the six modalities (Text, Link, Photo, Doodle,
      Ambient Sound, Suggestions) as icon + name + one-line summary.
-  3. **Permissions** — optional priming for Camera, Microphone, and Location. Each
-     row shows the live authorization status and an **Allow** button that triggers
-     the system prompt on demand (`AVCaptureDevice.requestAccess(for:)`,
-     `AmbientAudioRecorder.requestPermission()`, `LocationManager.requestAuthorization()`);
-     the user can advance without granting anything.
+  3. **Permissions** — optional priming for Camera, Photos, Microphone, and
+     Location. Each row shows the live authorization status and an **Allow**
+     button that triggers the system prompt on demand
+     (`AVCaptureDevice.requestAccess(for:)`,
+     `PHPhotoLibrary.requestAuthorization(for: .readWrite)`,
+     `AmbientAudioRecorder.requestPermission()`,
+     `LocationManager.requestAuthorization()`); the user can advance without
+     granting anything.
   4. **Theme** — a grid of theme tiles bound to the same `JournalDefaults.themeID`
      key, so a selection applies app-wide and re-tints the onboarding immediately.
 
@@ -562,10 +658,18 @@ the gallery's **Lab** section).
   a vertical `ScrollView` of card-shaped draft summaries. The header is rendered
   with the standard `Date.FormatStyle` field selection, so its field order and
   separators follow the user's locale (en: "Sat, Jun 27"; ja: "6月27日(土)").
+  When the selected owned vault is already shared, the navigation toolbar also
+  shows the same system `SWCollaborationView` control used by the vault picker,
+  so the active composer keeps the collaboration state and management entry
+  visible without adding a second invite button. The composer derives that state
+  from the refreshed catalog row for the selected vault, so stopping sharing in
+  the system UI removes the control after the runtime refreshes.
   Drafts render through the same adaptive saved-entry summary card wrapper used
   by Entries; the wrapper still owns the 4:5 paper aspect ratio, footer, tilt, and
   modality-specific summary layout, while draft-only media payloads are fed in
-  directly instead of being loaded from attachment files. Tapping a text card
+  directly instead of being loaded from attachment files. Doodle and Bauhaus
+  draft summaries render the authored value with their SwiftUI renderers instead
+  of a raster preview. Tapping a text card
   opens a native **Text** sheet with a focused `TextEditor`. Tapping a photo card
   opens a native **Photo** sheet, showing the existing
   `CapturedPhoto` with **Retake Photo** or `PhotoCaptureView` for a new shot.
@@ -602,7 +706,9 @@ the gallery's **Lab** section).
   separate save button for those visual editors. The glass up-arrow converts the
   current draft cards into `VaultContentStore.CardDraft` values, saves them
   through the selected `VaultInstance` as one root `CardEdge` tree, then clears
-  the composer.
+  the composer. During this conversion, photo drafts generate their bounded
+  raster thumbnail through `MediaProcessing`; authored media such as Doodle and
+  Bauhaus do not store raster thumbnails.
   A successful save shows a transient bottom capsule notification ("Saved to
   Journal") with success haptics; if saving fails, the draft remains on screen
   and a persistent bottom capsule notification explains that the save did not
@@ -637,24 +743,43 @@ the gallery's **Lab** section).
   `VaultInstance`. It reads `CardEdge`, `Card`, and `Attachment` rows from
   the selected vault container, creates value snapshots, groups root edges into
   local-calendar day sections, and displays them as 4:5 `CardSurface` tiles. Child
-  edges are shown in the pushed detail view as a flattened subtree; grid tiles
+  edges are collapsed into the root tile by default and shown in the pushed
+  detail view as a flattened subtree. When any saved thread has child cards, the
+  toolbar shows a stack toggle: collapsed mode keeps one tile per root stack,
+  while expanded mode flattens root and child cards into the day grid without
+  rereading the vault store. Collapsed stacks keep lightweight child previews
+  behind the root tile and use matched-geometry animation so expansion feels like
+  cards moving out of the stack. Pull-to-refresh remains the manual snapshot reload;
+  the old toolbar reload icon is not shown in the normal list surface. Grid tiles
   are matched transition sources so opening a detail view uses the system zoom
   navigation transition from the tapped card. Link cards
   use iOS's LinkPresentation preview in both tiles and detail cards, fetching
-  metadata at display time and caching it for the app session. Media previews
-  prefer the vault media file when it exists and fall back to attachment
-  thumbnails or a modality placeholder. The list listens for
+  metadata at display time and caching it for the app session. Photo summary
+  previews use the saved thumbnail to avoid decoding original-size images during
+  scrolling; detail cards can read the full vault media file. Video previews
+  play as muted inline loops when the media file is local, while keeping the app
+  audio session mixed with other audio so external music or podcasts continue.
+  Doodle and Bauhaus previews decode the authored JSON attachment file and render
+  it with their SwiftUI renderers. When a media file is not local yet, the UI
+  shows a modality placeholder. The list listens for
   `VaultMediaFileChange` notifications for the selected vault and reloads snapshots
   when files arrive. Saved cards can be edited from a grid tile's context menu or
   from each detail card's pencil button. Editing rehydrates the saved card into
   `CardEditDraftEditor`, requires the full media file for media cards, and saves
   back through `VaultContentStore.updateCard(cardID:with:)`; thumbnails are not
-  used as lossy edit sources. Legacy saved-entry export/share UI was removed with
-  the migration and still needs to be rebuilt against `VaultInstance` snapshots.
+  used as lossy edit sources. Saved cards can also be deleted from a grid tile's
+  context menu or from each detail card's trash button. Deletion is confirmed
+  first, then writes through `VaultContentStore.deleteCardEdge(edgeID:)` so the
+  selected edge, descendant cards, attachments, attachment resources, local media
+  files, and CloudKit delete outbox rows stay aligned. Detail deletion dismisses
+  back to the list after a successful delete so the user sees a fresh snapshot.
+  The old saved-entry export/share UI was removed with the vault rewrite and still
+  needs to be rebuilt against `VaultInstance` snapshots.
 - **`SettingsView`** — a theme picker, an **Appearance** picker, a **Location**
-  toggle for automatic location attachment, a **Widgets** section with an **Add
-  Widgets** guide, optional Debug-only **Vault Runtime** and Lab links, and About
-  actions. Settings is a grouped `Form`, but every cell background opts into the
+  toggle for automatic location attachment, a **Storage** section with **Cloud
+  Storage** estimates, a **Widgets** section with an **Add Widgets** guide,
+  optional Debug-only **Vault Runtime** and Lab links, and About actions.
+  Settings is a grouped `Form`, but every cell background opts into the
   active `MuColor` secondary container because SwiftUI form rows do not inherit
   the app theme surface automatically. Selecting a theme writes
   `JournalDefaults.themeID` (animated) and triggers selection haptic feedback.
@@ -663,8 +788,15 @@ the gallery's **Lab** section).
   setting, while **Light** and **Dark** request a fixed scene color scheme for
   Journal and update the theme palette immediately. The **Attach Location**
   toggle writes `JournalDefaults.shouldAttachLocationToNewCards`; it defaults on,
-  and when disabled new draft cards are saved without location metadata. **Add
-  Widgets** opens a Settings detail screen with an illustrated header and
+  and when disabled new draft cards are saved without location metadata. **Cloud
+  Storage** opens a Settings detail screen that estimates Journal's CloudKit
+  payload from local vault rows: owned vaults are grouped as data that counts
+  toward the user's iCloud quota, participant vaults are grouped as shared data
+  charged to the originating owner, and breakdowns show text/link body bytes,
+  media file bytes, thumbnail bytes, record counts, and media kind totals. It is
+  labeled as an estimate because CloudKit does not expose exact iCloud usage or
+  server overhead to the app. **Add Widgets** opens a Settings detail screen with
+  an illustrated header and
   step-by-step instructions for adding Tinycurve to the Home Screen, Lock Screen
   below the clock, and StandBy. The guide frames the widget as showing the
   latest card in a chosen vault.
@@ -692,7 +824,7 @@ xcodebuild -workspace MuApps.xcworkspace -scheme Journal \
 
 Each capture component also has its own scheme (`CaptureText`, `CapturePhoto`,
 `CaptureDoodle`, `CaptureBauhaus`, `CaptureAudio`, `CaptureSuggestions`,
-`MuColor`, `MuHaptics`) for building/running it in isolation.
+`MediaProcessing`, `MuColor`, `MuHaptics`) for building/running it in isolation.
 
 **Simulator note:** this machine has no iPhone 16 simulator — use **iPhone 17 /
 OS 27.0**.
@@ -702,9 +834,9 @@ OS 27.0**.
 The active app shell disables SwiftData CloudKit mirroring for vault stores.
 CloudKit verification now belongs to `CloudKitVaultSyncEngine`: zone creation,
 record upload/download, CKAsset file transfer, subscriptions, share creation,
-share invitation acceptance, and shared-database imports. The app runtime now
-uses `CloudKitVaultSyncEngine`; `LoggingVaultSyncEngine` remains for previews,
-debug probes, and narrow tests.
+share invitation acceptance, vault zone deletion, and shared-database imports.
+The app runtime now uses `CloudKitVaultSyncEngine`; `LoggingVaultSyncEngine`
+remains for previews, debug probes, and narrow tests.
 On every launch, the runtime should kick a lightweight CloudKit vault recovery:
 enumerate Journal-owned zones in the private database, accepted shared zones in
 the shared database, materialize any missing catalog rows, and then hand record

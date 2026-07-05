@@ -37,8 +37,8 @@ extension Theme {
   /// Warm Cream（= `.default`）
   public static let warmCream = Theme(id: "warmCream", name: "Warm Cream", assetName: "WarmCream")
 
-  /// Soft Mocha
-  public static let softMocha = Theme(id: "softMocha", name: "Soft Mocha", assetName: "SoftMocha")
+  /// Black & White
+  public static let blackWhite = Theme(id: "blackWhite", name: "Black & White", assetName: "BlackWhite")
 
   /// Midnight（基準のダークスキーム）
   public static let midnight = Theme(id: "midnight", name: "Midnight", assetName: "Midnight")
@@ -55,9 +55,6 @@ extension Theme {
   /// Lagoon
   public static let lagoon = Theme(id: "lagoon", name: "Lagoon", assetName: "Lagoon")
 
-  /// Berry
-  public static let berry = Theme(id: "berry", name: "Berry", assetName: "Berry")
-
   /// Vermilion
   public static let vermilion = Theme(id: "vermilion", name: "Vermilion", assetName: "Vermilion")
 
@@ -67,18 +64,17 @@ extension Theme {
   /// Forest
   public static let forest = Theme(id: "forest", name: "Forest", assetName: "Forest")
 
-  public static let `default`: Theme = .warmCream
+  public static let `default`: Theme = .forest
 
   /// All themes, in picker display order.
   public static let all: [Theme] = [
     .warmCream,
-    .softMocha,
+    .blackWhite,
     .midnight,
     .sage,
     .blush,
     .citrus,
     .lagoon,
-    .berry,
     .vermilion,
     .cobalt,
     .forest,

@@ -73,8 +73,13 @@ app shell の user-facing save / read UI は `VaultInstance` を使う。
 permission/share state、vault-scoped action を UI に見せる domain object とする。
 内部では `VaultContentStore` を所有するが、画面は CloudKit transport object を直接持たない。
 旧 `JournalModel` store は app shell の startup path では開かない。
-legacy data migration は CloudKit query / write operation として sync layer が所有し、
-SwiftUI tree には legacy `ModelContainer` を注入しない。
+Journal はまだ pre-release なので legacy migration layer は保持せず、
+SwiftUI tree に legacy `ModelContainer` も注入しない。
+schema break で vault content store が開けない場合は、旧 rows を変換せず、
+その vault の `store.sqlite*` と `media/` だけを reset して作り直す。
+この時 CKSyncEngine state も reset し、次の fetch で CloudKit records / CKAssets
+から fresh store を materialize する。catalog / sibling vault content store は
+reset しない。
 `cloudKitDatabase: .automatic` を前提にした model constraint、widget query、
 media sync の分離設計は target architecture に順次移行する。
 
@@ -126,23 +131,13 @@ vault boundary の中でまとめて扱う。shared vault でも row と media �
 
 ```mermaid
 flowchart LR
-  subgraph Legacy["Migration source only"]
-    LegacyStore["JournalModel<br/>SwiftData CloudKit mirroring"]
-    MediaSync["MediaSyncEngine<br/>file / CKAsset sync only"]
-    LegacyStore --> MediaSync
-  end
-
-  subgraph Target["Target vault architecture"]
-    VaultStore["VaultContentStore<br/>SwiftData / cloudKit: none"]
-    VaultSync["VaultSyncEngine<br/>row + asset + share sync"]
-    Zone["CloudKit vault zone<br/>records + CKAsset + CKShare"]
-    VaultStore --> VaultSync
-    VaultSync --> Zone
-    Zone --> VaultSync
-    VaultSync --> VaultStore
-  end
-
-  MediaSync -.->|"責務を吸収して削除"| VaultSync
+  VaultStore["VaultContentStore<br/>SwiftData / cloudKit: none"]
+  VaultSync["VaultSyncEngine<br/>row + asset + share sync"]
+  Zone["CloudKit vault zone<br/>records + CKAsset + CKShare"]
+  VaultStore --> VaultSync
+  VaultSync --> Zone
+  Zone --> VaultSync
+  VaultSync --> VaultStore
 ```
 
 `MediaSyncEngine` を消す条件として次の境界を置いた。
@@ -151,14 +146,13 @@ flowchart LR
 2. attachment row と media file が vault directory 配下に保存される。
 3. asset upload / download と file availability signal が `VaultSyncEngine` 経由になる。
 4. widget / global view が `VaultCatalogStore` の summary を読む。
-5. CloudKit query / write migration または export / import により旧 data からの移行手段がある。
 
 `SyncStatusMonitor` も同じ境界で置き換える。
 旧実装の SwiftData mirroring と `MediaSyncEngine` queue を監視する UI ではなく、
 CloudKit sync coordinator と `VaultInstance` の upload / download / conflict / share state と
 `VaultCatalogStore` の vault summary を見る UI にする。
 
-2026-07 の app shell 移行では、1、2、3、5 を先に満たした。
+2026-07 の app shell 移行では、1、2、3 を先に満たした。
 `MediaSyncEngine` / `SyncStatusMonitor` / 旧 sync status UI は削除済み。
 production runtime は `CloudKitVaultSyncEngine` を使う。`LoggingVaultSyncEngine` は
 preview / debug / narrow tests 用の network-less stub として残す。
@@ -532,8 +526,22 @@ Attachment
   id
   cardID
   kind
-  localRelativePath?
+  primaryResourceID
+  thumbnail?
   metadata
+
+AttachmentResource
+  id
+  attachmentID
+  role
+  byteSize
+  contentType?
+  pixelWidth?
+  pixelHeight?
+  duration?
+  isHDR
+  colorSpaceName?
+  createdAt
 ```
 
 ```mermaid
@@ -607,20 +615,23 @@ media だけ別 boundary から待つ形にはしない。
 
 Media は vault directory 配下の file として保存し、
 `VaultSyncEngine` が CloudKit asset として同期する。
-shared vault では、`Attachment` record と `CKAsset` が同じ shared zone に含まれる。
-participant は shared database から record を受け取り、asset file を自分の local vault directory に保存する。
+shared vault では、`Attachment` / `AttachmentResource` records と `CKAsset`
+が同じ shared zone に含まれる。participant は shared database から record を受け取り、
+asset file を自分の local vault directory に保存する。
 
 ```text
 VaultContentStore
   Attachment row
+  AttachmentResource row
 Vault directory
-  media/<attachment-id>
+  media/<resource-id>
 CloudKit zone
-  Attachment record + CKAsset
+  Attachment record
+  AttachmentResource record + CKAsset
 ```
 
 UI は引き続き row boundary で live SwiftData model を observe する。
-attachment record が local file より先に届いた場合は、
+attachment / resource record が local file より先に届いた場合は、
 sync layer が file availability の signal を明示的に発火し、
 表示中の view が load を retry できるようにする。
 
@@ -640,6 +651,12 @@ Widget はまず `VaultCatalogStore` を読む。
 full card content が必要な場合は vault ID から該当する `VaultContentStore` を開ける。
 2026-07 時点の widget first pass は `WidgetConfigurationIntent` で vault を選ばせ、
 選択された `VaultContentStore` から latest visible card snapshot を直接作る。
+この snapshot は photo では attachment thumbnail bytes を表示源にして、
+Widget timeline で original-size image file を読まない。
+text/link は本文、doodle / Bauhaus は authored JSON を decode した value を
+Widget の SwiftUI view が描画する。
+audio と Lock Screen accessory family は constrained surface として typed label /
+symbol を使う。
 将来の default path は小さな summary snapshot を読む形に最適化する。
 
 ## 未決定事項
@@ -675,7 +692,7 @@ Phase 3: CloudKit transport
 1. owned vault ごとに custom record zone を作る。
 2. `PendingMutation` から `CKRecord` を作って private database に送る。
 3. remote changes を fetch して `VaultContentStore` に import する。
-4. `CKAsset` を attachment record と同じ vault zone で upload / download する。
+4. `AttachmentResource` record の `CKAsset` を attachment row と同じ vault zone で upload / download する。
 
 Phase 4: Vault lifecycle UI
 
@@ -769,19 +786,17 @@ Owned vault invite issuance is implemented through
 bridge. Invite acceptance is implemented through the scene metadata router,
 `JournalVaultRuntime.acceptShare(metadata:)`, and the shared-database
 `CloudKitVaultSyncEngine` import path; live two-account acceptance verification
-is still pending. Shared With You surfacing and legacy migration are not
-implemented in this slice.
+is still pending. Vault deletion is implemented from `VaultSelectionView`:
+owned vaults delete their private custom zone before local cleanup, participant
+vaults target the accepted shared zone before removing local catalog/content
+files. Shared With You surfacing is not implemented in this slice.
 
 起動時には sync engine を start し、毎回 CloudKit vault recovery / reconciliation を
 kick する。remote/private/shared vault が見つからず local catalog も空の場合は
 新規 user 状態として扱い、空の vault picker を表示する。
-app shell は旧 `JournalModel` App Group SQLite を startup migration source として開かない。
-legacy migration は `VaultSyncEngine` 側の CloudKit operation として実装する。
-旧 CloudKit records / CKAssets を query し、legacy content が見つかった場合だけ
-migration target vault zone へ新しい `VaultInfo` / `Card` / `CardEdge` / `Attachment` records を write し、
-その後 vault sync import により local `VaultContentStore` へ materialize する。
-この migration は target vault の card count が 0 の時だけ実行し、既に content がある
-vault へ legacy data を merge しない。
+app shell は旧 `JournalModel` App Group SQLite を startup path で開かない。
+legacy local `JournalModel` module は project から削除済み。Journal は pre-release
+なので product migration code は持たず、現在の schema を source of truth とする。
 ユーザーが `VaultSelectionView` で vault を選んだ時点で
 `JournalVaultRuntime.selectVault(_:)` が `VaultInstance` を開き、
 `CreationView` と `SavedListView` はその selected instance だけを使う。
@@ -799,7 +814,7 @@ user-facing list は selected `VaultInstance` の `CardEdge` / `Card` / `Attachm
 - `VaultCatalogStore` + `VaultIndex` / `VaultLocalState` / `VaultSummary`
   (cloudKitDatabase: .none、user-created vault、remote vault の materialize)。
 - `VaultContentStore(vaultID)` + `VaultInfo` / `Card` / `CardEdge` /
-  `Attachment` / `SyncMetadata` / `PendingMutation`。
+  `Attachment` / `AttachmentResource` / `SyncMetadata` / `PendingMutation`。
   すべての write は同一 transaction で outbox(`PendingMutation`)を積む。
   save は必ず root `CardEdge` を作る。card edit は `Card` save と attachment replacement を
   同一 transaction で扱う。削除 cascade は domain rule として実装。
@@ -815,7 +830,7 @@ user-facing list は selected `VaultInstance` の `CardEdge` / `Card` / `Attachm
   vault へ routing。未知 zone は catalog へ materialize。zone は最初の save が
   `zoneNotFound` を返したときに lazy に作成。engine state は
   `SyncState/{private,shared}-database.json` に永続化。
-  `CKAsset` の upload / download(vault の `media/` に保存、
+  `AttachmentResource` の `CKAsset` upload / download(vault の `media/` に保存、
   `VaultMediaFileChange` notification で file 到着を通知)。
 - `JournalVaultRuntime` — `JournalApp` 起動時に
   App Group layout、catalog store、store registry、`CloudKitVaultSyncEngine` を作る。
@@ -832,15 +847,11 @@ user-facing list は selected `VaultInstance` の `CardEdge` / `Card` / `Attachm
 - conflict policy は record 単位で local-pending-wins。
   server の system fields だけ採用して再送する。field-wise merge は未決定のまま。
 - remote の record deletion は local edit より優先。
-- zone-level deletion(owner の削除 / share revoke)は log のみ。repair flow 未設計。
+- zone-level deletion(owner の削除 / share revoke / participant 側の removal)は
+  catalog row と vault-local content directory を削除し、次回 picker refresh で消える。
 
 未実装(次フェーズ):
 
-- `LegacyCloudKitMigration` — 旧 SwiftData mirroring / media sync が作った
-  CloudKit records と CKAssets を query し、legacy content が見つかった時だけ
-  migration target vault zone へ write する。
-  source は local SQLite ではなく CloudKit。target import は `VaultSyncEngine` の
-  通常 path に乗せる。
 - Shared with You 連携。
 - `VaultSummary` の latest card denormalize。
 - vault-backed saved-entry export share UI。

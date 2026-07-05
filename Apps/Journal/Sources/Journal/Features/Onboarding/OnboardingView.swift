@@ -1,7 +1,9 @@
+import AppUIComponents
 import AVFoundation
 import CaptureAudio
 import CoreLocation
 import MuColor
+import Photos
 import SwiftUI
 
 /// First-run (and on-demand) introduction to Journal.
@@ -149,7 +151,7 @@ fileprivate struct CaptureMethodsPage: View {
   }
 }
 
-/// Primes the three system permissions the app can use. Everything here is
+/// Primes the system permissions the app can use. Everything here is
 /// optional: each row requests its own permission on demand and reflects the live
 /// status, but the user can advance without granting anything.
 fileprivate struct PermissionsPage: View {
@@ -161,6 +163,7 @@ fileprivate struct PermissionsPage: View {
     ) {
       VStack(spacing: 14) {
         CameraPermissionRow()
+        PhotoLibraryPermissionRow()
         MicrophonePermissionRow()
         LocationPermissionRow()
       }
@@ -206,8 +209,8 @@ fileprivate struct ThemePage: View {
 /// pages genuinely share this shape; the welcome page deliberately doesn't use it.
 fileprivate struct OnboardingPage<Content: View>: View {
 
-  let title: String
-  let subtitle: String
+  let title: LocalizedStringResource
+  let subtitle: LocalizedStringResource
   @ViewBuilder var content: Content
 
   var body: some View {
@@ -237,8 +240,8 @@ private struct CaptureMethod: Identifiable {
 
   let id: String
   let icon: String
-  let name: String
-  let summary: String
+  let name: LocalizedStringResource
+  let summary: LocalizedStringResource
 
   static let all: [CaptureMethod] = [
     .init(id: "text", icon: "text.alignleft", name: "Text", summary: "Jot down what's on your mind."),
@@ -294,8 +297,8 @@ private enum PermissionState {
 fileprivate struct PermissionRow: View {
 
   let icon: String
-  let title: String
-  let description: String
+  let title: LocalizedStringResource
+  let description: LocalizedStringResource
   let state: PermissionState
   let onRequest: @MainActor @Sendable () -> Void
 
@@ -368,6 +371,37 @@ fileprivate struct CameraPermissionRow: View {
   private var state: PermissionState {
     switch status {
     case .authorized: .granted
+    case .denied, .restricted: .denied
+    case .notDetermined: .notDetermined
+    @unknown default: .notDetermined
+    }
+  }
+}
+
+fileprivate struct PhotoLibraryPermissionRow: View {
+
+  @State private var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+
+  var body: some View {
+    PermissionRow(
+      icon: "photo.on.rectangle.angled",
+      title: "Photos",
+      description: "Import photos, Live Photos, and videos from your library.",
+      state: state,
+      onRequest: {
+        Task {
+          _ = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+          withAnimation(.smooth) {
+            status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+          }
+        }
+      }
+    )
+  }
+
+  private var state: PermissionState {
+    switch status {
+    case .authorized, .limited: .granted
     case .denied, .restricted: .denied
     case .notDetermined: .notDetermined
     @unknown default: .notDetermined
@@ -491,6 +525,7 @@ fileprivate struct ThemeTile: View {
   PrimaryContainer(theme: .default) {
     VStack(spacing: 14) {
       PermissionRow(icon: "camera", title: "Camera", description: "Take a photo to attach to an entry.", state: .notDetermined, onRequest: {})
+      PermissionRow(icon: "photo.on.rectangle.angled", title: "Photos", description: "Import photos, Live Photos, and videos from your library.", state: .notDetermined, onRequest: {})
       PermissionRow(icon: "waveform", title: "Microphone", description: "Record the sound around you.", state: .granted, onRequest: {})
       PermissionRow(icon: "location", title: "Location", description: "Attach where you are to an entry.", state: .denied, onRequest: {})
     }

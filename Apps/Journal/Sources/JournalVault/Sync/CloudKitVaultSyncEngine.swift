@@ -35,7 +35,7 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
   private var localMutationTask: Task<Void, Never>?
 
   public init(
-    containerIdentifier: String = "iCloud.app.muukii.journal",
+    containerIdentifier: String = VaultCloudKitContainer.identifier,
     layout: VaultStoreLayout,
     catalog: VaultCatalogStore,
     registry: VaultStoreRegistry
@@ -69,6 +69,7 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     for descriptor in descriptors.values {
       await seedPendingChanges(for: descriptor, unstagingAll: true)
     }
+    await resetEnginesIfPreReleaseRefetchRequested()
 
     localMutationTask = Task {
       for await vaultID in registry.localMutations() {
@@ -85,6 +86,7 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     }
 
     do {
+      await resetEnginesIfPreReleaseRefetchRequested()
       switch try await container.accountStatus() {
       case .available:
         try await fetchInitialVaultAvailability()
@@ -113,6 +115,7 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
 
   public func activate(_ vaultID: VaultID) async {
     await refreshDescriptorsIfUnknown(vaultID)
+    await resetEnginesIfPreReleaseRefetchRequested()
     guard
       let descriptor = descriptors[vaultID],
       let engine = engines[databaseScope(for: descriptor)]
@@ -187,6 +190,38 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     await refreshDescriptors()
 
     return VaultShareAcceptance(share: acceptedShare, vaultID: acceptedVaultID)
+  }
+
+  public func deleteVault(_ descriptor: VaultDescriptor) async throws {
+    await start()
+    await refreshDescriptorsIfUnknown(descriptor.vaultID)
+
+    guard let currentDescriptor = descriptors[descriptor.vaultID] else {
+      throw VaultDeletionError.vaultNotFound(descriptor.vaultID)
+    }
+
+    let scope = databaseScope(for: currentDescriptor)
+    guard let engine = engines[scope] else {
+      throw VaultDeletionError.cloudKitUnavailable
+    }
+
+    // The zone delete is the whole vault delete. Drop queued record work for
+    // this zone before the direct CloudKit call so stale saves cannot race the
+    // user's destructive action.
+    removeEnginePendingChanges(for: currentDescriptor, engine: engine)
+
+    do {
+      _ = try await cloudDatabase(for: scope).deleteRecordZone(withID: currentDescriptor.zoneID)
+    } catch let error as CKError where error.isMissingZone {
+      // A local-only vault, an already-deleted vault, or a revoked shared zone
+      // is already gone remotely; local cleanup can continue.
+    } catch {
+      throw VaultDeletionError.deleteFailed(error.localizedDescription)
+    }
+
+    removeEnginePendingChanges(for: currentDescriptor, engine: engine)
+    syncDatabases.removeValue(forKey: currentDescriptor.vaultID)
+    descriptors.removeValue(forKey: currentDescriptor.vaultID)
   }
 
   // MARK: - CKSyncEngineDelegate
@@ -334,16 +369,47 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
 
     for deletion in changes.deletions {
       guard let vaultID = VaultID(zoneName: deletion.zoneID.zoneName) else { continue }
-      // Zone-level deletion: the owner deleted the vault, the share was
-      // revoked, or iCloud data was reset. The recovery/repair flow is not
-      // designed yet — keep local data untouched and surface the fact.
-      log.error(
+      await deleteLocalVaultAfterRemoteZoneRemoval(
+        vaultID: vaultID,
+        scope: scope,
+        reason: String(describing: deletion.reason)
+      )
+    }
+  }
+
+  /// Applies a remote zone deletion locally: owner deleted the vault, a share
+  /// was revoked, or the user removed the accepted shared zone elsewhere.
+  private func deleteLocalVaultAfterRemoteZoneRemoval(
+    vaultID: VaultID,
+    scope: CKDatabase.Scope,
+    reason: String
+  ) async {
+    if let descriptor = descriptors[vaultID],
+       let engine = engines[scope] {
+      removeEnginePendingChanges(for: descriptor, engine: engine)
+    }
+
+    syncDatabases.removeValue(forKey: vaultID)
+    registry.discardStore(for: vaultID)
+
+    do {
+      try layout.removeVaultDirectory(for: vaultID)
+    } catch {
+      log.error("remove local vault directory failed \(vaultID.uuidString, privacy: .public): \(error)")
+    }
+
+    do {
+      try await catalog.deleteVault(vaultID: vaultID)
+      descriptors.removeValue(forKey: vaultID)
+      log.info(
         """
         vault zone removed remotely \
-        (\(String(describing: deletion.reason), privacy: .public)): \
+        (\(reason, privacy: .public)): \
         \(vaultID.uuidString, privacy: .public)
         """
       )
+    } catch {
+      log.error("remove local catalog row failed \(vaultID.uuidString, privacy: .public): \(error)")
     }
   }
 
@@ -479,6 +545,10 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
 
   // MARK: - Routing
 
+  private func cloudDatabase(for scope: CKDatabase.Scope) -> CKDatabase {
+    scope == .shared ? container.sharedCloudDatabase : container.privateCloudDatabase
+  }
+
   private func databaseScope(for descriptor: VaultDescriptor) -> CKDatabase.Scope {
     switch descriptor.ownership {
     case .owned:
@@ -524,6 +594,38 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
   private func refreshDescriptorsIfUnknown(_ vaultID: VaultID) async {
     guard descriptors[vaultID] == nil else { return }
     await refreshDescriptors()
+  }
+
+  private func removeEnginePendingChanges(
+    for descriptor: VaultDescriptor,
+    engine: CKSyncEngine
+  ) {
+    let zoneID = descriptor.zoneID
+    let recordChanges = engine.state.pendingRecordZoneChanges.filter { change in
+      switch change {
+      case .saveRecord(let recordID), .deleteRecord(let recordID):
+        return recordID.zoneID == zoneID
+      @unknown default:
+        return false
+      }
+    }
+    if recordChanges.isEmpty == false {
+      engine.state.remove(pendingRecordZoneChanges: recordChanges)
+    }
+
+    let databaseChanges = engine.state.pendingDatabaseChanges.filter { change in
+      switch change {
+      case .saveZone(let zone):
+        return zone.zoneID == zoneID
+      case .deleteZone(let deletedZoneID):
+        return deletedZoneID == zoneID
+      @unknown default:
+        return false
+      }
+    }
+    if databaseChanges.isEmpty == false {
+      engine.state.remove(pendingDatabaseChanges: databaseChanges)
+    }
   }
 
   // MARK: - Zone-wide sharing
@@ -594,6 +696,8 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
   }
 
   private func fetchInitialVaultAvailability() async throws {
+    await resetEnginesIfPreReleaseRefetchRequested()
+
     if let privateEngine = engines[.private] {
       try await privateEngine.fetchChanges(.init(scope: .all))
     }
@@ -633,9 +737,59 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     guard let data = try? JSONEncoder().encode(serialization) else { return }
     try? data.write(to: engineStateFileURL(scope: scope), options: .atomic)
   }
+
+  /// A pre-release local store reset discards rows and media, so the next
+  /// CloudKit fetch must not reuse old CKSyncEngine change tokens. Rebuild both
+  /// database engines from empty state; CKSyncEngine will then rediscover zones
+  /// and replay remote records into the fresh vault store.
+  private func resetEnginesIfPreReleaseRefetchRequested() async {
+    var didConsumeRequest = false
+
+    for descriptor in descriptors.values {
+      do {
+        if try layout.consumePreReleaseCloudKitRefetchRequest(for: descriptor.vaultID) {
+          didConsumeRequest = true
+        }
+      } catch {
+        log.error(
+          "consume pre-release refetch marker failed \(descriptor.vaultID.uuidString, privacy: .public): \(error)"
+        )
+      }
+    }
+
+    guard didConsumeRequest else { return }
+
+    do {
+      try layout.resetCloudKitSyncStateFiles()
+    } catch {
+      log.error("reset CKSyncEngine state files failed: \(error)")
+    }
+
+    syncDatabases.removeAll()
+    engines[.private] = makeEngine(scope: .private)
+    engines[.shared] = makeEngine(scope: .shared)
+    await refreshDescriptors()
+
+    for descriptor in descriptors.values {
+      await seedPendingChanges(for: descriptor, unstagingAll: true)
+    }
+
+    log.info("reset CKSyncEngine state for pre-release vault store recovery")
+  }
 }
 
 private extension CKError {
+
+  var isMissingZone: Bool {
+    switch code {
+    case .unknownItem, .zoneNotFound, .userDeletedZone:
+      return true
+    case .partialFailure:
+      return partialErrorsContainMissingZone()
+    default:
+      return false
+    }
+  }
 
   func isUnknownItem(for recordID: CKRecord.ID) -> Bool {
     if code == .unknownItem {
@@ -650,6 +804,20 @@ private extension CKError {
     if let partialErrors = userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: any Error],
        let itemError = partialErrors[AnyHashable(recordID)] as? CKError {
       return itemError.code == .unknownItem
+    }
+    return false
+  }
+
+  private func partialErrorsContainMissingZone() -> Bool {
+    if let partialErrors = userInfo[CKPartialErrorsByItemIDKey] as? [CKRecordZone.ID: any Error] {
+      return partialErrors.values.contains { error in
+        (error as? CKError)?.isMissingZone == true
+      }
+    }
+    if let partialErrors = userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: any Error] {
+      return partialErrors.values.contains { error in
+        (error as? CKError)?.isMissingZone == true
+      }
     }
     return false
   }

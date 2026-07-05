@@ -11,7 +11,7 @@ writes and reads user-facing entries through the `JournalVault` architecture:
 per-vault SwiftData stores with CloudKit mirroring disabled and explicit sync
 owned by the CloudKit sync boundary. App UI should work through the selected
 `VaultInstance`; CloudKit transport objects stay behind that boundary. The
-legacy `JournalModel` store is no longer opened by the app shell; product
+legacy `JournalModel` module has been removed from the app project; product
 migration should read legacy CloudKit records and write the target vault zone.
 
 The app is **pre-product**: the real journaling UI is still being shaped. Today
@@ -28,12 +28,6 @@ behavior).
 
 - `Sources/Journal/` — app shell: `JournalApp`, creation/list/settings features,
   app-local components, notification UI, and app resources such as `Icon.icon`.
-- `Sources/JournalModel/` — **shared data layer** (dynamic framework): `Card`, `Tag`,
-  `Attachment`, `CardRelationship`, `Coordinate`, and `JournalStore` (the schema
-  + the one shared-container factory). Built extension-API-only for narrow
-  local tooling compatibility. `JournalStore`'s public persistence/media entry
-  points are intentionally deprecated as migration warnings; do not add new
-  callers except for explicit legacy migration tooling.
 - `Sources/JournalVault/` — **target-architecture data layer** (dynamic framework,
   extension-API-only): per-vault SwiftData stores with CloudKit mirroring
   *disabled* plus the explicit sync layer (`VaultCatalogStore`,
@@ -46,10 +40,14 @@ behavior).
 - `Sources/JournalWidget/` — **WidgetKit extension** (`.appExtension`): `JournalWidgetBundle`
   (`@main`) + `LatestNoteWidget`, which lets each widget instance choose a vault
   through WidgetKit configuration, reads the selected `JournalVault` store, and
-  shows the authored latest item, including doodle thumbnails when available.
+  shows the authored latest item. Home Screen widgets use save-time raster
+  thumbnails for photos, render Doodle/Bauhaus authored JSON through SwiftUI
+  renderers, and keep tight accessory families on labels/symbols.
 - `Sources/Capture*/` — capture frameworks (one isolated static framework each):
-  `CaptureText`, `CapturePhoto`, `CaptureDoodle`, `CaptureAudio`,
-  `CaptureSuggestions`.
+  `CaptureText`, `CapturePhoto`, `CaptureDoodle`, `CaptureBauhaus`,
+  `CaptureAudio`, `CaptureSuggestions`.
+- `Sources/MediaProcessing/` — save-time media derivatives such as Image I/O
+  photo thumbnails and future video / Live Photo poster handling.
 - `Sources/MuColor/`, `Sources/MuHaptics/` — support frameworks for themes/palette
   and Core Haptics labs.
 - `Tests/JournalUITests/` — UI tests.
@@ -61,23 +59,19 @@ behavior).
   value type through a `@MainActor @Sendable` callback (`CapturedText`,
   `CapturedPhoto`, `DoodleDrawing`, `BauhausGridDocument`, `AudioRecording`,
   `CapturedSuggestion`) and must know nothing about `Card`, SwiftData, or
-  iCloud. Don't couple them to the app shell.
-- **Legacy SwiftData models obey CloudKit-mirroring constraints.** Every stored
-  property optional-or-defaulted, no `.unique`, every relationship optional,
-  inverse declared on one side only. This applies to `JournalModel`, which now
-  exists for legacy migration and local tooling; do not add new product writes
-  to it.
+  iCloud. Don't couple them to the app shell; media thumbnails belong in
+  `MediaProcessing` at the save boundary.
 - **Legacy migration is CloudKit-owned, not local SQLite-owned.** The app shell
-  should not open `JournalStore` as a startup migration source. A product
-  migration must query legacy CloudKit records / CKAssets and write the target
-  vault zone, then let `VaultSyncEngine` import those records into the selected
-  local vault store. Do not inject the legacy container into SwiftUI, and do not
-  reintroduce `MediaSyncEngine`, `SyncStatusMonitor`, or legacy saved-entry
-  share/edit UI. New product code should use `JournalVault`.
+  must not recreate the old local SwiftData model layer as a startup migration
+  source. A product migration must query legacy CloudKit records / CKAssets and
+  write the target vault zone, then let `VaultSyncEngine` import those records
+  into the selected local vault store. Do not inject a legacy container into
+  SwiftUI, and do not reintroduce `MediaSyncEngine`, `SyncStatusMonitor`, or
+  legacy saved-entry share/edit UI. New product code should use `JournalVault`.
 - **The widget is a vault reader.** `JournalWidget` links `JournalVault`, lists
   vault choices from `VaultCatalogStore`, and opens the configured
   `VaultContentStore` only long enough to build a `Sendable` `NoteSnapshot`.
-  Do not reintroduce `JournalModel` reads for product widget behavior.
+  Do not reintroduce legacy model reads for product widget behavior.
 - **Theming goes through `MuColor`.** Use the palette/app shape styles
   (`.appPrimaryContainer`, etc.) and `PrimaryContainer`/`SecondaryContainer`
   rather than hard-coded colors. Five seed colors only — no new hues.

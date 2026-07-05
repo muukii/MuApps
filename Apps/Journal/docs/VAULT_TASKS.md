@@ -34,7 +34,6 @@ flowchart TD
   AcceptInvite["T4 招待受け入れ"]
   Recovery["T4.5 CloudKit vault recovery"]
   SharedWithYou["T5 Shared with You 表示"]
-  Migration["T6 CloudKit-only legacy migration"]
   Widget["T7 Widget vault summary migration"]
 
   CreateVault --> ShareIssue
@@ -44,28 +43,26 @@ flowchart TD
   ShareIssue --> SharedWithYou
   AcceptInvite --> SharedWithYou
   Recovery --> SharedWithYou
-  CloudKitRuntime --> Migration
   CreateVault --> Widget
 ```
 
 ## Current Board
 
-### T0. Migration 状態の再確認
+### T0. Legacy migration path removal
 
 - 状態: `Done`
-- 目的: migration が「実装済み」なのか、「wire 済み」なのか、「docs だけ」なのかを分ける。
+- 目的: pre-release schema として migration path を持たない方針に整理する。
 - 結論:
   - 旧 local SwiftData SQLite migration は product path から外した。
-  - `JournalStore.makeMigrationSourceModelContainer()` は deprecated API として残る。
-  - CloudKit-only legacy migration は未実装。
+  - `JournalModel` / `JournalStore` module は product project から削除した。
+  - CloudKit-only legacy migration task は削除した。
   - 現在 product startup に migration は wire されていない。
 - 確認箇所:
   - `Sources/Journal/JournalApp.swift`
   - `Sources/Journal/App/JournalVaultRuntime.swift`
-  - `Sources/JournalModel/JournalStore.swift`
   - `docs/VAULT_SYNC_DESIGN.md`
 
-### T1. Vault 作成 UI/API
+### T1. Vault 作成/削除 UI/API
 
 - 状態: `Done`
 - 目的: 初期 catalog が空の新規 user でも、user が自分で vault を作れるようにする。
@@ -79,9 +76,13 @@ flowchart TD
   - 既存の `VaultCatalogStore.createVault(title:using:)` を使う。
   - 作成後に catalog を reload し、必要なら作成した vault を選択する。
   - `VaultSelectionView` に作成 UI を追加する。
+  - `VaultSelectionView` の row swipe/context menu から削除 confirmation を出す。
+  - 削除は `VaultSyncEngine.deleteVault(_:)` で CloudKit zone を消してから、
+    catalog row と vault-local content directory を削除する。
 - Done:
   - preset vault を自動作成せず、vault picker から新規 vault を作成できる。
   - 作成した vault を選択して `CreationView` へ入れる。
+  - vault picker から owned/participant vault を削除できる。
   - `Journal` scheme の simulator build が通る。
 - Verification:
   - 2026-07-04: `Journal` simulator build succeeded on `iPhone 17`.
@@ -89,7 +90,7 @@ flowchart TD
 ### T2. CloudKitVaultSyncEngine を product runtime に接続
 
 - 状態: `Done`
-- 目的: share / invite / CloudKit-only migration の前提として、実 CloudKit transport を product
+- 目的: share / invite の前提として、実 CloudKit transport を product
   runtime で使えるようにする。
 - 依存: なし。ただし runtime behavior の検証が必要。
 - 担当範囲:
@@ -258,7 +259,7 @@ flowchart TD
 
 ### T5. Shared with You 表示
 
-- 状態: `Todo`
+- 状態: `In Progress`
 - 目的: Messages / share sheet で collaboration preview を出し、app 内で `SWCollaborationView`
   を表示する。
 - 依存:
@@ -271,40 +272,24 @@ flowchart TD
 - 実装方針:
   - `CKShare` を `NSItemProvider` / transfer representation に載せる。
   - share preview title / image は `VaultSummary` から作る。
-  - shared vault toolbar / settings に `SWCollaborationView` を置く。
+  - 初期 surface として vault picker の owned vault cell に明示的な share button を置き、
+    catalog 上 shared な owned vault には `SWCollaborationView` も並べて置く。
+    selected-vault composer toolbar にも shared な owned vault の `SWCollaborationView`
+    を表示する。
+    `SWCollaborationView` は share 状態の visual affordance と管理入口として扱い、
+    cell 表示時には CloudKit transport を走らせない。
+  - share button は既存の `cloudSharingPresentation` / `UICloudSharingController`
+    導線を使い、Notes のように collaboration state 表示とは別の invite affordance として残す。
+  - 必要なら後続で shared vault settings にも `SWCollaborationView` を置く。
 - Done:
   - Messages に vault preview が出る。
-  - app 内で collaboration state を見られる。
+  - vault picker cell と composer toolbar で app 内の collaboration state を見られる。
 
-### T6. CloudKit-only legacy migration
-
-- 状態: `Todo`
-- 目的: 旧 SwiftData mirroring / media sync が作った CloudKit records と CKAssets を query し、
-  legacy content が見つかった時だけ migration target vault zone へ移行する。
-- 依存:
-  - T2 CloudKit runtime 接続
-  - 旧 CloudKit schema の確認
-- 担当範囲:
-  - 新規 `Sources/JournalVault/Migration/`
-  - `Sources/JournalVault/Sync/`
-  - 必要なら `Sources/Journal/App/JournalVaultRuntime.swift`
-- 実装方針:
-  - source は local SQLite ではなく CloudKit。
-  - legacy content が見つかった場合だけ migration target vault を作る。
-  - target vault が card 0 件の時だけ実行する。
-  - target は migration target vault zone への records / CKAssets write。
-  - target import は通常の `VaultSyncEngine` import path に寄せる。
-- Risk:
-  - SwiftData mirroring が作った record type / field name に依存する。
-  - 旧 `MediaSyncEngine` の custom zone / CKAsset schema 確認が必要。
-- Done:
-  - local SQLite を開かずに旧 content が migration target vault に入る。
-  - attachment assets も vault media directory に materialize される。
-
-### T7. Widget vault summary migration
+### T7. Widget vault summary optimization
 
 - 状態: `Todo`
-- 目的: widget が legacy `JournalModel` ではなく `VaultCatalogStore` / `VaultSummary` を読む。
+- 目的: widget が現在の selected vault store 直接読みに加えて、
+  `VaultCatalogStore` / `VaultSummary` から latest preview を読めるようにする。
 - 依存:
   - T1 Vault 作成 UI/API
   - vault summary の latest card denormalize 方針
@@ -314,7 +299,7 @@ flowchart TD
   - `Sources/JournalVault/Content/` の write path
 - Done:
   - widget が vault summary から latest card preview を出す。
-  - app target から `JournalModel` dependency を戻さずに済む。
+  - removed `JournalModel` module を戻さずに済む。
 
 ## Subagent Assignment Template
 

@@ -20,6 +20,7 @@
 
 import Combine
 import Foundation
+import AVFoundation
 import SwiftUI
 
 // MARK: - YouTubeVideoPlayer
@@ -98,6 +99,9 @@ final class YouTubeVideoPlayerController: VideoPlayerController {
     self.webView = YouTubePlayerWebView()
 
     setupEventHandling()
+
+    // Activate audio session before video playback so background music continues
+    AudioSessionManager.shared.activate()
 
     // Load the video
     webView.loadVideo(videoID: videoID, autoplay: false, controls: true)

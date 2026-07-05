@@ -3,6 +3,13 @@ import Foundation
 import OSLog
 import SwiftData
 
+/// CloudKit container settings shared by Journal's vault sync and collaboration
+/// presentation layers.
+public enum VaultCloudKitContainer {
+  /// The iCloud container identifier declared in the Journal app entitlements.
+  public static let identifier = "iCloud.app.muukii.journal"
+}
+
 /// Saved CloudKit share payload ready for `UICloudSharingController`.
 ///
 /// The sync engine returns this only after the zone-wide `CKShare` has been
@@ -153,6 +160,27 @@ public enum VaultShareAcceptanceError: Error, LocalizedError, Sendable {
   }
 }
 
+/// User-facing failures for deleting a vault.
+public enum VaultDeletionError: Error, LocalizedError, Sendable {
+  case unsupportedBySyncEngine
+  case vaultNotFound(VaultID)
+  case cloudKitUnavailable
+  case deleteFailed(String)
+
+  public var errorDescription: String? {
+    switch self {
+    case .unsupportedBySyncEngine:
+      "This sync engine does not support vault deletion."
+    case .vaultNotFound:
+      "The selected vault could not be found."
+    case .cloudKitUnavailable:
+      "CloudKit is not available for vault deletion."
+    case .deleteFailed(let message):
+      "Could not delete the vault: \(message)"
+    }
+  }
+}
+
 /// The explicit sync boundary that owns CloudKit for vault stores.
 ///
 /// Screens never read CloudKit; they observe SwiftData. Implementations import
@@ -182,6 +210,14 @@ public protocol VaultSyncEngine: Sendable {
   /// Accepts a zone-wide CloudKit vault share and imports its shared database
   /// changes into the local vault stores.
   func acceptShare(metadata: CKShare.Metadata) async throws -> VaultShareAcceptance
+
+  /// Deletes the CloudKit boundary for a vault.
+  ///
+  /// Owned vaults delete their private custom zone, which removes the vault for
+  /// every participant. Participant vaults target the accepted shared zone so
+  /// this user can leave/remove the share. Local catalog and file cleanup stay
+  /// outside the sync engine and run only after this command succeeds.
+  func deleteVault(_ descriptor: VaultDescriptor) async throws
 }
 
 /// Network-less stand-in for the CloudKit engine: logs what the real
@@ -226,6 +262,10 @@ public actor LoggingVaultSyncEngine: VaultSyncEngine {
 
   public func acceptShare(metadata: CKShare.Metadata) async throws -> VaultShareAcceptance {
     throw VaultShareAcceptanceError.unsupportedBySyncEngine
+  }
+
+  public func deleteVault(_ descriptor: VaultDescriptor) async throws {
+    log.info("delete vault \(descriptor.vaultID.uuidString, privacy: .public) — no transport to delete")
   }
 
   private static func pendingMutationCount(

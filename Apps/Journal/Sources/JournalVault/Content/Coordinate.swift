@@ -7,10 +7,6 @@ import Foundation
 /// Absence (`nil`) means the card has no location — either the user has not
 /// granted location access, or none was available at capture time. A present
 /// value therefore always implies the user permitted location use.
-///
-/// Intentionally duplicated from the legacy `JournalModel.Coordinate` rather
-/// than shared: the two data layers must be able to evolve (and be deleted)
-/// independently during the vault migration.
 public struct Coordinate: Codable, Hashable, Sendable {
   public var latitude: Double
   public var longitude: Double

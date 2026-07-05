@@ -63,8 +63,11 @@ public struct DoodleDrawing: Sendable, Equatable, Codable {
   public var isEmpty: Bool { strokes.allSatisfy { $0.points.isEmpty } }
 
   /// Rasterizes the vector strokes into a transparent image, tinted with
-  /// `inkColor`. For thumbnails / sharing only — the drawing itself stays vector.
-  /// Pass `scale` from a view context when the target screen scale matters.
+  /// `inkColor`.
+  ///
+  /// Use this only at an explicit raster boundary such as share/export or a
+  /// debug preview. Normal card UI should render `DoodleDrawingView` so the
+  /// drawing remains vector content.
   @MainActor
   public func image(inkColor: Color, scale: CGFloat? = nil) -> UIImage? {
     guard canvasSize.width > 0, canvasSize.height > 0 else { return nil }

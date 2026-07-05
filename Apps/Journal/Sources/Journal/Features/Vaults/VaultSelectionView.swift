@@ -1,3 +1,4 @@
+import AppUIComponents
 import CloudKit
 import JournalVault
 import MuColor
@@ -17,8 +18,11 @@ struct VaultSelectionView: View {
 
   @State private var selectingVaultID: VaultID?
   @State private var preparingShareVaultID: VaultID?
+  @State private var deletingVaultID: VaultID?
   @State private var cloudSharingPresentation: VaultCloudSharingPresentation?
   @State private var shareError: VaultShareErrorMessage?
+  @State private var deletionConfirmation: VaultDeletionConfirmation?
+  @State private var deletionError: VaultDeletionErrorMessage?
   @State private var isVaultCreationPresented = false
   @State private var isSettingsPresented = false
 
@@ -32,12 +36,15 @@ struct VaultSelectionView: View {
         runtimeState: vaultRuntime.state,
         initialAvailabilityResolution: vaultRuntime.lastInitialAvailabilityResolution,
         vaults: vaultRuntime.vaults,
-        selectedVaultID: vaultRuntime.selectedVault?.vaultID,
-        selectedVaultState: vaultRuntime.selectedVaultState,
         selectingVaultID: selectingVaultID,
         preparingShareVaultID: preparingShareVaultID,
+        deletingVaultID: deletingVaultID,
         onSelectVault: selectVault,
         onShareVault: shareVault,
+        onPrepareCollaborationShare: prepareCollaborationShare,
+        onCollaborationSharingStopped: noteCollaborationSharingStopped,
+        onCollaborationError: presentShareError,
+        onDeleteVault: requestDeleteVault,
         onCreateVault: { isVaultCreationPresented = true },
         onRefresh: refreshVaults
       )
@@ -51,14 +58,7 @@ struct VaultSelectionView: View {
             Image(systemName: "plus")
           }
           .accessibilityLabel("New Vault")
-          .disabled(vaultRuntime.state != .ready || selectingVaultID != nil)
-
-          Button {
-            refreshVaults()
-          } label: {
-            Image(systemName: "arrow.clockwise")
-          }
-          .accessibilityLabel("Refresh Vaults")
+          .disabled(vaultRuntime.state != .ready || selectingVaultID != nil || deletingVaultID != nil)
 
           Button {
             isSettingsPresented = true
@@ -99,10 +99,41 @@ struct VaultSelectionView: View {
         dismissButton: .default(Text("OK"))
       )
     }
+    .alert(item: $deletionError) { error in
+      Alert(
+        title: Text("Could Not Delete Vault"),
+        message: Text(error.message),
+        dismissButton: .default(Text("OK"))
+      )
+    }
+    .confirmationDialog(
+      deletionConfirmation?.title ?? String(localized: "Delete Vault?"),
+      isPresented: deleteConfirmationBinding,
+      titleVisibility: .visible,
+      presenting: deletionConfirmation
+    ) { confirmation in
+      Button(confirmation.destructiveButtonTitle, role: .destructive) {
+        deleteVault(confirmation.descriptor)
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: { confirmation in
+      Text(confirmation.message)
+    }
+  }
+
+  private var deleteConfirmationBinding: Binding<Bool> {
+    Binding(
+      get: { deletionConfirmation != nil },
+      set: { isPresented in
+        if isPresented == false {
+          deletionConfirmation = nil
+        }
+      }
+    )
   }
 
   private func selectVault(_ descriptor: VaultDescriptor) {
-    guard selectingVaultID == nil else { return }
+    guard selectingVaultID == nil, deletingVaultID == nil else { return }
 
     selectingVaultID = descriptor.vaultID
 
@@ -122,7 +153,7 @@ struct VaultSelectionView: View {
 
   private func createVault(title: String) async -> String? {
     guard await vaultRuntime.createVault(title: title) != nil else {
-      return vaultRuntime.lastMessage ?? "Could not create vault."
+      return vaultRuntime.lastMessage ?? String(localized: "Could not create vault.")
     }
 
     isVaultCreationPresented = false
@@ -131,7 +162,7 @@ struct VaultSelectionView: View {
   }
 
   private func shareVault(_ descriptor: VaultDescriptor) {
-    guard preparingShareVaultID == nil else { return }
+    guard preparingShareVaultID == nil, deletingVaultID == nil else { return }
     preparingShareVaultID = descriptor.vaultID
 
     Task { @MainActor in
@@ -150,6 +181,39 @@ struct VaultSelectionView: View {
     }
   }
 
+  private func prepareCollaborationShare(_ vaultID: VaultID) async throws -> VaultSharePreparation {
+    try await vaultRuntime.prepareShare(for: vaultID)
+  }
+
+  private func noteCollaborationSharingStopped(_ vaultID: VaultID) async {
+    await vaultRuntime.noteSharingStopped(for: vaultID)
+  }
+
+  private func presentShareError(_ error: any Error) {
+    shareError = VaultShareErrorMessage(message: error.localizedDescription)
+  }
+
+  private func requestDeleteVault(_ descriptor: VaultDescriptor) {
+    guard deletingVaultID == nil else { return }
+    deletionConfirmation = VaultDeletionConfirmation(descriptor: descriptor)
+  }
+
+  private func deleteVault(_ descriptor: VaultDescriptor) {
+    guard deletingVaultID == nil else { return }
+    deletingVaultID = descriptor.vaultID
+
+    Task { @MainActor in
+      defer { deletingVaultID = nil }
+
+      guard await vaultRuntime.deleteVault(descriptor) else {
+        deletionError = VaultDeletionErrorMessage(
+          message: vaultRuntime.lastMessage ?? String(localized: "Could not delete vault.")
+        )
+        return
+      }
+    }
+  }
+
   private func refreshVaults() {
     Task { @MainActor in
       await vaultRuntime.refresh()
@@ -162,12 +226,15 @@ private struct VaultSelectionContent: View {
   let runtimeState: JournalVaultRuntime.State
   let initialAvailabilityResolution: VaultInitialAvailabilityResolution?
   let vaults: [VaultDescriptor]
-  let selectedVaultID: VaultID?
-  let selectedVaultState: JournalVaultRuntime.SelectedVaultState
   let selectingVaultID: VaultID?
   let preparingShareVaultID: VaultID?
+  let deletingVaultID: VaultID?
   let onSelectVault: @MainActor @Sendable (VaultDescriptor) -> Void
   let onShareVault: @MainActor @Sendable (VaultDescriptor) -> Void
+  let onPrepareCollaborationShare: @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
+  let onCollaborationSharingStopped: @MainActor @Sendable (VaultID) async -> Void
+  let onCollaborationError: @MainActor @Sendable (any Error) -> Void
+  let onDeleteVault: @MainActor @Sendable (VaultDescriptor) -> Void
   let onCreateVault: @MainActor @Sendable () -> Void
   let onRefresh: @MainActor @Sendable () -> Void
 
@@ -186,12 +253,15 @@ private struct VaultSelectionContent: View {
         VaultSelectionList(
           initialAvailabilityResolution: initialAvailabilityResolution,
           vaults: vaults,
-          selectedVaultID: selectedVaultID,
-          selectedVaultState: selectedVaultState,
           selectingVaultID: selectingVaultID,
           preparingShareVaultID: preparingShareVaultID,
+          deletingVaultID: deletingVaultID,
           onSelectVault: onSelectVault,
-          onShareVault: onShareVault
+          onShareVault: onShareVault,
+          onPrepareCollaborationShare: onPrepareCollaborationShare,
+          onCollaborationSharingStopped: onCollaborationSharingStopped,
+          onCollaborationError: onCollaborationError,
+          onDeleteVault: onDeleteVault
         )
       }
     case .failed(let message):
@@ -204,12 +274,15 @@ private struct VaultSelectionList: View {
 
   let initialAvailabilityResolution: VaultInitialAvailabilityResolution?
   let vaults: [VaultDescriptor]
-  let selectedVaultID: VaultID?
-  let selectedVaultState: JournalVaultRuntime.SelectedVaultState
   let selectingVaultID: VaultID?
   let preparingShareVaultID: VaultID?
+  let deletingVaultID: VaultID?
   let onSelectVault: @MainActor @Sendable (VaultDescriptor) -> Void
   let onShareVault: @MainActor @Sendable (VaultDescriptor) -> Void
+  let onPrepareCollaborationShare: @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
+  let onCollaborationSharingStopped: @MainActor @Sendable (VaultID) async -> Void
+  let onCollaborationError: @MainActor @Sendable (any Error) -> Void
+  let onDeleteVault: @MainActor @Sendable (VaultDescriptor) -> Void
 
   var body: some View {
     List {
@@ -223,22 +296,49 @@ private struct VaultSelectionList: View {
 
       Section {
         ForEach(vaults, id: \.vaultID) { vault in
-          let isActive = selectedVaultID == vault.vaultID && selectedVaultState == .active
           let isSelecting = selectingVaultID == vault.vaultID
           let isPreparingShare = preparingShareVaultID == vault.vaultID
+          let isDeleting = deletingVaultID == vault.vaultID
 
           VaultSelectionRow(
+            vaultID: vault.vaultID,
             title: vault.title,
             subtitle: vault.ownership.selectionSubtitle,
             systemImage: vault.ownership.selectionSystemImage,
-            isActive: isActive,
             isSelecting: isSelecting,
             isPreparingShare: isPreparingShare,
+            isDeleting: isDeleting,
+            isShared: vault.isShared,
             canShare: vault.ownership == .owned,
             onSelect: { onSelectVault(vault) },
-            onShare: { onShareVault(vault) }
+            onShare: { onShareVault(vault) },
+            onPrepareCollaborationShare: onPrepareCollaborationShare,
+            onCollaborationSharingStopped: onCollaborationSharingStopped,
+            onCollaborationError: onCollaborationError
           )
-          .disabled(selectingVaultID != nil || preparingShareVaultID != nil)
+          .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+              onDeleteVault(vault)
+            } label: {
+              Label("Delete", systemImage: "trash")
+            }
+          }
+          .contextMenu {
+            if vault.ownership == .owned {
+              Button {
+                onShareVault(vault)
+              } label: {
+                Label("Invite People", systemImage: "person.crop.circle.badge.plus")
+              }
+            }
+
+            Button(role: .destructive) {
+              onDeleteVault(vault)
+            } label: {
+              Label("Delete Vault", systemImage: "trash")
+            }
+          }
+          .disabled(selectingVaultID != nil || preparingShareVaultID != nil || deletingVaultID != nil)
           .listRowBackground(Rectangle().fill(.appSecondaryContainer))
         }
       }
@@ -251,15 +351,20 @@ private struct VaultSelectionList: View {
 
 private struct VaultSelectionRow: View {
 
+  let vaultID: VaultID
   let title: String
   let subtitle: LocalizedStringResource
   let systemImage: String
-  let isActive: Bool
   let isSelecting: Bool
   let isPreparingShare: Bool
+  let isDeleting: Bool
+  let isShared: Bool
   let canShare: Bool
   let onSelect: @MainActor @Sendable () -> Void
   let onShare: @MainActor @Sendable () -> Void
+  let onPrepareCollaborationShare: @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
+  let onCollaborationSharingStopped: @MainActor @Sendable (VaultID) async -> Void
+  let onCollaborationError: @MainActor @Sendable (any Error) -> Void
 
   var body: some View {
     HStack(spacing: 12) {
@@ -284,17 +389,9 @@ private struct VaultSelectionRow: View {
 
           Spacer(minLength: 0)
 
-          if isSelecting {
+          if isSelecting || isDeleting {
             ProgressView()
               .controlSize(.small)
-          } else if isActive {
-            Image(systemName: "checkmark.circle.fill")
-              .font(.title3)
-              .foregroundStyle(.tint)
-          } else {
-            Image(systemName: "chevron.forward")
-              .font(.caption.weight(.semibold))
-              .foregroundStyle(.appOnSecondaryContainer.opacity(0.42))
           }
         }
         .contentShape(Rectangle())
@@ -302,23 +399,52 @@ private struct VaultSelectionRow: View {
       .buttonStyle(.plain)
 
       if canShare {
-        Button(action: onShare) {
-          ZStack {
-            if isPreparingShare {
-              ProgressView()
-                .controlSize(.small)
-            } else {
-              Image(systemName: "person.crop.circle.badge.plus")
-                .font(.title3)
-            }
+        HStack(spacing: 6) {
+          if isShared {
+            VaultCollaborationControl(
+              vaultID: vaultID,
+              title: title,
+              prepareShare: onPrepareCollaborationShare,
+              onSharingStopped: onCollaborationSharingStopped,
+              onError: onCollaborationError
+            )
+            .id(vaultID)
+            .frame(width: 36, height: 36)
           }
-          .frame(width: 36, height: 36)
+
+          VaultShareButton(
+            isPreparing: isPreparingShare,
+            onShare: onShare
+          )
         }
-        .buttonStyle(.borderless)
-        .accessibilityLabel("Invite People")
+        .fixedSize()
       }
     }
     .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+  }
+}
+
+/// Explicit vault invite button shown next to the system collaboration control.
+private struct VaultShareButton: View {
+
+  let isPreparing: Bool
+  let onShare: @MainActor @Sendable () -> Void
+
+  var body: some View {
+    Button(action: onShare) {
+      ZStack {
+        if isPreparing {
+          ProgressView()
+            .controlSize(.small)
+        } else {
+          Image(systemName: "square.and.arrow.up")
+            .font(.title3)
+        }
+      }
+      .frame(width: 36, height: 36)
+    }
+    .buttonStyle(.borderless)
+    .accessibilityLabel("Invite People")
   }
 }
 
@@ -332,6 +458,44 @@ private struct VaultCloudSharingPresentation: Identifiable {
 private struct VaultShareErrorMessage: Identifiable {
   let id = UUID()
   let message: String
+}
+
+private struct VaultDeletionErrorMessage: Identifiable {
+  let id = UUID()
+  let message: String
+}
+
+private struct VaultDeletionConfirmation: Identifiable {
+  let descriptor: VaultDescriptor
+
+  var id: VaultID { descriptor.vaultID }
+
+  var title: String {
+    switch descriptor.ownership {
+    case .owned:
+      String(localized: "Delete Vault?")
+    case .participant:
+      String(localized: "Remove Shared Vault?")
+    }
+  }
+
+  var message: String {
+    switch descriptor.ownership {
+    case .owned:
+      String(localized: "This deletes the vault from iCloud for everyone with access. Local cards and media on this device are removed too.")
+    case .participant:
+      String(localized: "This removes the shared vault from your iCloud account and this device. The owner's vault is not deleted.")
+    }
+  }
+
+  var destructiveButtonTitle: String {
+    switch descriptor.ownership {
+    case .owned:
+      String(localized: "Delete Vault")
+    case .participant:
+      String(localized: "Remove Shared Vault")
+    }
+  }
 }
 
 private struct VaultCloudSharingController: UIViewControllerRepresentable {

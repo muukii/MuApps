@@ -3,6 +3,7 @@ import Foundation
 import JournalVault
 import Observation
 import SwiftData
+import WidgetKit
 
 /// App-process owner for the target vault persistence stack.
 ///
@@ -310,6 +311,56 @@ final class JournalVaultRuntime {
     }
   }
 
+  /// Deletes a vault after the sync boundary has removed its CloudKit zone.
+  ///
+  /// The remote delete runs first so a transient CloudKit failure doesn't leave
+  /// only local state removed; otherwise launch recovery could discover the
+  /// still-existing zone and bring the vault back.
+  @discardableResult
+  func deleteVault(_ descriptor: VaultDescriptor) async -> Bool {
+    do {
+      try await syncEngine.deleteVault(descriptor)
+
+      if selectedVault?.vaultID == descriptor.vaultID {
+        selectedVault = nil
+        selectedVaultState = .inactive
+      }
+
+      instanceRegistry.discardInstance(for: descriptor.vaultID)
+      registry.discardStore(for: descriptor.vaultID)
+      try catalogStore.layout.removeVaultDirectory(for: descriptor.vaultID)
+      try catalogStore.deleteVault(vaultID: descriptor.vaultID)
+      try reloadCatalog()
+
+      WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
+      lastMessage = "Deleted \(descriptor.title)."
+      if case .failed = state {
+        state = .ready
+      }
+      return true
+    } catch {
+      lastMessage = error.localizedDescription
+      return false
+    }
+  }
+
+  /// Estimates Journal's CloudKit payload across all locally known vaults.
+  ///
+  /// This opens each vault's local content store and reads only SwiftData rows;
+  /// it doesn't query CloudKit because CloudKit doesn't expose account usage
+  /// totals to client apps.
+  func cloudStorageEstimate() throws -> JournalCloudStorageEstimate {
+    try reloadCatalog()
+    let vaultEstimates = try vaults.map { descriptor in
+      let store = try registry.store(for: descriptor.vaultID)
+      return JournalVaultCloudStorageEstimate(
+        descriptor: descriptor,
+        estimate: try store.cloudStorageEstimate()
+      )
+    }
+    return JournalCloudStorageEstimate(generatedAt: Date(), vaults: vaultEstimates)
+  }
+
   #if DEBUG
   /// Writes one text card into the selected vault.
   ///
@@ -404,6 +455,11 @@ final class VaultInstanceRegistry {
     instances[descriptor.vaultID] = instance
     return instance
   }
+
+  /// Releases the UI-facing object for a vault that was deleted.
+  func discardInstance(for vaultID: VaultID) {
+    _ = instances.removeValue(forKey: vaultID)
+  }
 }
 
 /// UI-facing domain object for one vault.
@@ -472,6 +528,80 @@ final class VaultInstance {
     let context = ModelContext(contentStore.container)
     pendingMutationCount = try? context.fetchCount(FetchDescriptor<PendingMutation>())
   }
+}
+
+/// App-facing storage report for every vault Journal knows about locally.
+///
+/// The report deliberately says "estimate": CloudKit quota totals, exact server
+/// overhead, and other apps' iCloud usage are outside the public CloudKit API.
+struct JournalCloudStorageEstimate: Equatable {
+  var generatedAt: Date
+  var vaults: [JournalVaultCloudStorageEstimate]
+
+  var estimatedPayloadBytes: Int {
+    vaults.reduce(0) { $0 + $1.estimate.estimatedPayloadBytes }
+  }
+
+  var ownedEstimatedPayloadBytes: Int {
+    vaults
+      .filter { $0.descriptor.ownership == .owned }
+      .reduce(0) { $0 + $1.estimate.estimatedPayloadBytes }
+  }
+
+  var participantEstimatedPayloadBytes: Int {
+    vaults
+      .filter { $0.descriptor.ownership == .participant }
+      .reduce(0) { $0 + $1.estimate.estimatedPayloadBytes }
+  }
+
+  var mediaBytes: Int {
+    vaults.reduce(0) { $0 + $1.estimate.mediaBytes }
+  }
+
+  var inlinePayloadBytes: Int {
+    vaults.reduce(0) { $0 + $1.estimate.inlinePayloadBytes }
+  }
+
+  var cardBodyBytes: Int {
+    vaults.reduce(0) { $0 + $1.estimate.cardBodyBytes }
+  }
+
+  var thumbnailBytes: Int {
+    vaults.reduce(0) { $0 + $1.estimate.thumbnailBytes }
+  }
+
+  var recordCount: Int {
+    vaults.reduce(0) { $0 + $1.estimate.recordCount }
+  }
+
+  var mediaBreakdowns: [VaultCloudStorageEstimate.MediaBreakdown] {
+    var valuesByKind: [JournalVault.Attachment.Kind: (count: Int, byteSize: Int)] = [:]
+    for vault in vaults {
+      for breakdown in vault.estimate.mediaBreakdowns {
+        let current = valuesByKind[breakdown.kind] ?? (count: 0, byteSize: 0)
+        valuesByKind[breakdown.kind] = (
+          count: current.count + breakdown.count,
+          byteSize: current.byteSize + breakdown.byteSize
+        )
+      }
+    }
+    return JournalVault.Attachment.Kind.allCases.compactMap { kind in
+      guard let value = valuesByKind[kind], value.count > 0 else { return nil }
+      return VaultCloudStorageEstimate.MediaBreakdown(
+        kind: kind,
+        count: value.count,
+        byteSize: value.byteSize
+      )
+    }
+  }
+}
+
+/// One vault row inside a Journal-wide storage estimate.
+struct JournalVaultCloudStorageEstimate: Identifiable, Equatable {
+  var descriptor: VaultDescriptor
+  var estimate: VaultCloudStorageEstimate
+
+  var id: VaultID { descriptor.vaultID }
 }
 
 extension JournalVaultRuntime.State {

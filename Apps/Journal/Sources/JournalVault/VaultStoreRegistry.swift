@@ -41,6 +41,18 @@ public final class VaultStoreRegistry: Sendable {
     }
   }
 
+  /// Releases the cached store identity for a vault that is about to be
+  /// deleted locally.
+  ///
+  /// The registry can't forcibly close a SwiftData `ModelContainer`; this
+  /// method removes the registry's strong reference so the deletion flow can
+  /// drop every app-owned handle before removing the vault directory.
+  public func discardStore(for vaultID: VaultID) {
+    state.withLock { state in
+      _ = state.stores.removeValue(forKey: vaultID)
+    }
+  }
+
   /// A stream of vault IDs whose stores just saved local mutations. The sync
   /// engine consumes this to turn `PendingMutation` rows into CloudKit pending
   /// changes without the stores knowing the engine exists.

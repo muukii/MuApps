@@ -9,4 +9,5 @@ public enum VaultRecordType: String, Sendable, CaseIterable {
   case card = "Card"
   case cardEdge = "CardEdge"
   case attachment = "Attachment"
+  case attachmentResource = "AttachmentResource"
 }

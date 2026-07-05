@@ -57,9 +57,9 @@ public struct BauhausGridDocument: Codable, Equatable, Sendable {
     try container.encodeIfPresent(replay, forKey: .replay)
   }
 
-  /// Rasterizes the final artwork into a square image for lightweight fallback
-  /// surfaces such as widgets. The document itself remains editable JSON; this
-  /// image is only a derived preview.
+  /// Rasterizes the final artwork into a square image for explicit raster
+  /// outputs. The document itself remains editable JSON; normal card UI should
+  /// render `BauhausGridArtworkView` or `BauhausGridReplayView` directly.
   @MainActor
   public func image(
     colorScheme: ColorScheme = .light,

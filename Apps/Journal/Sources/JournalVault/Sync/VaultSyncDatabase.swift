@@ -109,12 +109,19 @@ actor VaultSyncDatabase: ModelActor {
         try discardPendingRow(pending)
         return nil
       }
+      VaultRecordMapper.applyFields(of: attachment, to: record)
+
+    case .attachmentResource:
+      guard let id = UUID(uuidString: recordName), let resource = try fetchAttachmentResource(id) else {
+        try discardPendingRow(pending)
+        return nil
+      }
       let fileURL = mediaDirectoryURL.appending(
-        path: attachment.fileName,
+        path: resource.fileName,
         directoryHint: .notDirectory
       )
       let assetFileURL = FileManager.default.fileExists(atPath: fileURL.path) ? fileURL : nil
-      VaultRecordMapper.applyFields(of: attachment, assetFileURL: assetFileURL, to: record)
+      VaultRecordMapper.applyFields(of: resource, assetFileURL: assetFileURL, to: record)
     }
 
     pending.stagedAt = Date()
@@ -287,19 +294,31 @@ actor VaultSyncDatabase: ModelActor {
         if let existing = try fetchAttachment(id) {
           attachment = existing
         } else {
-          attachment = Attachment(id: id, cardID: id)
+          guard let primaryResourceID = Self.attachmentPrimaryResourceID(from: record) else {
+            continue
+          }
+          attachment = Attachment(id: id, cardID: id, primaryResourceID: primaryResourceID)
           modelContext.insert(attachment)
         }
         VaultRecordMapper.update(attachment, from: record)
 
-        if let asset = record[VaultRecordMapper.AttachmentKey.file] as? CKAsset,
+      case .attachmentResource:
+        guard let id = UUID(uuidString: recordName) else { continue }
+        let resource: AttachmentResource
+        if let existing = try fetchAttachmentResource(id) {
+          resource = existing
+        } else {
+          resource = AttachmentResource(id: id, attachmentID: id, role: .unknown)
+          modelContext.insert(resource)
+        }
+        VaultRecordMapper.update(resource, from: record)
+
+        if let asset = record[VaultRecordMapper.AttachmentResourceKey.file] as? CKAsset,
           let sourceURL = asset.fileURL
         {
-          // Copy before this event handler returns: CKSyncEngine reclaims the
-          // asset's temporary file as soon as it does.
           do {
-            try importAssetFile(from: sourceURL, attachmentID: id)
-            outcome.changedAttachmentIDs.append(id)
+            try importAssetFile(from: sourceURL, to: resource)
+            outcome.changedAttachmentIDs.append(resource.attachmentID)
           } catch {
             // The row stays; the file can be repaired by a later fetch.
           }
@@ -344,6 +363,8 @@ actor VaultSyncDatabase: ModelActor {
         try deleteImportedEdgeSubtree(edgeID: id, outcome: &outcome)
       case .attachment:
         try deleteImportedAttachment(attachmentID: id, outcome: &outcome)
+      case .attachmentResource:
+        try deleteImportedAttachmentResource(resourceID: id, outcome: &outcome)
       }
     }
 
@@ -436,23 +457,53 @@ actor VaultSyncDatabase: ModelActor {
     outcome: inout ImportOutcome
   ) throws {
     let attachmentID = attachment.id
+    let resources = try fetchAttachmentResources(attachmentID: attachmentID)
+    for resource in resources {
+      try deleteImportedAttachmentResourceFileAndRow(resource, outcome: &outcome)
+    }
     modelContext.delete(attachment)
-    removeAttachmentFile(attachmentID: attachmentID, outcome: &outcome)
     try removeSyncState(recordName: attachmentID.uuidString)
   }
 
-  private func removeAttachmentFile(
-    attachmentID: UUID,
+  private func deleteImportedAttachmentResource(
+    resourceID: UUID,
     outcome: inout ImportOutcome
-  ) {
+  ) throws {
+    if let resource = try fetchAttachmentResource(resourceID) {
+      try deleteImportedAttachmentResource(resource, outcome: &outcome)
+    }
+    try removeSyncState(recordName: resourceID.uuidString)
+  }
+
+  private func deleteImportedAttachmentResource(
+    _ resource: AttachmentResource,
+    outcome: inout ImportOutcome
+  ) throws {
+    let attachmentID = resource.attachmentID
+    if let attachment = try fetchAttachment(attachmentID),
+      attachment.primaryResourceID == resource.id
+    {
+      try deleteImportedAttachment(attachment, outcome: &outcome)
+      return
+    }
+    try deleteImportedAttachmentResourceFileAndRow(resource, outcome: &outcome)
+  }
+
+  private func deleteImportedAttachmentResourceFileAndRow(
+    _ resource: AttachmentResource,
+    outcome: inout ImportOutcome
+  ) throws {
+    let attachmentID = resource.attachmentID
     let fileURL = mediaDirectoryURL.appending(
-      path: attachmentID.uuidString,
+      path: resource.fileName,
       directoryHint: .notDirectory
     )
     if FileManager.default.fileExists(atPath: fileURL.path) {
       try? FileManager.default.removeItem(at: fileURL)
       outcome.changedAttachmentIDs.append(attachmentID)
     }
+    modelContext.delete(resource)
+    try removeSyncState(recordName: resource.id.uuidString)
   }
 
   private func removeSyncState(recordName: String) throws {
@@ -502,9 +553,9 @@ actor VaultSyncDatabase: ModelActor {
     return false
   }
 
-  private func importAssetFile(from sourceURL: URL, attachmentID: UUID) throws {
+  private func importAssetFile(from sourceURL: URL, to resource: AttachmentResource) throws {
     let destination = mediaDirectoryURL.appending(
-      path: attachmentID.uuidString,
+      path: resource.fileName,
       directoryHint: .notDirectory
     )
     if FileManager.default.fileExists(atPath: destination.path) {
@@ -569,5 +620,23 @@ actor VaultSyncDatabase: ModelActor {
     var descriptor = FetchDescriptor<Attachment>(predicate: #Predicate { $0.id == id })
     descriptor.fetchLimit = 1
     return try modelContext.fetch(descriptor).first
+  }
+
+  private func fetchAttachmentResource(_ id: UUID) throws -> AttachmentResource? {
+    var descriptor = FetchDescriptor<AttachmentResource>(predicate: #Predicate { $0.id == id })
+    descriptor.fetchLimit = 1
+    return try modelContext.fetch(descriptor).first
+  }
+
+  private func fetchAttachmentResources(attachmentID: UUID) throws -> [AttachmentResource] {
+    let descriptor = FetchDescriptor<AttachmentResource>(
+      predicate: #Predicate { $0.attachmentID == attachmentID }
+    )
+    return try modelContext.fetch(descriptor)
+  }
+
+  private static func attachmentPrimaryResourceID(from record: CKRecord) -> UUID? {
+    (record[VaultRecordMapper.AttachmentKey.primaryResourceID] as? String)
+      .flatMap(UUID.init(uuidString:))
   }
 }

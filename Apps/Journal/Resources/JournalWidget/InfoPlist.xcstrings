@@ -1,0 +1,40 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "CFBundleDisplayName": {
+      "comment": "Bundle display name",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tinycurve Widget"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tinycurve Widget"
+          }
+        }
+      }
+    },
+    "CFBundleName": {
+      "comment": "Bundle name",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TinycurveWidget"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TinycurveWidget"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

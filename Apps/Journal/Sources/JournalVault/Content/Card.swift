@@ -1,13 +1,13 @@
 import Foundation
 import SwiftData
 
-/// A content atom: one captured thing (a note, a link, a photo, a doodle...).
+/// A content atom: one captured thing (a note, a link, a photo, a video, a doodle...).
 ///
 /// Where the card sits in the vault's tree is expressed separately by
 /// `CardEdge`; every visible card is referenced by exactly one edge.
 ///
-/// Unlike the legacy CloudKit-mirrored `JournalModel.Card`, this store has
-/// mirroring disabled, so `.unique` and non-optional properties are fine.
+/// CloudKit mirroring is disabled for this store, so `.unique` and non-optional
+/// properties are fine.
 /// There are deliberately **no SwiftData relationships**: rows reference each
 /// other by UUID exactly as their CloudKit records do, which keeps record
 /// mapping 1:1 and keeps deletion cascades an explicit domain rule
@@ -56,9 +56,9 @@ public final class Card {
 
 extension Card {
 
-  /// The top-level content modality for a `Card`. Same raw values as the
-  /// legacy `JournalModel.Card.Kind`, so content can migrate between the two
-  /// stores without translation.
+  /// The top-level content modality for a `Card`. Raw values are stable
+  /// CloudKit payload values, so newer app versions can introduce kinds without
+  /// older builds rewriting them to `unknown`.
   public enum Kind: String, Codable, Sendable, CaseIterable, Hashable {
     /// A written note. `body` is the primary content.
     case text
@@ -68,6 +68,14 @@ extension Card {
 
     /// A still photo card; expects one `.photo` attachment.
     case photo
+
+    /// A video card; expects one `.video` attachment with an `.originalVideo`
+    /// primary resource.
+    case video
+
+    /// A Live Photo card; expects one `.livePhoto` attachment whose primary
+    /// resource is `.stillImage` and whose paired movie is `.pairedVideo`.
+    case livePhoto
 
     /// An ambient audio card; expects one `.audio` attachment.
     case audio

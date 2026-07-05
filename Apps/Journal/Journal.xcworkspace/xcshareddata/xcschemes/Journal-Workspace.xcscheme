@@ -1,0 +1,364 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme
+   LastUpgradeVersion = "1010"
+   version = "1.3">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES">
+      <BuildActionEntries>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A1794ABEF889A33E6D27E466"
+               BuildableName = "Algorithms.framework"
+               BlueprintName = "Algorithms"
+               ReferencedContainer = "container:../../Tuist/.build/tuist-derived/Projects/swift-algorithms/swift-algorithms.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "5125796EEB202BFCFDDB9B12"
+               BuildableName = "AppUIComponents.framework"
+               BlueprintName = "AppUIComponents"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "0686834425AFFC38A86FC1B4"
+               BuildableName = "CaptureAudio.framework"
+               BlueprintName = "CaptureAudio"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "EC8261F7C803CE372D4D11E5"
+               BuildableName = "CaptureBauhaus.framework"
+               BlueprintName = "CaptureBauhaus"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "8E05981747C0D1A551DDB0AC"
+               BuildableName = "CaptureDoodle.framework"
+               BlueprintName = "CaptureDoodle"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "4640FE481490AA3DABB847DB"
+               BuildableName = "CapturePhoto.framework"
+               BlueprintName = "CapturePhoto"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "F80DCDFC7A50CBC61A7C49FB"
+               BuildableName = "CaptureSuggestions.framework"
+               BlueprintName = "CaptureSuggestions"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "94371F5EDE847DEDAD02733D"
+               BuildableName = "CaptureText.framework"
+               BlueprintName = "CaptureText"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "1700A6CD808D31E9E59C7D98"
+               BuildableName = "Journal.app"
+               BlueprintName = "Journal"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "0AC3A9C00C88BACD487BBF82"
+               BuildableName = "JournalUITests.xctest"
+               BlueprintName = "JournalUITests"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "0FB1DA120F6CDEFE6B3C0A5E"
+               BuildableName = "JournalVault.framework"
+               BlueprintName = "JournalVault"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "3CF82D55E396642B2DFEC74B"
+               BuildableName = "JournalVaultTests.xctest"
+               BlueprintName = "JournalVaultTests"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "DFA9299AB8C669A1CAF2370B"
+               BuildableName = "JournalWidget.appex"
+               BlueprintName = "JournalWidget"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "0217EE27AB61D5BE1E0157D1"
+               BuildableName = "MediaProcessing.framework"
+               BlueprintName = "MediaProcessing"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "5BF039AE23FBECF7445D7451"
+               BuildableName = "MuColor.framework"
+               BlueprintName = "MuColor"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "E6B22986692D5C5A9D9C96D7"
+               BuildableName = "MuHaptics.framework"
+               BlueprintName = "MuHaptics"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "665DB30C45B2A77DEB71A41F"
+               BuildableName = "RealModule.framework"
+               BlueprintName = "RealModule"
+               ReferencedContainer = "container:../../Tuist/.build/tuist-derived/Projects/swift-numerics/swift-numerics.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "020F117A5A2FFEAFE89E0CA0"
+               BuildableName = "ScrollEdgeEffect.framework"
+               BlueprintName = "ScrollEdgeEffect"
+               ReferencedContainer = "container:../../Tuist/.build/tuist-derived/Projects/swiftui-scroll-edge-effect/swiftui-scroll-edge-effect.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "C0B66C9F607B0D0E419B8581"
+               BuildableName = "SwiftUIIntrospect.framework"
+               BlueprintName = "SwiftUIIntrospect"
+               ReferencedContainer = "container:../../Tuist/.build/tuist-derived/Projects/swiftui-introspect/swiftui-introspect.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "F5FFA0FE6DB8AA7BA170A64C"
+               BuildableName = "_NumericsShims.framework"
+               BlueprintName = "_NumericsShims"
+               ReferencedContainer = "container:../../Tuist/.build/tuist-derived/Projects/swift-numerics/swift-numerics.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <TestAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "YES">
+      <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "0AC3A9C00C88BACD487BBF82"
+               BuildableName = "JournalUITests.xctest"
+               BlueprintName = "JournalUITests"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "3CF82D55E396642B2DFEC74B"
+               BuildableName = "JournalVaultTests.xctest"
+               BlueprintName = "JournalVaultTests"
+               ReferencedContainer = "container:Journal.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
+   </TestAction>
+   <LaunchAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "YES">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "A1794ABEF889A33E6D27E466"
+            BuildableName = "Algorithms.framework"
+            BlueprintName = "Algorithms"
+            ReferencedContainer = "container:../../Tuist/.build/tuist-derived/Projects/swift-algorithms/swift-algorithms.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
+   </LaunchAction>
+   <ProfileAction
+      buildConfiguration = "Release"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "A1794ABEF889A33E6D27E466"
+            BuildableName = "Algorithms.framework"
+            BlueprintName = "Algorithms"
+            ReferencedContainer = "container:../../Tuist/.build/tuist-derived/Projects/swift-algorithms/swift-algorithms.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "Debug">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Release"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
+</Scheme>

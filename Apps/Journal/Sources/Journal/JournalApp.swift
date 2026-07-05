@@ -1,3 +1,4 @@
+import AppUIComponents
 import CaptureBauhaus
 import CaptureDoodle
 import CloudKit
@@ -13,6 +14,8 @@ struct JournalApp: App {
   let vaultRuntime: JournalVaultRuntime
 
   init() {
+    VideoPlaybackObservationConfiguration.configure()
+
     do {
       vaultRuntime = try JournalVaultRuntime.appGroupCloudKitRuntime()
     } catch {
@@ -59,15 +62,31 @@ private struct RootView: View {
     case creation
   }
 
+  /// Launch-only gate for opening the persisted default vault.
+  ///
+  /// When a stored vault id exists, `RootView` keeps showing the launch loading
+  /// surface until restore either opens that vault or proves it should be
+  /// ignored. This prevents the vault picker from flashing before the composer.
+  private enum LastSelectedVaultRestoreState: Equatable {
+    /// The launch restore decision has not completed yet.
+    case pending
+
+    /// The launch restore decision finished, whether by opening a vault or
+    /// falling back to normal routing.
+    case resolved
+  }
+
   @AppStorage(JournalDefaults.themeID) private var themeID: String = Theme.default.id
   @AppStorage(JournalDefaults.appearancePreferenceID)
   private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
   @AppStorage(JournalDefaults.hasCompletedOnboarding) private var hasCompletedOnboarding: Bool = false
   @AppStorage(JournalDefaults.hasResolvedInitialVaultAvailability)
   private var hasResolvedInitialVaultAvailability: Bool = false
+  @AppStorage(JournalDefaults.lastSelectedVaultID) private var lastSelectedVaultID: String = ""
   @State private var notificationCenter = JournalNotificationCenter()
   @State private var vaultRuntime: JournalVaultRuntime
   @State private var existingUserRoute: ExistingUserRoute = .vaultSelection
+  @State private var lastSelectedVaultRestoreState: LastSelectedVaultRestoreState = .pending
 
   init(vaultRuntime: JournalVaultRuntime) {
     _vaultRuntime = State(initialValue: vaultRuntime)
@@ -96,9 +115,7 @@ private struct RootView: View {
         case .existingUser(.vaultSelection):
           VaultSelectionView(
             onVaultSelected: {
-              withAnimation(.smooth) {
-                existingUserRoute = .creation
-              }
+              enterCreationWithSelectedVault(animated: true)
             }
           )
           .transition(.opacity)
@@ -122,19 +139,20 @@ private struct RootView: View {
   private func startRootRouting() async {
     let resolution = await vaultRuntime.resolveInitialVaultAvailability()
 
-    withAnimation(.smooth) {
-      if vaultRuntime.vaults.isEmpty == false {
-        hasCompletedOnboarding = true
-      }
-
-      if resolution.isResolved {
-        hasResolvedInitialVaultAvailability = true
-      }
+    if vaultRuntime.vaults.isEmpty == false {
+      hasCompletedOnboarding = true
     }
+
+    if resolution.isResolved {
+      hasResolvedInitialVaultAvailability = true
+    }
+
+    await restoreLastSelectedVaultIfPossible()
   }
 
   private var rootRoute: RootRoute {
     guard hasResolvedInitialVaultAvailability else { return .loading }
+    if shouldWaitForLastSelectedVaultRestore { return .loading }
 
     if vaultRuntime.vaults.isEmpty == false || hasCompletedOnboarding {
       return .existingUser(existingUserRoute)
@@ -143,11 +161,63 @@ private struct RootView: View {
     return .newUser
   }
 
+  private var shouldWaitForLastSelectedVaultRestore: Bool {
+    lastSelectedVaultID.isEmpty == false && lastSelectedVaultRestoreState == .pending
+  }
+
   private func completeNewUserOnboarding() {
     withAnimation(.smooth) {
       hasCompletedOnboarding = true
       existingUserRoute = .vaultSelection
     }
+  }
+
+  private func enterCreationWithSelectedVault(animated: Bool) {
+    guard let selectedVault = vaultRuntime.selectedVault,
+          vaultRuntime.selectedVaultState == .active else {
+      return
+    }
+
+    lastSelectedVaultRestoreState = .resolved
+    lastSelectedVaultID = selectedVault.vaultID.uuidString
+
+    guard animated else {
+      existingUserRoute = .creation
+      return
+    }
+
+    withAnimation(.smooth) {
+      existingUserRoute = .creation
+    }
+  }
+
+  private func restoreLastSelectedVaultIfPossible() async {
+    defer { lastSelectedVaultRestoreState = .resolved }
+
+    guard vaultRuntime.vaults.isEmpty == false,
+          lastSelectedVaultID.isEmpty == false else {
+      return
+    }
+
+    guard let vaultID = VaultID(uuidString: lastSelectedVaultID) else {
+      lastSelectedVaultID = ""
+      return
+    }
+
+    guard vaultRuntime.vaults.contains(where: { $0.vaultID == vaultID }) else {
+      lastSelectedVaultID = ""
+      return
+    }
+
+    await vaultRuntime.selectVault(vaultID)
+
+    guard vaultRuntime.selectedVault?.vaultID == vaultID,
+          vaultRuntime.selectedVaultState == .active else {
+      lastSelectedVaultID = ""
+      return
+    }
+
+    enterCreationWithSelectedVault(animated: false)
   }
 
   private func acceptIncomingCloudKitShares() async {

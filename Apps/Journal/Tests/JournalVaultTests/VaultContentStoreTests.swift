@@ -87,12 +87,84 @@ struct VaultContentStoreTests {
     #expect(attachment.byteSize == bytes.count)
     #expect(attachment.thumbnail == Data([0x00]))
 
-    let fileURL = store.fileURL(for: attachment)
+    let resource = try #require(
+      try context.fetch(FetchDescriptor<JournalVault.AttachmentResource>()).first
+    )
+    #expect(resource.attachmentID == attachment.id)
+    #expect(resource.role == .originalImage)
+    #expect(resource.byteSize == bytes.count)
+    #expect(resource.contentType == "public.jpeg")
+    #expect(attachment.primaryResourceID == resource.id)
+
+    let fileURL = store.fileURL(for: resource)
     #expect(try Data(contentsOf: fileURL) == bytes)
 
     let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
-    #expect(outbox.count == 3)  // card + edge + attachment
+    #expect(outbox.count == 4)  // card + edge + attachment + resource
     #expect(outbox.contains { $0.recordType == VaultRecordType.attachment.rawValue })
+    #expect(outbox.contains { $0.recordType == VaultRecordType.attachmentResource.rawValue })
+  }
+
+  @Test
+  func createThread_livePhotoDraft_writesStillAndPairedVideoResources() throws {
+    let store = try makeStore()
+    let stillBytes = Data([0x01, 0x02, 0x03])
+    let pairedVideoURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("paired-\(UUID().uuidString)")
+      .appendingPathExtension("mov")
+    let pairedVideoBytes = Data([0x10, 0x11, 0x12, 0x13])
+    try pairedVideoBytes.write(to: pairedVideoURL)
+
+    try store.createThread(cards: [
+      .init(
+        kind: .livePhoto,
+        mediaResources: [
+          .init(
+            role: .stillImage,
+            data: stillBytes,
+            contentType: "public.heic",
+            pixelWidth: 4032,
+            pixelHeight: 3024
+          ),
+          .init(
+            role: .pairedVideo,
+            fileURL: pairedVideoURL,
+            contentType: "com.apple.quicktime-movie",
+            pixelWidth: 4032,
+            pixelHeight: 3024,
+            duration: 1.4
+          ),
+        ],
+        thumbnail: Data([0xA0])
+      )
+    ])
+
+    let context = store.container.mainContext
+    let attachment = try #require(
+      try context.fetch(FetchDescriptor<JournalVault.Attachment>()).first
+    )
+    let resources = try context.fetch(FetchDescriptor<JournalVault.AttachmentResource>())
+      .sorted { $0.createdAt < $1.createdAt }
+    let still = try #require(resources.first { $0.role == .stillImage })
+    let pairedVideo = try #require(resources.first { $0.role == .pairedVideo })
+
+    #expect(attachment.kind == .livePhoto)
+    #expect(attachment.byteSize == stillBytes.count)
+    #expect(attachment.primaryResourceID == still.id)
+    #expect(attachment.thumbnail == Data([0xA0]))
+    #expect(resources.count == 2)
+    #expect(still.contentType == "public.heic")
+    #expect(still.pixelWidth == 4032)
+    #expect(still.pixelHeight == 3024)
+    #expect(pairedVideo.contentType == "com.apple.quicktime-movie")
+    #expect(pairedVideo.duration == 1.4)
+    #expect(try Data(contentsOf: store.fileURL(for: still)) == stillBytes)
+    #expect(try Data(contentsOf: store.fileURL(for: pairedVideo)) == pairedVideoBytes)
+    #expect(FileManager.default.fileExists(atPath: pairedVideoURL.path) == false)
+
+    let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
+    #expect(outbox.count == 5)  // card + edge + attachment + 2 resources
+    #expect(outbox.filter { $0.recordType == VaultRecordType.attachmentResource.rawValue }.count == 2)
   }
 
   @Test
@@ -108,6 +180,7 @@ struct VaultContentStoreTests {
     #expect(card.kind == .link)
     #expect(card.body == "https://example.com/article")
     #expect(try context.fetchCount(FetchDescriptor<JournalVault.Attachment>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<JournalVault.AttachmentResource>()) == 0)
 
     let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
     #expect(outbox.count == 2)  // card + edge
@@ -117,122 +190,39 @@ struct VaultContentStoreTests {
     )
   }
 
-  // MARK: - migration import
-
   @Test
-  func importMigratedContent_insertsRowsCopiesMediaAndQueuesOutbox() throws {
+  func cloudStorageEstimate_countsRowsBodyMediaAndThumbnails() throws {
     let store = try makeStore()
-    let cardID = UUID()
-    let edgeID = UUID()
-    let attachmentID = UUID()
-    let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
-    let sourceFileURL = FileManager.default.temporaryDirectory.appending(
-      path: "JournalVaultImport-\(UUID().uuidString)",
-      directoryHint: .notDirectory
-    )
-    let mediaBytes = Data([0xCA, 0xFE, 0x01])
-    try mediaBytes.write(to: sourceFileURL)
+    try store.seedVaultInfo(title: "Personal")
 
-    let result = try store.importMigratedContent(
-      cards: [
-        .init(
-          id: cardID,
-          kind: .photo,
-          body: "",
-          createdAt: createdAt,
-          updatedAt: createdAt,
-          location: Coordinate(latitude: 35.0, longitude: 139.0)
-        )
-      ],
-      edges: [
-        .init(
-          id: edgeID,
-          cardID: cardID,
-          createdAt: createdAt,
-          updatedAt: createdAt
-        )
-      ],
-      attachments: [
-        .init(
-          id: attachmentID,
-          cardID: cardID,
-          kind: .photo,
-          byteSize: mediaBytes.count,
-          thumbnail: Data([0x00]),
-          createdAt: createdAt,
-          sourceFileURL: sourceFileURL
-        )
-      ]
-    )
+    let photoBytes = Data([0x01, 0x02, 0x03, 0x04])
+    let thumbnailBytes = Data([0x10, 0x11])
+    try store.createThread(cards: [
+      .init(kind: .text, text: "hello"),
+      .init(kind: .link, text: "https://example.com/article"),
+      .init(kind: .photo, mediaData: photoBytes, thumbnail: thumbnailBytes),
+    ])
 
-    #expect(result.insertedCards == 1)
-    #expect(result.insertedEdges == 1)
-    #expect(result.insertedAttachments == 1)
-    #expect(result.copiedMediaFiles == 1)
+    let estimate = try store.cloudStorageEstimate()
 
-    let context = store.container.mainContext
-    #expect(try context.fetchCount(FetchDescriptor<Card>()) == 1)
-    #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 1)
-    #expect(try context.fetchCount(FetchDescriptor<JournalVault.Attachment>()) == 1)
-    #expect(try Data(contentsOf: store.fileURL(forAttachmentID: attachmentID)) == mediaBytes)
-
-    let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
-    #expect(outbox.count == 3)
+    #expect(estimate.vaultInfoCount == 1)
+    #expect(estimate.cardCount == 3)
+    #expect(estimate.cardEdgeCount == 3)
+    #expect(estimate.attachmentCount == 1)
+    #expect(estimate.attachmentResourceCount == 1)
+    #expect(estimate.recordCount == 9)
     #expect(
-      Set(outbox.map(\.recordType))
-        == [
-          VaultRecordType.card.rawValue,
-          VaultRecordType.cardEdge.rawValue,
-          VaultRecordType.attachment.rawValue,
-        ]
+      estimate.cardBodyBytes
+        == "hello".utf8.count + "https://example.com/article".utf8.count
     )
-  }
+    #expect(estimate.mediaBytes == photoBytes.count)
+    #expect(estimate.thumbnailBytes == thumbnailBytes.count)
+    #expect(estimate.inlinePayloadBytes == estimate.cardBodyBytes + thumbnailBytes.count)
+    #expect(estimate.estimatedPayloadBytes == estimate.inlinePayloadBytes + photoBytes.count)
 
-  @Test
-  func importMigratedContent_isIdempotentWhenRowsAreUnchanged() throws {
-    let mutationCount = Mutex(0)
-    let store = try makeStore(onLocalMutation: { mutationCount.withLock { $0 += 1 } })
-    let cardID = UUID()
-    let edgeID = UUID()
-    let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
-
-    let cards = [
-      VaultContentStore.MigratedCard(
-        id: cardID,
-        kind: .text,
-        body: "legacy",
-        createdAt: createdAt,
-        updatedAt: createdAt
-      )
-    ]
-    let edges = [
-      VaultContentStore.MigratedCardEdge(
-        id: edgeID,
-        cardID: cardID,
-        createdAt: createdAt,
-        updatedAt: createdAt
-      )
-    ]
-
-    let first = try store.importMigratedContent(
-      cards: cards,
-      edges: edges,
-      attachments: []
-    )
-    let second = try store.importMigratedContent(
-      cards: cards,
-      edges: edges,
-      attachments: []
-    )
-
-    #expect(first.didChange)
-    #expect(second.didChange == false)
-    #expect(mutationCount.withLock { $0 } == 1)
-
-    let context = store.container.mainContext
-    #expect(try context.fetchCount(FetchDescriptor<Card>()) == 1)
-    #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 1)
-    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 2)
+    let photoBreakdown = try #require(estimate.mediaBreakdowns.first { $0.kind == .photo })
+    #expect(photoBreakdown.count == 1)
+    #expect(photoBreakdown.byteSize == photoBytes.count)
   }
 
   // MARK: - updateCardBody
@@ -268,8 +258,12 @@ struct VaultContentStoreTests {
     let oldAttachment = try #require(
       try context.fetch(FetchDescriptor<JournalVault.Attachment>()).first
     )
+    let oldResource = try #require(
+      try context.fetch(FetchDescriptor<JournalVault.AttachmentResource>()).first
+    )
     let oldAttachmentID = oldAttachment.id
-    let oldFileURL = store.fileURL(for: oldAttachment)
+    let oldResourceID = oldResource.id
+    let oldFileURL = store.fileURL(for: oldResource)
     #expect(FileManager.default.fileExists(atPath: oldFileURL.path))
 
     try store.updateCard(
@@ -287,18 +281,28 @@ struct VaultContentStoreTests {
 
     let attachments = try context.fetch(FetchDescriptor<JournalVault.Attachment>())
     let attachment = try #require(attachments.first)
+    let resources = try context.fetch(FetchDescriptor<JournalVault.AttachmentResource>())
+    let resource = try #require(resources.first)
     #expect(attachments.count == 1)
+    #expect(resources.count == 1)
     #expect(attachment.id != oldAttachmentID)
+    #expect(resource.id != oldResourceID)
+    #expect(resource.attachmentID == attachment.id)
+    #expect(attachment.primaryResourceID == resource.id)
     #expect(attachment.kind == .doodle)
     #expect(attachment.byteSize == 3)
+    #expect(resource.role == .authoredJSON)
+    #expect(resource.byteSize == 3)
     #expect(attachment.thumbnail == Data([0x20]))
-    #expect(try Data(contentsOf: store.fileURL(for: attachment)) == Data([0x03, 0x04, 0x05]))
+    #expect(try Data(contentsOf: store.fileURL(for: resource)) == Data([0x03, 0x04, 0x05]))
     #expect(FileManager.default.fileExists(atPath: oldFileURL.path) == false)
 
     let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
     #expect(outbox.contains { $0.recordName == root.cardID.uuidString && $0.kind == .save })
     #expect(outbox.contains { $0.recordName == attachment.id.uuidString && $0.kind == .save })
+    #expect(outbox.contains { $0.recordName == resource.id.uuidString && $0.kind == .save })
     #expect(outbox.contains { $0.recordName == oldAttachmentID.uuidString } == false)
+    #expect(outbox.contains { $0.recordName == oldResourceID.uuidString } == false)
   }
 
   @Test
@@ -311,10 +315,13 @@ struct VaultContentStoreTests {
     )
 
     let context = store.container.mainContext
-    let oldAttachment = try #require(
+    _ = try #require(
       try context.fetch(FetchDescriptor<JournalVault.Attachment>()).first
     )
-    let oldFileURL = store.fileURL(for: oldAttachment)
+    let oldResource = try #require(
+      try context.fetch(FetchDescriptor<JournalVault.AttachmentResource>()).first
+    )
+    let oldFileURL = store.fileURL(for: oldResource)
 
     try store.updateCard(
       cardID: root.cardID,
@@ -325,6 +332,7 @@ struct VaultContentStoreTests {
     #expect(card.kind == .text)
     #expect(card.body == "edited")
     #expect(try context.fetchCount(FetchDescriptor<JournalVault.Attachment>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<JournalVault.AttachmentResource>()) == 0)
     #expect(FileManager.default.fileExists(atPath: oldFileURL.path) == false)
   }
 
@@ -388,7 +396,11 @@ struct VaultContentStoreTests {
     let attachment = try #require(
       try context.fetch(FetchDescriptor<JournalVault.Attachment>()).first
     )
-    let fileURL = store.fileURL(for: attachment)
+    let resource = try #require(
+      try context.fetch(FetchDescriptor<JournalVault.AttachmentResource>()).first
+    )
+    let fileURL = store.fileURL(for: resource)
+    #expect(attachment.primaryResourceID == resource.id)
     #expect(FileManager.default.fileExists(atPath: fileURL.path))
 
     try store.deleteCardEdge(edgeID: root.id)
@@ -396,6 +408,7 @@ struct VaultContentStoreTests {
     #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 0)
     #expect(try context.fetchCount(FetchDescriptor<Card>()) == 0)
     #expect(try context.fetchCount(FetchDescriptor<JournalVault.Attachment>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<JournalVault.AttachmentResource>()) == 0)
     #expect(FileManager.default.fileExists(atPath: fileURL.path) == false)
   }
 

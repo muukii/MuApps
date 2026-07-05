@@ -1,0 +1,4033 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@, %@" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@、%2$@"
+          }
+        }
+      }
+    },
+    "%d cards" : {
+      "comment" : "Accessibility label for the number of cards in a saved thread.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d cards"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d枚のカード"
+          }
+        }
+      }
+    },
+    "A few permissions" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A few permissions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "いくつかのアクセス許可"
+          }
+        }
+      }
+    },
+    "About" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "情報"
+          }
+        }
+      }
+    },
+    "Add Tinycurve widgets for a quick view of the latest card in a vault you choose." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Tinycurve widgets for a quick view of the latest card in a vault you choose."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選んだVaultの最新カードをすぐ見られるように、Tinycurveウィジェットを追加できます。"
+          }
+        }
+      }
+    },
+    "Add Widgets" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Widgets"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ウィジェットを追加"
+          }
+        }
+      }
+    },
+    "All optional — grant only what you want to use. You can change these anytime in the Settings app." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All optional — grant only what you want to use. You can change these anytime in the Settings app."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべて任意です。使いたいものだけ許可してください。いつでも設定アプリから変更できます。"
+          }
+        }
+      }
+    },
+    "Allow" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "許可"
+          }
+        }
+      }
+    },
+    "Ambient Sound" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ambient Sound"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "環境音"
+          }
+        }
+      }
+    },
+    "Analytics, ads, and tracking" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analytics, ads, and tracking"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分析、広告、トラッキング"
+          }
+        }
+      }
+    },
+    "Appearance" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appearance"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "外観"
+          }
+        }
+      }
+    },
+    "Apply bottom arc semicircle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply bottom arc semicircle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下向きアーク半円を適用"
+          }
+        }
+      }
+    },
+    "Apply bottom flat semicircle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply bottom flat semicircle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下向きフラット半円を適用"
+          }
+        }
+      }
+    },
+    "Apply bottom-leading quarter circle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply bottom-leading quarter circle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左下の四分円を適用"
+          }
+        }
+      }
+    },
+    "Apply bottom-leading triangle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply bottom-leading triangle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左下の三角形を適用"
+          }
+        }
+      }
+    },
+    "Apply bottom-trailing quarter circle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply bottom-trailing quarter circle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "右下の四分円を適用"
+          }
+        }
+      }
+    },
+    "Apply bottom-trailing triangle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply bottom-trailing triangle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "右下の三角形を適用"
+          }
+        }
+      }
+    },
+    "Apply filled circle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply filled circle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "塗りつぶし円を適用"
+          }
+        }
+      }
+    },
+    "Apply leading arc semicircle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply leading arc semicircle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左向きアーク半円を適用"
+          }
+        }
+      }
+    },
+    "Apply leading flat semicircle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply leading flat semicircle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左向きフラット半円を適用"
+          }
+        }
+      }
+    },
+    "Apply padded circle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply padded circle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "余白付き円を適用"
+          }
+        }
+      }
+    },
+    "Apply square" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply square"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正方形を適用"
+          }
+        }
+      }
+    },
+    "Apply top arc semicircle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply top arc semicircle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上向きアーク半円を適用"
+          }
+        }
+      }
+    },
+    "Apply top flat semicircle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply top flat semicircle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上向きフラット半円を適用"
+          }
+        }
+      }
+    },
+    "Apply top-leading quarter circle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply top-leading quarter circle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左上の四分円を適用"
+          }
+        }
+      }
+    },
+    "Apply top-leading triangle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply top-leading triangle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左上の三角形を適用"
+          }
+        }
+      }
+    },
+    "Apply top-trailing quarter circle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply top-trailing quarter circle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "右上の四分円を適用"
+          }
+        }
+      }
+    },
+    "Apply top-trailing triangle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply top-trailing triangle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "右上の三角形を適用"
+          }
+        }
+      }
+    },
+    "Apply trailing arc semicircle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply trailing arc semicircle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "右向きアーク半円を適用"
+          }
+        }
+      }
+    },
+    "Apply trailing flat semicircle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apply trailing flat semicircle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "右向きフラット半円を適用"
+          }
+        }
+      }
+    },
+    "Attach Location" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Attach Location"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "位置情報を添付"
+          }
+        }
+      }
+    },
+    "Attach where you are to an entry." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Attach where you are to an entry."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記録に今いる場所を添付します。"
+          }
+        }
+      }
+    },
+    "Audio" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audio"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声"
+          }
+        }
+      }
+    },
+    "Audio Card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audio Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声カード"
+          }
+        }
+      }
+    },
+    "Background" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "背景"
+          }
+        }
+      }
+    },
+    "Basic" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Basic"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "基本"
+          }
+        }
+      }
+    },
+    "Bauhaus" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bauhaus"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bauhaus"
+          }
+        }
+      }
+    },
+    "Bauhaus Card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bauhaus Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bauhausカード"
+          }
+        }
+      }
+    },
+    "Bauhaus shape cell" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bauhaus shape cell"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bauhaus形状セル"
+          }
+        }
+      }
+    },
+    "By Type" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "By Type"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "種類別"
+          }
+        }
+      }
+    },
+    "Calculating" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Calculating"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "計算中"
+          }
+        }
+      }
+    },
+    "Camera" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Camera"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カメラ"
+          }
+        }
+      }
+    },
+    "Camera access is off. Enable it in Settings to take a photo." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Camera access is off. Enable it in Settings to take a photo."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カメラへのアクセスがオフです。写真を撮るには設定で有効にしてください。"
+          }
+        }
+      }
+    },
+    "Camera access is used only when you open photo capture and take a photo for a card." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Camera access is used only when you open photo capture and take a photo for a card."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カメラへのアクセスは、写真キャプチャを開いてカード用の写真を撮影するときだけ使われます。"
+          }
+        }
+      }
+    },
+    "Cancel" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キャンセル"
+          }
+        }
+      }
+    },
+    "Capture a moment with the camera." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Capture a moment with the camera."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カメラでその瞬間を残します。"
+          }
+        }
+      }
+    },
+    "Capture text, links, photos, doodles, and sound — each kept as a simple card that syncs across your devices." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Capture text, links, photos, doodles, and sound — each kept as a simple card that syncs across your devices."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テキスト、リンク、写真、落書き、音声を記録できます。すべてシンプルなカードとして保存され、あなたのデバイス間で同期されます。"
+          }
+        }
+      }
+    },
+    "Card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カード"
+          }
+        }
+      }
+    },
+    "Card Kind" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Card Kind"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カードの種類"
+          }
+        }
+      }
+    },
+    "Change Vault" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change Vault"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultを変更"
+          }
+        }
+      }
+    },
+    "Checking Vaults" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking Vaults"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultを確認中"
+          }
+        }
+      }
+    },
+    "Choose a theme" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a theme"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テーマを選択"
+          }
+        }
+      }
+    },
+    "Choose Media" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Media"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メディアを選択"
+          }
+        }
+      }
+    },
+    "Choose Photo" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Photo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真を選択"
+          }
+        }
+      }
+    },
+    "Choose Vault" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Vault"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultを選択"
+          }
+        }
+      }
+    },
+    "Clear artwork" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear artwork"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アートワークを消去"
+          }
+        }
+      }
+    },
+    "Clear cell" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear cell"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "セルを消去"
+          }
+        }
+      }
+    },
+    "CloudKit does not expose exact iCloud usage to apps. This estimate uses Journal rows and attachment byte sizes, excluding CloudKit overhead and other apps." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CloudKit does not expose exact iCloud usage to apps. This estimate uses Journal rows and attachment byte sizes, excluding CloudKit overhead and other apps."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CloudKit は正確な iCloud 使用量をアプリに公開していません。この推定値は Journal の行と添付ファイルのバイト数を使用し、CloudKit のオーバーヘッドや他のアプリは含みません。"
+          }
+        }
+      }
+    },
+    "Collapse Stacks" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Collapse Stacks"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スタックを折りたたむ"
+          }
+        }
+      }
+    },
+    "Contact and changes" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contact and changes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連絡先と変更"
+          }
+        }
+      }
+    },
+    "Could Not Calculate" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could Not Calculate"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "計算できませんでした"
+          }
+        }
+      }
+    },
+    "Could not create vault." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not create vault."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultを作成できませんでした。"
+          }
+        }
+      }
+    },
+    "Could Not Delete Card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could Not Delete Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カードを削除できませんでした"
+          }
+        }
+      }
+    },
+    "Could Not Delete Vault" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could Not Delete Vault"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultを削除できませんでした"
+          }
+        }
+      }
+    },
+    "Could not delete vault." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not delete vault."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultを削除できませんでした。"
+          }
+        }
+      }
+    },
+    "Could Not Edit Card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could Not Edit Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カードを編集できませんでした"
+          }
+        }
+      }
+    },
+    "Could not import media" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not import media"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メディアを読み込めませんでした"
+          }
+        }
+      }
+    },
+    "Could not import photo" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not import photo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真を読み込めませんでした"
+          }
+        }
+      }
+    },
+    "Could not join vault" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not join vault"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultに参加できませんでした"
+          }
+        }
+      }
+    },
+    "Could Not Load Entries" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could Not Load Entries"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entriesを読み込めませんでした"
+          }
+        }
+      }
+    },
+    "Could Not Manage Collaboration" : {
+
+    },
+    "Could not save" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not save"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存できませんでした"
+          }
+        }
+      }
+    },
+    "Could Not Share Vault" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could Not Share Vault"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultを共有できませんでした"
+          }
+        }
+      }
+    },
+    "Create" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "作成"
+          }
+        }
+      }
+    },
+    "Dark" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dark"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダーク"
+          }
+        }
+      }
+    },
+    "Data you create" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Data you create"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたが作成するデータ"
+          }
+        }
+      }
+    },
+    "Debug surface for the selected vault instance and explicit sync runtime." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Debug surface for the selected vault instance and explicit sync runtime."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選択中のVaultインスタンスと明示的な同期ランタイムを確認するデバッグ画面です。"
+          }
+        }
+      }
+    },
+    "Delete" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除"
+          }
+        }
+      }
+    },
+    "Delete Card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カードを削除"
+          }
+        }
+      }
+    },
+    "Delete Vault" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete Vault"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultを削除"
+          }
+        }
+      }
+    },
+    "Delete Vault?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete Vault?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultを削除しますか？"
+          }
+        }
+      }
+    },
+    "Deletion and retention" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deletion and retention"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除と保持"
+          }
+        }
+      }
+    },
+    "Denied" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Denied"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拒否済み"
+          }
+        }
+      }
+    },
+    "Device permissions" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device permissions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "デバイスのアクセス許可"
+          }
+        }
+      }
+    },
+    "Discard and Change Vault" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Discard and Change Vault"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "破棄してVaultを変更"
+          }
+        }
+      }
+    },
+    "Discard Drafts?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Discard Drafts?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下書きを破棄しますか？"
+          }
+        }
+      }
+    },
+    "Dismiss notification" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dismiss notification"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知を閉じる"
+          }
+        }
+      }
+    },
+    "Done" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了"
+          }
+        }
+      }
+    },
+    "Doodle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doodle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "落書き"
+          }
+        }
+      }
+    },
+    "Doodle Card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doodle Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "落書きカード"
+          }
+        }
+      }
+    },
+    "Drafts are kept only in the current composer." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drafts are kept only in the current composer."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下書きは現在の作成画面にだけ保存されています。"
+          }
+        }
+      }
+    },
+    "Each thing you record becomes one card." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Each thing you record becomes one card."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記録したものは、ひとつずつカードになります。"
+          }
+        }
+      }
+    },
+    "Edit" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Edit"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "編集"
+          }
+        }
+      }
+    },
+    "Edit Card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Edit Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カードを編集"
+          }
+        }
+      }
+    },
+    "Empty cell" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empty cell"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "空のセル"
+          }
+        }
+      }
+    },
+    "Empty link card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empty link card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "空のリンクカード"
+          }
+        }
+      }
+    },
+    "Empty text card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empty text card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "空のテキストカード"
+          }
+        }
+      }
+    },
+    "Enable microphone access in Settings to record ambient sound." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable microphone access in Settings to record ambient sound."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "環境音を録音するには、設定でマイクへのアクセスを有効にしてください。"
+          }
+        }
+      }
+    },
+    "Enter a valid web URL" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter a valid web URL"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有効なWeb URLを入力してください"
+          }
+        }
+      }
+    },
+    "Entries" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entries"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entries"
+          }
+        }
+      }
+    },
+    "Estimate" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estimate"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "推定"
+          }
+        }
+      }
+    },
+    "Every little thing\nbecomes a card." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every little thing\nbecomes a card."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "小さなできごとが\nカードになる。"
+          }
+        }
+      }
+    },
+    "Expand Stacks" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expand Stacks"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スタックを展開"
+          }
+        }
+      }
+    },
+    "Finish artwork" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finish artwork"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アートワークを完了"
+          }
+        }
+      }
+    },
+    "For privacy questions, use the developer support contact listed with Tinycurve in the App Store." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "For privacy questions, use the developer support contact listed with Tinycurve in the App Store."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プライバシーに関する質問は、App StoreのTinycurveページに掲載されている開発者サポート連絡先をご利用ください。"
+          }
+        }
+      }
+    },
+    "Get Started" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Get Started"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "はじめる"
+          }
+        }
+      }
+    },
+    "Haptic Doodle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Haptic Doodle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ハプティック落書き"
+          }
+        }
+      }
+    },
+    "Haptics" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Haptics"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ハプティクス"
+          }
+        }
+      }
+    },
+    "Home Screen" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Home Screen"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホーム画面"
+          }
+        }
+      }
+    },
+    "iCloud Recovery Deferred" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud Recovery Deferred"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud復元を保留中"
+          }
+        }
+      }
+    },
+    "If you choose a Journaling Suggestion, Apple presents the system picker. Tinycurve receives only the suggestion content you select, such as a title, date, photo reference, media metadata, workout summary, place, motion summary, contact name, or reflection prompt." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "If you choose a Journaling Suggestion, Apple presents the system picker. Tinycurve receives only the suggestion content you select, such as a title, date, photo reference, media metadata, workout summary, place, motion summary, contact name, or reflection prompt."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ジャーナリング提案を選ぶ場合、Appleのシステムピッカーが表示されます。Tinycurveが受け取るのは、あなたが選択した提案内容だけです。例として、タイトル、日付、写真参照、メディアメタデータ、ワークアウト概要、場所、モーション概要、連絡先名、リフレクションの問いなどが含まれます。"
+          }
+        }
+      }
+    },
+    "Instructions for adding Tinycurve to the Home Screen, Lock Screen, and StandBy." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Instructions for adding Tinycurve to the Home Screen, Lock Screen, and StandBy."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycurveをホーム画面、ロック画面、スタンバイに追加する手順です。"
+          }
+        }
+      }
+    },
+    "Invite People" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invite People"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メンバーを招待"
+          }
+        }
+      }
+    },
+    "Joined Vault" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Joined Vault"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultに参加しました"
+          }
+        }
+      }
+    },
+    "Jot down what's on your mind." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jot down what's on your mind."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "頭に浮かんだことを書きとめます。"
+          }
+        }
+      }
+    },
+    "Journal content remains until you delete it in the app, delete the app's data, or remove it through iCloud behavior controlled by Apple. iCloud sync deletion timing is governed by Apple's CloudKit and iCloud systems." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Journal content remains until you delete it in the app, delete the app's data, or remove it through iCloud behavior controlled by Apple. iCloud sync deletion timing is governed by Apple's CloudKit and iCloud systems."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Journalの内容は、アプリ内で削除する、アプリのデータを削除する、またはAppleが制御するiCloudの動作を通じて削除されるまで残ります。iCloud同期での削除タイミングは、AppleのCloudKitとiCloudシステムによって管理されます。"
+          }
+        }
+      }
+    },
+    "Journaling Suggestions access is used only when you open the system picker. The raw signals used by iOS to prepare suggestions stay with the system unless you select a suggestion." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Journaling Suggestions access is used only when you open the system picker. The raw signals used by iOS to prepare suggestions stay with the system unless you select a suggestion."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ジャーナリング提案へのアクセスは、システムピッカーを開いたときだけ使われます。iOSが提案を準備するために使う元のシグナルは、あなたが提案を選ばない限りシステム内に留まります。"
+          }
+        }
+      }
+    },
+    "Lab" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lab"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lab"
+          }
+        }
+      }
+    },
+    "Last updated: July 4, 2026" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last updated: July 4, 2026"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最終更新日: 2026年7月4日"
+          }
+        }
+      }
+    },
+    "Latest" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Latest"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新"
+          }
+        }
+      }
+    },
+    "Light" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Light"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ライト"
+          }
+        }
+      }
+    },
+    "Link" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Link"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リンク"
+          }
+        }
+      }
+    },
+    "Link Card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Link Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リンクカード"
+          }
+        }
+      }
+    },
+    "Live Photo" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live Photo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live Photo"
+          }
+        }
+      }
+    },
+    "Live Photo Card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live Photo Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live Photoカード"
+          }
+        }
+      }
+    },
+    "Live Photos" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live Photos"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live Photos"
+          }
+        }
+      }
+    },
+    "Location" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Location"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "位置情報"
+          }
+        }
+      }
+    },
+    "Location access is optional. When Attach Location is enabled in Settings and iOS grants permission, new cards can store the current latitude and longitude." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Location access is optional. When Attach Location is enabled in Settings and iOS grants permission, new cards can store the current latitude and longitude."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "位置情報へのアクセスは任意です。設定で「位置情報を添付」がオンになっていて、iOSが許可している場合、新しいカードに現在の緯度と経度を保存できます。"
+          }
+        }
+      }
+    },
+    "Lock Screen" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lock Screen"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ロック画面"
+          }
+        }
+      }
+    },
+    "Long-press the Home Screen, tap +, then add Tinycurve." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Long-press the Home Screen, tap +, then add Tinycurve."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホーム画面を長押しし、+をタップしてTinycurveを追加します。"
+          }
+        }
+      }
+    },
+    "Long-press the Lock Screen, tap Customize, then add Tinycurve below the clock." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Long-press the Lock Screen, tap Customize, then add Tinycurve below the clock."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ロック画面を長押しし、「カスタマイズ」をタップして、時計の下にTinycurveを追加します。"
+          }
+        }
+      }
+    },
+    "Long-press the StandBy screen, tap +, then add Tinycurve." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Long-press the StandBy screen, tap +, then add Tinycurve."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スタンバイ画面を長押しし、+をタップしてTinycurveを追加します。"
+          }
+        }
+      }
+    },
+    "Make it yours" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Make it yours"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自分らしく"
+          }
+        }
+      }
+    },
+    "Manage Collaboration" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manage Collaboration"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共同作業を管理"
+          }
+        }
+      }
+    },
+    "Many ways to capture" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Many ways to capture"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "いろいろな残し方"
+          }
+        }
+      }
+    },
+    "Media" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Media"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メディア"
+          }
+        }
+      }
+    },
+    "Microphone" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Microphone"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイク"
+          }
+        }
+      }
+    },
+    "Microphone access is used only when you record an ambient audio card." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Microphone access is used only when you record an ambient audio card."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイクへのアクセスは、環境音カードを録音するときだけ使われます。"
+          }
+        }
+      }
+    },
+    "Microphone Access Needed" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Microphone Access Needed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイクへのアクセスが必要です"
+          }
+        }
+      }
+    },
+    "New Vault" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New Vault"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新しいVault"
+          }
+        }
+      }
+    },
+    "Next" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "次へ"
+          }
+        }
+      }
+    },
+    "No camera is available on this device." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No camera is available on this device."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスではカメラを利用できません。"
+          }
+        }
+      }
+    },
+    "No Cards" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Cards"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カードがありません"
+          }
+        }
+      }
+    },
+    "No media files" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No media files"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メディアファイルなし"
+          }
+        }
+      }
+    },
+    "No vaults" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No vaults"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vault がありません"
+          }
+        }
+      }
+    },
+    "No Vaults" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Vaults"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultがありません"
+          }
+        }
+      }
+    },
+    "now" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "now"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今"
+          }
+        }
+      }
+    },
+    "OK" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        }
+      }
+    },
+    "Owned by you" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Owned by you"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたが所有"
+          }
+        }
+      }
+    },
+    "Photo" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真"
+          }
+        }
+      }
+    },
+    "Photo Card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photo Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真カード"
+          }
+        }
+      }
+    },
+    "Photo unavailable" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photo unavailable"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真を表示できません"
+          }
+        }
+      }
+    },
+    "Photos access is used through Apple's system picker. Tinycurve receives only the photo you choose for a card." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos access is used through Apple's system picker. Tinycurve receives only the photo you choose for a card."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真へのアクセスはAppleのシステムピッカーを通じて使われます。Tinycurveが受け取るのは、カード用にあなたが選んだ写真だけです。"
+          }
+        }
+      }
+    },
+    "Pick a color theme. You can change it anytime in Settings." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick a color theme. You can change it anytime in Settings."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カラーテーマを選びましょう。あとから設定でいつでも変更できます。"
+          }
+        }
+      }
+    },
+    "Play" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Play"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再生"
+          }
+        }
+      }
+    },
+    "Post Thread" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Post Thread"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スレッドを投稿"
+          }
+        }
+      }
+    },
+    "Preparing Vaults" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing Vaults"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultを準備中"
+          }
+        }
+      }
+    },
+    "Privacy Policy" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Privacy Policy"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プライバシーポリシー"
+          }
+        }
+      }
+    },
+    "Quarter Circle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quarter Circle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "四分円"
+          }
+        }
+      }
+    },
+    "Record Again" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record Again"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "録音し直す"
+          }
+        }
+      }
+    },
+    "Record the sound around you." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record the sound around you."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まわりの音を録音します。"
+          }
+        }
+      }
+    },
+    "Recorded Audio" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recorded Audio"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "録音済みの音声"
+          }
+        }
+      }
+    },
+    "Refresh" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新"
+          }
+        }
+      }
+    },
+    "Refresh Vaults" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh Vaults"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultを更新"
+          }
+        }
+      }
+    },
+    "Reload Entries" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reload Entries"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entriesを再読み込み"
+          }
+        }
+      }
+    },
+    "Remove Shared Vault" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove Shared Vault"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共有Vaultを削除"
+          }
+        }
+      }
+    },
+    "Remove Shared Vault?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove Shared Vault?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共有Vaultを削除しますか？"
+          }
+        }
+      }
+    },
+    "Retake Photo" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retake Photo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真を撮り直す"
+          }
+        }
+      }
+    },
+    "Retry" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再試行"
+          }
+        }
+      }
+    },
+    "Save" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存"
+          }
+        }
+      }
+    },
+    "Save a web page with a native preview." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save a web page with a native preview."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Webページをネイティブプレビュー付きで保存します。"
+          }
+        }
+      }
+    },
+    "Saved to Journal" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved to Journal"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Journalに保存しました"
+          }
+        }
+      }
+    },
+    "Select color" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select color"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "色を選択"
+          }
+        }
+      }
+    },
+    "Semicircle Arc" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Semicircle Arc"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "半円アーク"
+          }
+        }
+      }
+    },
+    "Semicircle Flat" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Semicircle Flat"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "半円フラット"
+          }
+        }
+      }
+    },
+    "Settings" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Settings"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定"
+          }
+        }
+      }
+    },
+    "Shape" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shape"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "形"
+          }
+        }
+      }
+    },
+    "Shared with you" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shared with you"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたに共有済み"
+          }
+        }
+      }
+    },
+    "Sharing and widgets" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sharing and widgets"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共有とウィジェット"
+          }
+        }
+      }
+    },
+    "Show Onboarding" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Onboarding"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オンボーディングを表示"
+          }
+        }
+      }
+    },
+    "Shows Journal's estimate for vault data stored through CloudKit." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows Journal's estimate for vault data stored through CloudKit."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CloudKit に保存される Vault データの Journal 推定値を表示します。"
+          }
+        }
+      }
+    },
+    "Sketch a quick ink drawing." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sketch a quick ink drawing."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "インクのようにさっと描けます。"
+          }
+        }
+      }
+    },
+    "Skip" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skip"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スキップ"
+          }
+        }
+      }
+    },
+    "StandBy" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "StandBy"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スタンバイ"
+          }
+        }
+      }
+    },
+    "Start from a Journaling Suggestion." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start from a Journaling Suggestion."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ジャーナリング提案から始めます。"
+          }
+        }
+      }
+    },
+    "Start recording" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start recording"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "録音を開始"
+          }
+        }
+      }
+    },
+    "Stop recording" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop recording"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "録音を停止"
+          }
+        }
+      }
+    },
+    "Storage" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Storage"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ストレージ"
+          }
+        }
+      }
+    },
+    "Storage and iCloud sync" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Storage and iCloud sync"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存とiCloud同期"
+          }
+        }
+      }
+    },
+    "Suggestions" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggestions"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提案"
+          }
+        }
+      }
+    },
+    "System" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "システム"
+          }
+        }
+      }
+    },
+    "System follows the device setting. Light and Dark override it for Journal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System follows the device setting. Light and Dark override it for Journal."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "システムはデバイス設定に従います。ライトとダークはJournalだけに適用されます。"
+          }
+        }
+      }
+    },
+    "Take a photo to attach to an entry." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Take a photo to attach to an entry."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記録に添付する写真を撮影します。"
+          }
+        }
+      }
+    },
+    "Take photo" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Take photo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真を撮る"
+          }
+        }
+      }
+    },
+    "Text" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テキスト"
+          }
+        }
+      }
+    },
+    "Text Card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テキストカード"
+          }
+        }
+      }
+    },
+    "The selected palette applies across the entire app, including Light and Dark modes." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected palette applies across the entire app, including Light and Dark modes."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選択したパレットは、ライトモードとダークモードを含むアプリ全体に適用されます。"
+          }
+        }
+      }
+    },
+    "The selected vault is not available." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected vault is not available."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選択中のVaultを利用できません。"
+          }
+        }
+      }
+    },
+    "The shared vault is now available in your picker." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The shared vault is now available in your picker."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共有されたVaultが選択画面で使えるようになりました。"
+          }
+        }
+      }
+    },
+    "The Tinycurve widget reads cards from the vault you choose for that widget. Widget content is generated locally by the widget extension." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Tinycurve widget reads cards from the vault you choose for that widget. Widget content is generated locally by the widget extension."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycurveウィジェットは、そのウィジェットで選択したVaultからカードを読み取ります。ウィジェットの内容は、ウィジェット拡張機能によってローカルで生成されます。"
+          }
+        }
+      }
+    },
+    "Theme" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Theme"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テーマ"
+          }
+        }
+      }
+    },
+    "This audio recording could not be prepared for editing." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This audio recording could not be prepared for editing."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この音声録音を編集用に準備できませんでした。"
+          }
+        }
+      }
+    },
+    "This card and any connected cards will be removed from this vault. Synced copies are deleted through iCloud." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This card and any connected cards will be removed from this vault. Synced copies are deleted through iCloud."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このカードとつながっているカードを、このVaultから削除します。同期済みのコピーもiCloud経由で削除されます。"
+          }
+        }
+      }
+    },
+    "This card type is not editable yet." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This card type is not editable yet."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この種類のカードはまだ編集できません。"
+          }
+        }
+      }
+    },
+    "This card's media file could not be prepared for editing." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This card's media file could not be prepared for editing."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このカードのメディアファイルを編集用に準備できませんでした。"
+          }
+        }
+      }
+    },
+    "This card's media file could not be read for editing." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This card's media file could not be read for editing."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このカードのメディアファイルを編集用に読み込めませんでした。"
+          }
+        }
+      }
+    },
+    "This card's media file is not available on this device yet." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This card's media file is not available on this device yet."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このカードのメディアファイルは、まだこのデバイスで利用できません。"
+          }
+        }
+      }
+    },
+    "This deletes the vault from iCloud for everyone with access. Local cards and media on this device are removed too." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This deletes the vault from iCloud for everyone with access. Local cards and media on this device are removed too."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このVaultを、アクセス権を持つ全員のiCloudから削除します。このデバイス上のローカルカードとメディアも削除されます。"
+          }
+        }
+      }
+    },
+    "This policy may be updated as Tinycurve changes. The Last updated date shows when this copy was last revised." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This policy may be updated as Tinycurve changes. The Last updated date shows when this copy was last revised."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このポリシーはTinycurveの変更に合わせて更新される場合があります。最終更新日は、この文面が最後に改訂された日を示します。"
+          }
+        }
+      }
+    },
+    "This removes the shared vault from your iCloud account and this device. The owner's vault is not deleted." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This removes the shared vault from your iCloud account and this device. The owner's vault is not deleted."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この共有VaultをあなたのiCloudアカウントとこのデバイスから削除します。オーナーのVault自体は削除されません。"
+          }
+        }
+      }
+    },
+    "Tinycurve does not include developer-operated analytics, advertising SDKs, third-party trackers, or cross-app tracking." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycurve does not include developer-operated analytics, advertising SDKs, third-party trackers, or cross-app tracking."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycurveには、開発者が運用する分析、広告SDK、第三者トラッカー、アプリ横断トラッキングは含まれていません。"
+          }
+        }
+      }
+    },
+    "Tinycurve is a personal journaling app. It is designed so the developer does not run a server for your journal content and does not sell, track, or advertise with your data." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycurve is a personal journaling app. It is designed so the developer does not run a server for your journal content and does not sell, track, or advertise with your data."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycurveは個人のためのジャーナリングアプリです。開発者があなたの記録内容を扱うサーバーを運営せず、あなたのデータを販売、追跡、広告利用しない設計です。"
+          }
+        }
+      }
+    },
+    "Today" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Today"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日"
+          }
+        }
+      }
+    },
+    "Triangle" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Triangle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "三角形"
+          }
+        }
+      }
+    },
+    "Try choosing another image from Photos." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try choosing another image from Photos."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真から別の画像を選んでみてください。"
+          }
+        }
+      }
+    },
+    "Try choosing another item from Photos." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try choosing another item from Photos."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真から別の項目を選んでみてください。"
+          }
+        }
+      }
+    },
+    "Try opening the invitation again." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try opening the invitation again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "招待をもう一度開いてみてください。"
+          }
+        }
+      }
+    },
+    "TYPE 1" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TYPE 1"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "タイプ 1"
+          }
+        }
+      }
+    },
+    "TYPE 2" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TYPE 2"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "タイプ 2"
+          }
+        }
+      }
+    },
+    "TYPE 3" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TYPE 3"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "タイプ 3"
+          }
+        }
+      }
+    },
+    "Vault" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vault"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vault"
+          }
+        }
+      }
+    },
+    "Vault Name" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vault Name"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vault名"
+          }
+        }
+      }
+    },
+    "Vault Not Ready" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vault Not Ready"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultの準備ができていません"
+          }
+        }
+      }
+    },
+    "Vault Runtime" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vault Runtime"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vault Runtime"
+          }
+        }
+      }
+    },
+    "Vaults" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaults"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vault"
+          }
+        }
+      }
+    },
+    "Vaults Unavailable" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaults Unavailable"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultを利用できません"
+          }
+        }
+      }
+    },
+    "Video" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Video"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "動画"
+          }
+        }
+      }
+    },
+    "Video Card" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Video Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "動画カード"
+          }
+        }
+      }
+    },
+    "Videos" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Videos"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "動画"
+          }
+        }
+      }
+    },
+    "Voice" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "録音"
+          }
+        }
+      }
+    },
+    "Voice Record" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice Record"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声録音"
+          }
+        }
+      }
+    },
+    "Welcome to Journal" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Welcome to Journal"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Journalへようこそ"
+          }
+        }
+      }
+    },
+    "When enabled, new cards attach your current location automatically if iOS allows Journal to access it." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When enabled, new cards attach your current location automatically if iOS allows Journal to access it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オンにすると、iOSがJournalに位置情報の利用を許可している場合、新しいカードに現在地を自動で添付します。"
+          }
+        }
+      }
+    },
+    "When iCloud is available, Tinycurve uses Apple's CloudKit private database to sync your cards and media across devices signed in to your Apple Account. The developer does not receive a copy of your journal content from this sync." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When iCloud is available, Tinycurve uses Apple's CloudKit private database to sync your cards and media across devices signed in to your Apple Account. The developer does not receive a copy of your journal content from this sync."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloudを利用できる場合、TinycurveはAppleのCloudKitプライベートデータベースを使い、あなたのApple Accountでサインインしているデバイス間でカードとメディアを同期します。この同期によって、開発者があなたの記録内容のコピーを受け取ることはありません。"
+          }
+        }
+      }
+    },
+    "When you create cards, Tinycurve can store the text you type, photos you capture or choose from Photos, audio recordings, doodles, Bauhaus artwork, timestamps, relationships between cards, attachment metadata, and optional location coordinates." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When you create cards, Tinycurve can store the text you type, photos you capture or choose from Photos, audio recordings, doodles, Bauhaus artwork, timestamps, relationships between cards, attachment metadata, and optional location coordinates."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カードを作成すると、Tinycurveは入力したテキスト、撮影または写真アプリから選んだ写真、音声録音、落書き、Bauhausアートワーク、タイムスタンプ、カード同士の関係、添付ファイルのメタデータ、任意の位置座標を保存できます。"
+          }
+        }
+      }
+    },
+    "When you use a share action, Tinycurve creates the selected image or video export on device and hands that file to the system share sheet. The destination you choose controls what happens after that." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When you use a share action, Tinycurve creates the selected image or video export on device and hands that file to the system share sheet. The destination you choose controls what happens after that."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共有アクションを使うと、Tinycurveは選択された画像または動画の書き出しをデバイス上で作成し、そのファイルをシステム共有シートに渡します。その後の扱いは、あなたが選ぶ共有先によって決まります。"
+          }
+        }
+      }
+    },
+    "Widgets" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Widgets"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ウィジェット"
+          }
+        }
+      }
+    },
+    "Write your thoughts..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Write your thoughts..."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "思ったことを書いてみる..."
+          }
+        }
+      }
+    },
+    "Your draft stayed on screen." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your draft stayed on screen."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下書きは画面に残っています。"
+          }
+        }
+      }
+    },
+    "Your journal database and attachment files are stored on your device in Tinycurve's app container and App Group container so the app and widget can read the same entries." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your journal database and attachment files are stored on your device in Tinycurve's app container and App Group container so the app and widget can read the same entries."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたのジャーナルデータベースと添付ファイルは、TinycurveのアプリコンテナとApp Groupコンテナ内のデバイス上に保存されます。これにより、アプリとウィジェットが同じEntriesを読み取れます。"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

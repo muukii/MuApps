@@ -1,13 +1,100 @@
+import AppUIComponents
 import CaptureAudio
 import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
+import CoreGraphics
 import Foundation
 import JournalVault
-import MuColor
+import MediaProcessing
 import Observation
-import SwiftUI
-import UIKit
+
+/// A selected video kept in a temporary file until the vault save moves it into
+/// the selected vault's media directory.
+struct CapturedVideo: Sendable, Equatable, Codable {
+  var fileURL: URL
+  var thumbnailData: Data?
+  var pixelSize: CGSize
+  var duration: TimeInterval
+  var contentTypeIdentifier: String?
+  var byteSize: Int?
+
+  init(
+    fileURL: URL,
+    thumbnailData: Data? = nil,
+    pixelSize: CGSize = .zero,
+    duration: TimeInterval = 0,
+    contentTypeIdentifier: String? = nil,
+    byteSize: Int? = nil
+  ) {
+    self.fileURL = fileURL
+    self.thumbnailData = thumbnailData
+    self.pixelSize = pixelSize
+    self.duration = duration
+    self.contentTypeIdentifier = contentTypeIdentifier
+    self.byteSize = byteSize
+  }
+}
+
+private extension CapturedVideo {
+  var pixelWidth: Int? { pixelSize.nonZeroPixelWidth }
+  var pixelHeight: Int? { pixelSize.nonZeroPixelHeight }
+}
+
+/// A selected Live Photo represented by its required still image and paired
+/// movie resources.
+///
+/// `PHLivePhoto` itself is not persisted. The Photos import boundary extracts
+/// the durable resource files, then the vault save writes them as sibling
+/// `AttachmentResource` rows so CloudKit sync/export can reason about both.
+struct CapturedLivePhoto: Sendable, Equatable, Codable {
+  var stillImageData: Data
+  var pairedVideoFileURL: URL
+  var thumbnailData: Data?
+  var pixelSize: CGSize
+  var duration: TimeInterval
+  var stillImageContentTypeIdentifier: String?
+  var pairedVideoContentTypeIdentifier: String?
+  var stillImageByteSize: Int?
+  var pairedVideoByteSize: Int?
+
+  init(
+    stillImageData: Data,
+    pairedVideoFileURL: URL,
+    thumbnailData: Data? = nil,
+    pixelSize: CGSize = .zero,
+    duration: TimeInterval = 0,
+    stillImageContentTypeIdentifier: String? = nil,
+    pairedVideoContentTypeIdentifier: String? = nil,
+    stillImageByteSize: Int? = nil,
+    pairedVideoByteSize: Int? = nil
+  ) {
+    self.stillImageData = stillImageData
+    self.pairedVideoFileURL = pairedVideoFileURL
+    self.thumbnailData = thumbnailData
+    self.pixelSize = pixelSize
+    self.duration = duration
+    self.stillImageContentTypeIdentifier = stillImageContentTypeIdentifier
+    self.pairedVideoContentTypeIdentifier = pairedVideoContentTypeIdentifier
+    self.stillImageByteSize = stillImageByteSize
+    self.pairedVideoByteSize = pairedVideoByteSize
+  }
+}
+
+private extension CapturedLivePhoto {
+  var pixelWidth: Int? { pixelSize.nonZeroPixelWidth }
+  var pixelHeight: Int? { pixelSize.nonZeroPixelHeight }
+}
+
+private extension CGSize {
+  var nonZeroPixelWidth: Int? {
+    width > 0 ? Int(width.rounded()) : nil
+  }
+
+  var nonZeroPixelHeight: Int? {
+    height > 0 ? Int(height.rounded()) : nil
+  }
+}
 
 /// One editable Journal card draft.
 ///
@@ -29,6 +116,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     case kind
     case text
     case photo
+    case video
+    case livePhoto
     case audio
     case doodle
     case bauhaus
@@ -75,6 +164,12 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   /// Captured still photo kept in the component's own value type until save.
   var photo: CapturedPhoto?
 
+  /// Selected video kept in a temporary file until save.
+  var video: CapturedVideo?
+
+  /// Selected Live Photo kept as still + paired movie resources until save.
+  var livePhoto: CapturedLivePhoto?
+
   /// Completed ambient recording kept in the component's own value type until
   /// save. The recording file is moved into the Journal media directory later.
   var audio: AudioRecording?
@@ -102,6 +197,10 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
       return linkURL != nil
     case .photo:
       return photo != nil
+    case .video:
+      return video != nil
+    case .livePhoto:
+      return livePhoto != nil
     case .audio:
       return audio != nil
     case .doodle:
@@ -122,6 +221,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     kind == .text
       && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       && photo == nil
+      && video == nil
+      && livePhoto == nil
       && audio == nil
       && doodle == nil
       && bauhaus == nil
@@ -133,6 +234,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     kind: Card.Kind = .text,
     text: String = "",
     photo: CapturedPhoto? = nil,
+    video: CapturedVideo? = nil,
+    livePhoto: CapturedLivePhoto? = nil,
     audio: AudioRecording? = nil,
     doodle: DoodleDrawing? = nil,
     bauhaus: BauhausGridDocument? = nil,
@@ -143,6 +246,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     self.kind = kind
     self.text = text
     self.photo = photo
+    self.video = video
+    self.livePhoto = livePhoto
     self.audio = audio
     self.doodle = doodle
     self.bauhaus = bauhaus
@@ -156,6 +261,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     self.kind = try container.decode(Card.Kind.self, forKey: .kind)
     self.text = try container.decode(String.self, forKey: .text)
     self.photo = try container.decodeIfPresent(CapturedPhoto.self, forKey: .photo)
+    self.video = try container.decodeIfPresent(CapturedVideo.self, forKey: .video)
+    self.livePhoto = try container.decodeIfPresent(CapturedLivePhoto.self, forKey: .livePhoto)
     self.audio = try container.decodeIfPresent(AudioRecording.self, forKey: .audio)
     self.doodle = try container.decodeIfPresent(DoodleDrawing.self, forKey: .doodle)
     self.bauhaus = try container.decodeIfPresent(BauhausGridDocument.self, forKey: .bauhaus)
@@ -169,6 +276,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     try container.encode(kind, forKey: .kind)
     try container.encode(text, forKey: .text)
     try container.encodeIfPresent(photo, forKey: .photo)
+    try container.encodeIfPresent(video, forKey: .video)
+    try container.encodeIfPresent(livePhoto, forKey: .livePhoto)
     try container.encodeIfPresent(audio, forKey: .audio)
     try container.encodeIfPresent(doodle, forKey: .doodle)
     try container.encodeIfPresent(bauhaus, forKey: .bauhaus)
@@ -183,6 +292,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
       kind: kind,
       text: text,
       photo: photo,
+      video: video,
+      livePhoto: livePhoto,
       audio: audio,
       doodle: doodle,
       bauhaus: bauhaus,
@@ -194,6 +305,18 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   func setPhoto(_ photo: CapturedPhoto) {
     kind = .photo
     self.photo = photo
+  }
+
+  /// Stores a selected video payload and switches the draft to video mode.
+  func setVideo(_ video: CapturedVideo) {
+    kind = .video
+    self.video = video
+  }
+
+  /// Stores a selected Live Photo payload and switches the draft to Live Photo mode.
+  func setLivePhoto(_ livePhoto: CapturedLivePhoto) {
+    kind = .livePhoto
+    self.livePhoto = livePhoto
   }
 
   /// Stores raw URL text and switches the draft to link mode.
@@ -241,6 +364,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     kind = .text
     text = ""
     photo = nil
+    video = nil
+    livePhoto = nil
     audio = nil
     doodle = nil
     bauhaus = nil
@@ -253,27 +378,18 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
 /// then converts them into vault persistence input immediately before the write.
 struct CardEditDraftSnapshot: Sendable, Codable {
 
-  /// Maximum pixel edge for thumbnails mirrored through SwiftData. Full authored
-  /// media stays in the attachment file; this preview is only for lightweight
-  /// surfaces such as widgets.
-  private static let thumbnailMaximumPixelLength: CGFloat = 512
-
-  /// Square output size for Bauhaus thumbnails.
-  private static let bauhausThumbnailSize = CGSize(width: 512, height: 512)
-
   var kind: Card.Kind
   var text: String
   var photo: CapturedPhoto?
+  var video: CapturedVideo?
+  var livePhoto: CapturedLivePhoto?
   var audio: AudioRecording?
   var doodle: DoodleDrawing?
   var bauhaus: BauhausGridDocument?
   var location: Coordinate?
 
   @MainActor
-  func vaultDraft(
-    palette: Palette = .default,
-    colorScheme: ColorScheme = .light
-  ) throws -> VaultContentStore.CardDraft {
+  func vaultDraft() throws -> VaultContentStore.CardDraft {
     switch kind {
     case .text:
       return VaultContentStore.CardDraft(
@@ -292,9 +408,59 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       )
     case .photo:
       guard let photo else { throw CardEditDraftSnapshotError.missingMediaPayload }
+      let thumbnail = try? MediaThumbnailGenerator.imageThumbnail(from: photo.imageData).data
       return VaultContentStore.CardDraft(
         kind: .photo,
         mediaData: photo.imageData,
+        thumbnail: thumbnail,
+        location: location
+      )
+    case .video:
+      guard let video else { throw CardEditDraftSnapshotError.missingMediaPayload }
+      let thumbnail = video.thumbnailData
+        ?? (try? MediaThumbnailGenerator.videoThumbnail(from: video.fileURL).data)
+      return VaultContentStore.CardDraft(
+        kind: .video,
+        mediaResources: [
+          VaultContentStore.AttachmentResourceDraft(
+            role: .originalVideo,
+            fileURL: video.fileURL,
+            byteSize: video.byteSize,
+            contentType: video.contentTypeIdentifier ?? "public.mpeg-4",
+            pixelWidth: video.pixelWidth,
+            pixelHeight: video.pixelHeight,
+            duration: video.duration
+          )
+        ],
+        thumbnail: thumbnail,
+        location: location
+      )
+    case .livePhoto:
+      guard let livePhoto else { throw CardEditDraftSnapshotError.missingMediaPayload }
+      let thumbnail = livePhoto.thumbnailData
+        ?? (try? MediaThumbnailGenerator.imageThumbnail(from: livePhoto.stillImageData).data)
+      return VaultContentStore.CardDraft(
+        kind: .livePhoto,
+        mediaResources: [
+          VaultContentStore.AttachmentResourceDraft(
+            role: .stillImage,
+            data: livePhoto.stillImageData,
+            byteSize: livePhoto.stillImageByteSize,
+            contentType: livePhoto.stillImageContentTypeIdentifier,
+            pixelWidth: livePhoto.pixelWidth,
+            pixelHeight: livePhoto.pixelHeight
+          ),
+          VaultContentStore.AttachmentResourceDraft(
+            role: .pairedVideo,
+            fileURL: livePhoto.pairedVideoFileURL,
+            byteSize: livePhoto.pairedVideoByteSize,
+            contentType: livePhoto.pairedVideoContentTypeIdentifier ?? "public.mpeg-4",
+            pixelWidth: livePhoto.pixelWidth,
+            pixelHeight: livePhoto.pixelHeight,
+            duration: livePhoto.duration
+          ),
+        ],
+        thumbnail: thumbnail,
         location: location
       )
     case .audio:
@@ -309,7 +475,6 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       return VaultContentStore.CardDraft(
         kind: .doodle,
         mediaData: try JSONEncoder().encode(doodle),
-        thumbnail: doodleThumbnailData(for: doodle, palette: palette),
         location: location
       )
     case .bauhaus:
@@ -319,7 +484,6 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       return VaultContentStore.CardDraft(
         kind: .bauhaus,
         mediaData: try JSONEncoder().encode(bauhaus),
-        thumbnail: bauhausThumbnailData(for: bauhaus, colorScheme: colorScheme),
         location: location
       )
     case .unknown:
@@ -327,26 +491,6 @@ struct CardEditDraftSnapshot: Sendable, Codable {
     @unknown default:
       throw CardEditDraftSnapshotError.unsupportedKind
     }
-  }
-
-  @MainActor
-  private func doodleThumbnailData(for drawing: DoodleDrawing, palette: Palette) -> Data? {
-    drawing
-      .image(inkColor: palette.tint, scale: Self.thumbnailScale(for: drawing.canvasSize))
-      .flatMap { $0.pngData() }
-  }
-
-  @MainActor
-  private func bauhausThumbnailData(for document: BauhausGridDocument, colorScheme: ColorScheme) -> Data? {
-    document
-      .image(colorScheme: colorScheme, size: Self.bauhausThumbnailSize)
-      .flatMap { $0.pngData() }
-  }
-
-  private static func thumbnailScale(for canvasSize: CGSize) -> CGFloat {
-    let longestEdge = max(canvasSize.width, canvasSize.height)
-    guard longestEdge > thumbnailMaximumPixelLength else { return 1 }
-    return thumbnailMaximumPixelLength / longestEdge
   }
 }
 

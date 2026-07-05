@@ -74,6 +74,31 @@ struct VaultCatalogStoreTests {
   }
 
   @Test
+  func deleteVault_removesCatalogRowsOnly() throws {
+    let layout = makeTemporaryLayout()
+    let registry = VaultStoreRegistry(layout: layout)
+    let catalog = try VaultCatalogStore.open(layout: layout)
+    let deletedVaultID = try catalog.createVault(title: "Deleted", using: registry)
+    let remainingVaultID = try catalog.createVault(title: "Remaining", using: registry)
+
+    try catalog.deleteVault(vaultID: deletedVaultID)
+
+    let descriptors = try catalog.vaultDescriptors()
+    #expect(descriptors.map(\.vaultID) == [remainingVaultID])
+
+    let context = catalog.container.mainContext
+    let indices = try context.fetch(FetchDescriptor<VaultIndex>())
+    let localStates = try context.fetch(FetchDescriptor<VaultLocalState>())
+    let summaries = try context.fetch(FetchDescriptor<VaultSummary>())
+    #expect(indices.contains { $0.vaultID == deletedVaultID.rawValue } == false)
+    #expect(localStates.contains { $0.vaultID == deletedVaultID.rawValue } == false)
+    #expect(summaries.contains { $0.vaultID == deletedVaultID.rawValue } == false)
+
+    // Content files are a separate boundary owned by VaultStoreLayout.
+    #expect(FileManager.default.fileExists(atPath: layout.vaultDirectoryURL(for: deletedVaultID).path))
+  }
+
+  @Test
   func registry_streamsLocalMutationsToSubscribers() async throws {
     let layout = makeTemporaryLayout()
     let registry = VaultStoreRegistry(layout: layout)

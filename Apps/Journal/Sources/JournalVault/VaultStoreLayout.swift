@@ -12,6 +12,9 @@ import Foundation
 ///   SyncState/                 CKSyncEngine state serializations. Engine state
 ///                              is per CloudKit *database* (private / shared),
 ///                              not per vault, so it lives at the root.
+///   Vaults/<vault-id>/needs-cloudkit-refetch
+///                              Pre-release recovery marker consumed by the
+///                              CloudKit sync engine after a local store reset.
 /// ```
 ///
 /// Per-vault sync bookkeeping (record system fields, the pending-mutation
@@ -75,6 +78,18 @@ public struct VaultStoreLayout: Hashable, Sendable {
     vaultDirectoryURL(for: vaultID).appending(path: "media", directoryHint: .isDirectory)
   }
 
+  func preReleaseCloudKitRefetchMarkerURL(for vaultID: VaultID) -> URL {
+    vaultDirectoryURL(for: vaultID)
+      .appending(path: "needs-cloudkit-refetch", directoryHint: .notDirectory)
+  }
+
+  public func syncStateFileURLs() -> [URL] {
+    [
+      syncStateDirectoryURL.appending(path: "private-database.json", directoryHint: .notDirectory),
+      syncStateDirectoryURL.appending(path: "shared-database.json", directoryHint: .notDirectory),
+    ]
+  }
+
   // MARK: - Directory creation
 
   /// Creates the root, `Vaults/`, and `SyncState/` directories. Idempotent.
@@ -89,6 +104,64 @@ public struct VaultStoreLayout: Hashable, Sendable {
       at: mediaDirectoryURL(for: vaultID),
       withIntermediateDirectories: true
     )
+  }
+
+  /// Removes one vault's entire on-disk content directory.
+  ///
+  /// This is the local half of vault deletion. Callers must first release any
+  /// cached store/instance references they own; SwiftData doesn't expose an
+  /// explicit close operation for `ModelContainer`.
+  public func removeVaultDirectory(for vaultID: VaultID) throws {
+    let directoryURL = vaultDirectoryURL(for: vaultID)
+    if FileManager.default.fileExists(atPath: directoryURL.path) {
+      try FileManager.default.removeItem(at: directoryURL)
+    }
+  }
+
+  /// Removes one vault's local content database and media files.
+  ///
+  /// This is intentionally scoped to `Vaults/<vault-id>/`: the catalog, sync
+  /// engine state, and sibling vault stores are left untouched. Pre-release
+  /// schema breaks use this to discard incompatible local content instead of
+  /// carrying migration code for shapes that never shipped.
+  func resetPreReleaseContentStoreForCloudKitRecovery(for vaultID: VaultID) throws {
+    let storeURL = contentStoreURL(for: vaultID)
+    let fileManager = FileManager.default
+    let storeSidecarNames = [
+      storeURL.lastPathComponent,
+      "\(storeURL.lastPathComponent)-shm",
+      "\(storeURL.lastPathComponent)-wal",
+    ]
+
+    for fileName in storeSidecarNames {
+      let fileURL = storeURL.deletingLastPathComponent()
+        .appending(path: fileName, directoryHint: .notDirectory)
+      if fileManager.fileExists(atPath: fileURL.path) {
+        try fileManager.removeItem(at: fileURL)
+      }
+    }
+
+    let mediaURL = mediaDirectoryURL(for: vaultID)
+    if fileManager.fileExists(atPath: mediaURL.path) {
+      try fileManager.removeItem(at: mediaURL)
+    }
+    try ensureVaultDirectories(for: vaultID)
+    try Data().write(to: preReleaseCloudKitRefetchMarkerURL(for: vaultID), options: .atomic)
+    try resetCloudKitSyncStateFiles()
+  }
+
+  func consumePreReleaseCloudKitRefetchRequest(for vaultID: VaultID) throws -> Bool {
+    let markerURL = preReleaseCloudKitRefetchMarkerURL(for: vaultID)
+    guard FileManager.default.fileExists(atPath: markerURL.path) else { return false }
+    try FileManager.default.removeItem(at: markerURL)
+    return true
+  }
+
+  func resetCloudKitSyncStateFiles() throws {
+    let fileManager = FileManager.default
+    for fileURL in syncStateFileURLs() where fileManager.fileExists(atPath: fileURL.path) {
+      try fileManager.removeItem(at: fileURL)
+    }
   }
 }
 

@@ -1,3 +1,4 @@
+import AppUIComponents
 import AVFoundation
 import CaptureAudio
 import CaptureBauhaus
@@ -13,13 +14,11 @@ import WidgetKit
 /// Vault-backed entries list.
 ///
 /// This screen intentionally reads only the selected `VaultInstance`. It does
-/// not receive the legacy `JournalModel` container; legacy data enters the
-/// current UI only after the sync layer has imported it into a vault store.
+/// not receive any legacy persistence container; legacy data enters the current
+/// UI only after the sync layer has imported it into a vault store.
 struct SavedListView: View {
 
   @Environment(\.calendar) private var calendar
-  @Environment(\.appPalette) private var palette
-  @Environment(\.colorScheme) private var colorScheme
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
 
@@ -30,22 +29,32 @@ struct SavedListView: View {
   @State private var editPresentation: VaultSavedEntryEditPresentation?
   @State private var isEditDraftLoading = false
   @State private var isSavingEdit = false
+  @State private var isDeletingEntry = false
   @State private var editErrorMessage: String?
+  @State private var deleteErrorMessage: String?
+  @State private var areStacksExpanded = false
+  @Namespace private var stackExpansionNamespace
   @Namespace private var navigationTransitionNamespace
 
   var body: some View {
     let columns = SavedListGrid.columns(for: horizontalSizeClass)
+    let isMutationDisabled = isEditDraftLoading || isSavingEdit || isDeletingEntry
+    let visibleSections = visibleDaySections
 
     ScrollView {
       LazyVStack(alignment: .leading, spacing: daySectionSpacing) {
-        ForEach(sections) { section in
+        ForEach(visibleSections) { section in
           VaultSavedDaySectionView(
             section: section,
             columns: columns,
             childEntriesByParentID: childEntriesByParentID,
-            isEditingDisabled: isEditDraftLoading || isSavingEdit,
+            areStacksExpanded: areStacksExpanded,
+            isEditingDisabled: isMutationDisabled,
+            isDeletingDisabled: isMutationDisabled,
+            stackExpansionNamespace: stackExpansionNamespace,
             transitionNamespace: navigationTransitionNamespace,
-            onEdit: presentEditDraft
+            onEdit: presentEditDraft,
+            onDelete: deleteEntry
           )
         }
       }
@@ -62,17 +71,20 @@ struct SavedListView: View {
     }
     .scrollContentBackground(.hidden)
     .background(.background)
-    .navigationTitle(vaultRuntime.selectedVault?.title ?? "Entries")
+    .navigationTitle(vaultRuntime.selectedVault?.title ?? String(localized: "Entries"))
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
-        Button {
-          loadEntries()
-        } label: {
-          Image(systemName: "arrow.clockwise")
+      if hasStackedEntries {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button {
+            withAnimation(.smooth) {
+              areStacksExpanded.toggle()
+            }
+          } label: {
+            Image(systemName: areStacksExpanded ? "square.stack.3d.up" : "square.grid.2x2")
+          }
+          .accessibilityLabel(areStacksExpanded ? "Collapse Stacks" : "Expand Stacks")
         }
-        .disabled(isLoading)
-        .accessibilityLabel("Reload Entries")
       }
     }
     .refreshable {
@@ -105,6 +117,13 @@ struct SavedListView: View {
         Text(editErrorMessage)
       }
     }
+    .alert("Could Not Delete Card", isPresented: deleteErrorPresentation) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      if let deleteErrorMessage {
+        Text(deleteErrorMessage)
+      }
+    }
     .task(id: vaultRuntime.selectedVault?.vaultID.rawValue) {
       loadEntries()
     }
@@ -112,6 +131,38 @@ struct SavedListView: View {
       guard shouldReload(for: notification) else { return }
       loadEntries()
     }
+  }
+
+  private var hasStackedEntries: Bool {
+    childEntriesByParentID.values.contains { $0.isEmpty == false }
+  }
+
+  private var visibleDaySections: [VaultSavedDaySection] {
+    guard areStacksExpanded else {
+      return sections
+    }
+
+    return VaultSavedDaySection.sections(
+      for: expandedEntries(),
+      calendar: calendar
+    )
+  }
+
+  private func expandedEntries() -> [VaultSavedEntrySnapshot] {
+    var result: [VaultSavedEntrySnapshot] = []
+
+    func appendSubtree(startingAt entry: VaultSavedEntrySnapshot) {
+      result.append(entry)
+      for child in childEntriesByParentID[entry.edgeID] ?? [] {
+        appendSubtree(startingAt: child)
+      }
+    }
+
+    for root in sections.flatMap(\.entries) {
+      appendSubtree(startingAt: root)
+    }
+
+    return result
   }
 
   private var loadErrorPresentation: Binding<Bool> {
@@ -130,6 +181,16 @@ struct SavedListView: View {
     } set: { isPresented in
       if isPresented == false {
         editErrorMessage = nil
+      }
+    }
+  }
+
+  private var deleteErrorPresentation: Binding<Bool> {
+    Binding {
+      deleteErrorMessage != nil
+    } set: { isPresented in
+      if isPresented == false {
+        deleteErrorMessage = nil
       }
     }
   }
@@ -165,7 +226,7 @@ struct SavedListView: View {
   }
 
   private func presentEditDraft(for entry: VaultSavedEntrySnapshot) {
-    guard isEditDraftLoading == false, isSavingEdit == false else {
+    guard isEditDraftLoading == false, isSavingEdit == false, isDeletingEntry == false else {
       return
     }
 
@@ -200,10 +261,7 @@ struct SavedListView: View {
           throw VaultSavedEntryEditDraftError.vaultUnavailable
         }
 
-        let draft = try presentation.draft.savingSnapshot().vaultDraft(
-          palette: palette,
-          colorScheme: colorScheme
-        )
+        let draft = try presentation.draft.savingSnapshot().vaultDraft()
         try vault.contentStore.updateCard(cardID: presentation.cardID, with: draft)
         await vaultRuntime.refresh()
         WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
@@ -212,6 +270,34 @@ struct SavedListView: View {
       } catch {
         editErrorMessage = error.localizedDescription
       }
+    }
+  }
+
+  @MainActor
+  private func deleteEntry(_ entry: VaultSavedEntrySnapshot) async -> Bool {
+    guard isDeletingEntry == false, isEditDraftLoading == false, isSavingEdit == false else {
+      return false
+    }
+
+    isDeletingEntry = true
+    defer { isDeletingEntry = false }
+
+    do {
+      guard let vault = vaultRuntime.selectedVault else {
+        throw VaultSavedEntryEditDraftError.vaultUnavailable
+      }
+
+      try vault.contentStore.deleteCardEdge(edgeID: entry.edgeID)
+      if editPresentation?.cardID == entry.cardID {
+        editPresentation = nil
+      }
+      await vaultRuntime.refresh()
+      WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
+      loadEntries()
+      return true
+    } catch {
+      deleteErrorMessage = error.localizedDescription
+      return false
     }
   }
 }
@@ -254,6 +340,11 @@ private struct VaultSavedEntryReader {
         sortBy: [SortDescriptor(\.createdAt)]
       )
     )
+    let resources = try context.fetch(
+      FetchDescriptor<JournalVault.AttachmentResource>(
+        sortBy: [SortDescriptor(\.createdAt)]
+      )
+    )
 
     let cardsByID = Dictionary(uniqueKeysWithValues: cards.map { ($0.id, $0) })
     let edgeIDs = Set(edges.map(\.id))
@@ -262,6 +353,7 @@ private struct VaultSavedEntryReader {
         result[attachment.cardID] = attachment
       }
     }
+    let resourcesByAttachmentID = Dictionary(grouping: resources, by: \.attachmentID)
 
     let entries = edges.compactMap { edge -> VaultSavedEntrySnapshot? in
       guard let card = cardsByID[edge.cardID] else { return nil }
@@ -275,13 +367,34 @@ private struct VaultSavedEntryReader {
         createdAt: card.createdAt,
         updatedAt: card.updatedAt,
         location: card.location,
-        attachment: attachmentByCardID[card.id].map { attachment in
-          VaultSavedAttachmentSnapshot(
+        attachment: attachmentByCardID[card.id].flatMap { attachment in
+          let resourceSnapshots = (resourcesByAttachmentID[attachment.id] ?? []).map { resource in
+            VaultSavedAttachmentResourceSnapshot(
+              id: resource.id,
+              role: resource.role,
+              byteSize: resource.byteSize,
+              contentType: resource.contentType,
+              pixelWidth: resource.pixelWidth,
+              pixelHeight: resource.pixelHeight,
+              duration: resource.duration,
+              fileURL: store.fileURL(for: resource)
+            )
+          }
+          guard let fileURL = resourceSnapshots
+            .first(where: { $0.id == attachment.primaryResourceID })?
+            .fileURL
+          else {
+            return nil
+          }
+
+          return VaultSavedAttachmentSnapshot(
             id: attachment.id,
             kind: attachment.kind,
             byteSize: attachment.byteSize,
+            primaryResourceID: attachment.primaryResourceID,
+            fileURL: fileURL,
             thumbnail: attachment.thumbnail,
-            fileURL: store.fileURL(for: attachment)
+            resources: resourceSnapshots
           )
         }
       )
@@ -340,8 +453,8 @@ extension VaultSavedEntrySnapshot {
 
   /// Rehydrates this saved card into the shared editing draft model.
   ///
-  /// Media cards require the full vault media file. Thumbnails are display-only
-  /// fallbacks and are intentionally not used to create a lossy edit draft.
+  /// Media cards require the full vault media file. Raster previews are
+  /// intentionally not used to create a lossy edit draft.
   @MainActor
   fileprivate func editDraft() async throws -> CardEditDraft {
     switch kind {
@@ -359,8 +472,51 @@ extension VaultSavedEntrySnapshot {
         photo: CapturedPhoto(imageData: data, pixelSize: image.pixelSize),
         location: location
       )
+    case .video:
+      let fileURL = try mediaFileURL(matching: .video)
+      let editableURL = try VaultSavedEntryEditMediaPreparer.mediaCopy(
+        from: fileURL,
+        fallbackPathExtension: "mov"
+      )
+      let resource = attachment?.primaryResource
+      return CardEditDraft(
+        kind: .video,
+        video: CapturedVideo(
+          fileURL: editableURL,
+          thumbnailData: attachment?.thumbnail,
+          pixelSize: resource?.pixelSize ?? .zero,
+          duration: resource?.duration ?? 0,
+          contentTypeIdentifier: resource?.contentType,
+          byteSize: resource?.byteSize
+        ),
+        location: location
+      )
+    case .livePhoto:
+      let stillData = try await mediaData(matching: .stillImage)
+      let pairedVideoFileURL = try mediaFileURL(matching: .pairedVideo)
+      let editablePairedVideoURL = try VaultSavedEntryEditMediaPreparer.mediaCopy(
+        from: pairedVideoFileURL,
+        fallbackPathExtension: "mov"
+      )
+      let stillResource = try mediaResource(matching: .stillImage)
+      let pairedVideoResource = try mediaResource(matching: .pairedVideo)
+      return CardEditDraft(
+        kind: .livePhoto,
+        livePhoto: CapturedLivePhoto(
+          stillImageData: stillData,
+          pairedVideoFileURL: editablePairedVideoURL,
+          thumbnailData: attachment?.thumbnail,
+          pixelSize: stillResource.pixelSize ?? .zero,
+          duration: pairedVideoResource.duration ?? 0,
+          stillImageContentTypeIdentifier: stillResource.contentType,
+          pairedVideoContentTypeIdentifier: pairedVideoResource.contentType,
+          stillImageByteSize: stillResource.byteSize,
+          pairedVideoByteSize: pairedVideoResource.byteSize
+        ),
+        location: location
+      )
     case .audio:
-      let fileURL = try mediaFileURL(matching: .audio)
+      let fileURL = try mediaFileURL(matching: JournalVault.Attachment.Kind.audio)
       let editableURL = try VaultSavedEntryEditMediaPreparer.audioCopy(from: fileURL)
       return CardEditDraft(
         kind: .audio,
@@ -398,8 +554,31 @@ extension VaultSavedEntrySnapshot {
     return fileURL
   }
 
+  private func mediaFileURL(matching role: JournalVault.AttachmentResource.Role) throws -> URL {
+    let resource = try mediaResource(matching: role)
+    guard FileManager.default.fileExists(atPath: resource.fileURL.path) else {
+      throw VaultSavedEntryEditDraftError.mediaUnavailable
+    }
+    return resource.fileURL
+  }
+
+  private func mediaResource(matching role: JournalVault.AttachmentResource.Role) throws -> VaultSavedAttachmentResourceSnapshot {
+    guard let resource = attachment?.resources.first(where: { $0.role == role }) else {
+      throw VaultSavedEntryEditDraftError.mediaUnavailable
+    }
+    return resource
+  }
+
   private func mediaData(matching kind: JournalVault.Attachment.Kind) async throws -> Data {
     let fileURL = try mediaFileURL(matching: kind)
+    guard let data = await VaultSavedEntryMediaFileReader.data(from: fileURL) else {
+      throw VaultSavedEntryEditDraftError.mediaUnavailable
+    }
+    return data
+  }
+
+  private func mediaData(matching role: JournalVault.AttachmentResource.Role) async throws -> Data {
+    let fileURL = try mediaFileURL(matching: role)
     guard let data = await VaultSavedEntryMediaFileReader.data(from: fileURL) else {
       throw VaultSavedEntryEditDraftError.mediaUnavailable
     }
@@ -411,8 +590,33 @@ private struct VaultSavedAttachmentSnapshot: Hashable {
   let id: UUID
   let kind: JournalVault.Attachment.Kind
   let byteSize: Int
-  let thumbnail: Data?
+  let primaryResourceID: UUID
   let fileURL: URL
+  let thumbnail: Data?
+  let resources: [VaultSavedAttachmentResourceSnapshot]
+
+  var primaryResource: VaultSavedAttachmentResourceSnapshot? {
+    resources.first { $0.id == primaryResourceID }
+  }
+}
+
+private struct VaultSavedAttachmentResourceSnapshot: Hashable {
+  let id: UUID
+  let role: JournalVault.AttachmentResource.Role
+  let byteSize: Int
+  let contentType: String?
+  let pixelWidth: Int?
+  let pixelHeight: Int?
+  let duration: Double?
+  let fileURL: URL
+
+  var pixelSize: CGSize? {
+    guard let pixelWidth, let pixelHeight else {
+      return nil
+    }
+
+    return CGSize(width: pixelWidth, height: pixelHeight)
+  }
 }
 
 /// Errors surfaced when a saved vault entry cannot be reopened as an editable draft.
@@ -420,21 +624,21 @@ private enum VaultSavedEntryEditDraftError: LocalizedError {
   case vaultUnavailable
   case mediaUnavailable
   case mediaDecodeFailed
-  case audioCopyFailed
+  case mediaCopyFailed
   case unsupportedKind
 
   var errorDescription: String? {
     switch self {
     case .vaultUnavailable:
-      return "The selected vault is not available."
+      return String(localized: "The selected vault is not available.")
     case .mediaUnavailable:
-      return "This card's media file is not available on this device yet."
+      return String(localized: "This card's media file is not available on this device yet.")
     case .mediaDecodeFailed:
-      return "This card's media file could not be read for editing."
-    case .audioCopyFailed:
-      return "This audio recording could not be prepared for editing."
+      return String(localized: "This card's media file could not be read for editing.")
+    case .mediaCopyFailed:
+      return String(localized: "This card's media file could not be prepared for editing.")
     case .unsupportedKind:
-      return "This card type is not editable yet."
+      return String(localized: "This card type is not editable yet.")
     }
   }
 }
@@ -453,20 +657,28 @@ private enum VaultSavedEntryEditMediaPreparer {
 
   @MainActor
   static func audioCopy(from sourceURL: URL) throws -> URL {
+    try mediaCopy(from: sourceURL, fallbackPathExtension: "m4a")
+  }
+
+  @MainActor
+  static func mediaCopy(
+    from sourceURL: URL,
+    fallbackPathExtension: String
+  ) throws -> URL {
     guard FileManager.default.fileExists(atPath: sourceURL.path) else {
       throw VaultSavedEntryEditDraftError.mediaUnavailable
     }
 
-    let pathExtension = sourceURL.pathExtension.isEmpty ? "m4a" : sourceURL.pathExtension
+    let pathExtension = sourceURL.pathExtension.isEmpty ? fallbackPathExtension : sourceURL.pathExtension
     let destinationURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("journal-vault-edit-audio-\(UUID().uuidString)")
+      .appendingPathComponent("journal-vault-edit-media-\(UUID().uuidString)")
       .appendingPathExtension(pathExtension)
 
     do {
       try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
       return destinationURL
     } catch {
-      throw VaultSavedEntryEditDraftError.audioCopyFailed
+      throw VaultSavedEntryEditDraftError.mediaCopyFailed
     }
   }
 
@@ -570,9 +782,15 @@ private struct VaultSavedDaySectionView: View {
   let section: VaultSavedDaySection
   let columns: [GridItem]
   let childEntriesByParentID: [UUID: [VaultSavedEntrySnapshot]]
+  let areStacksExpanded: Bool
   let isEditingDisabled: Bool
+  let isDeletingDisabled: Bool
+  let stackExpansionNamespace: Namespace.ID
   let transitionNamespace: Namespace.ID
   let onEdit: @MainActor (VaultSavedEntrySnapshot) -> Void
+  let onDelete: @MainActor (VaultSavedEntrySnapshot) async -> Bool
+
+  @State private var deleteCandidate: VaultSavedEntrySnapshot?
 
   var body: some View {
     VStack(alignment: .leading, spacing: dayHeaderSpacing) {
@@ -580,20 +798,27 @@ private struct VaultSavedDaySectionView: View {
 
       LazyVGrid(columns: columns, spacing: cardSpacing) {
         ForEach(section.entries) { entry in
+          let subtree = subtreeEntries(startingAt: entry)
+          let childEntries = Array(subtree.dropFirst())
+
           NavigationLink {
             VaultSavedEntryDetailView(
-              entries: subtreeEntries(startingAt: entry),
+              entries: subtree,
               rootTitle: entry.kind.vaultListDisplayTitle,
               isEditingDisabled: isEditingDisabled,
-              onEdit: onEdit
+              isDeletingDisabled: isDeletingDisabled,
+              onEdit: onEdit,
+              onDelete: onDelete
             )
             .navigationTransition(.zoom(sourceID: entry.edgeID, in: transitionNamespace))
           } label: {
-            VaultSavedEntryTile(
+            VaultSavedEntryStackTile(
               entry: entry,
-              childCount: subtreeEntries(startingAt: entry).count - 1
+              childEntries: childEntries,
+              isExpanded: areStacksExpanded,
+              stackNamespace: stackExpansionNamespace,
+              transitionNamespace: transitionNamespace
             )
-            .matchedTransitionSource(id: entry.edgeID, in: transitionNamespace)
           }
           .buttonStyle(.plain)
           .contextMenu {
@@ -603,8 +828,43 @@ private struct VaultSavedDaySectionView: View {
               Label("Edit", systemImage: "square.and.pencil")
             }
             .disabled(isEditingDisabled)
+
+            Button(role: .destructive) {
+              deleteCandidate = entry
+            } label: {
+              Label("Delete", systemImage: "trash")
+            }
+            .disabled(isDeletingDisabled)
           }
         }
+      }
+    }
+    .confirmationDialog(
+      "Delete Card",
+      isPresented: deleteConfirmationPresentation,
+      titleVisibility: .visible,
+      presenting: deleteCandidate
+    ) { entry in
+      Button("Delete Card", role: .destructive) {
+        deleteCandidate = nil
+        Task { @MainActor in
+          _ = await onDelete(entry)
+        }
+      }
+      Button("Cancel", role: .cancel) {
+        deleteCandidate = nil
+      }
+    } message: { _ in
+      Text("This card and any connected cards will be removed from this vault. Synced copies are deleted through iCloud.")
+    }
+  }
+
+  private var deleteConfirmationPresentation: Binding<Bool> {
+    Binding {
+      deleteCandidate != nil
+    } set: { isPresented in
+      if isPresented == false {
+        deleteCandidate = nil
       }
     }
   }
@@ -636,39 +896,34 @@ private struct VaultSavedDayHeader: View {
   }
 }
 
-private struct VaultSavedEntryTile: View {
+private struct VaultSavedEntryStackTile: View {
 
   let entry: VaultSavedEntrySnapshot
-  let childCount: Int
+  let childEntries: [VaultSavedEntrySnapshot]
+  let isExpanded: Bool
+  let stackNamespace: Namespace.ID
+  let transitionNamespace: Namespace.ID
 
   var body: some View {
-    CardSurface {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack(spacing: 8) {
-          Image(systemName: entry.kind.vaultListSymbolName)
-          Text(entry.kind.vaultListDisplayTitle)
-          Spacer(minLength: 0)
-          if childCount > 0 {
-            Label {
-              Text(childCount + 1, format: .number)
-            } icon: {
-              Image(systemName: "point.3.connected.trianglepath.dotted")
-            }
-            .labelStyle(.iconOnly)
-            .accessibilityLabel("\(childCount + 1) cards")
-          }
+    ZStack {
+      if isExpanded == false {
+        ForEach(Array(childEntries.prefix(2).enumerated()), id: \.element.edgeID) { index, child in
+          VaultSavedEntryTile(entry: child.cardModel, childCount: 0)
+            .matchedGeometryEffect(id: child.edgeID, in: stackNamespace)
+            .scaleEffect(1 - CGFloat(index + 1) * 0.035)
+            .offset(x: CGFloat(index + 1) * 4, y: CGFloat(index + 1) * 6)
+            .opacity(0.72 - CGFloat(index) * 0.18)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.appOnSecondaryContainer.opacity(0.70))
-
-        VaultSavedEntryPreviewContent(entry: entry, isDetail: false)
-
-        Spacer(minLength: 0)
-
-        Text(entry.createdAt, format: .dateTime.hour().minute())
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(.appOnSecondaryContainer.opacity(0.56))
       }
+
+      VaultSavedEntryTile(
+        entry: entry.cardModel,
+        childCount: childEntries.count
+      )
+      .matchedGeometryEffect(id: entry.edgeID, in: stackNamespace)
+      .matchedTransitionSource(id: entry.edgeID, in: transitionNamespace)
     }
   }
 }
@@ -678,16 +933,27 @@ private struct VaultSavedEntryDetailView: View {
   let entries: [VaultSavedEntrySnapshot]
   let rootTitle: LocalizedStringResource
   let isEditingDisabled: Bool
+  let isDeletingDisabled: Bool
   let onEdit: @MainActor (VaultSavedEntrySnapshot) -> Void
+  let onDelete: @MainActor (VaultSavedEntrySnapshot) async -> Bool
+
+  @Environment(\.dismiss) private var dismiss
+  @State private var deleteCandidate: VaultSavedEntrySnapshot?
 
   var body: some View {
     ScrollView {
       LazyVStack(alignment: .center, spacing: 24) {
         ForEach(entries) { entry in
           VaultSavedEntryDetailCard(
-            entry: entry,
+            entry: entry.cardModel,
             isEditingDisabled: isEditingDisabled,
-            onEdit: onEdit
+            isDeletingDisabled: isDeletingDisabled,
+            onEdit: {
+              onEdit(entry)
+            },
+            onDelete: {
+              deleteCandidate = entry
+            }
           )
           .frame(maxWidth: detailMaximumCardWidth)
         }
@@ -698,216 +964,68 @@ private struct VaultSavedEntryDetailView: View {
     .background(.background)
     .navigationTitle(rootTitle)
     .navigationBarTitleDisplayMode(.inline)
-  }
-}
-
-private struct VaultSavedEntryDetailCard: View {
-
-  let entry: VaultSavedEntrySnapshot
-  let isEditingDisabled: Bool
-  let onEdit: @MainActor (VaultSavedEntrySnapshot) -> Void
-
-  var body: some View {
-    CardSurface {
-      VStack(alignment: .leading, spacing: 16) {
-        HStack(spacing: 8) {
-          Image(systemName: entry.kind.vaultListSymbolName)
-          Text(entry.kind.vaultListDisplayTitle)
-          Spacer(minLength: 0)
-          Text(entry.createdAt, format: .dateTime.month().day().hour().minute())
-          Button {
-            onEdit(entry)
-          } label: {
-            Image(systemName: "square.and.pencil")
+    .confirmationDialog(
+      "Delete Card",
+      isPresented: deleteConfirmationPresentation,
+      titleVisibility: .visible,
+      presenting: deleteCandidate
+    ) { entry in
+      Button("Delete Card", role: .destructive) {
+        deleteCandidate = nil
+        Task { @MainActor in
+          let didDelete = await onDelete(entry)
+          if didDelete {
+            dismiss()
           }
-          .buttonStyle(.plain)
-          .disabled(isEditingDisabled)
-          .accessibilityLabel("Edit Card")
-        }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.appOnSecondaryContainer.opacity(0.70))
-
-        VaultSavedEntryPreviewContent(entry: entry, isDetail: true)
-
-        Spacer(minLength: 0)
-
-        VaultSavedEntryMetadata(entry: entry)
-      }
-    }
-  }
-}
-
-private struct VaultSavedEntryPreviewContent: View {
-
-  let entry: VaultSavedEntrySnapshot
-  let isDetail: Bool
-
-  var body: some View {
-    switch entry.kind {
-    case .text:
-      Text(entry.body.isEmpty ? "Empty text card" : entry.body)
-        .font(isDetail ? .title3.weight(.semibold) : .headline.weight(.semibold))
-        .lineLimit(isDetail ? nil : 8)
-    case .link:
-      VaultSavedLinkPreview(urlString: entry.body, isDetail: isDetail)
-    case .photo:
-      VaultSavedMediaPreview(
-        attachment: entry.attachment,
-        fallbackSystemImage: "photo",
-        isDetail: isDetail
-      )
-    case .audio:
-      VaultSavedAudioPreview(isDetail: isDetail)
-    case .doodle:
-      VaultSavedMediaPreview(
-        attachment: entry.attachment,
-        fallbackSystemImage: "scribble",
-        isDetail: isDetail
-      )
-    case .bauhaus:
-      VaultSavedMediaPreview(
-        attachment: entry.attachment,
-        fallbackSystemImage: "square.grid.3x3",
-        isDetail: isDetail
-      )
-    case .unknown:
-      VaultSavedUnknownPreview()
-    @unknown default:
-      VaultSavedUnknownPreview()
-    }
-  }
-}
-
-private struct VaultSavedLinkPreview: View {
-
-  let urlString: String
-  let isDetail: Bool
-
-  var body: some View {
-    if let linkURL = JournalLinkURL(urlString) {
-      JournalLinkPreview(
-        url: linkURL.url,
-        mode: isDetail ? .detail : .summary
-      )
-    } else {
-      Text(urlString.isEmpty ? "Empty link card" : urlString)
-        .font(isDetail ? .title3.weight(.semibold) : .headline.weight(.semibold))
-        .lineLimit(isDetail ? nil : 8)
-    }
-  }
-}
-
-private struct VaultSavedMediaPreview: View {
-
-  let attachment: VaultSavedAttachmentSnapshot?
-  let fallbackSystemImage: String
-  let isDetail: Bool
-
-  var body: some View {
-    if let image = image {
-      Image(uiImage: image)
-        .resizable()
-        .scaledToFill()
-        .frame(maxWidth: .infinity)
-        .aspectRatio(isDetail ? 4 / 3 : 1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    } else {
-      VaultSavedMediaPlaceholder(systemImage: fallbackSystemImage)
-        .aspectRatio(isDetail ? 4 / 3 : 1, contentMode: .fit)
-    }
-  }
-
-  private var image: UIImage? {
-    if let fileURL = attachment?.fileURL,
-       FileManager.default.fileExists(atPath: fileURL.path),
-       let image = UIImage(contentsOfFile: fileURL.path) {
-      return image
-    }
-
-    if let thumbnail = attachment?.thumbnail {
-      return UIImage(data: thumbnail)
-    }
-
-    return nil
-  }
-}
-
-private struct VaultSavedAudioPreview: View {
-
-  let isDetail: Bool
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      Label("Audio", systemImage: "waveform")
-        .font(.headline.weight(.semibold))
-
-      HStack(alignment: .center, spacing: 4) {
-        ForEach(VaultSavedAudioWaveformSample.samples) { sample in
-          Capsule()
-            .fill(.appOnSecondaryContainer.opacity(0.62))
-            .frame(width: 4, height: sample.height)
         }
       }
-      .frame(maxWidth: .infinity, minHeight: isDetail ? 96 : 52, alignment: .center)
+      Button("Cancel", role: .cancel) {
+        deleteCandidate = nil
+      }
+    } message: { _ in
+      Text("This card and any connected cards will be removed from this vault. Synced copies are deleted through iCloud.")
+    }
+  }
+
+  private var deleteConfirmationPresentation: Binding<Bool> {
+    Binding {
+      deleteCandidate != nil
+    } set: { isPresented in
+      if isPresented == false {
+        deleteCandidate = nil
+      }
     }
   }
 }
 
-private struct VaultSavedAudioWaveformSample: Identifiable {
-  let id = UUID()
-  let height: CGFloat
+private extension VaultSavedEntrySnapshot {
 
-  static let samples: [VaultSavedAudioWaveformSample] = [
-    18, 30, 24, 42, 34, 58, 46, 70, 38, 54, 28, 44, 64, 50, 36, 22,
-  ].map { VaultSavedAudioWaveformSample(height: CGFloat($0)) }
-}
-
-private struct VaultSavedMediaPlaceholder: View {
-
-  let systemImage: String
-
-  var body: some View {
-    RoundedRectangle(cornerRadius: 12, style: .continuous)
-      .fill(.appOnSecondaryContainer.opacity(0.08))
-      .overlay {
-        Image(systemName: systemImage)
-          .font(.system(size: 34, weight: .semibold))
-          .foregroundStyle(.appOnSecondaryContainer.opacity(0.42))
-      }
+  /// Display projection handed to `AppUIComponents`.
+  ///
+  /// The saved-list feature owns vault snapshots and mutation callbacks; the UI
+  /// component module receives only the stable values it needs to render a card.
+  var cardModel: VaultSavedEntryCardModel {
+    VaultSavedEntryCardModel(
+      id: edgeID,
+      kind: kind,
+      body: body,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      location: location,
+      attachment: attachment?.cardModel
+    )
   }
 }
 
-private struct VaultSavedUnknownPreview: View {
+private extension VaultSavedAttachmentSnapshot {
 
-  var body: some View {
-    VaultSavedMediaPlaceholder(systemImage: "questionmark.square.dashed")
-  }
-}
-
-private struct VaultSavedEntryMetadata: View {
-
-  let entry: VaultSavedEntrySnapshot
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Label {
-        Text(entry.updatedAt, format: .dateTime.month().day().hour().minute())
-      } icon: {
-        Image(systemName: "clock.arrow.circlepath")
-      }
-
-      if let location = entry.location {
-        Label {
-          Text(
-            "\(location.latitude.formatted(.number.precision(.fractionLength(4)))), \(location.longitude.formatted(.number.precision(.fractionLength(4))))"
-          )
-        } icon: {
-          Image(systemName: "location")
-        }
-      }
-    }
-    .font(.caption)
-    .foregroundStyle(.appOnSecondaryContainer.opacity(0.62))
+  var cardModel: VaultSavedEntryAttachmentModel {
+    VaultSavedEntryAttachmentModel(
+      kind: kind,
+      fileURL: fileURL,
+      pairedVideoFileURL: resources.first { $0.role == .pairedVideo }?.fileURL,
+      thumbnail: thumbnail
+    )
   }
 }
 
@@ -942,46 +1060,5 @@ private extension UIImage {
   /// Pixel dimensions for persistence metadata derived from reloaded image data.
   var pixelSize: CGSize {
     CGSize(width: size.width * scale, height: size.height * scale)
-  }
-}
-
-private extension JournalVault.Card.Kind {
-
-  var vaultListDisplayTitle: LocalizedStringResource {
-    switch self {
-    case .text:
-      "Text"
-    case .link:
-      "Link"
-    case .photo:
-      "Photo"
-    case .audio:
-      "Audio"
-    case .doodle:
-      "Doodle"
-    case .bauhaus:
-      "Bauhaus"
-    case .unknown:
-      "Card"
-    }
-  }
-
-  var vaultListSymbolName: String {
-    switch self {
-    case .text:
-      "text.alignleft"
-    case .link:
-      "link"
-    case .photo:
-      "photo"
-    case .audio:
-      "waveform"
-    case .doodle:
-      "scribble"
-    case .bauhaus:
-      "square.grid.3x3"
-    case .unknown:
-      "questionmark.square.dashed"
-    }
   }
 }

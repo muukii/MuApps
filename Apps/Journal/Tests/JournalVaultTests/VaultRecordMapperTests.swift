@@ -39,14 +39,14 @@ struct VaultRecordMapperTests {
     // A kind from a newer app version must round-trip through this build
     // unchanged, not collapse to "unknown" on the server.
     let card = Card()
-    card.kindRawValue = "video"
+    card.kindRawValue = "spatialVideo"
     let record = makeRecord(type: .card, recordName: card.id.uuidString)
     VaultRecordMapper.applyFields(of: card, to: record)
 
     let imported = Card(id: card.id)
     VaultRecordMapper.update(imported, from: record)
 
-    #expect(imported.kindRawValue == "video")
+    #expect(imported.kindRawValue == "spatialVideo")
     #expect(imported.kind == .unknown)
   }
 
@@ -103,19 +103,59 @@ struct VaultRecordMapperTests {
       cardID: UUID(),
       kind: .doodle,
       byteSize: 128,
+      primaryResourceID: UUID(),
       thumbnail: Data([0x0A, 0x0B])
     )
     let record = makeRecord(type: .attachment, recordName: attachment.id.uuidString)
-    VaultRecordMapper.applyFields(of: attachment, assetFileURL: nil, to: record)
+    VaultRecordMapper.applyFields(of: attachment, to: record)
 
-    let imported = JournalVault.Attachment(id: attachment.id, cardID: UUID())
+    let imported = JournalVault.Attachment(
+      id: attachment.id,
+      cardID: UUID(),
+      primaryResourceID: UUID()
+    )
     VaultRecordMapper.update(imported, from: record)
 
     #expect(imported.cardID == attachment.cardID)
     #expect(imported.kind == .doodle)
     #expect(imported.byteSize == 128)
+    #expect(imported.primaryResourceID == attachment.primaryResourceID)
     #expect(imported.thumbnail == Data([0x0A, 0x0B]))
-    #expect(record[VaultRecordMapper.AttachmentKey.file] == nil)
+  }
+
+  @Test
+  func attachmentResourceFields_roundTrip() {
+    let resource = JournalVault.AttachmentResource(
+      attachmentID: UUID(),
+      role: .originalImage,
+      byteSize: 512,
+      contentType: "public.jpeg",
+      pixelWidth: 640,
+      pixelHeight: 480,
+      duration: 1.25,
+      isHDR: true,
+      colorSpaceName: "Display P3"
+    )
+    let record = makeRecord(type: .attachmentResource, recordName: resource.id.uuidString)
+    VaultRecordMapper.applyFields(of: resource, assetFileURL: nil, to: record)
+
+    let imported = JournalVault.AttachmentResource(
+      id: resource.id,
+      attachmentID: UUID(),
+      role: .unknown
+    )
+    VaultRecordMapper.update(imported, from: record)
+
+    #expect(imported.attachmentID == resource.attachmentID)
+    #expect(imported.role == .originalImage)
+    #expect(imported.byteSize == 512)
+    #expect(imported.contentType == "public.jpeg")
+    #expect(imported.pixelWidth == 640)
+    #expect(imported.pixelHeight == 480)
+    #expect(imported.duration == 1.25)
+    #expect(imported.isHDR)
+    #expect(imported.colorSpaceName == "Display P3")
+    #expect(record[VaultRecordMapper.AttachmentResourceKey.file] == nil)
   }
 
   @Test

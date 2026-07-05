@@ -1,4 +1,6 @@
 import AppIntents
+import CaptureBauhaus
+import CaptureDoodle
 import JournalVault
 import SwiftData
 import SwiftUI
@@ -92,7 +94,7 @@ struct JournalVaultEntity: AppEntity, Identifiable, Hashable {
 
   private var displayTitle: String {
     let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmedTitle.isEmpty ? "Untitled Vault" : trimmedTitle
+    return trimmedTitle.isEmpty ? String(localized: "Untitled Vault") : trimmedTitle
   }
 }
 
@@ -153,14 +155,14 @@ struct WidgetVaultSnapshot: Sendable, Hashable {
 
   private static func displayTitle(for title: String) -> String {
     let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmedTitle.isEmpty ? "Untitled Vault" : trimmedTitle
+    return trimmedTitle.isEmpty ? String(localized: "Untitled Vault") : trimmedTitle
   }
 }
 
 /// A `Sendable`, value-type view of the latest vault `Card`. The widget renders
 /// this rather than holding a SwiftData model reference, keeping the timeline
 /// entry `Sendable` and the views free of the persistence layer.
-struct NoteSnapshot: Sendable, Hashable {
+struct NoteSnapshot: Sendable {
   let id: UUID
   let content: NoteContent
   let createdAt: Date
@@ -168,15 +170,19 @@ struct NoteSnapshot: Sendable, Hashable {
 
 /// The widget-renderable content extracted from a vault `Card`.
 ///
-/// Text and link cards carry their display string. Doodle and Bauhaus cards
-/// carry only mirrored thumbnail bytes, not the full authored document JSON, so
-/// the extension can render them without linking capture frameworks or touching
-/// media files.
-enum NoteContent: Sendable, Hashable {
+/// Text and link cards carry their display string. Photo cards carry the
+/// save-time raster thumbnail, while Doodle and Bauhaus cards carry authored
+/// values decoded from the vault media file.
+enum NoteContent: Sendable {
   case text(String)
   case link(String)
-  case doodle(thumbnailData: Data?)
-  case bauhaus(thumbnailData: Data?)
+  case photo(Data?)
+  case video(Data?)
+  case livePhoto(Data?)
+  case audio
+  case doodle(DoodleDrawing?)
+  case bauhaus(BauhausGridDocument?)
+  case unknown
 }
 
 struct LatestNoteProvider: AppIntentTimelineProvider {
@@ -238,7 +244,7 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
   /// has no cards or when its store can't be opened; the view shows an empty
   /// state in both cases.
   private func loadLatestNote(in vaultID: VaultID) async throws -> NoteSnapshot? {
-    try await MainActor.run {
+    let cardSnapshot: WidgetLatestCardSnapshot? = try await MainActor.run {
       let layout = try VaultStoreLayout.appGroup()
       let store = try VaultContentStore.open(vaultID: vaultID, layout: layout)
       let context = store.container.mainContext
@@ -252,23 +258,134 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
         return nil
       }
 
-      let attachments = try Self.attachments(for: card.id, in: context)
-      return NoteSnapshot(
+      let latestCard = WidgetLatestCardSnapshot(
         id: card.id,
-        content: card.widgetContent(attachments: attachments),
-        createdAt: card.createdAt
+        kind: card.kind,
+        body: card.body,
+        createdAt: card.createdAt,
+        mediaAttachment: try Self.mediaAttachment(for: card, in: context, store: store)
       )
+
+      return latestCard
     }
+
+    guard let cardSnapshot else {
+      return nil
+    }
+
+    return await cardSnapshot.noteSnapshot()
   }
 
   @MainActor
-  private static func attachments(for cardID: UUID, in context: ModelContext) throws -> [Attachment] {
+  private static func mediaAttachment(
+    for card: Card,
+    in context: ModelContext,
+    store: VaultContentStore
+  ) throws -> WidgetMediaAttachmentSnapshot? {
+    guard let attachmentKind = card.kind.widgetMediaAttachmentKind else {
+      return nil
+    }
+
+    let cardID = card.id
     var descriptor = FetchDescriptor<Attachment>(
       predicate: #Predicate { $0.cardID == cardID },
       sortBy: [SortDescriptor(\.createdAt)]
     )
     descriptor.fetchLimit = 8
-    return try context.fetch(descriptor)
+
+    guard let attachment = try context.fetch(descriptor).first(where: { $0.kind == attachmentKind }) else {
+      return nil
+    }
+
+    let primaryResourceID = attachment.primaryResourceID
+    var resourceDescriptor = FetchDescriptor<AttachmentResource>(
+      predicate: #Predicate { $0.id == primaryResourceID }
+    )
+    resourceDescriptor.fetchLimit = 1
+    guard let resource = try context.fetch(resourceDescriptor).first else {
+      return WidgetMediaAttachmentSnapshot(
+        fileURL: nil,
+        thumbnailData: attachment.thumbnail
+      )
+    }
+
+    let fileURL = store.fileURL(for: resource)
+    let availableFileURL = FileManager.default.fileExists(atPath: fileURL.path) ? fileURL : nil
+    return WidgetMediaAttachmentSnapshot(
+      fileURL: availableFileURL,
+      thumbnailData: attachment.thumbnail
+    )
+  }
+}
+
+private struct WidgetMediaAttachmentSnapshot: Sendable {
+  let fileURL: URL?
+  let thumbnailData: Data?
+}
+
+private struct WidgetLatestCardSnapshot: Sendable {
+  let id: UUID
+  let kind: Card.Kind
+  let body: String
+  let createdAt: Date
+  let mediaAttachment: WidgetMediaAttachmentSnapshot?
+
+  func noteSnapshot() async -> NoteSnapshot {
+    NoteSnapshot(
+      id: id,
+      content: await content(),
+      createdAt: createdAt
+    )
+  }
+
+  private func content() async -> NoteContent {
+    switch kind {
+    case .text:
+      return .text(displayText)
+    case .link:
+      return .link(displayText)
+    case .photo:
+      return .photo(mediaAttachment?.thumbnailData)
+    case .video:
+      return .video(mediaAttachment?.thumbnailData)
+    case .livePhoto:
+      return .livePhoto(mediaAttachment?.thumbnailData)
+    case .audio:
+      return .audio
+    case .doodle:
+      guard let mediaFileURL = mediaAttachment?.fileURL else { return .doodle(nil) }
+      return .doodle(
+        await WidgetMediaFileReader.decode(DoodleDrawing.self, from: mediaFileURL)
+      )
+    case .bauhaus:
+      guard let mediaFileURL = mediaAttachment?.fileURL else { return .bauhaus(nil) }
+      return .bauhaus(
+        await WidgetMediaFileReader.decode(BauhausGridDocument.self, from: mediaFileURL)
+      )
+    case .unknown:
+      return .unknown
+    }
+  }
+
+  private var displayText: String {
+    let body = self.body.trimmingCharacters(in: .whitespacesAndNewlines)
+    return body.isEmpty ? String(localized: "Untitled") : body
+  }
+}
+
+private enum WidgetMediaFileReader {
+
+  nonisolated static func decode<Value: Decodable & Sendable>(
+    _ type: Value.Type,
+    from fileURL: URL
+  ) async -> Value? {
+    await Task.detached(priority: .utility) {
+      guard let data = try? Data(contentsOf: fileURL) else {
+        return nil
+      }
+
+      return try? JSONDecoder().decode(type, from: data)
+    }.value
   }
 }
 
@@ -341,7 +458,7 @@ private struct LatestNoteInlineAccessoryView: View {
     if let note = entry.note {
       return note.content.accessoryTitle
     }
-    return entry.vault == nil ? "No vaults yet" : "No notes yet"
+    return entry.vault == nil ? String(localized: "No vaults yet") : String(localized: "No notes yet")
   }
 }
 
@@ -364,7 +481,7 @@ private struct LatestNoteCircularAccessoryView: View {
   }
 
   private var accessibilityTitle: String {
-    entry.note?.content.accessoryTitle ?? (entry.vault == nil ? "No vaults yet" : "No notes yet")
+    entry.note?.content.accessoryTitle ?? (entry.vault == nil ? String(localized: "No vaults yet") : String(localized: "No notes yet"))
   }
 }
 
@@ -389,11 +506,11 @@ private struct LatestNoteRectangularAccessoryView: View {
   }
 
   private var headerTitle: String {
-    entry.vault?.title ?? "Latest"
+    entry.vault?.title ?? String(localized: "Latest")
   }
 
   private var bodyTitle: String {
-    entry.note?.content.accessoryTitle ?? (entry.vault == nil ? "No vaults yet" : "No notes yet")
+    entry.note?.content.accessoryTitle ?? (entry.vault == nil ? String(localized: "No vaults yet") : String(localized: "No notes yet"))
   }
 
   private var emptySymbolName: String {
@@ -409,7 +526,7 @@ private struct LatestNoteContentCard: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Label(vault?.title ?? "Latest", systemImage: note.content.symbolName)
+      Label(vault?.title ?? String(localized: "Latest"), systemImage: note.content.symbolName)
         .font(.caption2.weight(.semibold))
         .foregroundStyle(.secondary)
         .lineLimit(1)
@@ -453,14 +570,30 @@ private struct NoteContentView: View {
       } icon: {
         Image(systemName: "link")
       }
-    case .doodle(let thumbnailData):
-      DoodleThumbnailView(thumbnailData: thumbnailData)
-    case .bauhaus(let thumbnailData):
-      DoodleThumbnailView(
-        thumbnailData: thumbnailData,
-        fallbackTitle: "Bauhaus",
-        fallbackSymbolName: "square.grid.3x3.square"
+    case .photo(let imageData):
+      WidgetPhotoView(imageData: imageData)
+    case .video(let imageData):
+      WidgetPhotoView(
+        imageData: imageData,
+        fallbackTitle: "Video",
+        fallbackSystemImage: "video",
+        accessibilityLabel: "Video"
       )
+    case .livePhoto(let imageData):
+      WidgetPhotoView(
+        imageData: imageData,
+        fallbackTitle: "Live Photo",
+        fallbackSystemImage: "livephoto",
+        accessibilityLabel: "Live Photo"
+      )
+    case .audio:
+      WidgetMediaLabel(title: "Audio", systemImage: "waveform")
+    case .doodle(let drawing):
+      WidgetDoodleView(drawing: drawing)
+    case .bauhaus(let document):
+      WidgetBauhausView(document: document)
+    case .unknown:
+      WidgetMediaLabel(title: "Untitled", systemImage: "questionmark.square.dashed")
     }
   }
 
@@ -481,44 +614,109 @@ private struct NoteContentView: View {
   }
 }
 
-private struct DoodleThumbnailView: View {
+private struct WidgetPhotoView: View {
 
-  let thumbnailData: Data?
-  let fallbackTitle: LocalizedStringResource
-  let fallbackSymbolName: String
+  let imageData: Data?
+  var fallbackTitle: LocalizedStringResource = "Photo"
+  var fallbackSystemImage: String = "photo"
+  var accessibilityLabel: LocalizedStringResource = "Photo"
 
-  init(
-    thumbnailData: Data?,
-    fallbackTitle: LocalizedStringResource = "Doodle",
-    fallbackSymbolName: String = "scribble.variable"
-  ) {
-    self.thumbnailData = thumbnailData
-    self.fallbackTitle = fallbackTitle
-    self.fallbackSymbolName = fallbackSymbolName
+  var body: some View {
+    if let uiImage = imageData.flatMap(UIImage.init(data:)) {
+      WidgetRenderedMediaFrame {
+        Image(uiImage: uiImage)
+          .resizable()
+          .scaledToFill()
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .clipped()
+      }
+      .accessibilityLabel(Text(accessibilityLabel))
+    } else {
+      WidgetMediaLabel(title: fallbackTitle, systemImage: fallbackSystemImage)
+    }
+  }
+}
+
+private struct WidgetDoodleView: View {
+
+  let drawing: DoodleDrawing?
+
+  var body: some View {
+    if let drawing {
+      WidgetRenderedMediaFrame {
+        DoodleDrawingView(
+          drawing: drawing,
+          inkColor: .primary,
+          displayAspectRatio: WidgetVisualMediaMetrics.aspectRatio
+        )
+        .padding(8)
+      }
+      .accessibilityLabel(Text("Doodle"))
+    } else {
+      WidgetMediaLabel(title: "Doodle", systemImage: "scribble.variable")
+    }
+  }
+}
+
+private struct WidgetBauhausView: View {
+
+  let document: BauhausGridDocument?
+
+  var body: some View {
+    if let document {
+      WidgetRenderedMediaFrame {
+        BauhausGridArtworkView(artwork: document.artwork)
+          .padding(6)
+      }
+      .accessibilityLabel(Text("Bauhaus"))
+    } else {
+      WidgetMediaLabel(title: "Bauhaus", systemImage: "square.grid.3x3.square")
+    }
+  }
+}
+
+private struct WidgetRenderedMediaFrame<Content: View>: View {
+
+  let content: Content
+
+  init(@ViewBuilder content: () -> Content) {
+    self.content = content()
   }
 
   var body: some View {
-    if let image = thumbnailData.flatMap(UIImage.init(data:)) {
-      Image(uiImage: image)
-        .resizable()
-        .scaledToFit()
-        .padding(6)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .background(
-          .secondary.opacity(0.08),
-          in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-        )
-        .accessibilityLabel(Text(fallbackTitle))
-    } else {
-      Label {
-        Text(fallbackTitle)
-      } icon: {
-        Image(systemName: fallbackSymbolName)
-      }
-        .font(.body.weight(.medium))
-        .foregroundStyle(.secondary)
+    ZStack {
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .fill(.secondary.opacity(0.08))
+
+      content
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
+    .aspectRatio(WidgetVisualMediaMetrics.aspectRatio, contentMode: .fit)
+    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+  }
+}
+
+private enum WidgetVisualMediaMetrics {
+  static let aspectRatio: CGFloat = 1
+}
+
+private struct WidgetMediaLabel: View {
+
+  let title: LocalizedStringResource
+  let systemImage: String
+
+  var body: some View {
+    Label {
+      Text(title)
+        .lineLimit(2)
+        .minimumScaleFactor(0.8)
+    } icon: {
+      Image(systemName: systemImage)
+    }
+    .font(.body.weight(.medium))
+    .foregroundStyle(.secondary)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
   }
 }
 
@@ -540,7 +738,7 @@ private struct LatestNoteEmptyState: View {
   }
 
   private var title: String {
-    vault == nil ? "No vaults yet" : "No cards yet"
+    vault == nil ? String(localized: "No vaults yet") : String(localized: "No cards yet")
   }
 
   private var symbolName: String {
@@ -549,41 +747,6 @@ private struct LatestNoteEmptyState: View {
 }
 
 // MARK: - Formatting Helpers
-
-extension Card {
-
-  /// The widget content for this card. Text cards render their written body;
-  /// doodle and Bauhaus cards render mirrored thumbnails, and other media cards
-  /// keep their modality label until they get a dedicated widget treatment.
-  fileprivate func widgetContent(attachments: [Attachment]) -> NoteContent {
-    switch kind {
-    case .text:
-      return .text(displayText)
-    case .link:
-      return .link(displayText)
-    case .photo:
-      return .text("Photo")
-    case .audio:
-      return .text("Audio")
-    case .doodle:
-      return .doodle(
-        thumbnailData: attachments.first(matching: .doodle)?.thumbnail
-      )
-    case .bauhaus:
-      return .bauhaus(
-        thumbnailData: attachments.first(matching: .bauhaus)?.thumbnail
-      )
-    case .unknown:
-      return .text("Untitled")
-    }
-  }
-
-  /// The fallback label for non-visual widget content.
-  fileprivate var displayText: String {
-    let body = self.body.trimmingCharacters(in: .whitespacesAndNewlines)
-    return body.isEmpty ? "Untitled" : body
-  }
-}
 
 extension Array where Element == Card {
 
@@ -609,6 +772,30 @@ extension Array where Element == Card {
   }
 }
 
+extension Card.Kind {
+
+  /// Media attachment kind the widget needs to decode this card visually.
+  ///
+  /// Text, link, audio, and unknown cards do not need a visual media file for
+  /// the current widget treatment.
+  fileprivate var widgetMediaAttachmentKind: Attachment.Kind? {
+    switch self {
+    case .photo:
+      return .photo
+    case .video:
+      return .video
+    case .livePhoto:
+      return .livePhoto
+    case .doodle:
+      return .doodle
+    case .bauhaus:
+      return .bauhaus
+    case .text, .link, .audio, .unknown:
+      return nil
+    }
+  }
+}
+
 extension NoteContent {
 
   /// SF Symbol used by the latest-note label for this content type.
@@ -618,10 +805,20 @@ extension NoteContent {
       return "note.text"
     case .link:
       return "link"
+    case .photo:
+      return "photo"
+    case .video:
+      return "video"
+    case .livePhoto:
+      return "livephoto"
+    case .audio:
+      return "waveform"
     case .doodle:
       return "scribble.variable"
     case .bauhaus:
       return "square.grid.3x3.square"
+    case .unknown:
+      return "questionmark.square.dashed"
     }
   }
 
@@ -630,22 +827,25 @@ extension NoteContent {
     switch self {
     case .text(let text):
       let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-      return trimmedText.isEmpty ? "Untitled" : trimmedText
+      return trimmedText.isEmpty ? String(localized: "Untitled") : trimmedText
     case .link(let urlString):
       let trimmedURLString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-      return trimmedURLString.isEmpty ? "Link" : trimmedURLString
+      return trimmedURLString.isEmpty ? String(localized: "Link") : trimmedURLString
+    case .photo:
+      return String(localized: "Photo")
+    case .video:
+      return String(localized: "Video")
+    case .livePhoto:
+      return String(localized: "Live Photo")
+    case .audio:
+      return String(localized: "Audio")
     case .doodle:
-      return "Doodle"
+      return String(localized: "Doodle")
     case .bauhaus:
-      return "Bauhaus"
+      return String(localized: "Bauhaus")
+    case .unknown:
+      return String(localized: "Untitled")
     }
-  }
-}
-
-extension Array where Element == Attachment {
-
-  fileprivate func first(matching kind: Attachment.Kind) -> Attachment? {
-    first { $0.kind == kind }
   }
 }
 
@@ -678,21 +878,63 @@ extension NoteSnapshot {
     createdAt: .now.addingTimeInterval(-1_800)
   )
 
-  /// Placeholder content for the doodle rendering path when a real thumbnail
-  /// has not been loaded from the selected vault store.
+  /// Placeholder content for the doodle widget render path.
   static let sampleDoodle = NoteSnapshot(
     id: UUID(),
-    content: .doodle(thumbnailData: nil),
+    content: .doodle(.widgetSample),
     createdAt: .now.addingTimeInterval(-600)
   )
 
-  /// Placeholder content for the Bauhaus rendering path when a real thumbnail
-  /// has not been loaded from the selected vault store.
+  /// Placeholder content for the Bauhaus widget render path.
   static let sampleBauhaus = NoteSnapshot(
     id: UUID(),
-    content: .bauhaus(thumbnailData: nil),
+    content: .bauhaus(.widgetSample),
     createdAt: .now.addingTimeInterval(-900)
   )
+}
+
+private extension DoodleDrawing {
+  static let widgetSample = DoodleDrawing(
+    strokes: [
+      DoodleStroke(
+        points: [
+          DoodlePoint(x: 36, y: 178, time: 0.0, width: 5),
+          DoodlePoint(x: 76, y: 118, time: 0.2, width: 7),
+          DoodlePoint(x: 126, y: 156, time: 0.4, width: 6),
+          DoodlePoint(x: 174, y: 82, time: 0.6, width: 8),
+          DoodlePoint(x: 216, y: 142, time: 0.8, width: 5),
+        ],
+        width: 6
+      ),
+      DoodleStroke(
+        points: [
+          DoodlePoint(x: 56, y: 224, time: 1.0, width: 4),
+          DoodlePoint(x: 112, y: 214, time: 1.2, width: 6),
+          DoodlePoint(x: 178, y: 232, time: 1.4, width: 4),
+        ],
+        width: 5
+      ),
+    ],
+    canvasSize: CGSize(width: 240, height: 300),
+    duration: 1.4
+  )
+}
+
+private extension BauhausGridDocument {
+  static let widgetSample = BauhausGridDocument(artwork: .widgetSample)
+}
+
+private extension BauhausGridArtwork {
+  static let widgetSample: BauhausGridArtwork = {
+    var artwork = BauhausGridArtwork()
+    artwork[BauhausGridPosition(row: 0, column: 1)] = BauhausTile(shape: .circle, shapeSwatch: .slot1)
+    artwork[BauhausGridPosition(row: 1, column: 2)] = BauhausTile(shape: .semicircleTrailing, shapeSwatch: .slot5)
+    artwork[BauhausGridPosition(row: 2, column: 0)] = BauhausTile(shape: .triangleBottomTrailing, shapeSwatch: .slot4)
+    artwork[BauhausGridPosition(row: 2, column: 3)] = BauhausTile(shape: .square, shapeSwatch: .slot2)
+    artwork[BauhausGridPosition(row: 3, column: 1)] = BauhausTile(shape: .quarterCircleTopTrailing, shapeSwatch: .slot6)
+    artwork[BauhausGridPosition(row: 4, column: 4)] = BauhausTile(shape: .paddedCircle, shapeSwatch: .slot7)
+    return artwork
+  }()
 }
 
 // MARK: - Preview

@@ -3,21 +3,53 @@ import SwiftData
 
 /// Sendable snapshot of one catalog row, safe to hand to the sync engine.
 public struct VaultDescriptor: Hashable, Sendable {
+  /// Stable identifier for the vault and its CloudKit custom zone.
   public let vaultID: VaultID
+
+  /// User-facing vault title shown in picker and sharing surfaces.
   public let title: String
+
+  /// Whether this device owns the vault zone or joined it through a share.
   public let ownership: VaultOwnership
+
+  /// CloudKit owner name for participant vaults. `nil` for owned vaults.
   public let zoneOwnerName: String?
+
+  /// Whether CloudKit currently has a share associated with this vault.
+  public let isShared: Bool
+
+  /// Share URL cached from CloudKit for lightweight presentation surfaces.
+  public let shareURL: URL?
+
+  /// CloudKit record name for the saved zone-wide `CKShare`, when known.
+  public let shareRecordName: String?
+
+  /// Number of known participants, including the owner.
+  public let participantCount: Int
+
+  /// Collapsed share permission for picker and settings display.
+  public let permission: VaultPermissionSummary
 
   public init(
     vaultID: VaultID,
     title: String,
     ownership: VaultOwnership,
-    zoneOwnerName: String? = nil
+    zoneOwnerName: String? = nil,
+    isShared: Bool = false,
+    shareURL: URL? = nil,
+    shareRecordName: String? = nil,
+    participantCount: Int = 1,
+    permission: VaultPermissionSummary = .owner
   ) {
     self.vaultID = vaultID
     self.title = title
     self.ownership = ownership
     self.zoneOwnerName = zoneOwnerName
+    self.isShared = isShared
+    self.shareURL = shareURL
+    self.shareRecordName = shareRecordName
+    self.participantCount = participantCount
+    self.permission = permission
   }
 }
 
@@ -62,11 +94,25 @@ extension VaultCatalogStore {
   public func vaultDescriptors() throws -> [VaultDescriptor] {
     let descriptor = FetchDescriptor<VaultIndex>(sortBy: [SortDescriptor(\.sortIndex)])
     return try container.mainContext.fetch(descriptor).map { index in
-      VaultDescriptor(
-        vaultID: VaultID(rawValue: index.vaultID),
+      let vaultID = VaultID(rawValue: index.vaultID)
+      let summary = try fetchSummary(vaultID: vaultID, in: container.mainContext)
+      return VaultDescriptor(
+        vaultID: vaultID,
         title: index.title,
         ownership: index.ownership,
-        zoneOwnerName: index.zoneOwnerName
+        zoneOwnerName: index.zoneOwnerName,
+        isShared: summary?.isShared ?? (index.ownership == .participant),
+        shareURL: summary?.shareURL.flatMap(URL.init(string:)),
+        shareRecordName: summary?.shareRecordName,
+        participantCount: max(1, summary?.participantCount ?? 1),
+        permission: summary?.permission ?? {
+          switch index.ownership {
+          case .owned:
+            return .owner
+          case .participant:
+            return .readWrite
+          }
+        }()
       )
     }
   }
@@ -169,6 +215,26 @@ extension VaultCatalogStore {
     let context = container.mainContext
     guard let localState = try fetchLocalState(vaultID: vaultID, in: context) else { return }
     localState.lastSyncedAt = date
+    try context.save()
+  }
+
+  /// Removes a vault from the local catalog.
+  ///
+  /// This deletes only catalog-facing rows (`VaultIndex`, `VaultLocalState`,
+  /// `VaultSummary`). The vault's content store directory and CloudKit zone are
+  /// separate boundaries owned by `VaultStoreLayout` and `VaultSyncEngine`.
+  @MainActor
+  public func deleteVault(vaultID: VaultID) throws {
+    let context = container.mainContext
+    guard let index = try fetchIndex(vaultID: vaultID, in: context) else { return }
+
+    if let localState = try fetchLocalState(vaultID: vaultID, in: context) {
+      context.delete(localState)
+    }
+    if let summary = try fetchSummary(vaultID: vaultID, in: context) {
+      context.delete(summary)
+    }
+    context.delete(index)
     try context.save()
   }
 

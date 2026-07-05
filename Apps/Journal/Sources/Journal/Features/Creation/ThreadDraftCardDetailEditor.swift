@@ -1,3 +1,4 @@
+import AppUIComponents
 import CaptureBauhaus
 import JournalVault
 import SwiftUI
@@ -37,7 +38,7 @@ struct CardEditDraftEditor: View {
 
   @Bindable var draft: CardEditDraft
   let isSaving: Bool
-  let confirmationTitle: String
+  let confirmationTitle: LocalizedStringResource
   let requiresSavableDraft: Bool
   let showsKindPicker: Bool
   let onConfirm: @MainActor () -> Void
@@ -45,7 +46,7 @@ struct CardEditDraftEditor: View {
   init(
     draft: CardEditDraft,
     isSaving: Bool,
-    confirmationTitle: String,
+    confirmationTitle: LocalizedStringResource,
     requiresSavableDraft: Bool = true,
     showsKindPicker: Bool = true,
     onConfirm: @escaping @MainActor () -> Void
@@ -77,8 +78,10 @@ struct CardEditDraftEditor: View {
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .confirmationAction) {
-        Button(confirmationTitle) {
+        Button {
           onConfirm()
+        } label: {
+          Text(confirmationTitle)
         }
         .disabled(isSaving || (requiresSavableDraft && draft.canSave == false))
       }
@@ -94,7 +97,14 @@ private struct CardEditDraftKindPicker: View {
   /// Kinds a person can author. `.unknown` is excluded — it only appears on cards
   /// synced from a newer build and is never user-selectable.
   private var selectableKinds: [Card.Kind] {
-    Card.Kind.allCases.filter { $0 != .unknown }
+    Card.Kind.allCases.filter { kind in
+      switch kind {
+      case .video, .livePhoto, .unknown:
+        return false
+      case .text, .link, .photo, .audio, .doodle, .bauhaus:
+        return true
+      }
+    }
   }
 
   var body: some View {
@@ -122,6 +132,8 @@ private struct CardEditDraftKindEditor: View {
         ThreadDraftLinkDetailEditor(text: $draft.text)
       case .photo:
         ThreadDraftPhotoDetailEditor(card: draft)
+      case .video, .livePhoto:
+        ThreadDraftImportedMediaDetailEditor(card: draft)
       case .audio:
         ThreadDraftAudioDetailEditor(card: draft)
       case .doodle:
@@ -166,6 +178,18 @@ private struct ThreadDraftPhotoDetailEditor: View {
     ThreadDraftPhotoCaptureContent(card: card) { [card] photo in
       card.setPhoto(photo)
     }
+  }
+}
+
+/// Read-only detail surface for media imported from Photos.
+private struct ThreadDraftImportedMediaDetailEditor: View {
+
+  @Bindable var card: CardEditDraft
+
+  var body: some View {
+    CardPreviewContent(payload: card.previewPayload, presentation: .savedDetail)
+      .padding(16)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
   }
 }
 
@@ -248,6 +272,10 @@ extension Card.Kind {
       return "Link Card"
     case .photo:
       return "Photo Card"
+    case .video:
+      return "Video Card"
+    case .livePhoto:
+      return "Live Photo Card"
     case .audio:
       return "Audio Card"
     case .doodle:
