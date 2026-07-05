@@ -155,6 +155,8 @@ extension-side recovery or summary refresh work.
 - `NSMicrophoneUsageDescription` — CaptureAudio.
 - `NSLocationWhenInUseUsageDescription` — automatic location attachment for
   newly authored cards when the Journal setting is enabled.
+- `CKSharingSupported` = `true` — lets CloudKit share URLs launch the app and
+  deliver `CKShare.Metadata` to the scene delegate for invite acceptance.
 - `UIBackgroundModes` = `["remote-notification"]` — lets the explicit CloudKit
   sync layer wake for remote change notifications while backgrounded.
 

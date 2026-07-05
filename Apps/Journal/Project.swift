@@ -28,6 +28,9 @@ let journalInfoPlist: InfoPlist = .extendingDefault(with: journalVersionInfoPlis
   "CFBundleName": journalBundleName,
   "ITSAppUsesNonExemptEncryption": false,
   "LSApplicationCategoryType": "public.app-category.lifestyle",
+  // Required for CloudKit share URLs to launch the app and deliver
+  // CKShare.Metadata to the scene delegate.
+  "CKSharingSupported": true,
   // CloudKit pushes remote changes to the device; the explicit vault sync
   // layer consumes these notifications for per-vault zones.
   "UIBackgroundModes": .array(["remote-notification"]),
