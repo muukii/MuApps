@@ -23,6 +23,8 @@ struct VaultSelectionView: View {
   @State private var shareError: VaultShareErrorMessage?
   @State private var deletionConfirmation: VaultDeletionConfirmation?
   @State private var deletionError: VaultDeletionErrorMessage?
+  @State private var iconEditorPresentation: VaultIconEditorPresentation?
+  @State private var iconError: VaultIconErrorMessage?
   @State private var isVaultCreationPresented = false
   @State private var isSettingsPresented = false
 
@@ -44,6 +46,7 @@ struct VaultSelectionView: View {
         onPrepareCollaborationShare: prepareCollaborationShare,
         onCollaborationSharingStopped: noteCollaborationSharingStopped,
         onCollaborationError: presentShareError,
+        onEditVaultIcon: presentIconEditor,
         onDeleteVault: requestDeleteVault,
         onCreateVault: { isVaultCreationPresented = true },
         onRefresh: refreshVaults
@@ -75,6 +78,16 @@ struct VaultSelectionView: View {
         onCancel: { isVaultCreationPresented = false }
       )
     }
+    .sheet(item: $iconEditorPresentation) { presentation in
+      VaultIconEditorSheet(
+        title: presentation.descriptor.title,
+        initialIcon: presentation.descriptor.icon,
+        onSave: { icon in
+          updateVaultIcon(vaultID: presentation.descriptor.vaultID, icon: icon)
+        },
+        onCancel: { iconEditorPresentation = nil }
+      )
+    }
     .sheet(isPresented: $isSettingsPresented) {
       SettingsScreen()
     }
@@ -102,6 +115,13 @@ struct VaultSelectionView: View {
     .alert(item: $deletionError) { error in
       Alert(
         title: Text("Could Not Delete Vault"),
+        message: Text(error.message),
+        dismissButton: .default(Text("OK"))
+      )
+    }
+    .alert(item: $iconError) { error in
+      Alert(
+        title: Text("Could Not Update Icon"),
         message: Text(error.message),
         dismissButton: .default(Text("OK"))
       )
@@ -151,8 +171,8 @@ struct VaultSelectionView: View {
     }
   }
 
-  private func createVault(title: String) async -> String? {
-    guard await vaultRuntime.createVault(title: title) != nil else {
+  private func createVault(title: String, icon: VaultIcon) async -> String? {
+    guard await vaultRuntime.createVault(title: title, icon: icon) != nil else {
       return vaultRuntime.lastMessage ?? String(localized: "Could not create vault.")
     }
 
@@ -191,6 +211,23 @@ struct VaultSelectionView: View {
 
   private func presentShareError(_ error: any Error) {
     shareError = VaultShareErrorMessage(message: error.localizedDescription)
+  }
+
+  private func presentIconEditor(_ descriptor: VaultDescriptor) {
+    guard selectingVaultID == nil, preparingShareVaultID == nil, deletingVaultID == nil else { return }
+    iconEditorPresentation = VaultIconEditorPresentation(descriptor: descriptor)
+  }
+
+  private func updateVaultIcon(vaultID: VaultID, icon: VaultIcon) {
+    Task { @MainActor in
+      guard await vaultRuntime.updateVaultIcon(vaultID: vaultID, icon: icon) else {
+        iconError = VaultIconErrorMessage(
+          message: vaultRuntime.lastMessage ?? String(localized: "Could not update vault icon.")
+        )
+        return
+      }
+      iconEditorPresentation = nil
+    }
   }
 
   private func requestDeleteVault(_ descriptor: VaultDescriptor) {
@@ -234,6 +271,7 @@ private struct VaultSelectionContent: View {
   let onPrepareCollaborationShare: @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
   let onCollaborationSharingStopped: @MainActor @Sendable (VaultID) async -> Void
   let onCollaborationError: @MainActor @Sendable (any Error) -> Void
+  let onEditVaultIcon: @MainActor @Sendable (VaultDescriptor) -> Void
   let onDeleteVault: @MainActor @Sendable (VaultDescriptor) -> Void
   let onCreateVault: @MainActor @Sendable () -> Void
   let onRefresh: @MainActor @Sendable () -> Void
@@ -261,6 +299,7 @@ private struct VaultSelectionContent: View {
           onPrepareCollaborationShare: onPrepareCollaborationShare,
           onCollaborationSharingStopped: onCollaborationSharingStopped,
           onCollaborationError: onCollaborationError,
+          onEditVaultIcon: onEditVaultIcon,
           onDeleteVault: onDeleteVault
         )
       }
@@ -282,6 +321,7 @@ private struct VaultSelectionList: View {
   let onPrepareCollaborationShare: @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
   let onCollaborationSharingStopped: @MainActor @Sendable (VaultID) async -> Void
   let onCollaborationError: @MainActor @Sendable (any Error) -> Void
+  let onEditVaultIcon: @MainActor @Sendable (VaultDescriptor) -> Void
   let onDeleteVault: @MainActor @Sendable (VaultDescriptor) -> Void
 
   var body: some View {
@@ -304,7 +344,7 @@ private struct VaultSelectionList: View {
             vaultID: vault.vaultID,
             title: vault.title,
             subtitle: vault.ownership.selectionSubtitle,
-            systemImage: vault.ownership.selectionSystemImage,
+            icon: vault.icon,
             isSelecting: isSelecting,
             isPreparingShare: isPreparingShare,
             isDeleting: isDeleting,
@@ -324,6 +364,12 @@ private struct VaultSelectionList: View {
             }
           }
           .contextMenu {
+            Button {
+              onEditVaultIcon(vault)
+            } label: {
+              Label("Change Icon", systemImage: "face.smiling")
+            }
+
             if vault.ownership == .owned {
               Button {
                 onShareVault(vault)
@@ -354,7 +400,7 @@ private struct VaultSelectionRow: View {
   let vaultID: VaultID
   let title: String
   let subtitle: LocalizedStringResource
-  let systemImage: String
+  let icon: VaultIcon
   let isSelecting: Bool
   let isPreparingShare: Bool
   let isDeleting: Bool
@@ -370,10 +416,7 @@ private struct VaultSelectionRow: View {
     HStack(spacing: 12) {
       Button(action: onSelect) {
         HStack(spacing: 12) {
-          Image(systemName: systemImage)
-            .font(.title3)
-            .foregroundStyle(.tint)
-            .frame(width: 30)
+          VaultIconMark(icon: icon, size: 30, font: .title3)
 
           VStack(alignment: .leading, spacing: 3) {
             Text(title)
@@ -463,6 +506,17 @@ private struct VaultShareErrorMessage: Identifiable {
 private struct VaultDeletionErrorMessage: Identifiable {
   let id = UUID()
   let message: String
+}
+
+private struct VaultIconErrorMessage: Identifiable {
+  let id = UUID()
+  let message: String
+}
+
+private struct VaultIconEditorPresentation: Identifiable {
+  let descriptor: VaultDescriptor
+
+  var id: VaultID { descriptor.vaultID }
 }
 
 private struct VaultDeletionConfirmation: Identifiable {
@@ -575,11 +629,12 @@ private struct VaultCloudSharingController: UIViewControllerRepresentable {
 /// Sheet that collects the user-facing title for a new local vault.
 private struct VaultCreationSheet: View {
 
-  let onCreate: @MainActor @Sendable (String) async -> String?
+  let onCreate: @MainActor @Sendable (String, VaultIcon) async -> String?
   let onCancel: @MainActor @Sendable () -> Void
 
   @FocusState private var isTitleFocused: Bool
   @State private var title = ""
+  @State private var selectedIcon: VaultIcon = .default
   @State private var errorMessage: String?
   @State private var isCreating = false
 
@@ -600,6 +655,8 @@ private struct VaultCreationSheet: View {
               .foregroundStyle(.red)
           }
         }
+
+        VaultIconPickerSection(selection: $selectedIcon)
       }
       .navigationTitle("New Vault")
       .navigationBarTitleDisplayMode(.inline)
@@ -647,7 +704,203 @@ private struct VaultCreationSheet: View {
 
     Task { @MainActor in
       defer { isCreating = false }
-      errorMessage = await onCreate(title)
+      errorMessage = await onCreate(title, selectedIcon)
+    }
+  }
+}
+
+/// Sheet for changing a vault's catalog icon after it has been created.
+private struct VaultIconEditorSheet: View {
+
+  let title: String
+  let initialIcon: VaultIcon
+  let onSave: @MainActor @Sendable (VaultIcon) -> Void
+  let onCancel: @MainActor @Sendable () -> Void
+
+  @State private var selectedIcon: VaultIcon
+
+  init(
+    title: String,
+    initialIcon: VaultIcon,
+    onSave: @escaping @MainActor @Sendable (VaultIcon) -> Void,
+    onCancel: @escaping @MainActor @Sendable () -> Void
+  ) {
+    self.title = title
+    self.initialIcon = initialIcon
+    self.onSave = onSave
+    self.onCancel = onCancel
+    _selectedIcon = State(initialValue: initialIcon)
+  }
+
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section {
+          HStack(spacing: 12) {
+            VaultIconMark(icon: selectedIcon, size: 44, font: .title2)
+
+            VStack(alignment: .leading, spacing: 3) {
+              Text(title)
+                .font(.headline)
+                .lineLimit(1)
+
+              Text("Vault Icon")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+          .padding(.vertical, 4)
+        }
+
+        VaultIconPickerSection(selection: $selectedIcon)
+      }
+      .navigationTitle("Vault Icon")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancel") {
+            onCancel()
+          }
+        }
+
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Save") {
+            onSave(selectedIcon)
+          }
+          .disabled(selectedIcon == initialIcon)
+        }
+      }
+    }
+  }
+}
+
+/// Preset picker for the two supported vault icon families.
+private struct VaultIconPickerSection: View {
+
+  @Binding var selection: VaultIcon
+
+  var body: some View {
+    Section("Icon") {
+      VaultIconPresetGrid(
+        title: "SF Symbols",
+        icons: VaultIconPreset.systemImages,
+        selection: $selection
+      )
+
+      VaultIconPresetGrid(
+        title: "Emoji",
+        icons: VaultIconPreset.emojis,
+        selection: $selection
+      )
+    }
+  }
+}
+
+private struct VaultIconPresetGrid: View {
+
+  let title: LocalizedStringResource
+  let icons: [VaultIcon]
+  @Binding var selection: VaultIcon
+
+  private let columns = [
+    GridItem(.adaptive(minimum: 44), spacing: 10)
+  ]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text(title)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+
+      LazyVGrid(columns: columns, spacing: 10) {
+        ForEach(icons, id: \.self) { icon in
+          Button {
+            selection = icon
+          } label: {
+            VaultIconMark(icon: icon, size: 40, font: .title3)
+              .overlay {
+                if selection == icon {
+                  RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(.tint, lineWidth: 2)
+                }
+              }
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel(icon.accessibilityLabel)
+        }
+      }
+    }
+    .padding(.vertical, 4)
+  }
+}
+
+private struct VaultIconMark: View {
+
+  let icon: VaultIcon
+  let size: CGFloat
+  let font: Font
+
+  var body: some View {
+    ZStack {
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .fill(.tint.opacity(0.12))
+
+      switch icon.kind {
+      case .systemImage:
+        Image(systemName: icon.value)
+          .font(font)
+          .foregroundStyle(.tint)
+      case .emoji:
+        Text(icon.value)
+          .font(font)
+      }
+    }
+    .frame(width: size, height: size)
+    .accessibilityHidden(true)
+  }
+}
+
+private enum VaultIconPreset {
+
+  static let systemImages: [VaultIcon] = [
+    .systemImage("shippingbox"),
+    .systemImage("tray.full"),
+    .systemImage("book.closed"),
+    .systemImage("sparkles"),
+    .systemImage("camera"),
+    .systemImage("waveform"),
+    .systemImage("paintpalette"),
+    .systemImage("leaf"),
+    .systemImage("heart"),
+    .systemImage("moon.stars"),
+    .systemImage("person.2"),
+    .systemImage("lock"),
+  ]
+
+  static let emojis: [VaultIcon] = [
+    .emoji("📦"),
+    .emoji("📓"),
+    .emoji("✨"),
+    .emoji("🌿"),
+    .emoji("🌙"),
+    .emoji("☕️"),
+    .emoji("🧠"),
+    .emoji("💭"),
+    .emoji("🎧"),
+    .emoji("📷"),
+    .emoji("🎨"),
+    .emoji("❤️"),
+  ]
+}
+
+private extension VaultIcon {
+
+  var accessibilityLabel: String {
+    switch kind {
+    case .systemImage:
+      String(localized: "SF Symbol \(value)")
+    case .emoji:
+      String(localized: "Emoji \(value)")
     }
   }
 }

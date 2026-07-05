@@ -4,6 +4,7 @@ import CaptureAudio
 import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
+import CaptureSuggestions
 import CoreTransferable
 import CoreLocation
 import JournalVault
@@ -103,7 +104,10 @@ struct CreationView: View {
             Button {
               requestVaultChange()
             } label: {
-              Label(vaultRuntime.selectedVault?.title ?? String(localized: "Vault"), systemImage: "shippingbox")
+              CreationVaultToolbarLabel(
+                title: vaultRuntime.selectedVault?.title ?? String(localized: "Vault"),
+                icon: vaultRuntime.selectedVault?.icon ?? .default
+              )
             }
             .accessibilityLabel("Change Vault")
           }
@@ -174,6 +178,9 @@ struct CreationView: View {
           },
           onRecordVoice: {
             presentVoiceRecorder()
+          },
+          onChooseSuggestion: { suggestion in
+            finishSuggestionCapture(suggestion)
           },
           onSave: save
         )
@@ -369,6 +376,8 @@ struct CreationView: View {
       break
     case .audio:
       voiceRecorderPresentation = VoiceRecorderPresentation(target: draft)
+    case .suggestion:
+      break
     case .doodle:
       doodleCanvasPresentation = DoodleCanvasPresentation(
         target: draft,
@@ -613,6 +622,17 @@ struct CreationView: View {
     let draft = target ?? draftForNewQuickCapture()
     draft.setAudio(recording)
     scrollTargetID = draft
+    attachLocationToCurrentDraftsIfNeeded()
+  }
+
+  private func finishSuggestionCapture(_ capturedSuggestion: CapturedSuggestion) {
+    var insertedDrafts: [ThreadDraftCard] = []
+    for payload in SuggestionCardPayload.cardPayloads(capturedSuggestion: capturedSuggestion) {
+      let draft = draftForNewQuickCapture()
+      draft.setSuggestion(payload)
+      insertedDrafts.append(draft)
+    }
+    scrollTargetID = insertedDrafts.last
     attachLocationToCurrentDraftsIfNeeded()
   }
 
@@ -1218,6 +1238,7 @@ private struct ThreadDraftActionRow: View {
   let onDrawDoodle: @MainActor @Sendable () -> Void
   let onComposeBauhaus: @MainActor @Sendable () -> Void
   let onRecordVoice: @MainActor @Sendable () -> Void
+  let onChooseSuggestion: @MainActor @Sendable (CapturedSuggestion) -> Void
   let onSave: @MainActor @Sendable () -> Void
 
   private var canSave: Bool {
@@ -1243,7 +1264,8 @@ private struct ThreadDraftActionRow: View {
               onMediaPickerUnavailable: onMediaPickerUnavailable,
               onDrawDoodle: onDrawDoodle,
               onComposeBauhaus: onComposeBauhaus,
-              onRecordVoice: onRecordVoice
+              onRecordVoice: onRecordVoice,
+              onChooseSuggestion: onChooseSuggestion
             )
             .disabled(isSaving)
             .opacity(isSaving ? 0.45 : 1)
@@ -1278,6 +1300,7 @@ private struct ThreadDraftActionRow: View {
     let onDrawDoodle: @MainActor @Sendable () -> Void
     let onComposeBauhaus: @MainActor @Sendable () -> Void
     let onRecordVoice: @MainActor @Sendable () -> Void
+    let onChooseSuggestion: @MainActor @Sendable (CapturedSuggestion) -> Void
 
     @State private var selectedLibraryMediaItem: PhotosPickerItem?
     @State private var isLibraryMediaPickerPresented = false
@@ -1340,6 +1363,15 @@ private struct ThreadDraftActionRow: View {
           accessibilityLabel: "Voice",
           action: onRecordVoice
         )
+
+        SuggestionCaptureButton {
+          ThreadDraftActionIconLabel(systemName: "sparkles")
+        } onCommit: { suggestion in
+          onChooseSuggestion(suggestion)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .accessibilityLabel(Text("Suggestion"))
       }
     }
 
@@ -1392,6 +1424,25 @@ private struct ThreadDraftActionRow: View {
 
 }
 
+private struct CreationVaultToolbarLabel: View {
+
+  let title: String
+  let icon: VaultIcon
+
+  var body: some View {
+    HStack(spacing: 6) {
+      switch icon.kind {
+      case .systemImage:
+        Image(systemName: icon.value)
+      case .emoji:
+        Text(icon.value)
+      }
+
+      Text(title)
+    }
+  }
+}
+
 extension Card.Kind {
 
   /// User-facing name for the editor modality.
@@ -1409,6 +1460,8 @@ extension Card.Kind {
       return "Live Photo"
     case .audio:
       return "Audio"
+    case .suggestion:
+      return "Suggestion"
     case .doodle:
       return "Doodle"
     case .bauhaus:
@@ -1435,6 +1488,8 @@ extension Card.Kind {
       return "livephoto"
     case .audio:
       return "waveform"
+    case .suggestion:
+      return "sparkles"
     case .doodle:
       return "scribble.variable"
     case .bauhaus:

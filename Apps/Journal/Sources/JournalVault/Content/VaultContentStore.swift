@@ -96,11 +96,12 @@ extension VaultContentStore {
     /// Primary modality of the card to create.
     public var kind: Card.Kind
 
-    /// Textual payload for body-backed cards. `.text` stores written content;
-    /// `.link` stores the canonical URL string. Media cards ignore it.
+    /// Textual payload for body-backed cards. `.text` stores written content,
+    /// and `.link` stores the canonical URL string. Media and authored JSON
+    /// cards ignore it.
     public var text: String
 
-    /// In-memory attachment bytes for photo, doodle, and Bauhaus cards.
+    /// In-memory attachment bytes for photo, suggestion, doodle, and Bauhaus cards.
     public var mediaData: Data?
 
     /// Temporary file URL for audio cards; the file is **moved** into the vault
@@ -151,14 +152,31 @@ extension VaultContentStore {
   /// sync/export code how the file participates in the logical attachment.
   public struct AttachmentResourceDraft: Sendable {
 
+    /// Optional stable id to use for the stored resource row.
+    ///
+    /// Most import paths let the vault store generate ids. Suggestion cards use
+    /// this to write the same id into their authored JSON resource so the JSON
+    /// can point at copied media resources after sync.
+    public var id: UUID?
+
     /// Semantic role of this file within its attachment.
     public var role: AttachmentResource.Role
 
     /// In-memory bytes for small resources or still images.
     public var data: Data?
 
-    /// Temporary file URL for larger resources. The file is moved into the vault.
+    /// Temporary or system-provided file URL for larger resources.
+    ///
+    /// `fileTransferMode` decides whether the source is moved or copied into
+    /// the vault.
     public var fileURL: URL?
+
+    /// How `fileURL` should be transferred into the vault media directory.
+    ///
+    /// App-owned temporary imports can be moved. System-owned sources such as
+    /// Journaling Suggestion media must be copied so the picker source remains
+    /// untouched.
+    public var fileTransferMode: FileTransferMode
 
     /// Optional byte count when the importer already knows it.
     public var byteSize: Int?
@@ -182,9 +200,11 @@ extension VaultContentStore {
     public var colorSpaceName: String?
 
     public init(
+      id: UUID? = nil,
       role: AttachmentResource.Role,
       data: Data? = nil,
       fileURL: URL? = nil,
+      fileTransferMode: FileTransferMode = .move,
       byteSize: Int? = nil,
       contentType: String? = nil,
       pixelWidth: Int? = nil,
@@ -193,9 +213,11 @@ extension VaultContentStore {
       isHDR: Bool = false,
       colorSpaceName: String? = nil
     ) {
+      self.id = id
       self.role = role
       self.data = data
       self.fileURL = fileURL
+      self.fileTransferMode = fileTransferMode
       self.byteSize = byteSize
       self.contentType = contentType
       self.pixelWidth = pixelWidth
@@ -203,6 +225,12 @@ extension VaultContentStore {
       self.duration = duration
       self.isHDR = isHDR
       self.colorSpaceName = colorSpaceName
+    }
+
+    /// File transfer behavior when staging a resource from an existing URL.
+    public enum FileTransferMode: Sendable {
+      case move
+      case copy
     }
   }
 }
@@ -422,7 +450,7 @@ extension VaultContentStore {
       return nil
     }
 
-    let primaryResourceID = UUID()
+    let primaryResourceID = resourceDrafts[0].id ?? UUID()
     let attachment = Attachment(
       cardID: cardID,
       kind: attachmentKind,
@@ -434,7 +462,7 @@ extension VaultContentStore {
     var stagedResources: [AttachmentResource] = []
     for (index, resourceDraft) in resourceDrafts.enumerated() {
       let resource = AttachmentResource(
-        id: index == 0 ? primaryResourceID : UUID(),
+        id: resourceDraft.id ?? (index == 0 ? primaryResourceID : UUID()),
         attachmentID: attachment.id,
         role: resourceDraft.role,
         byteSize: Self.byteSize(for: resourceDraft),
@@ -452,7 +480,12 @@ extension VaultContentStore {
       if let data = resourceDraft.data {
         try data.write(to: fileURL(for: resource), options: .atomic)
       } else if let sourceURL = resourceDraft.fileURL {
-        try FileManager.default.moveItem(at: sourceURL, to: fileURL(for: resource))
+        switch resourceDraft.fileTransferMode {
+        case .move:
+          try FileManager.default.moveItem(at: sourceURL, to: fileURL(for: resource))
+        case .copy:
+          try FileManager.default.copyItem(at: sourceURL, to: fileURL(for: resource))
+        }
       }
 
       context.insert(resource)
@@ -499,7 +532,7 @@ extension VaultContentStore {
     switch draft.kind {
     case .text, .link:
       return draft.text
-    case .photo, .video, .livePhoto, .audio, .doodle, .bauhaus, .unknown:
+    case .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus, .unknown:
       return ""
     }
   }
@@ -569,7 +602,7 @@ extension VaultContentStore {
       return .stillImage
     case .audio:
       return .audio
-    case .doodle, .bauhaus:
+    case .suggestion, .doodle, .bauhaus:
       return .authoredJSON
     case .unknown:
       return .unknown
@@ -586,7 +619,7 @@ extension VaultContentStore {
       return nil
     case .audio:
       return "public.mpeg-4-audio"
-    case .doodle, .bauhaus:
+    case .suggestion, .doodle, .bauhaus:
       return "public.json"
     case .unknown:
       return nil
@@ -605,6 +638,8 @@ extension VaultContentStore {
       return .livePhoto
     case .audio:
       return .audio
+    case .suggestion:
+      return .suggestion
     case .doodle:
       return .doodle
     case .bauhaus:

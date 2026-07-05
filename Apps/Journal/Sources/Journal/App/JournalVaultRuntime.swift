@@ -276,7 +276,7 @@ final class JournalVaultRuntime {
   /// user-input boundary. Empty titles are rejected before any vault directory
   /// or catalog rows are created.
   @discardableResult
-  func createVault(title rawTitle: String) async -> VaultID? {
+  func createVault(title rawTitle: String, icon: VaultIcon = .default) async -> VaultID? {
     let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
     guard title.isEmpty == false else {
       lastMessage = "Vault title is required."
@@ -284,7 +284,7 @@ final class JournalVaultRuntime {
     }
 
     do {
-      let vaultID = try catalogStore.createVault(title: title, using: registry)
+      let vaultID = try catalogStore.createVault(title: title, icon: icon, using: registry)
       try reloadCatalog()
 
       guard let descriptor = vaults.first(where: { $0.vaultID == vaultID }) else {
@@ -308,6 +308,21 @@ final class JournalVaultRuntime {
     } catch {
       lastMessage = error.localizedDescription
       return nil
+    }
+  }
+
+  /// Updates a vault's local presentation icon and refreshes dependent UI state.
+  func updateVaultIcon(vaultID: VaultID, icon: VaultIcon) async -> Bool {
+    do {
+      try catalogStore.updateVaultIcon(vaultID: vaultID, icon: icon)
+      try reloadCatalog()
+      refreshSelectedVaultDescriptor()
+      WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
+      lastMessage = "Updated vault icon."
+      return true
+    } catch {
+      lastMessage = error.localizedDescription
+      return false
     }
   }
 
@@ -498,6 +513,9 @@ final class VaultInstance {
 
   /// User-facing vault title.
   var title: String { descriptor.title }
+
+  /// User-facing vault icon.
+  var icon: VaultIcon { descriptor.icon }
 
   /// Whether this device owns the CloudKit zone or participates in someone
   /// else's shared zone.

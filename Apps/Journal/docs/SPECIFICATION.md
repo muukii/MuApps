@@ -259,7 +259,7 @@ compound media item such as a Live Photo.
 |----------|------|-------|
 | `id` | `UUID` | Unique attachment id. |
 | `cardID` | `UUID` | Referenced `Card`. |
-| `kindRawValue` | `String` | `.photo`, `.video`, `.livePhoto`, `.audio`, `.doodle`, `.bauhaus`, or unknown raw value. |
+| `kindRawValue` | `String` | `.photo`, `.video`, `.livePhoto`, `.audio`, `.suggestion`, `.doodle`, `.bauhaus`, or unknown raw value. |
 | `byteSize` | `Int` | Denormalized primary-resource byte size kept for summaries. |
 | `primaryResourceID` | `UUID` | Primary resource used by normal rendering. |
 | `thumbnail` | `Data?` | Optional save-time raster derivative for photo, video poster, and Live Photo still surfaces. Doodle/Bauhaus leave it empty and render from authored media. |
@@ -276,7 +276,7 @@ directory before the CloudKit temporary file disappears.
 |----------|------|-------|
 | `id` | `UUID` | Unique resource id and `media/<resource-id>` file name. |
 | `attachmentID` | `UUID` | Referenced logical attachment. |
-| `roleRawValue` | `String` | `.originalImage`, `.stillImage`, `.pairedVideo`, `.originalVideo`, `.authoredJSON`, `.audio`, or unknown raw value. |
+| `roleRawValue` | `String` | `.originalImage`, `.stillImage`, `.pairedVideo`, `.originalVideo`, `.authoredJSON`, `.suggestionImage`, `.suggestionVideo`, `.audio`, or unknown raw value. |
 | `byteSize` | `Int` | Resource file byte size. |
 | `contentType` | `String?` | UTI/MIME-style content type when known. |
 | `pixelWidth` / `pixelHeight` | `Int?` | Image/video dimensions when known. |
@@ -623,8 +623,13 @@ the gallery's **Lab** section).
   collaboration UI, and limits sharing to specified recipients with read-write
   permission. The share button and row context menu both present the direct
   `UICloudSharingController` invite sheet; participant vault rows do not offer
-  invite issuance. Vault rows can be deleted from swipe actions or the row
-  context menu after a destructive confirmation.
+  invite issuance. New vault creation includes an icon picker with SF Symbol and
+  emoji presets. Existing vault rows show that icon in the picker, expose
+  **Change Icon** from the row context menu, and carry the icon into the
+  composer toolbar, storage estimate rows, and widget vault headers. Icon
+  metadata is local catalog presentation data; it is not currently synchronized
+  through the vault's CloudKit `VaultInfo` record. Vault rows can be deleted from
+  swipe actions or the row context menu after a destructive confirmation.
   Owned vault deletion removes the CloudKit custom zone before deleting local
   catalog/content files, so the vault disappears for everyone with access.
   Participant vault deletion targets the accepted shared zone and then removes
@@ -703,12 +708,38 @@ the gallery's **Lab** section).
   reusing the first untouched text placeholder when possible and
   restoring/removing that quick draft if the canvas/grid is cleared. The doodle
   canvas and Bauhaus grid auto-sync committed changes into the draft; there is no
-  separate save button for those visual editors. The glass up-arrow converts the
-  current draft cards into `VaultContentStore.CardDraft` values, saves them
-  through the selected `VaultInstance` as one root `CardEdge` tree, then clears
-  the composer. During this conversion, photo drafts generate their bounded
-  raster thumbnail through `MediaProcessing`; authored media such as Doodle and
-  Bauhaus do not store raster thumbnails.
+  separate save button for those visual editors. The sparkles capture button
+  presents Apple's Journaling Suggestions picker; when the user selects a
+  suggestion, the composer creates one Suggestion card for each top-level
+  resolved element. A selected suggestion with several photos, songs, places, or
+  other elements therefore becomes several card drafts instead of one crowded
+  card; grouped system assets such as Live Photos, Location Groups, and Workout
+  Groups stay together as one card. Suggestion cards store the returned title,
+  date interval, and element payload as an authored JSON attachment, not in the
+  card body. Media returned inside the selected suggestion, such as photos,
+  videos, Live Photo components, posters, artwork, and icons, is copied into
+  additional `.suggestionImage` / `.suggestionVideo` resources when the source
+  file is locally available; the authored JSON records the copied resource ids.
+  Suggestion card previews show the selected element as the card's primary
+  subject: an element-specific category label, symbol, title, secondary metadata,
+  and date when available. Photo-like elements, such as Photos, Live Photos,
+  event posters, podcast or song artwork, and contact photos, render the local
+  source image or copied `.suggestionImage` resource as the card's primary media
+  when that file is available. Legacy payloads that still contain multiple
+  elements render the first element as the primary subject and summarize the
+  remaining elements below it.
+  The resolver snapshots Contacts, Event Posters, Generic Media, Live Photos,
+  Locations, Location Groups, Motion Activity, Photos, Podcasts, Reflections,
+  Songs, State of Mind, Videos, Workouts, Workout Details, and Workout Groups;
+  SwiftUI decoration values such as suggestion gradients/colors are not
+  persisted. The
+  glass up-arrow converts the current draft cards into
+  `VaultContentStore.CardDraft` values, saves them through the
+  selected `VaultInstance` as one root `CardEdge` tree, then clears the composer.
+  During this conversion, photo drafts generate their bounded raster thumbnail
+  through `MediaProcessing`; authored JSON cards such as Suggestion, Doodle, and
+  Bauhaus do not store raster thumbnails, though Suggestion may carry copied
+  media resources alongside its JSON.
   A successful save shows a transient bottom capsule notification ("Saved to
   Journal") with success haptics; if saving fails, the draft remains on screen
   and a persistent bottom capsule notification explains that the save did not
@@ -719,9 +750,9 @@ the gallery's **Lab** section).
   require a captured payload). Existing-Card continuation selection is not wired
   yet; this composer creates a new thread from the first draft.
   Toolbar links back to vault selection, to the vault-backed entries list
-  (`SavedListView`), and to Settings. Capture demos are
-  kept in the dev gallery rather than Settings; suggestions remain a dev-gallery
-  component rather than a compose-surface card kind.
+  (`SavedListView`), and to Settings. Capture demos are kept in the dev gallery
+  rather than Settings; Suggestions also appear on the compose surface as a
+  capture button and save as `Card.Kind.suggestion`.
 - **`CaptureGalleryView`** (dev scaffolding, not currently wired into the app
   root) — a `List` with:
   - **Capture**: Text, Photo, Doodle, Bauhaus Grid, Ambient Sound, Suggestions.
@@ -763,8 +794,13 @@ the gallery's **Lab** section).
   it with their SwiftUI renderers. When a media file is not local yet, the UI
   shows a modality placeholder. The list listens for
   `VaultMediaFileChange` notifications for the selected vault and reloads snapshots
-  when files arrive. Saved cards can be edited from a grid tile's context menu or
-  from each detail card's pencil button. Editing rehydrates the saved card into
+  when files arrive. Saved cards can be shared from a grid tile's context menu
+  or a detail card's context menu. The share action opens a preview sheet backed
+  by a detached vault-entry snapshot, renders the actual temporary PNG artifact,
+  and, for Doodle or Bauhaus cards with authored replay data, also offers a
+  generated mp4 replay before handing the selected file to the system activity
+  sheet. Saved cards can be edited from a grid tile's context menu or from each
+  detail card's pencil button. Editing rehydrates the saved card into
   `CardEditDraftEditor`, requires the full media file for media cards, and saves
   back through `VaultContentStore.updateCard(cardID:with:)`; thumbnails are not
   used as lossy edit sources. Saved cards can also be deleted from a grid tile's
@@ -773,8 +809,6 @@ the gallery's **Lab** section).
   selected edge, descendant cards, attachments, attachment resources, local media
   files, and CloudKit delete outbox rows stay aligned. Detail deletion dismisses
   back to the list after a successful delete so the user sees a fresh snapshot.
-  The old saved-entry export/share UI was removed with the vault rewrite and still
-  needs to be rebuilt against `VaultInstance` snapshots.
 - **`SettingsView`** — a theme picker, an **Appearance** picker, a **Location**
   toggle for automatic location attachment, a **Storage** section with **Cloud
   Storage** estimates, a **Widgets** section with an **Add Widgets** guide,

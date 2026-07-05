@@ -38,6 +38,13 @@ extension CardEditDraft {
       )
     case .audio:
       return .audio
+    case .suggestion:
+      return .suggestion(
+        CardPreviewSuggestionPayload(
+          suggestion: suggestion,
+          mediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID
+        )
+      )
     case .doodle:
       return .doodle(CardPreviewDoodlePayload(drawing: doodle))
     case .bauhaus:

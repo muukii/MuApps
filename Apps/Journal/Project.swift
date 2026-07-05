@@ -131,6 +131,7 @@ let project = Project(
         .sdk(name: "SharedWithYou", type: .framework),
         .external(name: "ScrollEdgeEffect"),
         .external(name: "Algorithms"),
+        .external(name: "VariableBlur"),
         .target(name: "AppUIComponents"),
         .target(name: "JournalVault"),
         // Embeds the widget extension into the app bundle.
@@ -292,6 +293,7 @@ let project = Project(
         .target(name: "CaptureDoodle"),
         .target(name: "JournalVault"),
         .target(name: "MuColor"),
+        .external(name: "VariableBlur")
       ]
     ),
     journalFramework(name: "MuHaptics"),

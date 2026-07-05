@@ -97,6 +97,12 @@ extension AttachmentResource {
     /// JSON authored value for vector/generated cards such as Doodle/Bauhaus.
     case authoredJSON
 
+    /// Still image, artwork, poster, or icon copied from a selected suggestion.
+    case suggestionImage
+
+    /// Video file copied from a selected suggestion.
+    case suggestionVideo
+
     /// Audio recording file.
     case audio
 

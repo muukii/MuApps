@@ -99,7 +99,7 @@ private struct CardEditDraftKindPicker: View {
   private var selectableKinds: [Card.Kind] {
     Card.Kind.allCases.filter { kind in
       switch kind {
-      case .video, .livePhoto, .unknown:
+      case .video, .livePhoto, .suggestion, .unknown:
         return false
       case .text, .link, .photo, .audio, .doodle, .bauhaus:
         return true
@@ -136,6 +136,8 @@ private struct CardEditDraftKindEditor: View {
         ThreadDraftImportedMediaDetailEditor(card: draft)
       case .audio:
         ThreadDraftAudioDetailEditor(card: draft)
+      case .suggestion:
+        ThreadDraftSuggestionDetailEditor(card: draft)
       case .doodle:
         ThreadDraftDoodleDetailEditor(card: draft)
       case .bauhaus:
@@ -202,6 +204,18 @@ private struct ThreadDraftAudioDetailEditor: View {
     ThreadDraftAudioRecorderContent(card: card) { [card] recording in
       card.setAudio(recording)
     }
+  }
+}
+
+/// Read-only detail surface for a selected Journaling Suggestion.
+private struct ThreadDraftSuggestionDetailEditor: View {
+
+  @Bindable var card: CardEditDraft
+
+  var body: some View {
+    CardPreviewContent(payload: card.previewPayload, presentation: .savedDetail)
+      .padding(16)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
   }
 }
 
@@ -278,6 +292,8 @@ extension Card.Kind {
       return "Live Photo Card"
     case .audio:
       return "Audio Card"
+    case .suggestion:
+      return "Suggestion Card"
     case .doodle:
       return "Doodle Card"
     case .bauhaus:

@@ -485,9 +485,7 @@ fileprivate struct VaultStorageEstimateRow: View {
 
   var body: some View {
     HStack(spacing: 12) {
-      Image(systemName: vaultEstimate.descriptor.ownership.storageSystemImage)
-        .foregroundStyle(.tint)
-        .frame(width: 24)
+      SettingsVaultIconMark(icon: vaultEstimate.descriptor.icon)
 
       VStack(alignment: .leading, spacing: 2) {
         Text(vaultEstimate.descriptor.storageDisplayTitle)
@@ -502,6 +500,30 @@ fileprivate struct VaultStorageEstimateRow: View {
       Text(vaultEstimate.estimate.estimatedPayloadBytes.storageByteCountText)
         .foregroundStyle(.secondary)
     }
+  }
+}
+
+fileprivate struct SettingsVaultIconMark: View {
+
+  let icon: VaultIcon
+
+  var body: some View {
+    ZStack {
+      RoundedRectangle(cornerRadius: 7, style: .continuous)
+        .fill(.tint.opacity(0.12))
+
+      switch icon.kind {
+      case .systemImage:
+        Image(systemName: icon.value)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(.tint)
+      case .emoji:
+        Text(icon.value)
+          .font(.subheadline)
+      }
+    }
+    .frame(width: 28, height: 28)
+    .accessibilityHidden(true)
   }
 }
 
@@ -665,6 +687,8 @@ fileprivate extension JournalVault.Attachment.Kind {
       "Live Photos"
     case .audio:
       "Audio"
+    case .suggestion:
+      "Suggestions"
     case .doodle:
       "Doodles"
     case .bauhaus:
@@ -685,6 +709,8 @@ fileprivate extension JournalVault.Attachment.Kind {
       "livephoto"
     case .audio:
       "waveform"
+    case .suggestion:
+      "sparkles"
     case .doodle:
       "pencil.line"
     case .bauhaus:

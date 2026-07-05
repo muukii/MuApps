@@ -70,14 +70,16 @@ public final class Attachment {
 extension Attachment {
 
   /// The capture modality behind an attachment, which determines how its
-  /// resources are interpreted (photo → still image, Live Photo → still + paired
-  /// movie, video → movie, audio → m4a, doodle / bauhaus → encoded JSON). Raw
-  /// values are stable CloudKit payload values.
+  /// resources are interpreted (photo -> still image, Live Photo -> still + paired
+  /// movie, video -> movie, audio -> m4a, suggestion -> authored JSON plus optional
+  /// copied media, doodle / bauhaus -> encoded JSON). Raw values are stable
+  /// CloudKit payload values.
   public enum Kind: String, Codable, Sendable, CaseIterable, Hashable {
     case photo
     case video
     case livePhoto
     case audio
+    case suggestion
     case doodle
     case bauhaus
 

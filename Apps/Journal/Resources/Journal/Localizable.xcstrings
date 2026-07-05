@@ -1218,6 +1218,9 @@
         }
       }
     },
+    "Could Not Update Icon" : {
+
+    },
     "Create" : {
       "localizations" : {
         "en" : {
@@ -1924,6 +1927,9 @@
           }
         }
       }
+    },
+    "Journal" : {
+
     },
     "Journal content remains until you delete it in the app, delete the app's data, or remove it through iCloud behavior controlled by Apple. iCloud sync deletion timing is governed by Apple's CloudKit and iCloud systems." : {
       "extractionState" : "stale",
@@ -3171,6 +3177,9 @@
         }
       }
     },
+    "Suggestion" : {
+
+    },
     "Suggestions" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3709,6 +3718,9 @@
           }
         }
       }
+    },
+    "Vault Icon" : {
+
     },
     "Vault Name" : {
       "extractionState" : "stale",

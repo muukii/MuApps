@@ -74,6 +74,7 @@ struct JournalVaultEntity: AppEntity, Identifiable, Hashable {
 
   let id: String
   let title: String
+  let icon: VaultIcon
 
   static let typeDisplayRepresentation: TypeDisplayRepresentation = "Vault"
   static let defaultQuery = JournalVaultEntityQuery()
@@ -85,11 +86,13 @@ struct JournalVaultEntity: AppEntity, Identifiable, Hashable {
   init(descriptor: VaultDescriptor) {
     self.id = descriptor.vaultID.uuidString
     self.title = descriptor.title
+    self.icon = descriptor.icon
   }
 
-  init(id: String, title: String) {
+  init(id: String, title: String, icon: VaultIcon = .default) {
     self.id = id
     self.title = title
+    self.icon = icon
   }
 
   private var displayTitle: String {
@@ -142,15 +145,18 @@ struct LatestNoteEntry: TimelineEntry {
 struct WidgetVaultSnapshot: Sendable, Hashable {
   let id: VaultID
   let title: String
+  let icon: VaultIcon
 
   init(descriptor: VaultDescriptor) {
     self.id = descriptor.vaultID
     self.title = Self.displayTitle(for: descriptor.title)
+    self.icon = descriptor.icon
   }
 
-  init(id: VaultID, title: String) {
+  init(id: VaultID, title: String, icon: VaultIcon = .default) {
     self.id = id
     self.title = Self.displayTitle(for: title)
+    self.icon = icon
   }
 
   private static func displayTitle(for title: String) -> String {
@@ -170,9 +176,10 @@ struct NoteSnapshot: Sendable {
 
 /// The widget-renderable content extracted from a vault `Card`.
 ///
-/// Text and link cards carry their display string. Photo cards carry the
-/// save-time raster thumbnail, while Doodle and Bauhaus cards carry authored
-/// values decoded from the vault media file.
+/// Text and link cards carry their display string. Suggestion cards carry the
+/// selected suggestion snapshot. Photo cards carry the save-time raster
+/// thumbnail, while Doodle and Bauhaus cards carry authored values decoded from
+/// the vault media file.
 enum NoteContent: Sendable {
   case text(String)
   case link(String)
@@ -180,6 +187,7 @@ enum NoteContent: Sendable {
   case video(Data?)
   case livePhoto(Data?)
   case audio
+  case suggestion(SuggestionCardPayload?)
   case doodle(DoodleDrawing?)
   case bauhaus(BauhausGridDocument?)
   case unknown
@@ -352,6 +360,11 @@ private struct WidgetLatestCardSnapshot: Sendable {
       return .livePhoto(mediaAttachment?.thumbnailData)
     case .audio:
       return .audio
+    case .suggestion:
+      guard let mediaFileURL = mediaAttachment?.fileURL else { return .suggestion(nil) }
+      return .suggestion(
+        await WidgetMediaFileReader.decode(SuggestionCardPayload.self, from: mediaFileURL)
+      )
     case .doodle:
       guard let mediaFileURL = mediaAttachment?.fileURL else { return .doodle(nil) }
       return .doodle(
@@ -451,7 +464,13 @@ private struct LatestNoteInlineAccessoryView: View {
   let entry: LatestNoteEntry
 
   var body: some View {
-    Label(title, systemImage: entry.note?.content.symbolName ?? "note.text")
+    if let note = entry.note {
+      Label(note.content.accessoryTitle, systemImage: note.content.symbolName)
+    } else if let vault = entry.vault {
+      WidgetVaultHeaderLabel(title: title, icon: vault.icon)
+    } else {
+      Label(title, systemImage: "shippingbox")
+    }
   }
 
   private var title: String {
@@ -469,15 +488,18 @@ private struct LatestNoteCircularAccessoryView: View {
   var body: some View {
     ZStack {
       AccessoryWidgetBackground()
-      Image(systemName: entry.note?.content.symbolName ?? emptySymbolName)
-        .font(.title2.weight(.semibold))
+      if let note = entry.note {
+        Image(systemName: note.content.symbolName)
+          .font(.title2.weight(.semibold))
+      } else if let vault = entry.vault {
+        WidgetVaultIconMark(icon: vault.icon, font: .title2.weight(.semibold))
+      } else {
+        Image(systemName: "shippingbox")
+          .font(.title2.weight(.semibold))
+      }
     }
     .widgetAccentable()
     .accessibilityLabel(Text(accessibilityTitle))
-  }
-
-  private var emptySymbolName: String {
-    entry.vault == nil ? "shippingbox" : "note.text"
   }
 
   private var accessibilityTitle: String {
@@ -491,7 +513,10 @@ private struct LatestNoteRectangularAccessoryView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
-      Label(headerTitle, systemImage: entry.note?.content.symbolName ?? emptySymbolName)
+      WidgetVaultHeaderLabel(
+        title: headerTitle,
+        icon: entry.vault?.icon ?? .default
+      )
         .font(.caption2.weight(.semibold))
         .lineLimit(1)
 
@@ -513,9 +538,6 @@ private struct LatestNoteRectangularAccessoryView: View {
     entry.note?.content.accessoryTitle ?? (entry.vault == nil ? String(localized: "No vaults yet") : String(localized: "No notes yet"))
   }
 
-  private var emptySymbolName: String {
-    entry.vault == nil ? "shippingbox" : "note.text"
-  }
 }
 
 private struct LatestNoteContentCard: View {
@@ -526,7 +548,10 @@ private struct LatestNoteContentCard: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Label(vault?.title ?? String(localized: "Latest"), systemImage: note.content.symbolName)
+      WidgetVaultHeaderLabel(
+        title: vault?.title ?? String(localized: "Latest"),
+        icon: vault?.icon ?? .default
+      )
         .font(.caption2.weight(.semibold))
         .foregroundStyle(.secondary)
         .lineLimit(1)
@@ -588,6 +613,8 @@ private struct NoteContentView: View {
       )
     case .audio:
       WidgetMediaLabel(title: "Audio", systemImage: "waveform")
+    case .suggestion(let suggestion):
+      WidgetSuggestionView(suggestion: suggestion)
     case .doodle(let drawing):
       WidgetDoodleView(drawing: drawing)
     case .bauhaus(let document):
@@ -701,6 +728,33 @@ private enum WidgetVisualMediaMetrics {
   static let aspectRatio: CGFloat = 1
 }
 
+private struct WidgetSuggestionView: View {
+
+  let suggestion: SuggestionCardPayload?
+
+  var body: some View {
+    if let suggestion {
+      Label {
+        Text(displayTitle(for: suggestion))
+          .lineLimit(3)
+          .minimumScaleFactor(0.8)
+      } icon: {
+        Image(systemName: "sparkles")
+      }
+      .font(.body.weight(.medium))
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    } else {
+      WidgetMediaLabel(title: "Suggestion", systemImage: "sparkles")
+    }
+  }
+
+  private func displayTitle(for suggestion: SuggestionCardPayload) -> String {
+    let title = suggestion.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    return title.isEmpty ? String(localized: "Suggestion") : title
+  }
+}
+
 private struct WidgetMediaLabel: View {
 
   let title: LocalizedStringResource
@@ -726,9 +780,16 @@ private struct LatestNoteEmptyState: View {
 
   var body: some View {
     VStack(spacing: 6) {
-      Image(systemName: symbolName)
-        .font(.title2)
+      Group {
+        if let vault {
+          WidgetVaultIconMark(icon: vault.icon, font: .title2)
+        } else {
+          Image(systemName: "shippingbox")
+            .font(.title2)
+        }
+      }
         .foregroundStyle(.secondary)
+
       Text(title)
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -741,8 +802,36 @@ private struct LatestNoteEmptyState: View {
     vault == nil ? String(localized: "No vaults yet") : String(localized: "No cards yet")
   }
 
-  private var symbolName: String {
-    vault == nil ? "shippingbox" : "note.text"
+}
+
+private struct WidgetVaultHeaderLabel: View {
+
+  let title: String
+  let icon: VaultIcon
+
+  var body: some View {
+    Label {
+      Text(title)
+    } icon: {
+      WidgetVaultIconMark(icon: icon, font: .body)
+    }
+  }
+}
+
+private struct WidgetVaultIconMark: View {
+
+  let icon: VaultIcon
+  let font: Font
+
+  var body: some View {
+    switch icon.kind {
+    case .systemImage:
+      Image(systemName: icon.value)
+        .font(font)
+    case .emoji:
+      Text(icon.value)
+        .font(font)
+    }
   }
 }
 
@@ -790,6 +879,8 @@ extension Card.Kind {
       return .doodle
     case .bauhaus:
       return .bauhaus
+    case .suggestion:
+      return .suggestion
     case .text, .link, .audio, .unknown:
       return nil
     }
@@ -813,6 +904,8 @@ extension NoteContent {
       return "livephoto"
     case .audio:
       return "waveform"
+    case .suggestion:
+      return "sparkles"
     case .doodle:
       return "scribble.variable"
     case .bauhaus:
@@ -839,6 +932,12 @@ extension NoteContent {
       return String(localized: "Live Photo")
     case .audio:
       return String(localized: "Audio")
+    case .suggestion(let suggestion):
+      let title = suggestion?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+      if let title, title.isEmpty == false {
+        return title
+      }
+      return String(localized: "Suggestion")
     case .doodle:
       return String(localized: "Doodle")
     case .bauhaus:
@@ -864,7 +963,8 @@ extension WidgetVaultSnapshot {
   /// Placeholder vault for the widget gallery and redacted previews.
   static let sample = WidgetVaultSnapshot(
     id: VaultID(rawValue: UUID()),
-    title: "Personal"
+    title: "Personal",
+    icon: .emoji("📓")
   )
 }
 

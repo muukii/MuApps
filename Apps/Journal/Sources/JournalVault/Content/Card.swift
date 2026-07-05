@@ -24,9 +24,9 @@ public final class Card {
   /// `"unknown"`. Read through `kind` unless re-encoding for transport.
   public var kindRawValue: String
 
-  /// Body-backed payload for textual card kinds. `.text` stores written content;
-  /// `.link` stores the canonical URL string. Media kinds keep this empty and
-  /// point at `Attachment` rows instead.
+  /// Body-backed payload for textual card kinds. `.text` stores written content,
+  /// and `.link` stores the canonical URL string. Media and authored JSON kinds
+  /// keep this empty and point at `Attachment` rows instead.
   public var body: String
 
   public var createdAt: Date
@@ -79,6 +79,11 @@ extension Card {
 
     /// An ambient audio card; expects one `.audio` attachment.
     case audio
+
+    /// A selected Apple Journaling Suggestion; expects one `.suggestion`
+    /// attachment with an `.authoredJSON` payload resource and optional copied
+    /// suggestion media resources.
+    case suggestion
 
     /// A doodle card; expects one `.doodle` attachment.
     case doodle

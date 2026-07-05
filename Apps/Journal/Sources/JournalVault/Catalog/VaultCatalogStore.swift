@@ -9,6 +9,9 @@ public struct VaultDescriptor: Hashable, Sendable {
   /// User-facing vault title shown in picker and sharing surfaces.
   public let title: String
 
+  /// User-facing icon shown next to the vault title in lightweight surfaces.
+  public let icon: VaultIcon
+
   /// Whether this device owns the vault zone or joined it through a share.
   public let ownership: VaultOwnership
 
@@ -33,6 +36,7 @@ public struct VaultDescriptor: Hashable, Sendable {
   public init(
     vaultID: VaultID,
     title: String,
+    icon: VaultIcon = .default,
     ownership: VaultOwnership,
     zoneOwnerName: String? = nil,
     isShared: Bool = false,
@@ -43,6 +47,7 @@ public struct VaultDescriptor: Hashable, Sendable {
   ) {
     self.vaultID = vaultID
     self.title = title
+    self.icon = icon
     self.ownership = ownership
     self.zoneOwnerName = zoneOwnerName
     self.isShared = isShared
@@ -99,6 +104,7 @@ extension VaultCatalogStore {
       return VaultDescriptor(
         vaultID: vaultID,
         title: index.title,
+        icon: index.icon,
         ownership: index.ownership,
         zoneOwnerName: index.zoneOwnerName,
         isShared: summary?.isShared ?? (index.ownership == .participant),
@@ -133,7 +139,7 @@ extension VaultCatalogStore {
   /// — the catalog is the source of truth for which vaults exist.
   @MainActor
   @discardableResult
-  public func createVault(title: String, using registry: VaultStoreRegistry) throws -> VaultID {
+  public func createVault(title: String, icon: VaultIcon = .default, using registry: VaultStoreRegistry) throws -> VaultID {
     let vaultID = VaultID()
     try layout.ensureVaultDirectories(for: vaultID)
 
@@ -145,6 +151,7 @@ extension VaultCatalogStore {
       VaultIndex(
         vaultID: vaultID.rawValue,
         title: title,
+        icon: icon,
         ownership: .owned,
         sortIndex: try nextSortIndex(in: context)
       )
@@ -171,6 +178,7 @@ extension VaultCatalogStore {
       VaultIndex(
         vaultID: descriptor.vaultID.rawValue,
         title: descriptor.title,
+        icon: descriptor.icon,
         ownership: descriptor.ownership,
         zoneOwnerName: descriptor.zoneOwnerName,
         sortIndex: try nextSortIndex(in: context)
@@ -206,6 +214,16 @@ extension VaultCatalogStore {
     if let summary = try fetchSummary(vaultID: vaultID, in: context) {
       summary.title = title
     }
+    try context.save()
+  }
+
+  /// Updates the local catalog icon used by picker, widget, and launch surfaces.
+  @MainActor
+  public func updateVaultIcon(vaultID: VaultID, icon: VaultIcon) throws {
+    let context = container.mainContext
+    guard let index = try fetchIndex(vaultID: vaultID, in: context) else { return }
+    index.iconKindRawValue = icon.kind.rawValue
+    index.iconValue = icon.value
     try context.save()
   }
 
@@ -292,5 +310,20 @@ extension VaultCatalogStore {
     var descriptor = FetchDescriptor<VaultLocalState>(predicate: #Predicate { $0.vaultID == rawValue })
     descriptor.fetchLimit = 1
     return try context.fetch(descriptor).first
+  }
+}
+
+private extension VaultIndex {
+
+  /// Decoded icon with a stable fallback for catalog rows created before icons.
+  var icon: VaultIcon {
+    guard
+      let rawKind = iconKindRawValue,
+      let kind = VaultIcon.Kind(rawValue: rawKind),
+      let iconValue
+    else {
+      return .default
+    }
+    return VaultIcon(kind: kind, value: iconValue)
   }
 }

@@ -1,6 +1,7 @@
 import JournalVault
 import MuColor
 import SwiftUI
+import VariableBlur
 
 /// Display value consumed by saved vault card components.
 ///
@@ -41,17 +42,20 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
   public let fileURL: URL
   public let pairedVideoFileURL: URL?
   public let thumbnail: Data?
+  public let suggestionMediaFileURLsByResourceID: [UUID: URL]
 
   public init(
     kind: JournalVault.Attachment.Kind,
     fileURL: URL,
     pairedVideoFileURL: URL? = nil,
-    thumbnail: Data?
+    thumbnail: Data?,
+    suggestionMediaFileURLsByResourceID: [UUID: URL] = [:]
   ) {
     self.kind = kind
     self.fileURL = fileURL
     self.pairedVideoFileURL = pairedVideoFileURL
     self.thumbnail = thumbnail
+    self.suggestionMediaFileURLsByResourceID = suggestionMediaFileURLsByResourceID
   }
 }
 
@@ -91,11 +95,16 @@ public struct VaultSavedEntryTile: View {
           presentation: .savedSummary
         )
 
-        Spacer(minLength: 0)
+      }
+      .frame(maxHeight: .infinity)
+      .overlay(alignment: .bottom) {
 
         Text(entry.createdAt, format: .dateTime.hour().minute())
           .font(.caption2.weight(.semibold))
           .foregroundStyle(.appOnSecondaryContainer.opacity(0.56))
+          .padding()
+          .frame(maxWidth: .infinity)
+          .backgroundStyle(.thinMaterial)
       }
     }
   }
@@ -254,7 +263,8 @@ private extension VaultSavedEntryAttachmentModel {
       kind: kind,
       fileURL: fileURL,
       pairedVideoFileURL: pairedVideoFileURL,
-      thumbnailData: thumbnail
+      thumbnailData: thumbnail,
+      suggestionMediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID
     )
   }
 }
@@ -275,6 +285,8 @@ public extension JournalVault.Card.Kind {
       "Live Photo"
     case .audio:
       "Audio"
+    case .suggestion:
+      "Suggestion"
     case .doodle:
       "Doodle"
     case .bauhaus:
@@ -300,6 +312,8 @@ public extension JournalVault.Card.Kind {
       "livephoto"
     case .audio:
       "waveform"
+    case .suggestion:
+      "sparkles"
     case .doodle:
       "scribble"
     case .bauhaus:

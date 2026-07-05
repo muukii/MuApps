@@ -47,7 +47,7 @@ fileprivate enum PrivacyPolicyContent {
         ),
         PrivacyPolicyParagraph(
           id: "suggestions",
-          body: "If you choose a Journaling Suggestion, Apple presents the system picker. Tinycurve receives only the suggestion content you select, such as a title, date, photo reference, media metadata, workout summary, place, motion summary, contact name, or reflection prompt."
+          body: "If you choose a Journaling Suggestion, Apple presents the system picker. Tinycurve receives only the suggestion content you select, such as a title, date, selected photo or video files, artwork/icon files, media metadata, workout summary, place, motion summary, contact name, or reflection prompt."
         ),
       ]
     ),

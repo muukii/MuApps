@@ -6,6 +6,54 @@ import SwiftUI
 
 // MARK: - Capture View
 
+/// A customizable button entry point to Apple's Journaling Suggestions picker.
+///
+/// The system framework owns the actual picker presentation. This wrapper only
+/// lets the host app supply a label that visually fits its capture surface while
+/// keeping the same value-type `CapturedSuggestion` handoff as
+/// `SuggestionCaptureView`.
+public struct SuggestionCaptureButton<Label: View>: View {
+
+  private let label: @MainActor @Sendable () -> Label
+  private let onCommit: @MainActor @Sendable (CapturedSuggestion) -> Void
+
+  public init(
+    @ViewBuilder label: @escaping @MainActor @Sendable () -> Label,
+    onCommit: @escaping @MainActor @Sendable (CapturedSuggestion) -> Void
+  ) {
+    self.label = label
+    self.onCommit = onCommit
+  }
+
+  public var body: some View {
+    #if canImport(JournalingSuggestions)
+    // `JournalingSuggestions` is weak-linked and absent from the Mac (Designed for
+    // iPad) runtime. Guard on `isiOSAppOnMac` so its symbols are never touched
+    // there, and erase the picker through `AnyView` so the composed view type
+    // doesn't force the picker's (missing) type metadata to instantiate on Mac.
+    if ProcessInfo.processInfo.isiOSAppOnMac {
+      UnavailableSuggestionButton(label: label)
+    } else {
+      AnyView(picker)
+    }
+    #else
+    UnavailableSuggestionButton(label: label)
+    #endif
+  }
+
+  #if canImport(JournalingSuggestions)
+  private var picker: some View {
+    JournalingSuggestionsPicker(
+      label: label,
+      onCompletion: { suggestion in
+        let captured = await CapturedSuggestion.resolve(from: suggestion)
+        onCommit(captured)
+      }
+    )
+  }
+  #endif
+}
+
 /// A self-contained entry point to Apple's Journaling Suggestions.
 ///
 /// `JournalingSuggestionsPicker` renders a system-owned button that presents the
@@ -37,54 +85,30 @@ public struct SuggestionCaptureView: View {
   }
 
   public var body: some View {
-    #if canImport(JournalingSuggestions)
-    // `JournalingSuggestions` is weak-linked and absent from the Mac (Designed for
-    // iPad) runtime. Guard on `isiOSAppOnMac` so its symbols are never touched
-    // there, and erase the picker through `AnyView` so the composed view type
-    // doesn't force the picker's (missing) type metadata to instantiate on Mac.
-    if ProcessInfo.processInfo.isiOSAppOnMac {
-      UnavailablePlaceholder(text: "Available on iPhone & iPad only")
-    } else {
-      AnyView(picker)
+    SuggestionCaptureButton {
+      Label(label, systemImage: "sparkles")
+        .font(.headline)
+        .padding(.vertical, 4)
+    } onCommit: { suggestion in
+      onCommit(suggestion)
     }
-    #else
-    UnavailablePlaceholder(text: "Available on device only")
-    #endif
-  }
-
-  #if canImport(JournalingSuggestions)
-  private var picker: some View {
-    JournalingSuggestionsPicker(
-      label: {
-        Label(label, systemImage: "sparkles")
-          .font(.headline)
-          .padding(.vertical, 4)
-      },
-      onCompletion: { suggestion in
-        let captured = await CapturedSuggestion.resolve(from: suggestion)
-        onCommit(captured)
-      }
-    )
     .buttonStyle(.borderedProminent)
     .buttonBorderShape(.capsule)
   }
-  #endif
 }
 
 // MARK: - Fileprivate Views
 
-/// Shown wherever the picker can't run: the Simulator (no module) or the Mac
-/// Designed-for-iPad runtime (module absent).
-private struct UnavailablePlaceholder: View {
-  let text: String
+/// Disabled placeholder shown wherever the picker can't run: the Simulator (no
+/// module) or the Mac Designed-for-iPad runtime (module absent).
+private struct UnavailableSuggestionButton<Label: View>: View {
+  let label: @MainActor @Sendable () -> Label
 
   var body: some View {
-    Label(text, systemImage: "iphone.gen3.slash")
-      .font(.subheadline)
-      .foregroundStyle(.secondary)
-      .padding()
-      .frame(maxWidth: .infinity)
-      .background(.quaternary.opacity(0.5), in: Capsule())
+    Button(action: {}) {
+      label()
+    }
+    .disabled(true)
   }
 }
 

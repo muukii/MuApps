@@ -28,6 +28,13 @@ public final class VaultIndex {
 
   public var title: String
 
+  /// Raw `VaultIcon.Kind` value. `nil` means the row predates vault icons and
+  /// should render with `VaultIcon.default`.
+  public var iconKindRawValue: String?
+
+  /// SF Symbol name or emoji string paired with `iconKindRawValue`.
+  public var iconValue: String?
+
   public var ownership: VaultOwnership
 
   /// CloudKit zone owner for `participant` vaults. `nil` means the zone belongs
@@ -42,6 +49,7 @@ public final class VaultIndex {
   public init(
     vaultID: UUID,
     title: String,
+    icon: VaultIcon = .default,
     ownership: VaultOwnership = .owned,
     zoneOwnerName: String? = nil,
     createdAt: Date = Date(),
@@ -49,6 +57,8 @@ public final class VaultIndex {
   ) {
     self.vaultID = vaultID
     self.title = title
+    self.iconKindRawValue = icon.kind.rawValue
+    self.iconValue = icon.value
     self.ownership = ownership
     self.zoneOwnerName = zoneOwnerName
     self.createdAt = createdAt

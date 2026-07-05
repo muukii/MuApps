@@ -130,23 +130,36 @@ private struct SuggestionElementRow: View {
   @ViewBuilder
   private var thumbnail: some View {
     switch element {
-    case .photo(_, let imageURL, _):
-      remoteImage(imageURL, fallback: "photo")
-    case .song(_, _, _, _, let artworkURL),
-      .podcast(_, _, _, let artworkURL):
-      remoteImage(artworkURL, fallback: "music.note")
     case .contact(_, _, let photoURL):
       remoteImage(photoURL, fallback: "person.crop.circle")
-    case .media:
-      symbol("play.square")
-    case .workout:
-      symbol("figure.run")
+    case .eventPoster(_, _, let imageURL, _, _, _, _):
+      remoteImage(imageURL, fallback: "calendar.badge.clock")
+    case .genericMedia(_, _, _, _, _, let appIconURL):
+      remoteImage(appIconURL, fallback: "play.square")
+    case .livePhoto(_, let imageURL, _, _):
+      remoteImage(imageURL, fallback: "livephoto")
     case .location:
       symbol("mappin.and.ellipse")
-    case .motion:
-      symbol("figure.walk")
+    case .locationGroup:
+      symbol("map")
+    case .motion(_, _, _, let iconURL, _):
+      remoteImage(iconURL, fallback: "figure.walk")
+    case .photo(_, let imageURL, _):
+      remoteImage(imageURL, fallback: "photo")
+    case .podcast(_, _, _, let artworkURL, _):
+      remoteImage(artworkURL, fallback: "music.note")
     case .reflection:
       symbol("quote.bubble")
+    case .song(_, _, _, _, let artworkURL, _):
+      remoteImage(artworkURL, fallback: "music.note")
+    case .stateOfMind(_, _, let iconURL):
+      remoteImage(iconURL, fallback: "heart.text.square")
+    case .video:
+      symbol("video")
+    case .workout(_, let workout):
+      remoteImage(workout.iconURL, fallback: "figure.run")
+    case .workoutGroup(_, let group):
+      remoteImage(group.iconURL, fallback: "figure.mixed.cardio")
     }
   }
 
@@ -168,51 +181,101 @@ private struct SuggestionElementRow: View {
 
   private var primaryText: String {
     switch element {
-    case .photo:
-      return "Photo"
-    case .song(_, let title, _, _, _):
-      return title ?? "Song"
-    case .podcast(_, let episode, _, _):
-      return episode ?? "Podcast"
-    case .media(_, let title, _, _):
-      return title ?? "Media"
-    case .workout(_, let name, _, _, _):
-      return name ?? "Workout"
-    case .location(_, let place, let city, _, _):
-      return place ?? city ?? "Location"
-    case .motion(_, let steps, _):
-      return "\(steps) steps"
     case .contact(_, let name, _):
       return name
+    case .eventPoster(_, let title, _, _, _, _, _):
+      return title.nilIfEmpty ?? "Event"
+    case .genericMedia(_, let title, _, _, _, _):
+      return title ?? "Media"
+    case .livePhoto:
+      return "Live Photo"
+    case .location(_, let value):
+      return value.place ?? value.city ?? "Location"
+    case .locationGroup(_, let locations):
+      return "\(locations.count) locations"
+    case .motion(_, let steps, _, _, _):
+      return "\(steps) steps"
+    case .photo:
+      return "Photo"
+    case .podcast(_, let episode, _, _, _):
+      return episode ?? "Podcast"
     case .reflection(_, let prompt):
       return prompt
+    case .song(_, let title, _, _, _, _):
+      return title ?? "Song"
+    case .stateOfMind:
+      return "State of Mind"
+    case .video:
+      return "Video"
+    case .workout(_, let workout):
+      return workout.details?.localizedName ?? "Workout"
+    case .workoutGroup(_, let group):
+      return "\(group.workouts.count) workouts"
     }
   }
 
   private var secondaryText: String? {
     switch element {
-    case .photo(_, _, let date):
-      return date?.formatted(date: .abbreviated, time: .shortened)
-    case .song(_, _, let artist, let album, _):
-      return [artist, album].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
-    case .podcast(_, _, let show, _):
-      return show
-    case .media(_, _, let artist, let album):
-      return [artist, album].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
-    case .workout(_, _, let kcal, let meters, _):
-      let parts = [
-        kcal.map { "\(Int($0)) kcal" },
-        meters.map { String(format: "%.1f km", $0 / 1000) },
-      ].compactMap { $0 }
-      return parts.joined(separator: " · ").nilIfEmpty
-    case .location(_, _, let city, _, _):
-      return city
-    case .motion(_, _, let interval):
-      return interval?.formattedRange
     case .contact:
       return "Contact"
+    case .eventPoster(_, _, _, let eventStart, let eventEnd, let isHost, let placeName):
+      let role = isHost == true ? "Host" : nil
+      let date = eventStart.map { start in
+        if let eventEnd {
+          return DateInterval(start: start, end: eventEnd).formattedRange
+        }
+        return start.formatted(date: .abbreviated, time: .shortened)
+      }
+      return [placeName, date, role].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
+    case .genericMedia(_, _, let artist, let album, let date, _):
+      return [artist, album, date?.formatted(date: .abbreviated, time: .shortened)]
+        .compactMap { $0 }
+        .joined(separator: " · ")
+        .nilIfEmpty
+    case .livePhoto(_, _, _, let date):
+      return date?.formatted(date: .abbreviated, time: .shortened)
+    case .location(_, let value):
+      return value.city
+    case .locationGroup(_, let locations):
+      return locations.compactMap(\.city).joined(separator: " · ").nilIfEmpty
+    case .motion(_, _, let interval, _, let movementType):
+      return [movementType?.displayTitle, interval?.formattedRange]
+        .compactMap { $0 }
+        .joined(separator: " · ")
+        .nilIfEmpty
+    case .photo(_, _, let date):
+      return date?.formatted(date: .abbreviated, time: .shortened)
+    case .podcast(_, _, let show, _, let date):
+      return [show, date?.formatted(date: .abbreviated, time: .shortened)]
+        .compactMap { $0 }
+        .joined(separator: " · ")
+        .nilIfEmpty
     case .reflection:
       return "Reflection prompt"
+    case .song(_, _, let artist, let album, _, let date):
+      return [artist, album, date?.formatted(date: .abbreviated, time: .shortened)]
+        .compactMap { $0 }
+        .joined(separator: " · ")
+        .nilIfEmpty
+    case .stateOfMind(_, let value, _):
+      return "Valence \(value.valence.formatted(.number.precision(.fractionLength(2))))"
+    case .video(_, _, let date):
+      return date?.formatted(date: .abbreviated, time: .shortened)
+    case .workout(_, let workout):
+      let details = workout.details
+      let parts = [
+        details?.activeEnergyKilocalories.map { "\(Int($0)) kcal" },
+        details?.distanceMeters.map { String(format: "%.1f km", $0 / 1000) },
+        details?.averageHeartRateBeatsPerMinute.map { "\(Int($0)) bpm" },
+        details?.dateInterval?.formattedRange,
+      ].compactMap { $0 }
+      return parts.joined(separator: " · ").nilIfEmpty
+    case .workoutGroup(_, let group):
+      let parts = [
+        group.activeEnergyKilocalories.map { "\(Int($0)) kcal" },
+        group.duration.map(\.formattedDuration),
+      ].compactMap { $0 }
+      return parts.joined(separator: " · ").nilIfEmpty
     }
   }
 }
@@ -228,6 +291,34 @@ extension DateInterval {
 
 extension String {
   fileprivate var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
+private extension CapturedSuggestionMovementType {
+
+  var displayTitle: String {
+    switch self {
+    case .running:
+      return "Running"
+    case .walking:
+      return "Walking"
+    case .runningWalking:
+      return "Running + Walking"
+    }
+  }
+}
+
+private extension TimeInterval {
+
+  var formattedDuration: String {
+    let minutes = Int((self / 60).rounded())
+    if minutes < 60 {
+      return "\(minutes) min"
+    }
+
+    let hours = minutes / 60
+    let remainingMinutes = minutes % 60
+    return remainingMinutes == 0 ? "\(hours) hr" : "\(hours) hr \(remainingMinutes) min"
+  }
 }
 
 #Preview {

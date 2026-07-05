@@ -10,6 +10,7 @@ import SwiftData
 import SwiftUI
 import UIKit
 import WidgetKit
+import Algorithms
 
 /// Vault-backed entries list.
 ///
@@ -20,10 +21,12 @@ struct SavedListView: View {
 
   @Environment(\.calendar) private var calendar
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+  @Environment(\.appPalette) private var palette
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
 
   @State private var sections: [VaultSavedDaySection] = []
   @State private var childEntriesByParentID: [UUID: [VaultSavedEntrySnapshot]] = [:]
+  @State private var sharePreviewPresentation: CardSharePreviewPresentation?
   @State private var isLoading = false
   @State private var loadErrorMessage: String?
   @State private var editPresentation: VaultSavedEntryEditPresentation?
@@ -53,6 +56,7 @@ struct SavedListView: View {
             isDeletingDisabled: isMutationDisabled,
             stackExpansionNamespace: stackExpansionNamespace,
             transitionNamespace: navigationTransitionNamespace,
+            onShare: presentSharePreview,
             onEdit: presentEditDraft,
             onDelete: deleteEntry
           )
@@ -89,6 +93,12 @@ struct SavedListView: View {
     }
     .refreshable {
       loadEntries()
+    }
+    .sheet(item: $sharePreviewPresentation) { presentation in
+      CardSharePreviewScreen(
+        snapshot: presentation.snapshot,
+        palette: presentation.palette
+      )
     }
     .sheet(item: $editPresentation) { presentation in
       VaultSavedEntryEditSheet(
@@ -246,6 +256,13 @@ struct SavedListView: View {
     }
   }
 
+  private func presentSharePreview(for entry: VaultSavedEntrySnapshot) {
+    sharePreviewPresentation = CardSharePreviewPresentation(
+      snapshot: CardShareSnapshot(source: entry.shareSource),
+      palette: palette
+    )
+  }
+
   private func saveEdit(_ presentation: VaultSavedEntryEditPresentation) {
     guard isSavingEdit == false else {
       return
@@ -310,6 +327,13 @@ private struct VaultSavedEntryEditPresentation: Identifiable {
   let id = UUID()
   let cardID: UUID
   let draft: CardEditDraft
+}
+
+/// One presentation of the generated share-preview sheet.
+private struct CardSharePreviewPresentation: Identifiable {
+  let id = UUID()
+  let snapshot: CardShareSnapshot
+  let palette: Palette
 }
 
 // MARK: - Reading
@@ -526,6 +550,17 @@ extension VaultSavedEntrySnapshot {
         ),
         location: location
       )
+    case .suggestion:
+      let data = try await mediaData(matching: .suggestion)
+      guard let suggestion = SuggestionCardPayload.decode(from: data) else {
+        throw VaultSavedEntryEditDraftError.mediaDecodeFailed
+      }
+      return CardEditDraft(
+        kind: .suggestion,
+        suggestion: suggestion,
+        suggestionMediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID(for: suggestion),
+        location: location
+      )
     case .doodle:
       let data = try await mediaData(matching: .doodle)
       guard let drawing = try? JSONDecoder().decode(DoodleDrawing.self, from: data) else {
@@ -583,6 +618,22 @@ extension VaultSavedEntrySnapshot {
       throw VaultSavedEntryEditDraftError.mediaUnavailable
     }
     return data
+  }
+
+  private func suggestionMediaFileURLsByResourceID(
+    for suggestion: SuggestionCardPayload
+  ) -> [UUID: URL] {
+    guard let attachment else { return [:] }
+
+    let resourcesByID = Dictionary(uniqueKeysWithValues: attachment.resources.map { ($0.id, $0.fileURL) })
+    return suggestion.mediaResources.reduce(into: [UUID: URL]()) { result, media in
+      guard let resourceID = media.resourceID,
+            let fileURL = resourcesByID[resourceID],
+            FileManager.default.fileExists(atPath: fileURL.path) else {
+        return
+      }
+      result[resourceID] = fileURL
+    }
   }
 }
 
@@ -787,6 +838,7 @@ private struct VaultSavedDaySectionView: View {
   let isDeletingDisabled: Bool
   let stackExpansionNamespace: Namespace.ID
   let transitionNamespace: Namespace.ID
+  let onShare: @MainActor (VaultSavedEntrySnapshot) -> Void
   let onEdit: @MainActor (VaultSavedEntrySnapshot) -> Void
   let onDelete: @MainActor (VaultSavedEntrySnapshot) async -> Bool
 
@@ -807,6 +859,7 @@ private struct VaultSavedDaySectionView: View {
               rootTitle: entry.kind.vaultListDisplayTitle,
               isEditingDisabled: isEditingDisabled,
               isDeletingDisabled: isDeletingDisabled,
+              onShare: onShare,
               onEdit: onEdit,
               onDelete: onDelete
             )
@@ -822,6 +875,12 @@ private struct VaultSavedDaySectionView: View {
           }
           .buttonStyle(.plain)
           .contextMenu {
+            Button {
+              onShare(entry)
+            } label: {
+              Label("Share", systemImage: "square.and.arrow.up")
+            }
+
             Button {
               onEdit(entry)
             } label: {
@@ -907,7 +966,7 @@ private struct VaultSavedEntryStackTile: View {
   var body: some View {
     ZStack {
       if isExpanded == false {
-        ForEach(Array(childEntries.prefix(2).enumerated()), id: \.element.edgeID) { index, child in
+        ForEach(childEntries.prefix(2).indexed(), id: \.element.edgeID) { index, child in
           VaultSavedEntryTile(entry: child.cardModel, childCount: 0)
             .matchedGeometryEffect(id: child.edgeID, in: stackNamespace)
             .scaleEffect(1 - CGFloat(index + 1) * 0.035)
@@ -934,6 +993,7 @@ private struct VaultSavedEntryDetailView: View {
   let rootTitle: LocalizedStringResource
   let isEditingDisabled: Bool
   let isDeletingDisabled: Bool
+  let onShare: @MainActor (VaultSavedEntrySnapshot) -> Void
   let onEdit: @MainActor (VaultSavedEntrySnapshot) -> Void
   let onDelete: @MainActor (VaultSavedEntrySnapshot) async -> Bool
 
@@ -955,6 +1015,27 @@ private struct VaultSavedEntryDetailView: View {
               deleteCandidate = entry
             }
           )
+          .contextMenu {
+            Button {
+              onShare(entry)
+            } label: {
+              Label("Share", systemImage: "square.and.arrow.up")
+            }
+
+            Button {
+              onEdit(entry)
+            } label: {
+              Label("Edit", systemImage: "square.and.pencil")
+            }
+            .disabled(isEditingDisabled)
+
+            Button(role: .destructive) {
+              deleteCandidate = entry
+            } label: {
+              Label("Delete", systemImage: "trash")
+            }
+            .disabled(isDeletingDisabled)
+          }
           .frame(maxWidth: detailMaximumCardWidth)
         }
       }
@@ -1000,6 +1081,21 @@ private struct VaultSavedEntryDetailView: View {
 
 private extension VaultSavedEntrySnapshot {
 
+  /// Detached values handed to the share/export feature.
+  ///
+  /// The share sheet renders temporary files from this value copy, so it never
+  /// holds a live SwiftData model or reaches back into the selected vault.
+  var shareSource: CardShareSource {
+    CardShareSource(
+      id: edgeID,
+      kind: kind,
+      body: body,
+      createdAt: createdAt,
+      location: location,
+      attachment: attachment?.shareSource
+    )
+  }
+
   /// Display projection handed to `AppUIComponents`.
   ///
   /// The saved-list feature owns vault snapshots and mutation callbacks; the UI
@@ -1019,13 +1115,41 @@ private extension VaultSavedEntrySnapshot {
 
 private extension VaultSavedAttachmentSnapshot {
 
+  var shareSource: CardShareAttachmentSource {
+    CardShareAttachmentSource(
+      kind: kind,
+      fileURL: fileURL,
+      thumbnail: thumbnail
+    )
+  }
+
   var cardModel: VaultSavedEntryAttachmentModel {
     VaultSavedEntryAttachmentModel(
       kind: kind,
       fileURL: fileURL,
       pairedVideoFileURL: resources.first { $0.role == .pairedVideo }?.fileURL,
-      thumbnail: thumbnail
+      thumbnail: thumbnail,
+      suggestionMediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID
     )
+  }
+
+  private var suggestionMediaFileURLsByResourceID: [UUID: URL] {
+    resources.reduce(into: [UUID: URL]()) { result, resource in
+      switch resource.role {
+      case .suggestionImage, .suggestionVideo:
+        result[resource.id] = resource.fileURL
+      case .originalImage,
+        .stillImage,
+        .pairedVideo,
+        .originalVideo,
+        .authoredJSON,
+        .audio,
+        .unknown:
+        break
+      @unknown default:
+        break
+      }
+    }
   }
 }
 

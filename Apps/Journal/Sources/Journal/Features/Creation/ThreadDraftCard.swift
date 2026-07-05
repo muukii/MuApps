@@ -8,6 +8,7 @@ import Foundation
 import JournalVault
 import MediaProcessing
 import Observation
+import UniformTypeIdentifiers
 
 /// A selected video kept in a temporary file until the vault save moves it into
 /// the selected vault's media directory.
@@ -119,6 +120,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     case video
     case livePhoto
     case audio
+    case suggestion
+    case suggestionMediaFileURLsByResourceID
     case doodle
     case bauhaus
     case location
@@ -174,6 +177,20 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   /// save. The recording file is moved into the Journal media directory later.
   var audio: AudioRecording?
 
+  /// Selected Journaling Suggestion snapshot kept as value data until save.
+  ///
+  /// The device-only `CaptureSuggestions` framework stays at the picker
+  /// boundary. Drafts store the vault-owned payload type so saved previews and
+  /// widgets can decode suggestion cards without linking that system framework.
+  var suggestion: SuggestionCardPayload?
+
+  /// Local source files for media already copied into a saved suggestion card.
+  ///
+  /// The durable `SuggestionCardPayload` records resource ids, not local file
+  /// paths. Saved-entry editing fills this map so replacing the card can copy
+  /// the existing vault files into the new attachment resource set.
+  var suggestionMediaFileURLsByResourceID: [UUID: URL]
+
   /// Vector doodle kept editable while the draft is open.
   var doodle: DoodleDrawing?
 
@@ -203,6 +220,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
       return livePhoto != nil
     case .audio:
       return audio != nil
+    case .suggestion:
+      return suggestion != nil
     case .doodle:
       return doodle != nil
     case .bauhaus:
@@ -224,6 +243,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
       && video == nil
       && livePhoto == nil
       && audio == nil
+      && suggestion == nil
+      && suggestionMediaFileURLsByResourceID.isEmpty
       && doodle == nil
       && bauhaus == nil
   }
@@ -237,6 +258,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     video: CapturedVideo? = nil,
     livePhoto: CapturedLivePhoto? = nil,
     audio: AudioRecording? = nil,
+    suggestion: SuggestionCardPayload? = nil,
+    suggestionMediaFileURLsByResourceID: [UUID: URL] = [:],
     doodle: DoodleDrawing? = nil,
     bauhaus: BauhausGridDocument? = nil,
     location: Coordinate? = nil
@@ -249,6 +272,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     self.video = video
     self.livePhoto = livePhoto
     self.audio = audio
+    self.suggestion = suggestion
+    self.suggestionMediaFileURLsByResourceID = suggestionMediaFileURLsByResourceID
     self.doodle = doodle
     self.bauhaus = bauhaus
     self.location = location
@@ -264,6 +289,11 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     self.video = try container.decodeIfPresent(CapturedVideo.self, forKey: .video)
     self.livePhoto = try container.decodeIfPresent(CapturedLivePhoto.self, forKey: .livePhoto)
     self.audio = try container.decodeIfPresent(AudioRecording.self, forKey: .audio)
+    self.suggestion = try container.decodeIfPresent(SuggestionCardPayload.self, forKey: .suggestion)
+    self.suggestionMediaFileURLsByResourceID = try container.decodeIfPresent(
+      [UUID: URL].self,
+      forKey: .suggestionMediaFileURLsByResourceID
+    ) ?? [:]
     self.doodle = try container.decodeIfPresent(DoodleDrawing.self, forKey: .doodle)
     self.bauhaus = try container.decodeIfPresent(BauhausGridDocument.self, forKey: .bauhaus)
     self.location = try container.decodeIfPresent(Coordinate.self, forKey: .location)
@@ -279,6 +309,10 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     try container.encodeIfPresent(video, forKey: .video)
     try container.encodeIfPresent(livePhoto, forKey: .livePhoto)
     try container.encodeIfPresent(audio, forKey: .audio)
+    try container.encodeIfPresent(suggestion, forKey: .suggestion)
+    if suggestionMediaFileURLsByResourceID.isEmpty == false {
+      try container.encode(suggestionMediaFileURLsByResourceID, forKey: .suggestionMediaFileURLsByResourceID)
+    }
     try container.encodeIfPresent(doodle, forKey: .doodle)
     try container.encodeIfPresent(bauhaus, forKey: .bauhaus)
     try container.encodeIfPresent(location, forKey: .location)
@@ -295,6 +329,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
       video: video,
       livePhoto: livePhoto,
       audio: audio,
+      suggestion: suggestion,
+      suggestionMediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID,
       doodle: doodle,
       bauhaus: bauhaus,
       location: location
@@ -329,6 +365,14 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   func setAudio(_ audio: AudioRecording) {
     kind = .audio
     self.audio = audio
+  }
+
+  /// Stores a selected Journaling Suggestion and switches the draft to
+  /// suggestion mode.
+  func setSuggestion(_ suggestion: SuggestionCardPayload) {
+    kind = .suggestion
+    self.suggestion = suggestion
+    suggestionMediaFileURLsByResourceID = [:]
   }
 
   /// Stores a vector doodle payload and switches the draft to doodle mode.
@@ -367,6 +411,8 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     video = nil
     livePhoto = nil
     audio = nil
+    suggestion = nil
+    suggestionMediaFileURLsByResourceID = [:]
     doodle = nil
     bauhaus = nil
   }
@@ -384,6 +430,8 @@ struct CardEditDraftSnapshot: Sendable, Codable {
   var video: CapturedVideo?
   var livePhoto: CapturedLivePhoto?
   var audio: AudioRecording?
+  var suggestion: SuggestionCardPayload?
+  var suggestionMediaFileURLsByResourceID: [UUID: URL]
   var doodle: DoodleDrawing?
   var bauhaus: BauhausGridDocument?
   var location: Coordinate?
@@ -470,6 +518,17 @@ struct CardEditDraftSnapshot: Sendable, Codable {
         mediaFileURL: audio.fileURL,
         location: location
       )
+    case .suggestion:
+      guard let suggestion else { throw CardEditDraftSnapshotError.missingSuggestionPayload }
+      let resourceDrafts = try SuggestionCardResourceStager.resourceDrafts(
+        for: suggestion,
+        sourceFilesByResourceID: suggestionMediaFileURLsByResourceID
+      )
+      return VaultContentStore.CardDraft(
+        kind: .suggestion,
+        mediaResources: resourceDrafts,
+        location: location
+      )
     case .doodle:
       guard let doodle else { throw CardEditDraftSnapshotError.missingMediaPayload }
       return VaultContentStore.CardDraft(
@@ -494,8 +553,155 @@ struct CardEditDraftSnapshot: Sendable, Codable {
   }
 }
 
+private enum SuggestionCardResourceStager {
+
+  static func resourceDrafts(
+    for suggestion: SuggestionCardPayload,
+    sourceFilesByResourceID: [UUID: URL]
+  ) throws -> [VaultContentStore.AttachmentResourceDraft] {
+    var stagedSuggestion = suggestion
+    var mediaResourceDrafts: [VaultContentStore.AttachmentResourceDraft] = []
+
+    for index in stagedSuggestion.mediaResources.indices {
+      let media = stagedSuggestion.mediaResources[index]
+      guard let sourceURL = media.sourceURL(
+        in: suggestion,
+        sourceFilesByResourceID: sourceFilesByResourceID
+      ),
+        sourceURL.isFileURL,
+        FileManager.default.fileExists(atPath: sourceURL.path)
+      else {
+        stagedSuggestion.mediaResources[index].resourceID = nil
+        continue
+      }
+
+      let resourceID = UUID()
+      stagedSuggestion.mediaResources[index].resourceID = resourceID
+      mediaResourceDrafts.append(
+        VaultContentStore.AttachmentResourceDraft(
+          id: resourceID,
+          role: media.kind.attachmentResourceRole,
+          fileURL: sourceURL,
+          fileTransferMode: .copy,
+          contentType: media.contentType
+            ?? sourceURL.inferredContentTypeIdentifier
+            ?? media.kind.fallbackContentType
+        )
+      )
+    }
+
+    let authoredJSONData = try stagedSuggestion.encodedData()
+    return [
+      VaultContentStore.AttachmentResourceDraft(
+        role: .authoredJSON,
+        data: authoredJSONData,
+        byteSize: authoredJSONData.count,
+        contentType: "public.json"
+      )
+    ] + mediaResourceDrafts
+  }
+}
+
+private extension SuggestionCardMediaResource {
+
+  func sourceURL(
+    in suggestion: SuggestionCardPayload,
+    sourceFilesByResourceID: [UUID: URL]
+  ) -> URL? {
+    if let resourceID,
+      let fileURL = sourceFilesByResourceID[resourceID]
+    {
+      return fileURL
+    }
+
+    guard let element = suggestion.elements.first(where: { $0.id == elementID }) else {
+      return nil
+    }
+
+    switch (kind, element) {
+    case (.contactPhoto, .contact(_, _, let photoURL)):
+      return photoURL
+    case (.eventPosterImage, .eventPoster(_, _, let imageURL, _, _, _, _)):
+      return imageURL
+    case (.genericMediaAppIcon, .genericMedia(_, _, _, _, _, let appIconURL)):
+      return appIconURL
+    case (.livePhotoImage, .livePhoto(_, let imageURL, _, _)):
+      return imageURL
+    case (.livePhotoVideo, .livePhoto(_, _, let videoURL, _)):
+      return videoURL
+    case (.motionIcon, .motion(_, _, _, let iconURL, _)):
+      return iconURL
+    case (.photoImage, .photo(_, let imageURL, _)):
+      return imageURL
+    case (.podcastArtwork, .podcast(_, _, _, let artworkURL, _)):
+      return artworkURL
+    case (.songArtwork, .song(_, _, _, _, let artworkURL, _)):
+      return artworkURL
+    case (.stateOfMindIcon, .stateOfMind(_, _, let iconURL)):
+      return iconURL
+    case (.video, .video(_, let videoURL, _)):
+      return videoURL
+    case (.workoutIcon, .workout(_, let workout)):
+      return workout.iconURL
+    case (.workoutGroupIcon, .workoutGroup(_, let group)):
+      return group.iconURL
+    default:
+      return nil
+    }
+  }
+}
+
+private extension SuggestionCardMediaResource.Kind {
+
+  var attachmentResourceRole: AttachmentResource.Role {
+    switch self {
+    case .livePhotoVideo, .video:
+      return .suggestionVideo
+    case .contactPhoto,
+      .eventPosterImage,
+      .genericMediaAppIcon,
+      .livePhotoImage,
+      .motionIcon,
+      .photoImage,
+      .podcastArtwork,
+      .songArtwork,
+      .stateOfMindIcon,
+      .workoutIcon,
+      .workoutGroupIcon:
+      return .suggestionImage
+    }
+  }
+
+  var fallbackContentType: String {
+    switch self {
+    case .livePhotoVideo, .video:
+      return "public.mpeg-4"
+    case .contactPhoto,
+      .eventPosterImage,
+      .genericMediaAppIcon,
+      .livePhotoImage,
+      .motionIcon,
+      .photoImage,
+      .podcastArtwork,
+      .songArtwork,
+      .stateOfMindIcon,
+      .workoutIcon,
+      .workoutGroupIcon:
+      return "public.jpeg"
+    }
+  }
+}
+
+private extension URL {
+
+  var inferredContentTypeIdentifier: String? {
+    UTType(filenameExtension: pathExtension)?.identifier
+  }
+}
+
 enum CardEditDraftSnapshotError: Error {
   case missingMediaPayload
+  case missingSuggestionPayload
   case invalidLinkURL
   case unsupportedKind
 }
