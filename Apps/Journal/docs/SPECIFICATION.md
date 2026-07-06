@@ -644,7 +644,7 @@ the gallery's **Lab** section).
   composer toolbar, storage estimate rows, and widget vault headers. Icon
   metadata is local catalog presentation data; it is not currently synchronized
   through the vault's CloudKit `VaultInfo` record. Vault rows can be deleted from
-  swipe actions or the row context menu after a destructive confirmation.
+  the row context menu after a destructive confirmation.
   Owned vault deletion removes the CloudKit custom zone before deleting local
   catalog/content files, so the vault disappears for everyone with access.
   Participant vault deletion targets the accepted shared zone and then removes

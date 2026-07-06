@@ -356,13 +356,6 @@ private struct VaultSelectionList: View {
             onCollaborationSharingStopped: onCollaborationSharingStopped,
             onCollaborationError: onCollaborationError
           )
-          .swipeActions(edge: .trailing) {
-            Button(role: .destructive) {
-              onDeleteVault(vault)
-            } label: {
-              Label("Delete", systemImage: "trash")
-            }
-          }
           .contextMenu {
             Button {
               onEditVaultIcon(vault)
@@ -464,6 +457,80 @@ private struct VaultSelectionRow: View {
       }
     }
     .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+  }
+}
+
+#Preview("Vault Selection Cells") {
+  VaultSelectionRowPreview()
+}
+
+private struct VaultSelectionRowPreview: View {
+
+  private let baseVaultID = VaultID(rawValue: UUID(uuidString: "4AA2F163-22C7-41E1-8F92-289EA7EDB6C8")!)
+
+  var body: some View {
+    List {
+      Section {
+        previewRow(
+          title: "Personal",
+          subtitle: "Owned by you",
+          icon: .emoji("📓")
+        )
+
+        previewRow(
+          title: "Shared Project Notes",
+          subtitle: "Owned by you",
+          icon: .systemImage("person.2"),
+          isPreparingShare: true,
+          canShare: true
+        )
+
+        previewRow(
+          title: "Travel Archive",
+          subtitle: "Owned by you",
+          icon: .emoji("🌿"),
+          isDeleting: true
+        )
+
+        previewRow(
+          title: "Team Journal",
+          subtitle: "Shared with you",
+          icon: .systemImage("tray.full"),
+          canShare: false
+        )
+      }
+    }
+    .listStyle(.insetGrouped)
+    .scrollContentBackground(.hidden)
+    .background(.background)
+  }
+
+  private func previewRow(
+    title: String,
+    subtitle: LocalizedStringResource,
+    icon: VaultIcon,
+    isSelecting: Bool = false,
+    isPreparingShare: Bool = false,
+    isDeleting: Bool = false,
+    canShare: Bool = true
+  ) -> some View {
+    VaultSelectionRow(
+      vaultID: baseVaultID,
+      title: title,
+      subtitle: subtitle,
+      icon: icon,
+      isSelecting: isSelecting,
+      isPreparingShare: isPreparingShare,
+      isDeleting: isDeleting,
+      isShared: false,
+      canShare: canShare,
+      onSelect: {},
+      onShare: {},
+      onPrepareCollaborationShare: { _ in throw CancellationError() },
+      onCollaborationSharingStopped: { _ in },
+      onCollaborationError: { _ in }
+    )
+    .listRowBackground(Rectangle().fill(.appSecondaryContainer))
   }
 }
 
