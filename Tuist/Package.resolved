@@ -1,5 +1,5 @@
 {
-  "originHash" : "b49ab300d6363aec0cbf19b2d481c3f076414338ede45e7e0b64a28bfedd667b",
+  "originHash" : "e68949eaa6521d27e5f5cb78b3b1fb58402b5e9f3e6dfd0704551aac4aed64d6",
   "pins" : [
     {
       "identity" : "alamofire",
@@ -195,6 +195,15 @@
       "state" : {
         "revision" : "2c0dc7bd7dd7fa51b4161b6ae6b15ff59412f2c2",
         "version" : "1.0.0"
+      }
+    },
+    {
+      "identity" : "swiftui-gaussian-linear-gradient",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/FluidGroup/swiftui-gaussian-linear-gradient.git",
+      "state" : {
+        "revision" : "24a73857bfe5d58d8946097856b5d3d92e1b10cc",
+        "version" : "0.3.0"
       }
     },
     {

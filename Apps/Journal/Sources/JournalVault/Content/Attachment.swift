@@ -6,19 +6,27 @@ import SwiftData
 /// Concrete files live in `AttachmentResource` rows under the same vault
 /// boundary. Keeping bytes out of the store means rows and files have separate
 /// lifecycles: a row can arrive from CloudKit before its `CKAsset` file has
-/// been written locally. The sync layer posts `VaultMediaFileChange` when a
-/// resource file lands so views can retry loading.
+/// been written locally. `AttachmentResource.localFileRevision` changes when a
+/// resource file lands so views can retry through SwiftData observation.
 ///
-/// References the owning card by UUID (no SwiftData relationship) for the same
-/// record-mapping reasons as `Card`; the delete cascade is a domain rule in
-/// `VaultContentStore`.
+/// The public model connection is the SwiftData `card` relationship. A
+/// module-private reference id is kept beside it so CloudKit imports can store
+/// an attachment before its card has arrived, then repair the relationship
+/// later without exposing sync ordering to app UI.
 @Model
 public final class Attachment {
 
   @Attribute(.unique)
   public var id: UUID
 
-  public var cardID: UUID
+  /// Owning card once the local graph has been repaired.
+  public var card: Card?
+
+  /// CloudKit import/export and out-of-order repair key for `card`.
+  ///
+  /// This is intentionally module-private: app UI should traverse `card` /
+  /// `Card.attachments` instead of depending on transport-shaped foreign keys.
+  var cardReferenceID: UUID
 
   /// Raw modality string as stored and synced; see `Card.kindRawValue` for why
   /// this is a string. Read through `kind`.
@@ -35,7 +43,7 @@ public final class Attachment {
   /// Every media attachment has a primary resource. Additional resources can
   /// represent paired media such as a Live Photo movie without changing the
   /// attachment's logical identity.
-  public var primaryResourceID: UUID
+  var primaryResourceReferenceID: UUID
 
   /// Optional save-time raster derivative for large raster media.
   ///
@@ -45,6 +53,10 @@ public final class Attachment {
   public var thumbnail: Data?
 
   public var createdAt: Date
+
+  /// Concrete file resources that make up this logical attachment.
+  @Relationship(deleteRule: .cascade, inverse: \AttachmentResource.attachment)
+  public var resources: [AttachmentResource] = []
 
   public init(
     id: UUID = UUID(),
@@ -56,12 +68,51 @@ public final class Attachment {
     createdAt: Date = Date()
   ) {
     self.id = id
-    self.cardID = cardID
+    self.cardReferenceID = cardID
     self.kindRawValue = kind.rawValue
     self.byteSize = byteSize
-    self.primaryResourceID = primaryResourceID
+    self.primaryResourceReferenceID = primaryResourceID
     self.thumbnail = thumbnail
     self.createdAt = createdAt
+  }
+}
+
+// MARK: - Relationships
+
+extension Attachment {
+
+  /// Stable id of the owning card.
+  ///
+  /// Reads from the repaired relationship when available and falls back to the
+  /// sync reference while imports are still out of order.
+  public var cardID: UUID {
+    card?.id ?? cardReferenceID
+  }
+
+  /// Stable id of the primary resource used by renderers.
+  public var primaryResourceID: UUID {
+    primaryResourceReferenceID
+  }
+
+  /// Primary concrete resource, if it has been materialized locally.
+  public var primaryResource: AttachmentResource? {
+    resources.first { $0.id == primaryResourceReferenceID }
+  }
+
+  func setCardReferenceID(_ id: UUID) {
+    cardReferenceID = id
+    if card?.id != id {
+      card = nil
+    }
+  }
+
+  func connect(to card: Card) {
+    cardReferenceID = card.id
+    self.card = card
+  }
+
+  func setPrimaryResourceReferenceID(_ id: UUID) {
+    primaryResourceReferenceID = id
   }
 }
 

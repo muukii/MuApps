@@ -8,10 +8,8 @@ import SwiftData
 ///
 /// CloudKit mirroring is disabled for this store, so `.unique` and non-optional
 /// properties are fine.
-/// There are deliberately **no SwiftData relationships**: rows reference each
-/// other by UUID exactly as their CloudKit records do, which keeps record
-/// mapping 1:1 and keeps deletion cascades an explicit domain rule
-/// (see `VaultContentStore.deleteCardEdge`).
+/// CloudKit record ids stay as stable UUIDs, while SwiftData relationships keep
+/// the app UI on the local object graph instead of manual CloudKit-shaped joins.
 @Model
 public final class Card {
 
@@ -34,6 +32,20 @@ public final class Card {
 
   /// Where the card was created, recorded only when the user opted in.
   public var location: Coordinate?
+
+  /// Media or authored payload rows owned by this card.
+  ///
+  /// Text and link cards usually have no attachments. Media and authored JSON
+  /// cards use one logical attachment whose resources hold concrete files.
+  @Relationship(deleteRule: .cascade, inverse: \Attachment.card)
+  public var attachments: [Attachment] = []
+
+  /// Tree placements that make this card visible inside a vault.
+  ///
+  /// A valid vault normally has one placement per visible card. The array shape
+  /// keeps the relationship tolerant of partially imported or repaired data.
+  @Relationship(inverse: \CardEdge.card)
+  public var placements: [CardEdge] = []
 
   public init(
     id: UUID = UUID(),

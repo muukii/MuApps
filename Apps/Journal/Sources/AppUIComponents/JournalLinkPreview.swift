@@ -9,38 +9,23 @@ import UIKit
 /// placeholder when metadata is unavailable.
 public struct JournalLinkPreview: View {
 
-  /// The layout density used by card summaries and detail cards.
-  public enum Mode: Hashable, Sendable {
-    /// Compact preview sized for grid tiles and draft summaries.
-    case summary
-
-    /// Larger preview sized for the saved-card detail surface.
-    case detail
-  }
-
   let url: URL
-  let mode: Mode
 
   @State private var metadata: LPLinkMetadata?
   @State private var fetchState: LinkPreviewFetchState = .idle
 
   public init(
-    url: URL,
-    mode: Mode
+    url: URL
   ) {
     self.url = url
-    self.mode = mode
   }
 
   public var body: some View {
     ZStack(alignment: .bottomTrailing) {
       LinkPreviewRepresentable(
         url: url,
-        metadata: metadata,
-        height: previewHeight
+        metadata: metadata
       )
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .clipped()
 
       if fetchState == .failed {
         Label("Preview unavailable", systemImage: "exclamationmark.triangle")
@@ -52,20 +37,8 @@ public struct JournalLinkPreview: View {
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .frame(height: previewHeight)
-    .clipped()
-    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     .task(id: url) {
       await loadMetadata()
-    }
-  }
-
-  private var previewHeight: CGFloat {
-    switch mode {
-    case .summary:
-      return 112
-    case .detail:
-      return 220
     }
   }
 
@@ -120,7 +93,6 @@ private struct LinkPreviewRepresentable: UIViewRepresentable {
 
   let url: URL
   let metadata: LPLinkMetadata?
-  let height: CGFloat
 
   func makeUIView(context: Context) -> LinkPreviewContainerView {
     LinkPreviewContainerView(metadata: metadata ?? Self.placeholderMetadata(for: url))
@@ -128,14 +100,6 @@ private struct LinkPreviewRepresentable: UIViewRepresentable {
 
   func updateUIView(_ uiView: LinkPreviewContainerView, context: Context) {
     uiView.metadata = metadata ?? Self.placeholderMetadata(for: url)
-  }
-
-  func sizeThatFits(
-    _ proposal: ProposedViewSize,
-    uiView: LinkPreviewContainerView,
-    context: Context
-  ) -> CGSize? {
-    CGSize(width: max(proposal.width ?? 0, 0), height: height)
   }
 
   private static func placeholderMetadata(for url: URL) -> LPLinkMetadata {
@@ -171,17 +135,9 @@ private final class LinkPreviewContainerView: UIView {
 
     super.init(frame: .zero)
 
-    clipsToBounds = true
-    layer.masksToBounds = true
-    layer.cornerRadius = 12
-    layer.cornerCurve = .continuous
     backgroundColor = .clear
 
     linkView.translatesAutoresizingMaskIntoConstraints = false
-    linkView.clipsToBounds = true
-    linkView.layer.masksToBounds = true
-    linkView.layer.cornerRadius = 12
-    linkView.layer.cornerCurve = .continuous
     linkView.setContentHuggingPriority(.defaultLow, for: .horizontal)
     linkView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     linkView.setContentHuggingPriority(.defaultLow, for: .vertical)

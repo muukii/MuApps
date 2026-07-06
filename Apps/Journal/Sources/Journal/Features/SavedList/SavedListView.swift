@@ -19,16 +19,48 @@ import Algorithms
 /// UI only after the sync layer has imported it into a vault store.
 struct SavedListView: View {
 
+  @Environment(JournalVaultRuntime.self) private var vaultRuntime
+
+  var body: some View {
+    Group {
+      if let vault = vaultRuntime.selectedVault,
+        vaultRuntime.selectedVaultState == .active
+      {
+        VaultSavedListContentView(vault: vault)
+          .modelContainer(vault.contentStore.container)
+      } else {
+        ContentUnavailableView("Vault Not Ready", systemImage: "externaldrive")
+      }
+    }
+    .navigationTitle(vaultRuntime.selectedVault?.title ?? String(localized: "Entries"))
+    .navigationBarTitleDisplayMode(.inline)
+  }
+}
+
+/// Live SwiftData-backed content for the selected vault.
+///
+/// `SavedListView` installs the selected vault's `ModelContainer`; this view
+/// observes `CardEdge` rows and traverses relationships to cards, attachments,
+/// and resources. CloudKit imports update SwiftData models, and this view
+/// responds through normal SwiftData observation rather than a manual reload.
+private struct VaultSavedListContentView: View {
+
+  let vault: VaultInstance
+
   @Environment(\.calendar) private var calendar
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @Environment(\.appPalette) private var palette
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
 
-  @State private var sections: [VaultSavedDaySection] = []
-  @State private var childEntriesByParentID: [UUID: [VaultSavedEntrySnapshot]] = [:]
+  @Query(
+    sort: [
+      SortDescriptor(\JournalVault.CardEdge.createdAt, order: .reverse),
+      SortDescriptor(\JournalVault.CardEdge.sortIndex),
+    ]
+  )
+  private var edges: [JournalVault.CardEdge]
+
   @State private var sharePreviewPresentation: CardSharePreviewPresentation?
-  @State private var isLoading = false
-  @State private var loadErrorMessage: String?
   @State private var editPresentation: VaultSavedEntryEditPresentation?
   @State private var isEditDraftLoading = false
   @State private var isSavingEdit = false
@@ -65,18 +97,12 @@ struct SavedListView: View {
       .padding(cardSpacing)
     }
     .overlay {
-      if isLoading {
-        ProgressView()
-      } else if vaultRuntime.selectedVaultState != .active {
-        ContentUnavailableView("Vault Not Ready", systemImage: "externaldrive")
-      } else if sections.isEmpty {
+      if sections.isEmpty {
         ContentUnavailableView("No Cards", systemImage: "book.closed")
       }
     }
     .scrollContentBackground(.hidden)
     .background(.background)
-    .navigationTitle(vaultRuntime.selectedVault?.title ?? String(localized: "Entries"))
-    .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       if hasStackedEntries {
         ToolbarItem(placement: .topBarTrailing) {
@@ -92,7 +118,7 @@ struct SavedListView: View {
       }
     }
     .refreshable {
-      loadEntries()
+      await vaultRuntime.refresh()
     }
     .sheet(item: $sharePreviewPresentation) { presentation in
       CardSharePreviewScreen(
@@ -113,13 +139,6 @@ struct SavedListView: View {
       )
       .presentationBackground(.background)
     }
-    .alert("Could Not Load Entries", isPresented: loadErrorPresentation) {
-      Button("OK", role: .cancel) {}
-    } message: {
-      if let loadErrorMessage {
-        Text(loadErrorMessage)
-      }
-    }
     .alert("Could Not Edit Card", isPresented: editErrorPresentation) {
       Button("OK", role: .cancel) {}
     } message: {
@@ -134,13 +153,41 @@ struct SavedListView: View {
         Text(deleteErrorMessage)
       }
     }
-    .task(id: vaultRuntime.selectedVault?.vaultID.rawValue) {
-      loadEntries()
+  }
+
+  private var sections: [VaultSavedDaySection] {
+    VaultSavedDaySection.sections(for: rootEntries, calendar: calendar)
+  }
+
+  private var childEntriesByParentID: [UUID: [VaultSavedEntry]] {
+    entries
+      .filter { entry in
+        entry.parentEdgeID.map(edgeIDs.contains) ?? false
+      }
+      .reduce(into: [UUID: [VaultSavedEntry]]()) { result, entry in
+        guard let parentEdgeID = entry.parentEdgeID else { return }
+        result[parentEdgeID, default: []].append(entry)
+      }
+      .mapValues { $0.sortedForVaultListSiblings() }
+  }
+
+  private var entries: [VaultSavedEntry] {
+    edges.compactMap { edge in
+      guard let card = edge.card else { return nil }
+      return VaultSavedEntry(edge: edge, card: card, store: vault.contentStore)
     }
-    .onReceive(NotificationCenter.default.publisher(for: VaultMediaFileChange.name)) { notification in
-      guard shouldReload(for: notification) else { return }
-      loadEntries()
-    }
+  }
+
+  private var edgeIDs: Set<UUID> {
+    Set(edges.map(\.id))
+  }
+
+  private var rootEntries: [VaultSavedEntry] {
+    entries
+      .filter { entry in
+        entry.parentEdgeID.map(edgeIDs.contains) != true
+      }
+      .sortedForVaultList()
   }
 
   private var hasStackedEntries: Bool {
@@ -158,10 +205,10 @@ struct SavedListView: View {
     )
   }
 
-  private func expandedEntries() -> [VaultSavedEntrySnapshot] {
-    var result: [VaultSavedEntrySnapshot] = []
+  private func expandedEntries() -> [VaultSavedEntry] {
+    var result: [VaultSavedEntry] = []
 
-    func appendSubtree(startingAt entry: VaultSavedEntrySnapshot) {
+    func appendSubtree(startingAt entry: VaultSavedEntry) {
       result.append(entry)
       for child in childEntriesByParentID[entry.edgeID] ?? [] {
         appendSubtree(startingAt: child)
@@ -173,16 +220,6 @@ struct SavedListView: View {
     }
 
     return result
-  }
-
-  private var loadErrorPresentation: Binding<Bool> {
-    Binding {
-      loadErrorMessage != nil
-    } set: { isPresented in
-      if isPresented == false {
-        loadErrorMessage = nil
-      }
-    }
   }
 
   private var editErrorPresentation: Binding<Bool> {
@@ -205,37 +242,7 @@ struct SavedListView: View {
     }
   }
 
-  private func loadEntries() {
-    guard let vault = vaultRuntime.selectedVault else {
-      sections = []
-      childEntriesByParentID = [:]
-      return
-    }
-
-    isLoading = true
-    defer { isLoading = false }
-
-    do {
-      let reader = VaultSavedEntryReader(store: vault.contentStore, calendar: calendar)
-      let snapshot = try reader.snapshot()
-      sections = snapshot.sections
-      childEntriesByParentID = snapshot.childEntriesByParentID
-      loadErrorMessage = nil
-    } catch {
-      sections = []
-      childEntriesByParentID = [:]
-      loadErrorMessage = error.localizedDescription
-    }
-  }
-
-  private func shouldReload(for notification: Notification) -> Bool {
-    guard let vaultID = notification.userInfo?[VaultMediaFileChange.vaultIDKey] as? VaultID else {
-      return false
-    }
-    return vaultID == vaultRuntime.selectedVault?.vaultID
-  }
-
-  private func presentEditDraft(for entry: VaultSavedEntrySnapshot) {
+  private func presentEditDraft(for entry: VaultSavedEntry) {
     guard isEditDraftLoading == false, isSavingEdit == false, isDeletingEntry == false else {
       return
     }
@@ -256,7 +263,7 @@ struct SavedListView: View {
     }
   }
 
-  private func presentSharePreview(for entry: VaultSavedEntrySnapshot) {
+  private func presentSharePreview(for entry: VaultSavedEntry) {
     sharePreviewPresentation = CardSharePreviewPresentation(
       snapshot: CardShareSnapshot(source: entry.shareSource),
       palette: palette
@@ -283,7 +290,6 @@ struct SavedListView: View {
         await vaultRuntime.refresh()
         WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
         editPresentation = nil
-        loadEntries()
       } catch {
         editErrorMessage = error.localizedDescription
       }
@@ -291,7 +297,7 @@ struct SavedListView: View {
   }
 
   @MainActor
-  private func deleteEntry(_ entry: VaultSavedEntrySnapshot) async -> Bool {
+  private func deleteEntry(_ entry: VaultSavedEntry) async -> Bool {
     guard isDeletingEntry == false, isEditDraftLoading == false, isSavingEdit == false else {
       return false
     }
@@ -310,7 +316,6 @@ struct SavedListView: View {
       }
       await vaultRuntime.refresh()
       WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
-      loadEntries()
       return true
     } catch {
       deleteErrorMessage = error.localizedDescription
@@ -336,144 +341,46 @@ private struct CardSharePreviewPresentation: Identifiable {
   let palette: Palette
 }
 
-// MARK: - Reading
+// MARK: - Live Entry Projection
 
-private struct VaultSavedEntryReader {
+/// Live saved-entry handle used by the list and detail UI.
+///
+/// The handle carries SwiftData model references. Display, share, and edit
+/// values are derived at the edge of each operation, so CloudKit imports update
+/// the UI through SwiftData observation instead of a hand-built reload snapshot.
+private struct VaultSavedEntry: Identifiable {
 
+  let edge: JournalVault.CardEdge
+  let card: JournalVault.Card
   let store: VaultContentStore
-  let calendar: Calendar
 
-  @MainActor
-  func snapshot() throws -> VaultSavedListSnapshot {
-    let context = store.container.mainContext
-    let cards = try context.fetch(
-      FetchDescriptor<JournalVault.Card>(
-        sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
-      )
-    )
-    let edges = try context.fetch(
-      FetchDescriptor<JournalVault.CardEdge>(
-        sortBy: [
-          SortDescriptor(\.createdAt, order: .reverse),
-          SortDescriptor(\.sortIndex),
-        ]
-      )
-    )
-    let attachments = try context.fetch(
-      FetchDescriptor<JournalVault.Attachment>(
-        sortBy: [SortDescriptor(\.createdAt)]
-      )
-    )
-    let resources = try context.fetch(
-      FetchDescriptor<JournalVault.AttachmentResource>(
-        sortBy: [SortDescriptor(\.createdAt)]
-      )
-    )
+  var id: UUID { edgeID }
 
-    let cardsByID = Dictionary(uniqueKeysWithValues: cards.map { ($0.id, $0) })
-    let edgeIDs = Set(edges.map(\.id))
-    let attachmentByCardID = attachments.reduce(into: [UUID: JournalVault.Attachment]()) { result, attachment in
-      if result[attachment.cardID] == nil {
-        result[attachment.cardID] = attachment
-      }
-    }
-    let resourcesByAttachmentID = Dictionary(grouping: resources, by: \.attachmentID)
+  var edgeID: UUID { edge.id }
+  var cardID: UUID { card.id }
+  var parentEdgeID: UUID? { edge.parentEdgeID }
+  var sortIndex: Int { edge.sortIndex }
+  var kind: JournalVault.Card.Kind { card.kind }
+  var body: String { card.body }
+  var createdAt: Date { card.createdAt }
+  var updatedAt: Date { card.updatedAt }
+  var location: JournalVault.Coordinate? { card.location }
 
-    let entries = edges.compactMap { edge -> VaultSavedEntrySnapshot? in
-      guard let card = cardsByID[edge.cardID] else { return nil }
-      return VaultSavedEntrySnapshot(
-        edgeID: edge.id,
-        cardID: card.id,
-        parentEdgeID: edge.parentEdgeID,
-        sortIndex: edge.sortIndex,
-        kind: card.kind,
-        body: card.body,
-        createdAt: card.createdAt,
-        updatedAt: card.updatedAt,
-        location: card.location,
-        attachment: attachmentByCardID[card.id].flatMap { attachment in
-          let resourceSnapshots = (resourcesByAttachmentID[attachment.id] ?? []).map { resource in
-            VaultSavedAttachmentResourceSnapshot(
-              id: resource.id,
-              role: resource.role,
-              byteSize: resource.byteSize,
-              contentType: resource.contentType,
-              pixelWidth: resource.pixelWidth,
-              pixelHeight: resource.pixelHeight,
-              duration: resource.duration,
-              fileURL: store.fileURL(for: resource)
-            )
-          }
-          guard let fileURL = resourceSnapshots
-            .first(where: { $0.id == attachment.primaryResourceID })?
-            .fileURL
-          else {
-            return nil
-          }
-
-          return VaultSavedAttachmentSnapshot(
-            id: attachment.id,
-            kind: attachment.kind,
-            byteSize: attachment.byteSize,
-            primaryResourceID: attachment.primaryResourceID,
-            fileURL: fileURL,
-            thumbnail: attachment.thumbnail,
-            resources: resourceSnapshots
-          )
+  var attachment: VaultSavedAttachment? {
+    card.attachments
+      .sorted { lhs, rhs in
+        if lhs.createdAt != rhs.createdAt {
+          return lhs.createdAt < rhs.createdAt
         }
-      )
-    }
-
-    let childEntriesByParentID = entries
-      .filter { entry in
-        entry.parentEdgeID.map(edgeIDs.contains) ?? false
+        return lhs.id.uuidString < rhs.id.uuidString
       }
-      .reduce(into: [UUID: [VaultSavedEntrySnapshot]]()) { result, entry in
-        guard let parentEdgeID = entry.parentEdgeID else { return }
-        result[parentEdgeID, default: []].append(entry)
-      }
-      .mapValues { $0.sortedForVaultListSiblings() }
-
-    let rootEntries = entries
-      .filter { entry in
-        entry.parentEdgeID.map(edgeIDs.contains) != true
-      }
-      .sortedForVaultList()
-    let sections = VaultSavedDaySection.sections(for: rootEntries, calendar: calendar)
-
-    return VaultSavedListSnapshot(
-      sections: sections,
-      childEntriesByParentID: childEntriesByParentID
-    )
+      .lazy
+      .compactMap { VaultSavedAttachment(attachment: $0, store: store) }
+      .first
   }
 }
 
-private struct VaultSavedListSnapshot {
-  var sections: [VaultSavedDaySection]
-  var childEntriesByParentID: [UUID: [VaultSavedEntrySnapshot]]
-}
-
-/// Value snapshot used by the list and detail UI.
-///
-/// The live SwiftData models stay behind `VaultSavedEntryReader`; views render
-/// stable value snapshots and explicitly reload when the selected vault or media
-/// file availability changes.
-private struct VaultSavedEntrySnapshot: Identifiable, Hashable {
-  var id: UUID { edgeID }
-
-  let edgeID: UUID
-  let cardID: UUID
-  let parentEdgeID: UUID?
-  let sortIndex: Int
-  let kind: JournalVault.Card.Kind
-  let body: String
-  let createdAt: Date
-  let updatedAt: Date
-  let location: JournalVault.Coordinate?
-  let attachment: VaultSavedAttachmentSnapshot?
-}
-
-extension VaultSavedEntrySnapshot {
+extension VaultSavedEntry {
 
   /// Rehydrates this saved card into the shared editing draft model.
   ///
@@ -597,7 +504,7 @@ extension VaultSavedEntrySnapshot {
     return resource.fileURL
   }
 
-  private func mediaResource(matching role: JournalVault.AttachmentResource.Role) throws -> VaultSavedAttachmentResourceSnapshot {
+  private func mediaResource(matching role: JournalVault.AttachmentResource.Role) throws -> VaultSavedAttachmentResource {
     guard let resource = attachment?.resources.first(where: { $0.role == role }) else {
       throw VaultSavedEntryEditDraftError.mediaUnavailable
     }
@@ -637,21 +544,48 @@ extension VaultSavedEntrySnapshot {
   }
 }
 
-private struct VaultSavedAttachmentSnapshot: Hashable {
+private struct VaultSavedAttachment {
+
   let id: UUID
   let kind: JournalVault.Attachment.Kind
   let byteSize: Int
   let primaryResourceID: UUID
   let fileURL: URL
+  let fileRevision: Int
   let thumbnail: Data?
-  let resources: [VaultSavedAttachmentResourceSnapshot]
+  let resources: [VaultSavedAttachmentResource]
 
-  var primaryResource: VaultSavedAttachmentResourceSnapshot? {
+  init?(attachment: JournalVault.Attachment, store: VaultContentStore) {
+    let resources = attachment.resources
+      .sorted { lhs, rhs in
+        if lhs.createdAt != rhs.createdAt {
+          return lhs.createdAt < rhs.createdAt
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+      }
+      .map { VaultSavedAttachmentResource(resource: $0, store: store) }
+
+    guard let primaryResource = resources.first(where: { $0.id == attachment.primaryResourceID }) else {
+      return nil
+    }
+
+    self.id = attachment.id
+    self.kind = attachment.kind
+    self.byteSize = attachment.byteSize
+    self.primaryResourceID = attachment.primaryResourceID
+    self.fileURL = primaryResource.fileURL
+    self.fileRevision = resources.reduce(0) { $0 &+ $1.localFileRevision }
+    self.thumbnail = attachment.thumbnail
+    self.resources = resources
+  }
+
+  var primaryResource: VaultSavedAttachmentResource? {
     resources.first { $0.id == primaryResourceID }
   }
 }
 
-private struct VaultSavedAttachmentResourceSnapshot: Hashable {
+private struct VaultSavedAttachmentResource {
+
   let id: UUID
   let role: JournalVault.AttachmentResource.Role
   let byteSize: Int
@@ -660,6 +594,19 @@ private struct VaultSavedAttachmentResourceSnapshot: Hashable {
   let pixelHeight: Int?
   let duration: Double?
   let fileURL: URL
+  let localFileRevision: Int
+
+  init(resource: JournalVault.AttachmentResource, store: VaultContentStore) {
+    self.id = resource.id
+    self.role = resource.role
+    self.byteSize = resource.byteSize
+    self.contentType = resource.contentType
+    self.pixelWidth = resource.pixelWidth
+    self.pixelHeight = resource.pixelHeight
+    self.duration = resource.duration
+    self.fileURL = store.fileURL(for: resource)
+    self.localFileRevision = resource.localFileRevision
+  }
 
   var pixelSize: CGSize? {
     guard let pixelWidth, let pixelHeight else {
@@ -742,10 +689,10 @@ private enum VaultSavedEntryEditMediaPreparer {
 private struct VaultSavedDaySection: Identifiable {
   let id: Date
   let day: Date
-  var entries: [VaultSavedEntrySnapshot]
+  var entries: [VaultSavedEntry]
 
   static func sections(
-    for entries: [VaultSavedEntrySnapshot],
+    for entries: [VaultSavedEntry],
     calendar: Calendar
   ) -> [VaultSavedDaySection] {
     var sectionIndexesByDay: [Date: Int] = [:]
@@ -832,17 +779,17 @@ private struct VaultSavedDaySectionView: View {
 
   let section: VaultSavedDaySection
   let columns: [GridItem]
-  let childEntriesByParentID: [UUID: [VaultSavedEntrySnapshot]]
+  let childEntriesByParentID: [UUID: [VaultSavedEntry]]
   let areStacksExpanded: Bool
   let isEditingDisabled: Bool
   let isDeletingDisabled: Bool
   let stackExpansionNamespace: Namespace.ID
   let transitionNamespace: Namespace.ID
-  let onShare: @MainActor (VaultSavedEntrySnapshot) -> Void
-  let onEdit: @MainActor (VaultSavedEntrySnapshot) -> Void
-  let onDelete: @MainActor (VaultSavedEntrySnapshot) async -> Bool
+  let onShare: @MainActor (VaultSavedEntry) -> Void
+  let onEdit: @MainActor (VaultSavedEntry) -> Void
+  let onDelete: @MainActor (VaultSavedEntry) async -> Bool
 
-  @State private var deleteCandidate: VaultSavedEntrySnapshot?
+  @State private var deleteCandidate: VaultSavedEntry?
 
   var body: some View {
     VStack(alignment: .leading, spacing: dayHeaderSpacing) {
@@ -928,7 +875,7 @@ private struct VaultSavedDaySectionView: View {
     }
   }
 
-  private func subtreeEntries(startingAt root: VaultSavedEntrySnapshot) -> [VaultSavedEntrySnapshot] {
+  private func subtreeEntries(startingAt root: VaultSavedEntry) -> [VaultSavedEntry] {
     var result = [root]
 
     func appendChildren(of parentID: UUID) {
@@ -957,8 +904,8 @@ private struct VaultSavedDayHeader: View {
 
 private struct VaultSavedEntryStackTile: View {
 
-  let entry: VaultSavedEntrySnapshot
-  let childEntries: [VaultSavedEntrySnapshot]
+  let entry: VaultSavedEntry
+  let childEntries: [VaultSavedEntry]
   let isExpanded: Bool
   let stackNamespace: Namespace.ID
   let transitionNamespace: Namespace.ID
@@ -989,16 +936,16 @@ private struct VaultSavedEntryStackTile: View {
 
 private struct VaultSavedEntryDetailView: View {
 
-  let entries: [VaultSavedEntrySnapshot]
+  let entries: [VaultSavedEntry]
   let rootTitle: LocalizedStringResource
   let isEditingDisabled: Bool
   let isDeletingDisabled: Bool
-  let onShare: @MainActor (VaultSavedEntrySnapshot) -> Void
-  let onEdit: @MainActor (VaultSavedEntrySnapshot) -> Void
-  let onDelete: @MainActor (VaultSavedEntrySnapshot) async -> Bool
+  let onShare: @MainActor (VaultSavedEntry) -> Void
+  let onEdit: @MainActor (VaultSavedEntry) -> Void
+  let onDelete: @MainActor (VaultSavedEntry) async -> Bool
 
   @Environment(\.dismiss) private var dismiss
-  @State private var deleteCandidate: VaultSavedEntrySnapshot?
+  @State private var deleteCandidate: VaultSavedEntry?
 
   var body: some View {
     ScrollView {
@@ -1079,7 +1026,7 @@ private struct VaultSavedEntryDetailView: View {
   }
 }
 
-private extension VaultSavedEntrySnapshot {
+private extension VaultSavedEntry {
 
   /// Detached values handed to the share/export feature.
   ///
@@ -1098,8 +1045,8 @@ private extension VaultSavedEntrySnapshot {
 
   /// Display projection handed to `AppUIComponents`.
   ///
-  /// The saved-list feature owns vault snapshots and mutation callbacks; the UI
-  /// component module receives only the stable values it needs to render a card.
+  /// The saved-list feature owns live vault models and mutation callbacks; the
+  /// UI component module receives only the stable values it needs to render a card.
   var cardModel: VaultSavedEntryCardModel {
     VaultSavedEntryCardModel(
       id: edgeID,
@@ -1113,7 +1060,7 @@ private extension VaultSavedEntrySnapshot {
   }
 }
 
-private extension VaultSavedAttachmentSnapshot {
+private extension VaultSavedAttachment {
 
   var shareSource: CardShareAttachmentSource {
     CardShareAttachmentSource(
@@ -1128,6 +1075,7 @@ private extension VaultSavedAttachmentSnapshot {
       kind: kind,
       fileURL: fileURL,
       pairedVideoFileURL: resources.first { $0.role == .pairedVideo }?.fileURL,
+      fileRevision: fileRevision,
       thumbnail: thumbnail,
       suggestionMediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID
     )
@@ -1155,9 +1103,9 @@ private extension VaultSavedAttachmentSnapshot {
 
 // MARK: - Sorting
 
-private extension Array where Element == VaultSavedEntrySnapshot {
+private extension Array where Element == VaultSavedEntry {
 
-  func sortedForVaultList() -> [VaultSavedEntrySnapshot] {
+  func sortedForVaultList() -> [VaultSavedEntry] {
     sorted { lhs, rhs in
       if lhs.createdAt != rhs.createdAt {
         return lhs.createdAt > rhs.createdAt
@@ -1166,7 +1114,7 @@ private extension Array where Element == VaultSavedEntrySnapshot {
     }
   }
 
-  func sortedForVaultListSiblings() -> [VaultSavedEntrySnapshot] {
+  func sortedForVaultListSiblings() -> [VaultSavedEntry] {
     sorted { lhs, rhs in
       if lhs.sortIndex != rhs.sortIndex {
         return lhs.sortIndex < rhs.sortIndex

@@ -1,3 +1,4 @@
+import GaussianLinearGradient
 import JournalVault
 import MuColor
 import SwiftUI
@@ -41,6 +42,7 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
   public let kind: JournalVault.Attachment.Kind
   public let fileURL: URL
   public let pairedVideoFileURL: URL?
+  public let fileRevision: Int
   public let thumbnail: Data?
   public let suggestionMediaFileURLsByResourceID: [UUID: URL]
 
@@ -48,12 +50,14 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
     kind: JournalVault.Attachment.Kind,
     fileURL: URL,
     pairedVideoFileURL: URL? = nil,
+    fileRevision: Int = 0,
     thumbnail: Data?,
     suggestionMediaFileURLsByResourceID: [UUID: URL] = [:]
   ) {
     self.kind = kind
     self.fileURL = fileURL
     self.pairedVideoFileURL = pairedVideoFileURL
+    self.fileRevision = fileRevision
     self.thumbnail = thumbnail
     self.suggestionMediaFileURLsByResourceID = suggestionMediaFileURLsByResourceID
   }
@@ -80,15 +84,6 @@ public struct VaultSavedEntryTile: View {
   public var body: some View {
     CardSurface {
       VStack(alignment: .leading, spacing: 12) {
-//        VaultSavedEntryCardHeader(
-//          kind: entry.kind,
-//          childCount: childCount,
-//          timestamp: nil,
-//          isEditingDisabled: false,
-//          isDeletingDisabled: false,
-//          onEdit: nil,
-//          onDelete: nil
-//        )
 
         CardPreviewContent(
           payload: entry.previewPayload,
@@ -97,16 +92,41 @@ public struct VaultSavedEntryTile: View {
 
       }
       .frame(maxHeight: .infinity)
-      .overlay(alignment: .bottom) {
-
-        Text(entry.createdAt, format: .dateTime.hour().minute())
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(.appOnSecondaryContainer.opacity(0.56))
-          .padding()
-          .frame(maxWidth: .infinity)
-          .backgroundStyle(.thinMaterial)
-      }
     }
+  }
+}
+
+/// Bottom timestamp treatment for saved-entry tiles.
+///
+/// The material is drawn as its own full-width layer and alpha-masked with a
+/// Gaussian ramp. That keeps the card content layout stable while making the
+/// blur fade feel closer to a variable blur.
+private struct VaultSavedEntryTimestampOverlay: View {
+
+  let createdAt: Date
+
+  var body: some View {
+    ZStack(alignment: .bottom) {
+      Rectangle()
+        .fill(.thinMaterial)
+        .frame(height: 72)
+        .mask {
+          GaussianLinearGradient(
+            colors: [.clear, .black],
+            startPoint: .top,
+            endPoint: .bottom,
+            standardDeviation: 0.18
+          )
+        }
+
+      Text(createdAt, format: .dateTime.hour().minute())
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.appOnSecondaryContainer.opacity(0.56))
+        .padding(CardMetrics.padding)
+        .frame(maxWidth: .infinity)
+    }
+    .frame(maxWidth: .infinity)
+    .allowsHitTesting(false)
   }
 }
 
@@ -263,6 +283,7 @@ private extension VaultSavedEntryAttachmentModel {
       kind: kind,
       fileURL: fileURL,
       pairedVideoFileURL: pairedVideoFileURL,
+      fileRevision: fileRevision,
       thumbnailData: thumbnail,
       suggestionMediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID
     )
@@ -372,9 +393,9 @@ public extension JournalVault.Card.Kind {
   }
 }
 
-/// Preview-only snapshot for one saved-card tile.
+/// Preview-only example for one saved-card tile.
 ///
-/// The production list gets the same value shape from `VaultSavedEntryReader`.
+/// The production list derives this value shape from live SwiftData models.
 /// Keeping the fixture at the display-model boundary lets the Preview render
 /// the real card components without opening a vault store.
 private struct VaultSavedEntryCardPreviewExample: Identifiable {

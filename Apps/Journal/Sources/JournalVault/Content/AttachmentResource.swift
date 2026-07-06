@@ -18,7 +18,13 @@ public final class AttachmentResource {
   public var id: UUID
 
   /// Owning logical attachment.
-  public var attachmentID: UUID
+  public var attachment: Attachment?
+
+  /// CloudKit import/export and out-of-order repair key for `attachment`.
+  ///
+  /// Kept module-private so app UI uses `attachment` /
+  /// `Attachment.resources` as the model connection.
+  var attachmentReferenceID: UUID
 
   /// Raw role string as stored and synced. Read through `role`.
   public var roleRawValue: String
@@ -44,6 +50,14 @@ public final class AttachmentResource {
   /// Color space name, when the media pipeline can determine it.
   public var colorSpaceName: String?
 
+  /// Local-only file availability revision.
+  ///
+  /// CloudKit record metadata can arrive before the asset file is present on
+  /// disk. The sync layer increments this when the local file changes so SwiftUI
+  /// can observe file availability through SwiftData instead of a side-channel
+  /// notification.
+  public var localFileRevision: Int
+
   public var createdAt: Date
 
   public init(
@@ -57,10 +71,11 @@ public final class AttachmentResource {
     duration: Double? = nil,
     isHDR: Bool = false,
     colorSpaceName: String? = nil,
+    localFileRevision: Int = 0,
     createdAt: Date = Date()
   ) {
     self.id = id
-    self.attachmentID = attachmentID
+    self.attachmentReferenceID = attachmentID
     self.roleRawValue = role.rawValue
     self.byteSize = byteSize
     self.contentType = contentType
@@ -69,7 +84,37 @@ public final class AttachmentResource {
     self.duration = duration
     self.isHDR = isHDR
     self.colorSpaceName = colorSpaceName
+    self.localFileRevision = localFileRevision
     self.createdAt = createdAt
+  }
+}
+
+// MARK: - Relationships
+
+extension AttachmentResource {
+
+  /// Stable id of the owning attachment.
+  ///
+  /// Reads from the repaired relationship when available and falls back to the
+  /// sync reference while imports are still out of order.
+  public var attachmentID: UUID {
+    attachment?.id ?? attachmentReferenceID
+  }
+
+  func setAttachmentReferenceID(_ id: UUID) {
+    attachmentReferenceID = id
+    if attachment?.id != id {
+      attachment = nil
+    }
+  }
+
+  func connect(to attachment: Attachment) {
+    attachmentReferenceID = attachment.id
+    self.attachment = attachment
+  }
+
+  func noteLocalFileChange() {
+    localFileRevision &+= 1
   }
 }
 

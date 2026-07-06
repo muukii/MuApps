@@ -804,7 +804,9 @@ legacy local `JournalModel` module は project から削除済み。Journal は 
 user-facing save は `CreationView` から `VaultInstance.createThread(cards:)` に書く。
 user-facing edit は `SavedListView` から selected `VaultInstance` の
 `VaultContentStore.updateCard(cardID:with:)` に書く。
-user-facing list は selected `VaultInstance` の `CardEdge` / `Card` / `Attachment` snapshot を読む。
+user-facing list は selected `VaultInstance` の SwiftData `ModelContainer` を
+environment に入れ、`CardEdge` の `@Query` から `Card` / `Attachment` /
+`AttachmentResource` relationship を辿る。
 旧 saved-entry edit / export share UI、旧 sync status UI、`MediaSyncEngine`、
 `SyncStatusMonitor` は削除済み。share / edit は vault-backed UI として作り直す。
 
@@ -817,7 +819,9 @@ user-facing list は selected `VaultInstance` の `CardEdge` / `Card` / `Attachm
   `Attachment` / `AttachmentResource` / `SyncMetadata` / `PendingMutation`。
   すべての write は同一 transaction で outbox(`PendingMutation`)を積む。
   save は必ず root `CardEdge` を作る。card edit は `Card` save と attachment replacement を
-  同一 transaction で扱う。削除 cascade は domain rule として実装。
+  同一 transaction で扱う。`CardEdge` / `Attachment` / `AttachmentResource` は
+  SwiftData relationship を主接続として持ち、record の out-of-order import を
+  repair できるよう reference ID も横に保持する。削除 cascade は domain rule として実装。
 - `VaultStoreRegistry` — process 内で vault ごとに単一 `ModelContainer` を保証し、
   local mutation を `AsyncStream<VaultID>` で sync layer へ流す。
 - `VaultInstanceRegistry` / `VaultInstance` — process 内で vault ごとに stable な
@@ -831,7 +835,8 @@ user-facing list は selected `VaultInstance` の `CardEdge` / `Card` / `Attachm
   `zoneNotFound` を返したときに lazy に作成。engine state は
   `SyncState/{private,shared}-database.json` に永続化。
   `AttachmentResource` の `CKAsset` upload / download(vault の `media/` に保存、
-  `VaultMediaFileChange` notification で file 到着を通知)。
+  file 到着時は `AttachmentResource.localFileRevision` を更新して SwiftData
+  observation で UI preview を再読み込み)。
 - `JournalVaultRuntime` — `JournalApp` 起動時に
   App Group layout、catalog store、store registry、`CloudKitVaultSyncEngine` を作る。
   preset vault は自動作成しない。`previewRuntime()` と debug 用 factory は

@@ -32,6 +32,7 @@ public struct CardPreviewContent: View {
         emptyTitle: presentation.emptyTextTitle,
         presentation: presentation
       )
+      .padding()
     case .link(let urlString):
       CardPreviewLink(urlString: urlString, presentation: presentation)
     case .photo(let photo):
@@ -79,15 +80,6 @@ public enum CardPreviewPresentation: Hashable, Sendable {
       return nil
     case .draftSummary, .savedSummary:
       return 8
-    }
-  }
-
-  fileprivate var linkPreviewMode: JournalLinkPreview.Mode {
-    switch self {
-    case .savedDetail:
-      return .detail
-    case .draftSummary, .savedSummary:
-      return .summary
     }
   }
 
@@ -168,46 +160,63 @@ public enum CardPreviewPayload {
       self = .photo(
         CardPreviewPhotoPayload(
           fileURL: attachment?.kind == .photo ? attachment?.fileURL : nil,
-          thumbnailData: attachment?.kind == .photo ? attachment?.thumbnailData : nil
+          fileRevision: attachment?.kind == .photo
+            ? attachment?.fileRevision ?? 0 : 0,
+          thumbnailData: attachment?.kind == .photo
+            ? attachment?.thumbnailData : nil
         )
       )
     case .video:
       self = .video(
         CardPreviewVideoPayload(
           fileURL: attachment?.kind == .video ? attachment?.fileURL : nil,
-          thumbnailData: attachment?.kind == .video ? attachment?.thumbnailData : nil
+          fileRevision: attachment?.kind == .video
+            ? attachment?.fileRevision ?? 0 : 0,
+          thumbnailData: attachment?.kind == .video
+            ? attachment?.thumbnailData : nil
         )
       )
     case .livePhoto:
       self = .livePhoto(
         CardPreviewLivePhotoPayload(
           fileURL: attachment?.kind == .livePhoto ? attachment?.fileURL : nil,
-          pairedVideoFileURL: attachment?.kind == .livePhoto ? attachment?.pairedVideoFileURL : nil,
-          thumbnailData: attachment?.kind == .livePhoto ? attachment?.thumbnailData : nil
+          pairedVideoFileURL: attachment?.kind == .livePhoto
+            ? attachment?.pairedVideoFileURL : nil,
+          fileRevision: attachment?.kind == .livePhoto
+            ? attachment?.fileRevision ?? 0 : 0,
+          thumbnailData: attachment?.kind == .livePhoto
+            ? attachment?.thumbnailData : nil
         )
       )
     case .audio:
       self = .audio
     case .suggestion:
-      let suggestionMediaFileURLsByResourceID = attachment?.kind == .suggestion
+      let suggestionMediaFileURLsByResourceID =
+        attachment?.kind == .suggestion
         ? attachment?.suggestionMediaFileURLsByResourceID ?? [:]
         : [:]
       self = .suggestion(
         CardPreviewSuggestionPayload(
           fileURL: attachment?.kind == .suggestion ? attachment?.fileURL : nil,
+          fileRevision: attachment?.kind == .suggestion
+            ? attachment?.fileRevision ?? 0 : 0,
           mediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID
         )
       )
     case .doodle:
       self = .doodle(
         CardPreviewDoodlePayload(
-          fileURL: attachment?.kind == .doodle ? attachment?.fileURL : nil
+          fileURL: attachment?.kind == .doodle ? attachment?.fileURL : nil,
+          fileRevision: attachment?.kind == .doodle
+            ? attachment?.fileRevision ?? 0 : 0
         )
       )
     case .bauhaus:
       self = .bauhaus(
         CardPreviewBauhausPayload(
-          fileURL: attachment?.kind == .bauhaus ? attachment?.fileURL : nil
+          fileURL: attachment?.kind == .bauhaus ? attachment?.fileURL : nil,
+          fileRevision: attachment?.kind == .bauhaus
+            ? attachment?.fileRevision ?? 0 : 0
         )
       )
     case .unknown:
@@ -222,15 +231,18 @@ public enum CardPreviewPayload {
 public struct CardPreviewSuggestionPayload {
   public let suggestion: SuggestionCardPayload?
   public let fileURL: URL?
+  public let fileRevision: Int
   public let mediaFileURLsByResourceID: [UUID: URL]
 
   public init(
     suggestion: SuggestionCardPayload? = nil,
     fileURL: URL? = nil,
+    fileRevision: Int = 0,
     mediaFileURLsByResourceID: [UUID: URL] = [:]
   ) {
     self.suggestion = suggestion
     self.fileURL = fileURL
+    self.fileRevision = fileRevision
     self.mediaFileURLsByResourceID = mediaFileURLsByResourceID
   }
 }
@@ -243,6 +255,7 @@ public struct CardPreviewAttachment: Hashable, Sendable {
   public let kind: JournalVault.Attachment.Kind
   public let fileURL: URL
   public let pairedVideoFileURL: URL?
+  public let fileRevision: Int
   public let thumbnailData: Data?
   public let suggestionMediaFileURLsByResourceID: [UUID: URL]
 
@@ -250,14 +263,17 @@ public struct CardPreviewAttachment: Hashable, Sendable {
     kind: JournalVault.Attachment.Kind,
     fileURL: URL,
     pairedVideoFileURL: URL? = nil,
+    fileRevision: Int = 0,
     thumbnailData: Data?,
     suggestionMediaFileURLsByResourceID: [UUID: URL] = [:]
   ) {
     self.kind = kind
     self.fileURL = fileURL
     self.pairedVideoFileURL = pairedVideoFileURL
+    self.fileRevision = fileRevision
     self.thumbnailData = thumbnailData
-    self.suggestionMediaFileURLsByResourceID = suggestionMediaFileURLsByResourceID
+    self.suggestionMediaFileURLsByResourceID =
+      suggestionMediaFileURLsByResourceID
   }
 }
 
@@ -265,15 +281,18 @@ public struct CardPreviewAttachment: Hashable, Sendable {
 public struct CardPreviewPhotoPayload {
   public let imageData: Data?
   public let fileURL: URL?
+  public let fileRevision: Int
   public let thumbnailData: Data?
 
   public init(
     imageData: Data? = nil,
     fileURL: URL? = nil,
+    fileRevision: Int = 0,
     thumbnailData: Data? = nil
   ) {
     self.imageData = imageData
     self.fileURL = fileURL
+    self.fileRevision = fileRevision
     self.thumbnailData = thumbnailData
   }
 }
@@ -281,13 +300,16 @@ public struct CardPreviewPhotoPayload {
 /// Video preview source for either an unsaved draft or a saved card.
 public struct CardPreviewVideoPayload {
   public let fileURL: URL?
+  public let fileRevision: Int
   public let thumbnailData: Data?
 
   public init(
     fileURL: URL? = nil,
+    fileRevision: Int = 0,
     thumbnailData: Data? = nil
   ) {
     self.fileURL = fileURL
+    self.fileRevision = fileRevision
     self.thumbnailData = thumbnailData
   }
 }
@@ -297,17 +319,20 @@ public struct CardPreviewLivePhotoPayload {
   public let stillImageData: Data?
   public let fileURL: URL?
   public let pairedVideoFileURL: URL?
+  public let fileRevision: Int
   public let thumbnailData: Data?
 
   public init(
     stillImageData: Data? = nil,
     fileURL: URL? = nil,
     pairedVideoFileURL: URL? = nil,
+    fileRevision: Int = 0,
     thumbnailData: Data? = nil
   ) {
     self.stillImageData = stillImageData
     self.fileURL = fileURL
     self.pairedVideoFileURL = pairedVideoFileURL
+    self.fileRevision = fileRevision
     self.thumbnailData = thumbnailData
   }
 }
@@ -316,13 +341,16 @@ public struct CardPreviewLivePhotoPayload {
 public struct CardPreviewDoodlePayload {
   public let drawing: DoodleDrawing?
   public let fileURL: URL?
+  public let fileRevision: Int
 
   public init(
     drawing: DoodleDrawing? = nil,
-    fileURL: URL? = nil
+    fileURL: URL? = nil,
+    fileRevision: Int = 0
   ) {
     self.drawing = drawing
     self.fileURL = fileURL
+    self.fileRevision = fileRevision
   }
 }
 
@@ -330,13 +358,16 @@ public struct CardPreviewDoodlePayload {
 public struct CardPreviewBauhausPayload {
   public let document: BauhausGridDocument?
   public let fileURL: URL?
+  public let fileRevision: Int
 
   public init(
     document: BauhausGridDocument? = nil,
-    fileURL: URL? = nil
+    fileURL: URL? = nil,
+    fileRevision: Int = 0
   ) {
     self.document = document
     self.fileURL = fileURL
+    self.fileRevision = fileRevision
   }
 }
 
@@ -382,8 +413,8 @@ private struct CardPreviewLink: View {
     if let linkURL = JournalLinkURL(urlString) {
       JournalLinkPreview(
         url: linkURL.url,
-        mode: presentation.linkPreviewMode
       )
+      .allowsHitTesting(presentation == .savedDetail)
     } else {
       CardPreviewText(
         text: urlString,
@@ -398,7 +429,8 @@ private struct CardPreviewSuggestion: View {
 
   let suggestion: CardPreviewSuggestionPayload
   let presentation: CardPreviewPresentation
-  @State private var state: CardPreviewMediaLoadState<SuggestionCardPayload> = .idle
+  @State private var state: CardPreviewMediaLoadState<SuggestionCardPayload> =
+    .idle
 
   private var additionalElementLimit: Int {
     switch presentation {
@@ -411,7 +443,12 @@ private struct CardPreviewSuggestion: View {
 
   var body: some View {
     content
-      .task(id: suggestion.fileURL) {
+      .task(
+        id: CardPreviewFileLoadID(
+          fileURL: suggestion.fileURL,
+          fileRevision: suggestion.fileRevision
+        )
+      ) {
         await loadSuggestion()
       }
   }
@@ -455,8 +492,9 @@ private struct CardPreviewSuggestion: View {
 
     state = .loading
     guard let data = await CardPreviewMediaFileReader.data(from: fileURL),
-          let payload = SuggestionCardPayload.decode(from: data),
-          Task.isCancelled == false else {
+      let payload = SuggestionCardPayload.decode(from: data),
+      Task.isCancelled == false
+    else {
       state = .unavailable
       return
     }
@@ -480,6 +518,7 @@ private struct SuggestionCardHero: View {
       if let imageFileURL = content.primary.imageFileURL {
         SuggestionCardMediaImage(
           fileURL: imageFileURL,
+          style: content.primary.imageStyle,
           presentation: presentation
         )
       }
@@ -491,7 +530,9 @@ private struct SuggestionCardHero: View {
         presentation: presentation
       )
 
-      if content.additionalElements.isEmpty == false || content.hiddenElementCount > 0 {
+      if content.additionalElements.isEmpty == false
+        || content.hiddenElementCount > 0
+      {
         SuggestionCardAdditionalElements(
           elements: content.additionalElements,
           hiddenElementCount: content.hiddenElementCount
@@ -506,6 +547,7 @@ private struct SuggestionCardHero: View {
 private struct SuggestionCardMediaImage: View {
 
   let fileURL: URL
+  let style: SuggestionElementImageStyle
   let presentation: CardPreviewPresentation
   @State private var image: UIImage?
 
@@ -518,20 +560,38 @@ private struct SuggestionCardMediaImage: View {
 
   @ViewBuilder
   private var content: some View {
-    if let image {
-      CardPreviewMediaBox(
-        aspectRatio: presentation.suggestionMediaAspectRatio,
-        showsBackground: false
-      ) {
+    switch style {
+    case .media:
+      if let image {
+
         Image(uiImage: image)
           .resizable()
           .scaledToFill()
+
+      } else {
+        CardPreviewMediaPlaceholder(
+          systemImage: "photo",
+          aspectRatio: presentation.suggestionMediaAspectRatio
+        )
       }
-    } else {
-      CardPreviewMediaPlaceholder(
-        systemImage: "photo",
-        aspectRatio: presentation.suggestionMediaAspectRatio
-      )
+
+    case .icon:
+      ZStack {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+          .fill(.appOnSecondaryContainer.opacity(0.08))
+
+        if let image {
+          Image(uiImage: image)
+            .resizable()
+            .scaledToFill()
+        } else {
+          Image(systemName: "photo")
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(.appOnSecondaryContainer.opacity(0.42))
+        }
+      }
+      .frame(width: 56, height: 56)
+      .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
   }
 
@@ -545,6 +605,11 @@ private struct SuggestionCardMediaImage: View {
 
     image = loadedImage
   }
+}
+
+private enum SuggestionElementImageStyle: Hashable {
+  case media
+  case icon
 }
 
 private struct SuggestionCardCategoryLabel: View {
@@ -660,7 +725,10 @@ private struct SuggestionCardLoading: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      SuggestionCardCategoryLabel(symbolName: "sparkles", title: "Journaling Suggestion")
+      SuggestionCardCategoryLabel(
+        symbolName: "sparkles",
+        title: "Journaling Suggestion"
+      )
 
       ProgressView()
         .controlSize(.small)
@@ -677,7 +745,10 @@ private struct SuggestionCardPlaceholder: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      SuggestionCardCategoryLabel(symbolName: "sparkles", title: "Journaling Suggestion")
+      SuggestionCardCategoryLabel(
+        symbolName: "sparkles",
+        title: "Journaling Suggestion"
+      )
 
       Text("Suggestion")
         .font(presentation.suggestionTitleFont)
@@ -707,14 +778,21 @@ private struct SuggestionCardDisplayContent: Equatable {
         mediaFileURLsByResourceID: mediaFileURLsByResourceID
       )
     }
-    let primary = elementDisplays.first ?? .emptySuggestion(title: title, date: suggestion.dateInterval?.start)
-    let additionalElements = Array(elementDisplays.dropFirst().prefix(additionalElementLimit))
+    let primary =
+      elementDisplays.first
+      ?? .emptySuggestion(title: title, date: suggestion.dateInterval?.start)
+    let additionalElements = Array(
+      elementDisplays.dropFirst().prefix(additionalElementLimit)
+    )
 
     self.primary = primary
     self.contextTitle = Self.contextTitle(title, primaryTitle: primary.title)
     self.fallbackDate = suggestion.dateInterval?.start
     self.additionalElements = additionalElements
-    self.hiddenElementCount = max(0, elementDisplays.dropFirst().count - additionalElements.count)
+    self.hiddenElementCount = max(
+      0,
+      elementDisplays.dropFirst().count - additionalElements.count
+    )
   }
 
   private static func contextTitle(
@@ -725,10 +803,15 @@ private struct SuggestionCardDisplayContent: Equatable {
       return nil
     }
 
-    let normalizedSuggestionTitle = suggestionTitle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    let normalizedPrimaryTitle = primaryTitle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let normalizedSuggestionTitle = suggestionTitle.trimmingCharacters(
+      in: .whitespacesAndNewlines
+    ).lowercased()
+    let normalizedPrimaryTitle = primaryTitle.trimmingCharacters(
+      in: .whitespacesAndNewlines
+    ).lowercased()
 
-    return normalizedSuggestionTitle == normalizedPrimaryTitle ? nil : suggestionTitle
+    return normalizedSuggestionTitle == normalizedPrimaryTitle
+      ? nil : suggestionTitle
   }
 }
 
@@ -742,6 +825,7 @@ private struct SuggestionElementDisplayContent: Identifiable, Equatable {
   let date: Date?
   let titleLineLimit: Int
   let imageFileURL: URL?
+  let imageStyle: SuggestionElementImageStyle
 
   init(
     id: UUID,
@@ -752,7 +836,8 @@ private struct SuggestionElementDisplayContent: Identifiable, Equatable {
     metadata: String?,
     date: Date?,
     titleLineLimit: Int,
-    imageFileURL: URL? = nil
+    imageFileURL: URL? = nil,
+    imageStyle: SuggestionElementImageStyle = .media
   ) {
     self.id = id
     self.categoryTitle = categoryTitle
@@ -763,6 +848,7 @@ private struct SuggestionElementDisplayContent: Identifiable, Equatable {
     self.date = date
     self.titleLineLimit = titleLineLimit
     self.imageFileURL = imageFileURL
+    self.imageStyle = imageStyle
   }
 
   var compactSummary: String {
@@ -805,9 +891,9 @@ private enum SuggestionText {
   }
 }
 
-private extension CardPreviewPresentation {
+extension CardPreviewPresentation {
 
-  var suggestionTitleFont: Font {
+  fileprivate var suggestionTitleFont: Font {
     switch self {
     case .savedDetail:
       return .title2.weight(.semibold)
@@ -816,7 +902,7 @@ private extension CardPreviewPresentation {
     }
   }
 
-  var suggestionSubtitleFont: Font {
+  fileprivate var suggestionSubtitleFont: Font {
     switch self {
     case .savedDetail:
       return .callout
@@ -825,7 +911,7 @@ private extension CardPreviewPresentation {
     }
   }
 
-  var suggestionMediaAspectRatio: CGFloat {
+  fileprivate var suggestionMediaAspectRatio: CGFloat {
     switch self {
     case .savedDetail:
       return 4 / 3
@@ -835,9 +921,9 @@ private extension CardPreviewPresentation {
   }
 }
 
-private extension SuggestionCardElement {
+extension SuggestionCardElement {
 
-  func displayContent(
+  fileprivate func displayContent(
     in suggestion: SuggestionCardPayload,
     mediaFileURLsByResourceID: [UUID: URL]
   ) -> SuggestionElementDisplayContent {
@@ -856,10 +942,19 @@ private extension SuggestionCardElement {
           in: suggestion,
           mediaFileURLsByResourceID: mediaFileURLsByResourceID,
           preferredKinds: [.contactPhoto]
-        )
+        ),
+        imageStyle: .icon
       )
 
-    case .eventPoster(let id, let title, _, let eventStart, _, let isHost, let placeName):
+    case .eventPoster(
+      let id,
+      let title,
+      _,
+      let eventStart,
+      _,
+      let isHost,
+      let placeName
+    ):
       let cleanedTitle = SuggestionText.cleaned(title)
       let cleanedPlaceName = SuggestionText.cleaned(placeName)
       return SuggestionElementDisplayContent(
@@ -886,10 +981,18 @@ private extension SuggestionCardElement {
         categoryTitle: "Media",
         symbolName: symbolName,
         title: cleanedTitle ?? cleanedAlbum ?? "Media",
-        subtitle: SuggestionText.joined([artist, cleanedTitle == cleanedAlbum ? nil : cleanedAlbum]),
+        subtitle: SuggestionText.joined([
+          artist, cleanedTitle == cleanedAlbum ? nil : cleanedAlbum,
+        ]),
         metadata: nil,
         date: date,
-        titleLineLimit: 2
+        titleLineLimit: 2,
+        imageFileURL: dominantImageFileURL(
+          in: suggestion,
+          mediaFileURLsByResourceID: mediaFileURLsByResourceID,
+          preferredKinds: [.genericMediaAppIcon]
+        ),
+        imageStyle: .icon
       )
 
     case .livePhoto(let id, _, _, let date):
@@ -924,7 +1027,9 @@ private extension SuggestionCardElement {
       )
 
     case .locationGroup(let id, let locations):
-      let names = locations.compactMap { SuggestionText.joined([$0.place, $0.city]) }
+      let names = locations.compactMap {
+        SuggestionText.joined([$0.place, $0.city])
+      }
       let count = locations.count
       return SuggestionElementDisplayContent(
         id: id,
@@ -946,7 +1051,13 @@ private extension SuggestionCardElement {
         subtitle: movementType?.displayTitle,
         metadata: dateInterval?.duration.formattedDuration,
         date: dateInterval?.start,
-        titleLineLimit: 2
+        titleLineLimit: 2,
+        imageFileURL: dominantImageFileURL(
+          in: suggestion,
+          mediaFileURLsByResourceID: mediaFileURLsByResourceID,
+          preferredKinds: [.motionIcon]
+        ),
+        imageStyle: .icon
       )
 
     case .photo(let id, _, let date):
@@ -1005,7 +1116,9 @@ private extension SuggestionCardElement {
         categoryTitle: "Song",
         symbolName: symbolName,
         title: cleanedTitle ?? "Song",
-        subtitle: SuggestionText.joined([artist, cleanedTitle == cleanedAlbum ? nil : cleanedAlbum]),
+        subtitle: SuggestionText.joined([
+          artist, cleanedTitle == cleanedAlbum ? nil : cleanedAlbum,
+        ]),
         metadata: nil,
         date: date,
         titleLineLimit: 2,
@@ -1022,10 +1135,17 @@ private extension SuggestionCardElement {
         categoryTitle: "State of Mind",
         symbolName: symbolName,
         title: value.displayTitle,
-        subtitle: "Valence \(value.valence.formatted(.number.precision(.fractionLength(2))))",
+        subtitle:
+          "Valence \(value.valence.formatted(.number.precision(.fractionLength(2))))",
         metadata: value.displayMetadata,
         date: value.date,
-        titleLineLimit: 2
+        titleLineLimit: 2,
+        imageFileURL: dominantImageFileURL(
+          in: suggestion,
+          mediaFileURLsByResourceID: mediaFileURLsByResourceID,
+          preferredKinds: [.stateOfMindIcon]
+        ),
+        imageStyle: .icon
       )
 
     case .video(let id, _, let date):
@@ -1049,7 +1169,13 @@ private extension SuggestionCardElement {
         subtitle: workout.displaySubtitle,
         metadata: workout.displayMetadata,
         date: workout.details?.dateInterval?.start,
-        titleLineLimit: 2
+        titleLineLimit: 2,
+        imageFileURL: dominantImageFileURL(
+          in: suggestion,
+          mediaFileURLsByResourceID: mediaFileURLsByResourceID,
+          preferredKinds: [.workoutIcon]
+        ),
+        imageStyle: .icon
       )
 
     case .workoutGroup(let id, let group):
@@ -1060,8 +1186,15 @@ private extension SuggestionCardElement {
         title: group.displayTitle,
         subtitle: group.displaySubtitle,
         metadata: group.displayMetadata,
-        date: group.workouts.compactMap { $0.details?.dateInterval?.start }.min(),
-        titleLineLimit: 2
+        date: group.workouts.compactMap { $0.details?.dateInterval?.start }
+          .min(),
+        titleLineLimit: 2,
+        imageFileURL: dominantImageFileURL(
+          in: suggestion,
+          mediaFileURLsByResourceID: mediaFileURLsByResourceID,
+          preferredKinds: [.workoutGroupIcon]
+        ),
+        imageStyle: .icon
       )
     }
   }
@@ -1072,10 +1205,13 @@ private extension SuggestionCardElement {
     preferredKinds: [SuggestionCardMediaResource.Kind]
   ) -> URL? {
     for kind in preferredKinds {
-      if let media = suggestion.mediaResources.first(where: { $0.elementID == id && $0.kind == kind }) {
+      if let media = suggestion.mediaResources.first(where: {
+        $0.elementID == id && $0.kind == kind
+      }) {
         if let resourceID = media.resourceID,
-           let fileURL = mediaFileURLsByResourceID[resourceID],
-           fileURL.isFileURL {
+          let fileURL = mediaFileURLsByResourceID[resourceID],
+          fileURL.isFileURL
+        {
           return fileURL
         }
 
@@ -1094,21 +1230,33 @@ private extension SuggestionCardElement {
     return nil
   }
 
-  private func fallbackImageFileURL(for kind: SuggestionCardMediaResource.Kind) -> URL? {
+  private func fallbackImageFileURL(for kind: SuggestionCardMediaResource.Kind)
+    -> URL?
+  {
     let fileURL: URL?
     switch (kind, self) {
     case (.contactPhoto, .contact(_, _, let photoURL)):
       fileURL = photoURL
     case (.eventPosterImage, .eventPoster(_, _, let imageURL, _, _, _, _)):
       fileURL = imageURL
+    case (.genericMediaAppIcon, .genericMedia(_, _, _, _, _, let appIconURL)):
+      fileURL = appIconURL
     case (.livePhotoImage, .livePhoto(_, let imageURL, _, _)):
       fileURL = imageURL
+    case (.motionIcon, .motion(_, _, _, let iconURL, _)):
+      fileURL = iconURL
     case (.photoImage, .photo(_, let imageURL, _)):
       fileURL = imageURL
     case (.podcastArtwork, .podcast(_, _, _, let artworkURL, _)):
       fileURL = artworkURL
     case (.songArtwork, .song(_, _, _, _, let artworkURL, _)):
       fileURL = artworkURL
+    case (.stateOfMindIcon, .stateOfMind(_, _, let iconURL)):
+      fileURL = iconURL
+    case (.workoutIcon, .workout(_, let workout)):
+      fileURL = workout.iconURL
+    case (.workoutGroupIcon, .workoutGroup(_, let group)):
+      fileURL = group.iconURL
     default:
       fileURL = nil
     }
@@ -1120,7 +1268,7 @@ private extension SuggestionCardElement {
     return fileURL
   }
 
-  var symbolName: String {
+  fileprivate var symbolName: String {
     switch self {
     case .contact:
       return "person.crop.circle"
@@ -1156,9 +1304,9 @@ private extension SuggestionCardElement {
   }
 }
 
-private extension SuggestionCardMotionMovement {
+extension SuggestionCardMotionMovement {
 
-  var displayTitle: String {
+  fileprivate var displayTitle: String {
     switch self {
     case .running:
       return "Running"
@@ -1170,9 +1318,9 @@ private extension SuggestionCardMotionMovement {
   }
 }
 
-private extension SuggestionCardStateOfMind {
+extension SuggestionCardStateOfMind {
 
-  var displayTitle: String {
+  fileprivate var displayTitle: String {
     if valence >= 0.33 {
       return "Pleasant"
     } else if valence <= -0.33 {
@@ -1182,30 +1330,31 @@ private extension SuggestionCardStateOfMind {
     }
   }
 
-  var displayMetadata: String? {
+  fileprivate var displayMetadata: String? {
     let values = [
       labelRawValues.isEmpty ? nil : "\(labelRawValues.count) labels",
-      associationRawValues.isEmpty ? nil : "\(associationRawValues.count) associations",
+      associationRawValues.isEmpty
+        ? nil : "\(associationRawValues.count) associations",
     ]
 
     return SuggestionText.joined(values)
   }
 }
 
-private extension SuggestionCardWorkout {
+extension SuggestionCardWorkout {
 
-  var displayTitle: String {
+  fileprivate var displayTitle: String {
     SuggestionText.cleaned(details?.localizedName) ?? "Workout"
   }
 
-  var displaySubtitle: String? {
+  fileprivate var displaySubtitle: String? {
     SuggestionText.joined([
       details?.activeEnergyKilocalories.map(Self.kilocalorieText),
       details?.distanceMeters.map(Self.distanceText),
     ])
   }
 
-  var displayMetadata: String? {
+  fileprivate var displayMetadata: String? {
     details?.averageHeartRateBeatsPerMinute.map(Self.heartRateText)
   }
 
@@ -1226,27 +1375,27 @@ private extension SuggestionCardWorkout {
   }
 }
 
-private extension SuggestionCardWorkoutGroup {
+extension SuggestionCardWorkoutGroup {
 
-  var displayTitle: String {
+  fileprivate var displayTitle: String {
     workouts.count == 1 ? "Workout" : "\(workouts.count) workouts"
   }
 
-  var displaySubtitle: String? {
+  fileprivate var displaySubtitle: String? {
     SuggestionText.joined([
       duration?.formattedDuration,
       activeEnergyKilocalories.map { "\(Int($0.rounded())) kcal" },
     ])
   }
 
-  var displayMetadata: String? {
+  fileprivate var displayMetadata: String? {
     averageHeartRateBeatsPerMinute.map { "\(Int($0.rounded())) bpm" }
   }
 }
 
-private extension TimeInterval {
+extension TimeInterval {
 
-  var formattedDuration: String {
+  fileprivate var formattedDuration: String {
     let minutes = Int((self / 60).rounded())
     if minutes < 60 {
       return "\(minutes) min"
@@ -1254,7 +1403,8 @@ private extension TimeInterval {
 
     let hours = minutes / 60
     let remainingMinutes = minutes % 60
-    return remainingMinutes == 0 ? "\(hours) hr" : "\(hours) hr \(remainingMinutes) min"
+    return remainingMinutes == 0
+      ? "\(hours) hr" : "\(hours) hr \(remainingMinutes) min"
   }
 }
 
@@ -1276,14 +1426,9 @@ private struct CardPreviewPhoto: View {
   @ViewBuilder
   private var content: some View {
     if let image {
-      CardPreviewMediaBox(
-        aspectRatio: presentation.photoAspectRatio,
-        showsBackground: false
-      ) {
-        Image(uiImage: image)
-          .resizable()
-          .scaledToFill()
-      }
+      Image(uiImage: image)
+        .resizable()
+        .scaledToFill()
     } else {
       CardPreviewMediaPlaceholder(
         systemImage: "photo",
@@ -1307,6 +1452,7 @@ private struct CardPreviewPhoto: View {
     CardPreviewImageLoadID(
       presentation: presentation,
       fileURL: photo.fileURL,
+      fileRevision: photo.fileRevision,
       primaryData: CardPreviewImageDataFingerprint(photo.imageData),
       fallbackData: CardPreviewImageDataFingerprint(photo.thumbnailData)
     )
@@ -1328,7 +1474,9 @@ private struct CardPreviewPhoto: View {
       decodedImageDataImage = image
 
     case .savedSummary:
-      let image = await CardPreviewMediaFileReader.image(from: photo.thumbnailData)
+      let image = await CardPreviewMediaFileReader.image(
+        from: photo.thumbnailData
+      )
       guard Task.isCancelled == false else {
         return
       }
@@ -1336,7 +1484,9 @@ private struct CardPreviewPhoto: View {
       decodedThumbnailImage = image
 
     case .savedDetail:
-      let thumbnailImage = await CardPreviewMediaFileReader.image(from: photo.thumbnailData)
+      let thumbnailImage = await CardPreviewMediaFileReader.image(
+        from: photo.thumbnailData
+      )
       guard Task.isCancelled == false else {
         return
       }
@@ -1387,28 +1537,24 @@ private struct CardPreviewVideo: View {
   }
 
   private func playableVideo(_ fileURL: URL) -> some View {
-    CardPreviewMediaBox(
-      aspectRatio: presentation.photoAspectRatio,
-      showsBackground: false
-    ) {
-      ZStack {
-        Color.black.opacity(0.08)
 
-        MutedLoopingVideoPlayer(
-          fileURL: fileURL,
-          onReadyForPlayback: {
-            withAnimation(.easeInOut(duration: 0.18)) {
-              readyFileURL = fileURL
-            }
+    ZStack {
+      Color.black.opacity(0.08)
+
+      MutedLoopingVideoPlayer(
+        fileURL: fileURL,
+        onReadyForPlayback: {
+          withAnimation(.easeInOut(duration: 0.18)) {
+            readyFileURL = fileURL
           }
-        )
-
-        if let thumbnailImage {
-          Image(uiImage: thumbnailImage)
-            .resizable()
-            .scaledToFill()
-            .opacity(readyFileURL == fileURL ? 0 : 1)
         }
+      )
+
+      if let thumbnailImage {
+        Image(uiImage: thumbnailImage)
+          .resizable()
+          .scaledToFill()
+          .opacity(readyFileURL == fileURL ? 0 : 1)
       }
     }
     .overlay(alignment: .bottomTrailing) {
@@ -1417,17 +1563,13 @@ private struct CardPreviewVideo: View {
   }
 
   private func posterOnly(_ image: UIImage) -> some View {
-    CardPreviewMediaBox(
-      aspectRatio: presentation.photoAspectRatio,
-      showsBackground: false
-    ) {
-      Image(uiImage: image)
-        .resizable()
-        .scaledToFill()
-    }
-    .overlay(alignment: .bottomTrailing) {
-      CardPreviewMediaBadge(systemImage: "play.fill")
-    }
+
+    Image(uiImage: image)
+      .resizable()
+      .scaledToFill()
+      .overlay(alignment: .bottomTrailing) {
+        CardPreviewMediaBadge(systemImage: "play.fill")
+      }
   }
 
   @MainActor
@@ -1436,7 +1578,9 @@ private struct CardPreviewVideo: View {
     playableFileURL = nil
     readyFileURL = nil
 
-    let image = await CardPreviewMediaFileReader.image(from: video.thumbnailData)
+    let image = await CardPreviewMediaFileReader.image(
+      from: video.thumbnailData
+    )
     guard Task.isCancelled == false else {
       return
     }
@@ -1447,7 +1591,9 @@ private struct CardPreviewVideo: View {
       return
     }
 
-    let isPlayable = await CardPreviewMediaFileReader.isPlayableMediaURL(fileURL)
+    let isPlayable = await CardPreviewMediaFileReader.isPlayableMediaURL(
+      fileURL
+    )
     guard Task.isCancelled == false else {
       return
     }
@@ -1459,6 +1605,7 @@ private struct CardPreviewVideo: View {
     CardPreviewImageLoadID(
       presentation: presentation,
       fileURL: video.fileURL,
+      fileRevision: video.fileRevision,
       primaryData: CardPreviewImageDataFingerprint(video.thumbnailData),
       fallbackData: nil
     )
@@ -1489,30 +1636,32 @@ private struct CardPreviewLivePhoto: View {
   @ViewBuilder
   private var content: some View {
     if let image {
-      CardPreviewMediaBox(
-        aspectRatio: presentation.photoAspectRatio,
-        showsBackground: false
-      ) {
-        ZStack {
-          Image(uiImage: image)
-            .resizable()
-            .scaledToFill()
 
-          if isLivePhotoPlaybackActive, let pairedVideoFileURL = livePhoto.pairedVideoFileURL {
-            MutedLoopingVideoPlayer(
-              fileURL: pairedVideoFileURL,
-              onReadyForPlayback: {
-                withAnimation(.easeInOut(duration: 0.16)) {
-                  isPairedVideoReady = true
-                }
+      ZStack {
+        Image(uiImage: image)
+          .resizable()
+          .scaledToFill()
+
+        if isLivePhotoPlaybackActive,
+          let pairedVideoFileURL = livePhoto.pairedVideoFileURL
+        {
+          MutedLoopingVideoPlayer(
+            fileURL: pairedVideoFileURL,
+            onReadyForPlayback: {
+              withAnimation(.easeInOut(duration: 0.16)) {
+                isPairedVideoReady = true
               }
-            )
-            .opacity(isPairedVideoReady ? 1 : 0)
-          }
+            }
+          )
+          .opacity(isPairedVideoReady ? 1 : 0)
         }
       }
+
       .contentShape(Rectangle())
-      .gesture(livePhotoPlaybackGesture)
+      .gesture(
+        livePhotoPlaybackGesture,
+        isEnabled: presentation == .savedDetail
+      )
       .overlay(alignment: .bottomTrailing) {
         CardPreviewMediaBadge(systemImage: "livephoto")
       }
@@ -1549,6 +1698,7 @@ private struct CardPreviewLivePhoto: View {
     CardPreviewImageLoadID(
       presentation: presentation,
       fileURL: livePhoto.fileURL,
+      fileRevision: livePhoto.fileRevision,
       primaryData: CardPreviewImageDataFingerprint(livePhoto.stillImageData),
       fallbackData: CardPreviewImageDataFingerprint(livePhoto.thumbnailData)
     )
@@ -1562,7 +1712,9 @@ private struct CardPreviewLivePhoto: View {
 
     switch presentation {
     case .draftSummary:
-      let stillImage = await CardPreviewMediaFileReader.image(from: livePhoto.stillImageData)
+      let stillImage = await CardPreviewMediaFileReader.image(
+        from: livePhoto.stillImageData
+      )
       guard Task.isCancelled == false else {
         return
       }
@@ -1573,7 +1725,9 @@ private struct CardPreviewLivePhoto: View {
         return
       }
 
-      let thumbnailImage = await CardPreviewMediaFileReader.image(from: livePhoto.thumbnailData)
+      let thumbnailImage = await CardPreviewMediaFileReader.image(
+        from: livePhoto.thumbnailData
+      )
       guard Task.isCancelled == false else {
         return
       }
@@ -1581,7 +1735,9 @@ private struct CardPreviewLivePhoto: View {
       decodedThumbnailImage = thumbnailImage
 
     case .savedSummary:
-      let thumbnailImage = await CardPreviewMediaFileReader.image(from: livePhoto.thumbnailData)
+      let thumbnailImage = await CardPreviewMediaFileReader.image(
+        from: livePhoto.thumbnailData
+      )
       guard Task.isCancelled == false else {
         return
       }
@@ -1589,7 +1745,9 @@ private struct CardPreviewLivePhoto: View {
       decodedThumbnailImage = thumbnailImage
 
     case .savedDetail:
-      let thumbnailImage = await CardPreviewMediaFileReader.image(from: livePhoto.thumbnailData)
+      let thumbnailImage = await CardPreviewMediaFileReader.image(
+        from: livePhoto.thumbnailData
+      )
       guard Task.isCancelled == false else {
         return
       }
@@ -1638,7 +1796,11 @@ private struct CardPreviewAudio: View {
           .font(.headline.weight(.semibold))
 
         waveform
-          .frame(maxWidth: .infinity, minHeight: presentation == .savedDetail ? 96 : 52, alignment: .center)
+          .frame(
+            maxWidth: .infinity,
+            minHeight: presentation == .savedDetail ? 96 : 52,
+            alignment: .center
+          )
       }
     }
   }
@@ -1681,7 +1843,12 @@ private struct CardPreviewDoodle: View {
 
   var body: some View {
     content
-      .task(id: doodle.fileURL) {
+      .task(
+        id: CardPreviewFileLoadID(
+          fileURL: doodle.fileURL,
+          fileRevision: doodle.fileRevision
+        )
+      ) {
         await loadDrawing()
       }
   }
@@ -1714,14 +1881,14 @@ private struct CardPreviewDoodle: View {
         displayAspectRatio: CardMetrics.aspectRatio
       )
     } else {
-      CardPreviewRenderedMediaFrame(presentation: presentation) {
-        DoodleDrawingView(
-          drawing: drawing,
-          inkColor: palette.tint,
-          displayAspectRatio: presentation.savedMediaAspectRatio
-        )
-        .padding(presentation == .savedDetail ? 16 : 10)
-      }
+
+      DoodleDrawingView(
+        drawing: drawing,
+        inkColor: palette.tint,
+        displayAspectRatio: presentation.savedMediaAspectRatio
+      )
+      .padding(presentation == .savedDetail ? 16 : 10)
+
     }
   }
 
@@ -1744,8 +1911,9 @@ private struct CardPreviewDoodle: View {
 
     state = .loading
     guard let data = await CardPreviewMediaFileReader.data(from: fileURL),
-          let drawing = try? JSONDecoder().decode(DoodleDrawing.self, from: data),
-          Task.isCancelled == false else {
+      let drawing = try? JSONDecoder().decode(DoodleDrawing.self, from: data),
+      Task.isCancelled == false
+    else {
       state = .unavailable
       return
     }
@@ -1768,11 +1936,17 @@ private struct CardPreviewBauhaus: View {
   let bauhaus: CardPreviewBauhausPayload
   let presentation: CardPreviewPresentation
 
-  @State private var state: CardPreviewMediaLoadState<BauhausGridDocument> = .idle
+  @State private var state: CardPreviewMediaLoadState<BauhausGridDocument> =
+    .idle
 
   var body: some View {
     content
-      .task(id: bauhaus.fileURL) {
+      .task(
+        id: CardPreviewFileLoadID(
+          fileURL: bauhaus.fileURL,
+          fileRevision: bauhaus.fileRevision
+        )
+      ) {
         await loadDocument()
       }
   }
@@ -1827,8 +2001,12 @@ private struct CardPreviewBauhaus: View {
 
     state = .loading
     guard let data = await CardPreviewMediaFileReader.data(from: fileURL),
-          let document = try? JSONDecoder().decode(BauhausGridDocument.self, from: data),
-          Task.isCancelled == false else {
+      let document = try? JSONDecoder().decode(
+        BauhausGridDocument.self,
+        from: data
+      ),
+      Task.isCancelled == false
+    else {
       state = .unavailable
       return
     }
@@ -1874,8 +2052,14 @@ private enum CardPreviewMediaLoadState<Payload> {
 private struct CardPreviewImageLoadID: Hashable {
   let presentation: CardPreviewPresentation
   let fileURL: URL?
+  let fileRevision: Int
   let primaryData: CardPreviewImageDataFingerprint?
   let fallbackData: CardPreviewImageDataFingerprint?
+}
+
+private struct CardPreviewFileLoadID: Hashable {
+  let fileURL: URL?
+  let fileRevision: Int
 }
 
 /// Lightweight fingerprint for image data used only to restart decode tasks.
@@ -1915,45 +2099,7 @@ private struct CardPreviewRenderedMediaFrame<Content: View>: View {
   }
 
   var body: some View {
-    CardPreviewMediaBox(aspectRatio: presentation.savedMediaAspectRatio) {
-      content
-    }
-  }
-}
-
-/// Fixed-aspect media container for card previews.
-///
-/// The box creates the layout size first, then clips any fill-mode content
-/// inside that exact rectangle. This keeps photo and authored-media previews
-/// from advertising an oversized layout or painting outside the card tile.
-private struct CardPreviewMediaBox<Content: View>: View {
-
-  let aspectRatio: CGFloat
-  let showsBackground: Bool
-  let content: Content
-
-  init(
-    aspectRatio: CGFloat,
-    showsBackground: Bool = true,
-    @ViewBuilder content: () -> Content
-  ) {
-    self.aspectRatio = aspectRatio
-    self.showsBackground = showsBackground
-    self.content = content()
-  }
-
-  var body: some View {
-    RoundedRectangle(cornerRadius: 12, style: .continuous)
-      .fill(.appOnSecondaryContainer.opacity(showsBackground ? 0.08 : 0))
-      .aspectRatio(aspectRatio, contentMode: .fit)
-      .overlay {
-        GeometryReader { proxy in
-          content
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
-            .clipped()
-        }
-      }
-      .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    content
   }
 }
 
@@ -1990,11 +2136,9 @@ private struct CardPreviewMediaPlaceholder: View {
   }
 
   var body: some View {
-    CardPreviewMediaBox(aspectRatio: aspectRatio) {
-      Image(systemName: systemImage)
-        .font(.system(size: 34, weight: .semibold))
-        .foregroundStyle(.appOnSecondaryContainer.opacity(0.42))
-    }
+    Image(systemName: systemImage)
+      .font(.system(size: 34, weight: .semibold))
+      .foregroundStyle(.appOnSecondaryContainer.opacity(0.42))
   }
 }
 
@@ -2037,8 +2181,9 @@ private enum CardPreviewMediaFileReader {
   nonisolated static func image(at fileURL: URL) async -> UIImage? {
     await Task.detached(priority: .utility) {
       guard FileManager.default.fileExists(atPath: fileURL.path),
-            let data = try? Data(contentsOf: fileURL),
-            let image = UIImage(data: data) else {
+        let data = try? Data(contentsOf: fileURL),
+        let image = UIImage(data: data)
+      else {
         return nil
       }
 

@@ -213,10 +213,6 @@ actor VaultSyncDatabase: ModelActor {
     var deletedRecordCount = 0
     var repairedInvalidEdgeCount = 0
 
-    /// Attachments whose media file changed on disk (arrived or was removed);
-    /// drives `VaultMediaFileChange`.
-    var changedAttachmentIDs: [UUID] = []
-
     /// Set when a `VaultInfo` record was imported, so the catalog can pick up
     /// the vault's current title.
     var importedVaultTitle: String?
@@ -236,6 +232,7 @@ actor VaultSyncDatabase: ModelActor {
   ) throws -> ImportOutcome {
     var outcome = ImportOutcome()
     var touchedEdgeTopology = false
+    var touchedRelationships = false
 
     for record in modifications {
       let recordName = record.recordID.recordName
@@ -266,6 +263,7 @@ actor VaultSyncDatabase: ModelActor {
         outcome.importedVaultTitle = info.title
 
       case .card:
+        touchedRelationships = true
         guard let id = UUID(uuidString: recordName) else { continue }
         let card: Card
         if let existing = try fetchCard(id) {
@@ -277,6 +275,7 @@ actor VaultSyncDatabase: ModelActor {
         VaultRecordMapper.update(card, from: record)
 
       case .cardEdge:
+        touchedRelationships = true
         touchedEdgeTopology = true
         guard let id = UUID(uuidString: recordName) else { continue }
         let edge: CardEdge
@@ -289,6 +288,7 @@ actor VaultSyncDatabase: ModelActor {
         VaultRecordMapper.update(edge, from: record)
 
       case .attachment:
+        touchedRelationships = true
         guard let id = UUID(uuidString: recordName) else { continue }
         let attachment: Attachment
         if let existing = try fetchAttachment(id) {
@@ -303,6 +303,7 @@ actor VaultSyncDatabase: ModelActor {
         VaultRecordMapper.update(attachment, from: record)
 
       case .attachmentResource:
+        touchedRelationships = true
         guard let id = UUID(uuidString: recordName) else { continue }
         let resource: AttachmentResource
         if let existing = try fetchAttachmentResource(id) {
@@ -318,7 +319,6 @@ actor VaultSyncDatabase: ModelActor {
         {
           do {
             try importAssetFile(from: sourceURL, to: resource)
-            outcome.changedAttachmentIDs.append(resource.attachmentID)
           } catch {
             // The row stays; the file can be repaired by a later fetch.
           }
@@ -332,7 +332,14 @@ actor VaultSyncDatabase: ModelActor {
       if deletion.recordType == VaultRecordType.cardEdge.rawValue {
         touchedEdgeTopology = true
       }
+      if deletion.recordType != VaultRecordType.vaultInfo.rawValue {
+        touchedRelationships = true
+      }
       try applyRemoteDeletion(deletion, outcome: &outcome)
+    }
+
+    if touchedRelationships {
+      try repairRelationships()
     }
 
     if touchedEdgeTopology {
@@ -459,7 +466,7 @@ actor VaultSyncDatabase: ModelActor {
     let attachmentID = attachment.id
     let resources = try fetchAttachmentResources(attachmentID: attachmentID)
     for resource in resources {
-      try deleteImportedAttachmentResourceFileAndRow(resource, outcome: &outcome)
+      try deleteImportedAttachmentResourceFileAndRow(resource)
     }
     modelContext.delete(attachment)
     try removeSyncState(recordName: attachmentID.uuidString)
@@ -486,21 +493,18 @@ actor VaultSyncDatabase: ModelActor {
       try deleteImportedAttachment(attachment, outcome: &outcome)
       return
     }
-    try deleteImportedAttachmentResourceFileAndRow(resource, outcome: &outcome)
+    try deleteImportedAttachmentResourceFileAndRow(resource)
   }
 
   private func deleteImportedAttachmentResourceFileAndRow(
-    _ resource: AttachmentResource,
-    outcome: inout ImportOutcome
+    _ resource: AttachmentResource
   ) throws {
-    let attachmentID = resource.attachmentID
     let fileURL = mediaDirectoryURL.appending(
       path: resource.fileName,
       directoryHint: .notDirectory
     )
     if FileManager.default.fileExists(atPath: fileURL.path) {
       try? FileManager.default.removeItem(at: fileURL)
-      outcome.changedAttachmentIDs.append(attachmentID)
     }
     modelContext.delete(resource)
     try removeSyncState(recordName: resource.id.uuidString)
@@ -515,6 +519,53 @@ actor VaultSyncDatabase: ModelActor {
     }
   }
 
+  /// Resolves transport reference ids into SwiftData relationships after an
+  /// import batch. Missing targets are allowed: another CloudKit fetch can
+  /// deliver the referenced row later and this repair pass will connect it then.
+  private func repairRelationships() throws {
+    let cards = try modelContext.fetch(FetchDescriptor<Card>())
+    let edges = try modelContext.fetch(FetchDescriptor<CardEdge>())
+    let attachments = try modelContext.fetch(FetchDescriptor<Attachment>())
+    let resources = try modelContext.fetch(FetchDescriptor<AttachmentResource>())
+
+    let cardsByID = Dictionary(uniqueKeysWithValues: cards.map { ($0.id, $0) })
+    let edgesByID = Dictionary(uniqueKeysWithValues: edges.map { ($0.id, $0) })
+    let attachmentsByID = Dictionary(uniqueKeysWithValues: attachments.map { ($0.id, $0) })
+
+    for edge in edges {
+      let resolvedCard = cardsByID[edge.cardReferenceID]
+      if edge.card?.id != resolvedCard?.id {
+        edge.card = resolvedCard
+      }
+
+      let resolvedParent: CardEdge?
+      if let parentEdgeReferenceID = edge.parentEdgeReferenceID,
+        parentEdgeReferenceID != edge.id
+      {
+        resolvedParent = edgesByID[parentEdgeReferenceID]
+      } else {
+        resolvedParent = nil
+      }
+      if edge.parent?.id != resolvedParent?.id {
+        edge.parent = resolvedParent
+      }
+    }
+
+    for attachment in attachments {
+      let resolvedCard = cardsByID[attachment.cardReferenceID]
+      if attachment.card?.id != resolvedCard?.id {
+        attachment.card = resolvedCard
+      }
+    }
+
+    for resource in resources {
+      let resolvedAttachment = attachmentsByID[resource.attachmentReferenceID]
+      if resource.attachment?.id != resolvedAttachment?.id {
+        resource.attachment = resolvedAttachment
+      }
+    }
+  }
+
   /// Keeps imported topology safe to render. Missing parents are allowed
   /// because CloudKit may deliver parent and child records in different fetches,
   /// but an already-materialized cycle must not enter the recursive UI tree.
@@ -525,7 +576,7 @@ actor VaultSyncDatabase: ModelActor {
 
     for edge in edges where edge.parentEdgeID != nil {
       if parentChainContainsCycle(startingAt: edge, edgesByID: edgesByID) {
-        edge.parentEdgeID = nil
+        edge.setParentEdgeReferenceID(nil)
         repairedCount += 1
       }
     }
@@ -562,6 +613,7 @@ actor VaultSyncDatabase: ModelActor {
       try FileManager.default.removeItem(at: destination)
     }
     try FileManager.default.copyItem(at: sourceURL, to: destination)
+    resource.noteLocalFileChange()
   }
 
   private func upsertSyncMetadata(for record: CKRecord) {
@@ -630,7 +682,7 @@ actor VaultSyncDatabase: ModelActor {
 
   private func fetchAttachmentResources(attachmentID: UUID) throws -> [AttachmentResource] {
     let descriptor = FetchDescriptor<AttachmentResource>(
-      predicate: #Predicate { $0.attachmentID == attachmentID }
+      predicate: #Predicate { $0.attachmentReferenceID == attachmentID }
     )
     return try modelContext.fetch(descriptor)
   }

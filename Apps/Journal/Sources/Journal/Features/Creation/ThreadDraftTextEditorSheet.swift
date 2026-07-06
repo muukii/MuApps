@@ -100,7 +100,7 @@ struct ThreadDraftLinkEditorContent: View {
           }
 
         if let linkURL {
-          JournalLinkPreview(url: linkURL.url, mode: .detail)
+          JournalLinkPreview(url: linkURL.url)
         } else if urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
           Label("Enter a valid web URL", systemImage: "exclamationmark.triangle")
             .font(.footnote.weight(.semibold))

@@ -269,7 +269,7 @@ extension VaultContentStore {
     // date-sorted readers, so cards get tiny timestamp offsets.
     let threadCreatedAt = Date()
     var edges: [CardEdge] = []
-    var rootEdgeID: UUID?
+    var rootEdge: CardEdge?
 
     for (offset, draft) in drafts.enumerated() {
       let createdAt = threadCreatedAt.addingTimeInterval(TimeInterval(offset) / 1000)
@@ -286,18 +286,20 @@ extension VaultContentStore {
 
       let edge = CardEdge(
         cardID: card.id,
-        parentEdgeID: rootEdgeID,
-        sortIndex: rootEdgeID == nil ? 0 : offset - 1,
+        parentEdgeID: rootEdge?.id,
+        sortIndex: rootEdge == nil ? 0 : offset - 1,
         createdAt: createdAt,
         updatedAt: createdAt
       )
+      edge.connect(to: card)
+      edge.connect(parent: rootEdge)
       context.insert(edge)
       try noteSave(.cardEdge, recordName: edge.id.uuidString, in: context)
-      if rootEdgeID == nil {
-        rootEdgeID = edge.id
+      if rootEdge == nil {
+        rootEdge = edge
       }
 
-      if let stagedAttachment = try stageAttachment(from: draft, cardID: card.id, in: context) {
+      if let stagedAttachment = try stageAttachment(from: draft, card: card, in: context) {
         try noteSave(.attachment, recordName: stagedAttachment.attachment.id.uuidString, in: context)
         for resource in stagedAttachment.resources {
           try noteSave(.attachmentResource, recordName: resource.id.uuidString, in: context)
@@ -335,7 +337,7 @@ extension VaultContentStore {
     card.updatedAt = Date()
     try noteSave(.card, recordName: card.id.uuidString, in: context)
 
-    if let stagedAttachment = try stageAttachment(from: draft, cardID: card.id, in: context) {
+    if let stagedAttachment = try stageAttachment(from: draft, card: card, in: context) {
       try noteSave(.attachment, recordName: stagedAttachment.attachment.id.uuidString, in: context)
       for resource in stagedAttachment.resources {
         try noteSave(.attachmentResource, recordName: resource.id.uuidString, in: context)
@@ -438,7 +440,7 @@ extension VaultContentStore {
   @MainActor
   private func stageAttachment(
     from draft: CardDraft,
-    cardID: UUID,
+    card: Card,
     in context: ModelContext
   ) throws -> StagedAttachment? {
     guard let attachmentKind = Self.attachmentKind(for: draft.kind) else {
@@ -452,12 +454,13 @@ extension VaultContentStore {
 
     let primaryResourceID = resourceDrafts[0].id ?? UUID()
     let attachment = Attachment(
-      cardID: cardID,
+      cardID: card.id,
       kind: attachmentKind,
       byteSize: Self.byteSize(for: resourceDrafts[0]),
       primaryResourceID: primaryResourceID,
       thumbnail: draft.thumbnail
     )
+    attachment.connect(to: card)
 
     var stagedResources: [AttachmentResource] = []
     for (index, resourceDraft) in resourceDrafts.enumerated() {
@@ -474,6 +477,7 @@ extension VaultContentStore {
         colorSpaceName: resourceDraft.colorSpaceName,
         createdAt: attachment.createdAt
       )
+      resource.connect(to: attachment)
 
       // File first, row second: a failed save leaves an orphan file, never a
       // row pointing at missing bytes.
@@ -487,6 +491,7 @@ extension VaultContentStore {
           try FileManager.default.copyItem(at: sourceURL, to: fileURL(for: resource))
         }
       }
+      resource.noteLocalFileChange()
 
       context.insert(resource)
       stagedResources.append(resource)

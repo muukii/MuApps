@@ -4,7 +4,7 @@ import JournalVault
 
 /// Feature-local source values needed to create a share snapshot.
 ///
-/// `SavedListView` builds this from its vault-backed display snapshot so the
+/// `SavedListView` builds this from its live vault entry projection so the
 /// sharing layer does not need access to private saved-list types or live
 /// SwiftData models.
 struct CardShareSource: Sendable, Equatable {

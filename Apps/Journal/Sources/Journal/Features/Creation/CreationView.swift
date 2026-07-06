@@ -155,6 +155,8 @@ struct CreationView: View {
         ThreadDraftActionRow(
           draftCards: draftCards,
           isSaving: isSaving || isImportingMediaFromLibrary,
+          isSuggestionCaptureEnabled:
+            JournalFeatureFlags.isJournalingSuggestionsCaptureEnabled,
           onComposeText: {
             presentTextCapture()
           },
@@ -1230,6 +1232,7 @@ private struct ThreadDraftActionRow: View {
 
   let draftCards: [ThreadDraftCard]
   let isSaving: Bool
+  let isSuggestionCaptureEnabled: Bool
   let onComposeText: @MainActor @Sendable () -> Void
   let onComposeLink: @MainActor @Sendable () -> Void
   let onCapturePhoto: @MainActor @Sendable () -> Void
@@ -1265,6 +1268,7 @@ private struct ThreadDraftActionRow: View {
               onDrawDoodle: onDrawDoodle,
               onComposeBauhaus: onComposeBauhaus,
               onRecordVoice: onRecordVoice,
+              isSuggestionCaptureEnabled: isSuggestionCaptureEnabled,
               onChooseSuggestion: onChooseSuggestion
             )
             .disabled(isSaving)
@@ -1300,6 +1304,7 @@ private struct ThreadDraftActionRow: View {
     let onDrawDoodle: @MainActor @Sendable () -> Void
     let onComposeBauhaus: @MainActor @Sendable () -> Void
     let onRecordVoice: @MainActor @Sendable () -> Void
+    let isSuggestionCaptureEnabled: Bool
     let onChooseSuggestion: @MainActor @Sendable (CapturedSuggestion) -> Void
 
     @State private var selectedLibraryMediaItem: PhotosPickerItem?
@@ -1364,14 +1369,16 @@ private struct ThreadDraftActionRow: View {
           action: onRecordVoice
         )
 
-        SuggestionCaptureButton {
-          ThreadDraftActionIconLabel(systemName: "sparkles")
-        } onCommit: { suggestion in
-          onChooseSuggestion(suggestion)
+        if isSuggestionCaptureEnabled {
+          SuggestionCaptureButton {
+            ThreadDraftActionIconLabel(systemName: "sparkles")
+          } onCommit: { suggestion in
+            onChooseSuggestion(suggestion)
+          }
+          .buttonStyle(.plain)
+          .glassEffect(.regular.interactive(), in: .capsule)
+          .accessibilityLabel(Text("Suggestion"))
         }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: .capsule)
-        .accessibilityLabel(Text("Suggestion"))
       }
     }
 

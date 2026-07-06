@@ -234,8 +234,10 @@ fileprivate struct OnboardingPage<Content: View>: View {
 
 // MARK: - Capture Methods
 
-/// One capture modality as plain display data. Every entry has the same shape, so
-/// this is a struct with static constants rather than an enum.
+/// One capture modality as plain display data.
+///
+/// The list is generated from app feature flags so onboarding only describes
+/// capture entry points that are visible in the current build.
 private struct CaptureMethod: Identifiable {
 
   let id: String
@@ -243,14 +245,28 @@ private struct CaptureMethod: Identifiable {
   let name: LocalizedStringResource
   let summary: LocalizedStringResource
 
-  static let all: [CaptureMethod] = [
-    .init(id: "text", icon: "text.alignleft", name: "Text", summary: "Jot down what's on your mind."),
-    .init(id: "link", icon: "link", name: "Link", summary: "Save a web page with a native preview."),
-    .init(id: "photo", icon: "camera", name: "Photo", summary: "Capture a moment with the camera."),
-    .init(id: "doodle", icon: "scribble.variable", name: "Doodle", summary: "Sketch a quick ink drawing."),
-    .init(id: "audio", icon: "waveform", name: "Ambient Sound", summary: "Record the sound around you."),
-    .init(id: "suggestion", icon: "sparkles", name: "Suggestions", summary: "Start from a Journaling Suggestion."),
-  ]
+  static var all: [CaptureMethod] {
+    var methods: [CaptureMethod] = [
+      .init(id: "text", icon: "text.alignleft", name: "Text", summary: "Jot down what's on your mind."),
+      .init(id: "link", icon: "link", name: "Link", summary: "Save a web page with a native preview."),
+      .init(id: "photo", icon: "camera", name: "Photo", summary: "Capture a moment with the camera."),
+      .init(id: "doodle", icon: "scribble.variable", name: "Doodle", summary: "Sketch a quick ink drawing."),
+      .init(id: "audio", icon: "waveform", name: "Ambient Sound", summary: "Record the sound around you."),
+    ]
+
+    if JournalFeatureFlags.isJournalingSuggestionsCaptureEnabled {
+      methods.append(
+        .init(
+          id: "suggestion",
+          icon: "sparkles",
+          name: "Suggestions",
+          summary: "Start from a Journaling Suggestion."
+        )
+      )
+    }
+
+    return methods
+  }
 }
 
 fileprivate struct CaptureMethodRow: View {

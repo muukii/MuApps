@@ -152,10 +152,12 @@ enum VaultRecordMapper {
 
   static func update(_ edge: CardEdge, from record: CKRecord) {
     if let cardID = (record[CardEdgeKey.cardID] as? String).flatMap(UUID.init(uuidString:)) {
-      edge.cardID = cardID
+      edge.setCardReferenceID(cardID)
     }
-    edge.parentEdgeID = (record[CardEdgeKey.parentEdgeID] as? String)
-      .flatMap(UUID.init(uuidString:))
+    edge.setParentEdgeReferenceID(
+      (record[CardEdgeKey.parentEdgeID] as? String)
+        .flatMap(UUID.init(uuidString:))
+    )
     edge.sortIndex = record[CardEdgeKey.sortIndex] as? Int ?? 0
     edge.layout = record[CardEdgeKey.layout] as? Data
     if let createdAt = record[CardEdgeKey.createdAt] as? Date {
@@ -168,7 +170,7 @@ enum VaultRecordMapper {
 
   static func update(_ attachment: Attachment, from record: CKRecord) {
     if let cardID = (record[AttachmentKey.cardID] as? String).flatMap(UUID.init(uuidString:)) {
-      attachment.cardID = cardID
+      attachment.setCardReferenceID(cardID)
     }
     if let kind = record[AttachmentKey.kind] as? String {
       attachment.kindRawValue = kind
@@ -177,7 +179,7 @@ enum VaultRecordMapper {
     if let primaryResourceID = (record[AttachmentKey.primaryResourceID] as? String)
       .flatMap(UUID.init(uuidString:))
     {
-      attachment.primaryResourceID = primaryResourceID
+      attachment.setPrimaryResourceReferenceID(primaryResourceID)
     }
     attachment.thumbnail = record[AttachmentKey.thumbnail] as? Data
     if let createdAt = record[AttachmentKey.createdAt] as? Date {
@@ -187,7 +189,7 @@ enum VaultRecordMapper {
 
   static func update(_ resource: AttachmentResource, from record: CKRecord) {
     if let attachmentID = (record[AttachmentResourceKey.attachmentID] as? String).flatMap(UUID.init(uuidString:)) {
-      resource.attachmentID = attachmentID
+      resource.setAttachmentReferenceID(attachmentID)
     }
     if let role = record[AttachmentResourceKey.role] as? String {
       resource.roleRawValue = role

@@ -448,10 +448,6 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
         }
         try? await catalog.noteVaultSynced(vaultID)
 
-        if outcome.changedAttachmentIDs.isEmpty == false {
-          VaultMediaFileChange.post(vaultID: vaultID, attachmentIDs: outcome.changedAttachmentIDs)
-        }
-
         log.info(
           """
           vault \(vaultID.uuidString, privacy: .public): imported \

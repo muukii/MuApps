@@ -221,6 +221,12 @@ Journal/
 edges in one transaction. The same transaction writes `PendingMutation` rows, so
 local content never exists without a pending CloudKit upload.
 
+SwiftData relationships are the normal in-app source of truth for vault content:
+`CardEdge` points to its `Card` and parent/child edges, `Card` owns attachments,
+and `Attachment` owns resources. Stable UUID reference fields remain alongside
+those relationships so CloudKit imports can be repaired when records arrive out
+of order.
+
 ### `Card` — a content atom
 
 | Property | Type | Notes |
@@ -228,6 +234,8 @@ local content never exists without a pending CloudKit upload.
 | `id` | `UUID` | Unique inside the vault store. |
 | `kindRawValue` | `String` | Stored/synced modality string: `.text`, `.link`, `.photo`, `.video`, `.livePhoto`, `.audio`, `.doodle`, `.bauhaus`, or a newer unknown value. `kind` maps unknown values to `.unknown`. |
 | `body` | `String` | Text content for `.text`; canonical URL string for `.link`; media cards keep this empty. |
+| `attachments` | `[Attachment]` | Relationship-owned media rows for this card. |
+| `placements` | `[CardEdge]` | Relationship-owned placements that point at this card. |
 | `createdAt` | `Date` | |
 | `updatedAt` | `Date` | |
 | `location` | `Coordinate?` | `nil` = no location. |
@@ -235,15 +243,17 @@ local content never exists without a pending CloudKit upload.
 ### `CardEdge` — a card placement in the vault tree
 
 `CardEdge` is the fractal structure for both roots and children. A root edge has
-`parentEdgeID == nil`; children point to another edge. A linear thread is a root
-edge plus ordered child edges, and future mind-map layouts can attach layout data
-without changing `Card`.
+no parent relationship; children point to another edge. A linear thread is a
+root edge plus ordered child edges, and future mind-map layouts can attach layout
+data without changing `Card`.
 
 | Property | Type | Notes |
 |----------|------|-------|
 | `id` | `UUID` | Unique edge id. |
-| `cardID` | `UUID` | Referenced `Card`. |
-| `parentEdgeID` | `UUID?` | Parent edge in the same vault, or `nil` for roots. |
+| `card` | `Card?` | SwiftData relationship to the placed card. |
+| `children` | `[CardEdge]` | Child placements in the same vault tree. |
+| `cardID` | `UUID` | Relationship-backed reference ID for sync/import repair. |
+| `parentEdgeID` | `UUID?` | Relationship-backed parent reference ID, or `nil` for roots. |
 | `sortIndex` | `Int` | Order among siblings. |
 | `layout` | `Data?` | Reserved layout metadata. |
 | `createdAt` | `Date` | |
@@ -258,7 +268,9 @@ compound media item such as a Live Photo.
 | Property | Type | Notes |
 |----------|------|-------|
 | `id` | `UUID` | Unique attachment id. |
-| `cardID` | `UUID` | Referenced `Card`. |
+| `card` | `Card?` | SwiftData relationship to the owning card. |
+| `resources` | `[AttachmentResource]` | File-backed resources owned by this logical attachment. |
+| `cardID` | `UUID` | Relationship-backed reference ID for sync/import repair. |
 | `kindRawValue` | `String` | `.photo`, `.video`, `.livePhoto`, `.audio`, `.suggestion`, `.doodle`, `.bauhaus`, or unknown raw value. |
 | `byteSize` | `Int` | Denormalized primary-resource byte size kept for summaries. |
 | `primaryResourceID` | `UUID` | Primary resource used by normal rendering. |
@@ -275,7 +287,8 @@ directory before the CloudKit temporary file disappears.
 | Property | Type | Notes |
 |----------|------|-------|
 | `id` | `UUID` | Unique resource id and `media/<resource-id>` file name. |
-| `attachmentID` | `UUID` | Referenced logical attachment. |
+| `attachment` | `Attachment?` | SwiftData relationship to the owning logical attachment. |
+| `attachmentID` | `UUID` | Relationship-backed reference ID for sync/import repair. |
 | `roleRawValue` | `String` | `.originalImage`, `.stillImage`, `.pairedVideo`, `.originalVideo`, `.authoredJSON`, `.suggestionImage`, `.suggestionVideo`, `.audio`, or unknown raw value. |
 | `byteSize` | `Int` | Resource file byte size. |
 | `contentType` | `String?` | UTI/MIME-style content type when known. |
@@ -283,6 +296,7 @@ directory before the CloudKit temporary file disappears.
 | `duration` | `Double?` | Video/audio duration in seconds when known. |
 | `isHDR` | `Bool` | Whether the resource contains HDR media. |
 | `colorSpaceName` | `String?` | Color space name when known. |
+| `localFileRevision` | `Int` | Local-only revision bumped when a mirrored file lands or changes at the same URL. |
 | `createdAt` | `Date` | |
 
 ### Card rendering boundary
@@ -292,7 +306,8 @@ lossless to render. Text and link cards render their stored body/URL in SwiftUI.
 Doodle and Bauhaus cards decode their saved JSON attachment and render
 `DoodleDrawingView` / `BauhausGridArtworkView` directly as SwiftUI content; if
 the vault media file has not arrived locally yet, the UI shows a modality
-placeholder until `VaultMediaFileChange` triggers a reload.
+placeholder until SwiftData observes the resource's local file revision change
+and reloads the preview payload.
 
 Large raster media is the exception. Photo summary surfaces and Widget Home
 Screen photo previews use the save-time `Attachment.thumbnail` created by
@@ -640,8 +655,9 @@ the gallery's **Lab** section).
   and a **Skip** affordance on every page but the last:
   1. **Welcome** — a decorative `CardSurface` stating the core idea ("Every little
      thing becomes a card") over a short welcome blurb.
-  2. **Capture methods** — the six modalities (Text, Link, Photo, Doodle,
-     Ambient Sound, Suggestions) as icon + name + one-line summary.
+  2. **Capture methods** — Text, Link, Photo, Doodle, and Ambient Sound as icon
+     + name + one-line summary. Debug builds also show Suggestions while the
+     Journaling Suggestions capture feature flag is enabled.
   3. **Permissions** — optional priming for Camera, Photos, Microphone, and
      Location. Each row shows the live authorization status and an **Allow**
      button that triggers the system prompt on demand
@@ -723,11 +739,13 @@ the gallery's **Lab** section).
   Suggestion card previews show the selected element as the card's primary
   subject: an element-specific category label, symbol, title, secondary metadata,
   and date when available. Photo-like elements, such as Photos, Live Photos,
-  event posters, podcast or song artwork, and contact photos, render the local
-  source image or copied `.suggestionImage` resource as the card's primary media
-  when that file is available. Legacy payloads that still contain multiple
-  elements render the first element as the primary subject and summarize the
-  remaining elements below it.
+  event posters, podcast or song artwork, render the local source image or
+  copied `.suggestionImage` resource as the card's primary media when that file
+  is available. Icon-like media, such as contact photos, Generic Media app
+  icons, Motion Activity icons, State of Mind icons, Workout icons, and Workout
+  Group icons, render as a compact image inside the card. Legacy payloads that
+  still contain multiple elements render the first element as the primary subject
+  and summarize the remaining elements below it.
   The resolver snapshots Contacts, Event Posters, Generic Media, Live Photos,
   Locations, Location Groups, Motion Activity, Photos, Podcasts, Reflections,
   Songs, State of Mind, Videos, Workouts, Workout Details, and Workout Groups;
@@ -751,8 +769,9 @@ the gallery's **Lab** section).
   yet; this composer creates a new thread from the first draft.
   Toolbar links back to vault selection, to the vault-backed entries list
   (`SavedListView`), and to Settings. Capture demos are kept in the dev gallery
-  rather than Settings; Suggestions also appear on the compose surface as a
-  capture button and save as `Card.Kind.suggestion`.
+  rather than Settings; Debug builds show Suggestions on the compose surface as a
+  feature-flagged capture button, and selected suggestions save as
+  `Card.Kind.suggestion`.
 - **`CaptureGalleryView`** (dev scaffolding, not currently wired into the app
   root) — a `List` with:
   - **Capture**: Text, Photo, Doodle, Bauhaus Grid, Ambient Sound, Suggestions.
@@ -771,16 +790,20 @@ the gallery's **Lab** section).
   iOS 26+'s system (Liquid Glass) background is preserved unless an explicit
   `backgroundColor` is passed; the global appearance proxy is never touched.
 - **`SavedListView`** — a vault-backed entries list over the selected
-  `VaultInstance`. It reads `CardEdge`, `Card`, and `Attachment` rows from
-  the selected vault container, creates value snapshots, groups root edges into
-  local-calendar day sections, and displays them as 4:5 `CardSurface` tiles. Child
-  edges are collapsed into the root tile by default and shown in the pushed
-  detail view as a flattened subtree. When any saved thread has child cards, the
-  toolbar shows a stack toggle: collapsed mode keeps one tile per root stack,
-  while expanded mode flattens root and child cards into the day grid without
-  rereading the vault store. Collapsed stacks keep lightweight child previews
-  behind the root tile and use matched-geometry animation so expansion feels like
-  cards moving out of the stack. Pull-to-refresh remains the manual snapshot reload;
+  `VaultInstance`. It attaches the selected vault's `ModelContainer`, queries
+  `CardEdge` rows with SwiftData, follows the `Card` / `Attachment` /
+  `AttachmentResource` relationships, groups root edges into local-calendar day
+  sections, and displays them as 4:5 `CardSurface` tiles. Child edges are
+  collapsed into the root tile by default and shown in the pushed detail view as
+  a flattened subtree. When any saved thread has child cards, the toolbar shows a
+  stack toggle: collapsed mode keeps one tile per root stack, while expanded mode
+  flattens root and child cards into the day grid from the live model graph.
+  Collapsed stacks keep lightweight child previews behind the root tile and use
+  matched-geometry animation so expansion feels like cards moving out of the
+  stack. Tile timestamps sit over a bottom `.thinMaterial` layer whose alpha is
+  masked with a soft Gaussian gradient, so the preview fades into the footer
+  instead of ending at a hard material edge. Pull-to-refresh asks the vault
+  runtime to import fresh CloudKit changes;
   the old toolbar reload icon is not shown in the normal list surface. Grid tiles
   are matched transition sources so opening a detail view uses the system zoom
   navigation transition from the tapped card. Link cards
@@ -792,11 +815,11 @@ the gallery's **Lab** section).
   audio session mixed with other audio so external music or podcasts continue.
   Doodle and Bauhaus previews decode the authored JSON attachment file and render
   it with their SwiftUI renderers. When a media file is not local yet, the UI
-  shows a modality placeholder. The list listens for
-  `VaultMediaFileChange` notifications for the selected vault and reloads snapshots
-  when files arrive. Saved cards can be shared from a grid tile's context menu
+  shows a modality placeholder; when sync writes the file and bumps the resource
+  revision, SwiftData observation re-runs the affected preview load. Saved cards
+  can be shared from a grid tile's context menu
   or a detail card's context menu. The share action opens a preview sheet backed
-  by a detached vault-entry snapshot, renders the actual temporary PNG artifact,
+  by a detached share snapshot, renders the actual temporary PNG artifact,
   and, for Doodle or Bauhaus cards with authored replay data, also offers a
   generated mp4 replay before handing the selected file to the system activity
   sheet. Saved cards can be edited from a grid tile's context menu or from each
@@ -808,7 +831,7 @@ the gallery's **Lab** section).
   first, then writes through `VaultContentStore.deleteCardEdge(edgeID:)` so the
   selected edge, descendant cards, attachments, attachment resources, local media
   files, and CloudKit delete outbox rows stay aligned. Detail deletion dismisses
-  back to the list after a successful delete so the user sees a fresh snapshot.
+  back to the list after a successful delete so the user sees the updated model graph.
 - **`SettingsView`** — a theme picker, an **Appearance** picker, a **Location**
   toggle for automatic location attachment, a **Storage** section with **Cloud
   Storage** estimates, a **Widgets** section with an **Add Widgets** guide,

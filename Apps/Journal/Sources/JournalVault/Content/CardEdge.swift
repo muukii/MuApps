@@ -4,15 +4,15 @@ import SwiftData
 /// Placement of one `Card` in a vault's content tree.
 ///
 /// Root and child placements share this one shape — there is no separate
-/// "group" model. A root edge has `parentEdgeID == nil`; child edges point at a
-/// parent edge in the same vault. `children` arrays are never persisted; the
-/// tree is derived from `parentEdgeID`, so ordering, nesting, and layout
-/// changes are ordinary row mutations.
+/// "group" model. A root edge has `parent == nil`; child edges point at a
+/// parent edge in the same vault. Relationship repair ids are kept internally
+/// so CloudKit can import edges out of order without leaking transport ordering
+/// to UI code.
 ///
 /// Domain rules (enforced by `VaultContentStore`, not by the schema and not by
 /// CloudKit record hierarchy):
 /// - every visible card is referenced by exactly one edge
-/// - `parentEdgeID` may only point at an edge in the same vault
+/// - `parent` may only point at an edge in the same vault
 /// - cycles are forbidden
 /// - a linear thread is a root edge plus children ordered by `sortIndex`
 @Model
@@ -21,9 +21,21 @@ public final class CardEdge {
   @Attribute(.unique)
   public var id: UUID
 
-  public var cardID: UUID
+  /// Card placed by this edge once the local graph has been repaired.
+  public var card: Card?
 
-  public var parentEdgeID: UUID?
+  /// Parent edge for child cards in a thread or future spatial tree.
+  public var parent: CardEdge?
+
+  /// Child placements under this edge.
+  @Relationship(deleteRule: .cascade, inverse: \CardEdge.parent)
+  public var children: [CardEdge] = []
+
+  /// CloudKit import/export and out-of-order repair key for `card`.
+  var cardReferenceID: UUID
+
+  /// CloudKit import/export and out-of-order repair key for `parent`.
+  var parentEdgeReferenceID: UUID?
 
   /// Order among siblings under the same parent (authored order for threads).
   public var sortIndex: Int
@@ -45,11 +57,53 @@ public final class CardEdge {
     updatedAt: Date = Date()
   ) {
     self.id = id
-    self.cardID = cardID
-    self.parentEdgeID = parentEdgeID
+    self.cardReferenceID = cardID
+    self.parentEdgeReferenceID = parentEdgeID
     self.sortIndex = sortIndex
     self.layout = layout
     self.createdAt = createdAt
     self.updatedAt = updatedAt
+  }
+}
+
+// MARK: - Relationships
+
+extension CardEdge {
+
+  /// Stable id of the placed card.
+  ///
+  /// Reads from the repaired relationship when available and falls back to the
+  /// sync reference while imports are still out of order.
+  public var cardID: UUID {
+    card?.id ?? cardReferenceID
+  }
+
+  /// Stable id of the parent edge, if this edge is currently a child.
+  public var parentEdgeID: UUID? {
+    parent?.id ?? parentEdgeReferenceID
+  }
+
+  func setCardReferenceID(_ id: UUID) {
+    cardReferenceID = id
+    if card?.id != id {
+      card = nil
+    }
+  }
+
+  func connect(to card: Card) {
+    cardReferenceID = card.id
+    self.card = card
+  }
+
+  func setParentEdgeReferenceID(_ id: UUID?) {
+    parentEdgeReferenceID = id
+    if parent?.id != id {
+      parent = nil
+    }
+  }
+
+  func connect(parent: CardEdge?) {
+    parentEdgeReferenceID = parent?.id
+    self.parent = parent
   }
 }

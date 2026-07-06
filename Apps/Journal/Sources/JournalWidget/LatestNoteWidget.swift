@@ -271,7 +271,7 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
         kind: card.kind,
         body: card.body,
         createdAt: card.createdAt,
-        mediaAttachment: try Self.mediaAttachment(for: card, in: context, store: store)
+        mediaAttachment: Self.mediaAttachment(for: card, store: store)
       )
 
       return latestCard
@@ -287,30 +287,20 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
   @MainActor
   private static func mediaAttachment(
     for card: Card,
-    in context: ModelContext,
     store: VaultContentStore
-  ) throws -> WidgetMediaAttachmentSnapshot? {
+  ) -> WidgetMediaAttachmentSnapshot? {
     guard let attachmentKind = card.kind.widgetMediaAttachmentKind else {
       return nil
     }
 
-    let cardID = card.id
-    var descriptor = FetchDescriptor<Attachment>(
-      predicate: #Predicate { $0.cardID == cardID },
-      sortBy: [SortDescriptor(\.createdAt)]
-    )
-    descriptor.fetchLimit = 8
-
-    guard let attachment = try context.fetch(descriptor).first(where: { $0.kind == attachmentKind }) else {
+    guard let attachment = card.attachments
+      .sorted(using: KeyPathComparator(\.createdAt))
+      .first(where: { $0.kind == attachmentKind })
+    else {
       return nil
     }
 
-    let primaryResourceID = attachment.primaryResourceID
-    var resourceDescriptor = FetchDescriptor<AttachmentResource>(
-      predicate: #Predicate { $0.id == primaryResourceID }
-    )
-    resourceDescriptor.fetchLimit = 1
-    guard let resource = try context.fetch(resourceDescriptor).first else {
+    guard let resource = attachment.primaryResource else {
       return WidgetMediaAttachmentSnapshot(
         fileURL: nil,
         thumbnailData: attachment.thumbnail

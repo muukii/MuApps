@@ -293,6 +293,7 @@ let project = Project(
         .target(name: "CaptureDoodle"),
         .target(name: "JournalVault"),
         .target(name: "MuColor"),
+        .external(name: "GaussianLinearGradient"),
         .external(name: "VariableBlur")
       ]
     ),

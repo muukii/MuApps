@@ -18,7 +18,6 @@ struct VaultSyncDatabaseTests {
   private func makeStoreWithSubtreeAndMedia() throws -> (
     store: VaultContentStore,
     rootEdgeID: UUID,
-    attachmentID: UUID,
     attachmentFileURL: URL
   ) {
     let store = try VaultContentStore.open(vaultID: VaultID(), layout: makeTemporaryLayout())
@@ -33,7 +32,7 @@ struct VaultSyncDatabaseTests {
       try store.container.mainContext.fetch(FetchDescriptor<JournalVault.AttachmentResource>()).first
     )
     #expect(attachment.primaryResourceID == resource.id)
-    return (store, edges[0].id, attachment.id, store.fileURL(for: resource))
+    return (store, edges[0].id, store.fileURL(for: resource))
   }
 
   private func fetchPendingMutation(
@@ -211,7 +210,7 @@ struct VaultSyncDatabaseTests {
 
   @Test
   func importChanges_remoteRootEdgeDeletionCascadesSubtreeAndMedia() async throws {
-    let (store, rootEdgeID, attachmentID, attachmentFileURL) = try await makeStoreWithSubtreeAndMedia()
+    let (store, rootEdgeID, attachmentFileURL) = try await makeStoreWithSubtreeAndMedia()
     let database = VaultSyncDatabase(store: store)
     #expect(FileManager.default.fileExists(atPath: attachmentFileURL.path))
 
@@ -226,7 +225,6 @@ struct VaultSyncDatabaseTests {
     )
 
     #expect(outcome.deletedRecordCount == 1)
-    #expect(outcome.changedAttachmentIDs == [attachmentID])
     let context = ModelContext(store.container)
     #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 0)
     #expect(try context.fetchCount(FetchDescriptor<Card>()) == 0)
