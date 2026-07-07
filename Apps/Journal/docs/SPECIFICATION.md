@@ -58,6 +58,7 @@ Journal (app, app.muukii.journal)
 │   ├── JournalVault    (vault catalog/content reader)
 │   ├── CaptureDoodle   (read-only widget renderer)
 │   └── CaptureBauhaus  (read-only widget renderer)
+├── CloudKitSupport    — macro-generated CKRecord transport wrappers
 ├── JournalVault       — vault catalog/content stores + explicit CloudKit sync
 ├── MuColor            — color themes / palette + container views
 ├── MuHaptics          — Core Haptics pattern editor, tap sequencer & engine (Lab)
@@ -71,7 +72,11 @@ Journal (app, app.muukii.journal)
 ```
 
 `JournalVault` is the app shell's active persistence framework and the widget's
-vault reader. The legacy `JournalModel` module has been removed; product
+vault reader. It depends on the local Swift package `CloudKitSupport` for
+macro-generated, class-based wrappers that own `CKRecord` instances directly.
+Those wrappers are CloudKit transport objects only: they stay inside the sync
+boundary and are translated to/from SwiftData-backed domain rows before data
+reaches app UI. The legacy `JournalModel` module has been removed; product
 migration code is not kept in the app while Journal is still pre-release.
 
 ### Localization

@@ -184,6 +184,7 @@ let project = Project(
       buildableFolders: ["Sources/JournalVault"],
       dependencies: [
         .sdk(name: "CloudKit", type: .framework),
+        .external(name: "CloudKitSupport"),
       ],
       settings: .settings(
         base: .frameworkTarget.merging([
@@ -205,6 +206,7 @@ let project = Project(
       infoPlist: .default,
       buildableFolders: ["Tests/JournalVaultTests"],
       dependencies: [
+        .external(name: "CloudKitSupport"),
         .target(name: "JournalVault"),
       ],
       settings: .settings(

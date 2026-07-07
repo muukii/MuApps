@@ -64,6 +64,7 @@ let package = Package(
     .package(url: "https://github.com/siteline/swiftui-introspect", "1.3.0"..<"27.0.0"),
     .package(url: "https://github.com/dmrschmidt/DSWaveformImage", from: "14.2.2"),
     .package(url: "https://github.com/muukii/swift-macro-hex-color", from: "0.1.1"),
+    .package(path: "../Apps/Journal/Packages/CloudKitSupport"),
 
     // State management and utilities
     .package(url: "https://github.com/VergeGroup/swift-typed-identifier", from: "2.0.4"),
