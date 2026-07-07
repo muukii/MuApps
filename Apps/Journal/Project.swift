@@ -130,6 +130,7 @@ let project = Project(
         .sdk(name: "PhotosUI", type: .framework),
         .sdk(name: "SharedWithYou", type: .framework),
         .external(name: "ScrollEdgeEffect"),
+        .external(name: "SwiftUISnapDraggingModifier"),
         .external(name: "Algorithms"),
         .external(name: "VariableBlur"),
         .target(name: "AppUIComponents"),
@@ -138,6 +139,7 @@ let project = Project(
         .target(name: "JournalWidget"),
         .target(name: "MuColor"),
         .target(name: "MuHaptics"),
+        .target(name: "GrowingTextEditor"),
         .target(name: "CaptureText"),
         .target(name: "CapturePhoto"),
         .target(name: "MediaProcessing"),
@@ -300,7 +302,15 @@ let project = Project(
       ]
     ),
     journalFramework(name: "MuHaptics"),
-    journalFramework(name: "CaptureText"),
+    // Pure SwiftUI multiline text input that grows by measuring a hidden
+    // non-scrolling `TextEditor` instead of bridging to `UITextView`.
+    journalFramework(name: "GrowingTextEditor", product: .framework),
+    journalFramework(
+      name: "CaptureText",
+      dependencies: [
+        .target(name: "GrowingTextEditor"),
+      ]
+    ),
     journalFramework(name: "CapturePhoto"),
     // Save-time raster derivatives for large media such as photos and videos.
     journalFramework(

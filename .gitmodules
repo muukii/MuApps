@@ -1,0 +1,3 @@
+[submodule "submodules/swiftui-snap-dragging-modifier"]
+	path = submodules/swiftui-snap-dragging-modifier
+	url = https://github.com/FluidGroup/swiftui-snap-dragging-modifier

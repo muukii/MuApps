@@ -1,4 +1,5 @@
 import AppUIComponents
+import GrowingTextEditor
 import MuColor
 import SwiftUI
 
@@ -28,23 +29,25 @@ struct ThreadDraftTextEditorContent: View {
   @FocusState private var isFocused: Bool
 
   var body: some View {
-    ZStack(alignment: .topLeading) {
-      if text.isEmpty {
-        Text("Write your thoughts...")
-          .foregroundStyle(.secondary)
-          .padding(.horizontal, 20)
-          .padding(.vertical, 24)
-          .allowsHitTesting(false)
-      }
-
-      TextEditor(text: $text)
-        .foregroundStyle(.primary)
-        .focused($isFocused)
-        .scrollContentBackground(.hidden)
-        .padding(16)
+    GrowingTextEditor(
+      text: $text,
+      placeholder: "Write your thoughts...",
+      configuration: GrowingTextEditorConfiguration(
+        minLines: 4,
+        maxLines: 12,
+        horizontalPadding: 16,
+        verticalPadding: 16
+      ),
+      font: .system(size: 32, weight: .bold)
+    )
+    .foregroundStyle(.primary)
+    .focused($isFocused)
+    .frame(maxWidth: .infinity, alignment: .topLeading)
+    .padding(.horizontal, 4)
+    .padding(.vertical, 8)
+    .onAppear {
+      isFocused = true
     }
-    .font(.system(size: 32, weight: .bold))
-    .onAppear { isFocused = true }
   }
 }
 

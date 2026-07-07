@@ -70,6 +70,9 @@
         }
       }
     },
+    "Add Card" : {
+
+    },
     "Add Tinycurve widgets for a quick view of the latest card in a vault you choose." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3907,6 +3910,9 @@
         }
       }
     },
+    "What's on your mind?" : {
+
+    },
     "When enabled, new cards attach your current location automatically if iOS allows Journal to access it." : {
       "localizations" : {
         "en" : {
@@ -3991,6 +3997,7 @@
       }
     },
     "Write your thoughts..." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

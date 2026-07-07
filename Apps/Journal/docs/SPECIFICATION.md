@@ -347,9 +347,9 @@ Each is an isolated framework that emits a value type through a callback and own
 no persistence. The dev gallery hosts each in a standalone demo view; the
 compose detail editors also host Photo, Doodle, Bauhaus, and Ambient Sound and
 convert their callbacks into `CardEditDraft` payloads. Text composition uses an
-app-shell `TextEditor` bound directly to `CardEditDraft.text`; Link composition
-uses an app-shell URL field and LinkPresentation preview over the same draft
-body slot, so typed changes are reflected in the draft immediately.
+app-shell growing multiline editor bound directly to `CardEditDraft.text`; Link
+composition uses an app-shell URL field and LinkPresentation preview over the
+same draft body slot, so typed changes are reflected in the draft immediately.
 
 ### CaptureText → `CapturedText`
 
@@ -431,21 +431,29 @@ auto-save drafts.
 
 `BauhausGridCaptureView(initialDocument:onChange:onExport:)` — a SwiftUI grid
 composer for Bauhaus-style geometric artwork. The canvas is a fixed **5 x 5**
-grid of square cells. Tapping a cell presents a native shape picker sheet; the
-user chooses one of the prepared primitives (square, filled circle, padded
-circle, four arc-on-edge semicircles, four diameter-on-edge semicircles, four
-quarter-circles, and four diagonal triangles), and the selected
-shape/background colors are applied to that cell. Compact swatch rows choose the
-active primitive and cell background colors, the trash action clears the whole
+grid of square cells, slightly inset from the sheet width so more of the brush
+panel remains visible without scrolling. A persistent brush panel below the
+canvas lets the user choose one of the prepared primitives (square, filled
+circle, padded circle, four arc-on-edge semicircles, four diameter-on-edge
+semicircles, four quarter-circles, four edge-base triangles, and four diagonal
+corner triangles), pick primitive/background swatch colors, preview the active
+brush, switch to an eraser, or step through local undo/redo history. Tapping the
+active brush preview cycles to the next primitive in its current family,
+including the basic square/circle/padded-circle set, edge triangles, and
+semicircles. Tapping a grid cell
+immediately applies the current brush or clears that cell when the eraser is
+active. The trash action clears the whole
 artwork, and an optional export callback lets hosts finish the capture
 explicitly. The picker groups primitives by family in fixed four-column rows so
-rotational variants stay visually aligned while the sheet adapts to device
-width. Every cell edit and clear emits the current `BauhausGridDocument` through
-`onChange`. New empty documents record a replay timeline as cells are set or the
-grid is cleared; documents decoded from older final-only artwork stay static
-unless the user clears the grid and starts again. Cell and swatch selection use
-selection haptics, shape application and clearing use light impact haptics, and
-the optional export action uses success feedback.
+directional variants stay visually aligned while the panel adapts to device
+width. Every cell edit, clear, undo, and redo emits the current
+`BauhausGridDocument` through `onChange`. New empty documents record a replay
+timeline as cells are set or the grid is cleared; undo and redo restore the
+matching in-session document state, including replay data. Documents decoded
+from older final-only artwork stay static unless the user clears the grid and
+starts again. Brush, eraser, and swatch selection use selection haptics; shape
+application, clearing, undo, and redo use light impact haptics; and the optional
+export action uses success feedback.
 Saved Bauhaus replay starts with a very short empty-grid beat, places every
 authored event on the same brisk playback interval, and introduces each tile
 with a bounce while preserving the stored authored event timeline. Tile opacity
@@ -695,27 +703,34 @@ the gallery's **Lab** section).
   modality-specific summary layout, while draft-only media payloads are fed in
   directly instead of being loaded from attachment files. Doodle and Bauhaus
   draft summaries render the authored value with their SwiftUI renderers instead
-  of a raster preview. Tapping a text card
-  opens a native **Text** sheet with a focused `TextEditor`. Tapping a photo card
-  opens a native **Photo** sheet, showing the existing
+  of a raster preview. Tapping a text card opens a native **Text** sheet with a
+  focused growing multiline editor. Tapping a photo card opens a native
+  **Photo** sheet, showing the existing
   `CapturedPhoto` with **Retake Photo** or `PhotoCaptureView` for a new shot.
   Tapping a doodle card opens a dedicated full-screen **Doodle** canvas that
   reopens the existing `DoodleDrawing` in `DoodleCanvasView` so new strokes append
   to the same vector drawing. Tapping a Bauhaus card opens a native **Bauhaus**
-  sheet that restores the existing `BauhausGridDocument`; tapping a cell presents
-  the shape picker sheet, and choosing a shape applies it into the selected 5 x 5
-  grid cell while recording replay events when the document has a replay
-  timeline. Tapping a link card opens a native **Link** sheet with URL keyboard
+  sheet that restores the existing `BauhausGridDocument`; the sheet keeps the
+  5 x 5 grid and brush panel together, so choosing a shape or swatch updates the
+  active brush and tapping a cell applies that brush or erases the cell while
+  recording replay events when the document has a replay timeline. Tapping a
+  link card opens a native **Link** sheet with URL keyboard
   input; values such as `example.com` are normalized to HTTPS before save, and
   valid web URLs show iOS's native LinkPresentation preview in the composer.
   Tapping an audio card opens a native **Voice Record** sheet, showing
   **Play** and **Record Again** for an existing
   `AudioRecording` or `AudioCaptureView` for a new take. The bottom composer
-  controls put the concrete content-type icons — Text, Link, Camera, Photos,
-  Doodle, Bauhaus, and Voice — in separated Liquid Glass buttons inside one shared
-  `GlassEffectContainer`, with the save action remaining a separate prominent
-  glass button. Tapping one of those quick-capture icons presents the matching
-  native sheet or picker. Text opens the last untouched text placeholder when one
+  controls keep a compact **Add** Liquid Glass button beside the separate
+  prominent **Save** button. Tapping **Add** enters an in-place add mode: already
+  staged draft cards remain visible behind a blurred composer background, while
+  an overlay palette expands from the Add button and presents the concrete
+  content-type actions — Text, Link, Camera, Photos, Bauhaus, Doodle, Voice, and
+  Suggestions when enabled. Tapping outside the palette, tapping the close
+  button, or dragging the overlay downward past its dismissal threshold dismisses
+  add mode without changing the staged drafts. Choosing one of those
+  quick-capture actions closes add mode and presents the matching native sheet or
+  picker. Text opens the last untouched
+  text placeholder when one
   exists; otherwise it creates a new text draft and opens the Text sheet. Text,
   Doodle, and Bauhaus sheets reflect edits into the draft as the user works and
   rely on interactive dismissal rather than **Done** or **Cancel** buttons. Camera

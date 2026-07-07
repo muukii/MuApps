@@ -752,6 +752,14 @@ public enum BauhausShapeKind: String, CaseIterable, Codable, Identifiable, Senda
   case quarterCircleTopTrailing
   case quarterCircleBottomTrailing
   case quarterCircleBottomLeading
+  /// A triangle whose longest side is attached to the top cell edge.
+  case triangleFlatTop
+  /// A triangle whose longest side is attached to the trailing cell edge.
+  case triangleFlatTrailing
+  /// A triangle whose longest side is attached to the bottom cell edge.
+  case triangleFlatBottom
+  /// A triangle whose longest side is attached to the leading cell edge.
+  case triangleFlatLeading
   case triangleTopLeading
   case triangleTopTrailing
   case triangleBottomTrailing
@@ -984,9 +992,13 @@ public struct BauhausGridCaptureView: View {
   @Environment(\.colorScheme) private var colorScheme
 
   @State private var document: BauhausGridDocument
-  @State private var selectedPosition: BauhausGridPosition?
+  @State private var focusedPosition: BauhausGridPosition?
+  @State private var selectedShape: BauhausShapeKind = .square
   @State private var selectedShapeSwatch: BauhausSwatch = .slot1
   @State private var selectedBackgroundSwatch: BauhausSwatch = .slot3
+  @State private var isErasing = false
+  @State private var undoStack: [BauhausGridEditSnapshot] = []
+  @State private var redoStack: [BauhausGridEditSnapshot] = []
   @State private var selectionFeedbackTrigger = 0
   @State private var editFeedbackTrigger = 0
   @State private var completionFeedbackTrigger = 0
@@ -1035,18 +1047,25 @@ public struct BauhausGridCaptureView: View {
       VStack(spacing: 20) {
         BauhausArtworkBoard(
           artwork: document.artwork,
-          selectedPosition: selectedPosition,
+          selectedPosition: focusedPosition,
           colors: colors,
-          onSelect: selectCell
+          onSelect: applySelectedTool
         )
+        .padding(.horizontal, BauhausCaptureLayout.boardHorizontalInset)
 
         BauhausCaptureControls(
+          selectedShape: $selectedShape,
           selectedShapeSwatch: $selectedShapeSwatch,
           selectedBackgroundSwatch: $selectedBackgroundSwatch,
+          isErasing: $isErasing,
+          canUndo: undoStack.isEmpty == false,
+          canRedo: redoStack.isEmpty == false,
           isClearDisabled: document.artwork.isEmpty,
           isExportDisabled: document.artwork.isEmpty,
           showsExport: onExport != nil,
           colors: colors,
+          onUndo: undo,
+          onRedo: redo,
           onClear: clear,
           onExport: export,
           onSelectSwatch: triggerSelectionFeedback
@@ -1059,52 +1078,47 @@ public struct BauhausGridCaptureView: View {
     .background(.background)
     .navigationTitle("Bauhaus")
     .navigationBarTitleDisplayMode(.inline)
-    .sheet(item: $selectedPosition) { position in
-      BauhausShapePickerSheet(
-        selectedShapeSwatch: $selectedShapeSwatch,
-        selectedBackgroundSwatch: $selectedBackgroundSwatch,
-        currentTile: document.artwork[position],
-        colorPalette: colorPalette,
-        onApply: { tile in
-          apply(tile, at: position)
-        },
-        onClear: {
-          apply(nil, at: position)
-        },
-        onSelectSwatch: triggerSelectionFeedback
-      )
-      .presentationDetents([.height(540), .large])
-      .presentationDragIndicator(.visible)
-      .presentationBackground(.background)
-    }
     .sensoryFeedback(.selection, trigger: selectionFeedbackTrigger)
     .sensoryFeedback(.impact(weight: .light), trigger: editFeedbackTrigger)
     .sensoryFeedback(.success, trigger: completionFeedbackTrigger)
   }
 
-  private func selectCell(_ position: BauhausGridPosition) {
-    triggerSelectionFeedback()
-    if let tile = document.artwork[position] {
-      selectedShapeSwatch = tile.shapeSwatch
-      selectedBackgroundSwatch = tile.backgroundSwatch
+  private func applySelectedTool(to position: BauhausGridPosition) {
+    focusedPosition = position
+
+    let nextTile: BauhausTile? = isErasing
+      ? nil
+      : BauhausTile(
+        shape: selectedShape,
+        shapeSwatch: selectedShapeSwatch,
+        backgroundSwatch: selectedBackgroundSwatch
+      )
+
+    guard document.artwork[position] != nextTile else {
+      triggerSelectionFeedback()
+      return
     }
-    selectedPosition = position
+
+    apply(nextTile, at: position)
   }
 
   private func apply(_ tile: BauhausTile?, at position: BauhausGridPosition) {
+    pushUndoSnapshot()
     withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
       document.artwork[position] = tile
       recordReplayAction(.setTile(position: position, tile: tile))
     }
-    selectedPosition = nil
+    focusedPosition = position
     triggerEditFeedback()
     onChange?(document)
   }
 
   private func clear() {
     guard document.artwork.isEmpty == false else { return }
+    pushUndoSnapshot()
     withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) {
       document.artwork = .empty
+      focusedPosition = nil
       if document.replay == nil {
         document.replay = BauhausGridReplay()
         replayStart = nil
@@ -1114,6 +1128,18 @@ public struct BauhausGridCaptureView: View {
     }
     triggerEditFeedback()
     onChange?(document)
+  }
+
+  private func undo() {
+    guard let previous = undoStack.popLast() else { return }
+    redoStack.append(snapshot())
+    restore(previous)
+  }
+
+  private func redo() {
+    guard let next = redoStack.popLast() else { return }
+    undoStack.append(snapshot())
+    restore(next)
   }
 
   private func export() {
@@ -1155,6 +1181,46 @@ public struct BauhausGridCaptureView: View {
     }
     return BauhausGridDocument(artwork: document.artwork, replay: BauhausGridReplay())
   }
+
+  private func pushUndoSnapshot() {
+    undoStack.append(snapshot())
+    redoStack.removeAll()
+  }
+
+  private func snapshot() -> BauhausGridEditSnapshot {
+    BauhausGridEditSnapshot(
+      document: document,
+      focusedPosition: focusedPosition,
+      replayStart: replayStart
+    )
+  }
+
+  private func restore(_ snapshot: BauhausGridEditSnapshot) {
+    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+      document = snapshot.document
+      focusedPosition = snapshot.focusedPosition
+      replayStart = snapshot.replayStart
+    }
+    triggerEditFeedback()
+    onChange?(document)
+  }
+}
+
+fileprivate enum BauhausCaptureLayout {
+  static let boardHorizontalInset: CGFloat = 12
+}
+
+/// One reversible editor state for the in-session Bauhaus undo stack.
+fileprivate struct BauhausGridEditSnapshot: Equatable, Sendable {
+
+  /// The full document at the captured edit point, including replay data.
+  var document: BauhausGridDocument
+
+  /// The cell that was visually focused when this snapshot was captured.
+  var focusedPosition: BauhausGridPosition?
+
+  /// Replay timing origin used so redo keeps future authored timestamps stable.
+  var replayStart: Date?
 }
 
 /// Standalone demo harness for `BauhausGridCaptureView`.
@@ -1265,121 +1331,70 @@ fileprivate struct BauhausGridCellButton: View {
 
 // MARK: - Picker
 
-fileprivate struct BauhausShapePickerSheet: View {
-
-  @Binding var selectedShapeSwatch: BauhausSwatch
-  @Binding var selectedBackgroundSwatch: BauhausSwatch
-
-  let currentTile: BauhausTile?
-  let colorPalette: BauhausColorPalette
-  let onApply: @MainActor @Sendable (BauhausTile) -> Void
-  let onClear: @MainActor @Sendable () -> Void
-  let onSelectSwatch: @MainActor @Sendable () -> Void
-
-  @Environment(\.colorScheme) private var colorScheme
-
-  var body: some View {
-    let colors = colorPalette.colors(for: colorScheme)
-
-    NavigationStack {
-      ScrollView {
-        VStack(spacing: 20) {
-          VStack(spacing: 10) {
-            BauhausSwatchStrip(
-              title: "Shape",
-              selectedSwatch: $selectedShapeSwatch,
-              colors: colors,
-              onSelect: onSelectSwatch
-            )
-            BauhausSwatchStrip(
-              title: "Background",
-              selectedSwatch: $selectedBackgroundSwatch,
-              colors: colors,
-              onSelect: onSelectSwatch
-            )
-          }
-
-          BauhausShapeLibrary(
-            selectedShapeSwatch: selectedShapeSwatch,
-            selectedBackgroundSwatch: selectedBackgroundSwatch,
-            currentTile: currentTile,
-            colors: colors,
-            onApply: onApply
-          )
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 14)
-        .padding(.bottom, 20)
-      }
-      .navigationTitle("Shape")
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .topBarTrailing) {
-          Button(role: .destructive, action: onClear) {
-            Image(systemName: "eraser")
-          }
-          .disabled(currentTile == nil)
-          .accessibilityLabel("Clear cell")
-        }
-      }
-    }
-  }
-}
-
 fileprivate struct BauhausShapeLibrary: View {
+
+  @Binding var selectedShape: BauhausShapeKind
 
   let selectedShapeSwatch: BauhausSwatch
   let selectedBackgroundSwatch: BauhausSwatch
-  let currentTile: BauhausTile?
   let colors: BauhausResolvedColors
-  let onApply: @MainActor @Sendable (BauhausTile) -> Void
+  let onSelect: @MainActor @Sendable () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
       BauhausShapePickerSection(
         title: "Basic",
         shapes: BauhausShapeLibraryOrder.basic,
+        selectedShape: $selectedShape,
         selectedShapeSwatch: selectedShapeSwatch,
         selectedBackgroundSwatch: selectedBackgroundSwatch,
-        currentTile: currentTile,
         colors: colors,
-        onApply: onApply
+        onSelect: onSelect
+      )
+      BauhausShapePickerSection(
+        title: "Triangle Edge",
+        shapes: BauhausShapeLibraryOrder.edgeTriangles,
+        selectedShape: $selectedShape,
+        selectedShapeSwatch: selectedShapeSwatch,
+        selectedBackgroundSwatch: selectedBackgroundSwatch,
+        colors: colors,
+        onSelect: onSelect
+      )
+      BauhausShapePickerSection(
+        title: "Triangle Corner",
+        shapes: BauhausShapeLibraryOrder.cornerTriangles,
+        selectedShape: $selectedShape,
+        selectedShapeSwatch: selectedShapeSwatch,
+        selectedBackgroundSwatch: selectedBackgroundSwatch,
+        colors: colors,
+        onSelect: onSelect
       )
       BauhausShapePickerSection(
         title: "Semicircle Arc",
         shapes: BauhausShapeLibraryOrder.arcSemicircles,
+        selectedShape: $selectedShape,
         selectedShapeSwatch: selectedShapeSwatch,
         selectedBackgroundSwatch: selectedBackgroundSwatch,
-        currentTile: currentTile,
         colors: colors,
-        onApply: onApply
+        onSelect: onSelect
       )
       BauhausShapePickerSection(
         title: "Semicircle Flat",
         shapes: BauhausShapeLibraryOrder.flatSemicircles,
+        selectedShape: $selectedShape,
         selectedShapeSwatch: selectedShapeSwatch,
         selectedBackgroundSwatch: selectedBackgroundSwatch,
-        currentTile: currentTile,
         colors: colors,
-        onApply: onApply
+        onSelect: onSelect
       )
       BauhausShapePickerSection(
         title: "Quarter Circle",
         shapes: BauhausShapeLibraryOrder.quarterCircles,
+        selectedShape: $selectedShape,
         selectedShapeSwatch: selectedShapeSwatch,
         selectedBackgroundSwatch: selectedBackgroundSwatch,
-        currentTile: currentTile,
         colors: colors,
-        onApply: onApply
-      )
-      BauhausShapePickerSection(
-        title: "Triangle",
-        shapes: BauhausShapeLibraryOrder.triangles,
-        selectedShapeSwatch: selectedShapeSwatch,
-        selectedBackgroundSwatch: selectedBackgroundSwatch,
-        currentTile: currentTile,
-        colors: colors,
-        onApply: onApply
+        onSelect: onSelect
       )
     }
     .frame(maxWidth: BauhausShapePickerMetrics.libraryWidth)
@@ -1391,11 +1406,11 @@ fileprivate struct BauhausShapePickerSection: View {
 
   let title: LocalizedStringKey
   let shapes: [BauhausShapeKind]
+  @Binding var selectedShape: BauhausShapeKind
   let selectedShapeSwatch: BauhausSwatch
   let selectedBackgroundSwatch: BauhausSwatch
-  let currentTile: BauhausTile?
   let colors: BauhausResolvedColors
-  let onApply: @MainActor @Sendable (BauhausTile) -> Void
+  let onSelect: @MainActor @Sendable () -> Void
 
   private static let columns = Array(
     repeating: GridItem(
@@ -1420,11 +1435,13 @@ fileprivate struct BauhausShapePickerSection: View {
           )
 
           Button {
-            onApply(tile)
+            guard selectedShape != shape else { return }
+            selectedShape = shape
+            onSelect()
           } label: {
             BauhausShapeLibraryTile(
               tile: tile,
-              isSelected: currentTile == tile,
+              isSelected: selectedShape == shape,
               colors: colors
             )
           }
@@ -1437,13 +1454,13 @@ fileprivate struct BauhausShapePickerSection: View {
 }
 
 fileprivate enum BauhausShapePickerMetrics {
-  static let tileSide: CGFloat = 32
+  static let tileSide: CGFloat = 44
   static let columnSpacing: CGFloat = 10
   static let rowSpacing: CGFloat = 10
   static let libraryWidth = tileSide * 4 + columnSpacing * 3
 }
 
-/// Fixed picker ordering for quickly comparing rotational variants.
+/// Fixed picker ordering for quickly comparing shape variants.
 ///
 /// Directional shapes are grouped by family and kept in spatial order. The
 /// picker section uses four columns, so each family can stay on a single row
@@ -1476,12 +1493,50 @@ fileprivate enum BauhausShapeLibraryOrder {
     .quarterCircleBottomLeading,
   ]
 
-  static let triangles: [BauhausShapeKind] = [
+  static let edgeTriangles: [BauhausShapeKind] = [
+    .triangleFlatTop,
+    .triangleFlatTrailing,
+    .triangleFlatBottom,
+    .triangleFlatLeading,
+  ]
+
+  static let cornerTriangles: [BauhausShapeKind] = [
     .triangleTopLeading,
     .triangleTopTrailing,
     .triangleBottomTrailing,
     .triangleBottomLeading,
   ]
+}
+
+fileprivate extension BauhausShapeKind {
+
+  var nextBrushVariant: BauhausShapeKind? {
+    guard let cycleGroup,
+          let currentIndex = cycleGroup.firstIndex(of: self)
+    else {
+      return nil
+    }
+
+    let nextIndex = cycleGroup.index(after: currentIndex)
+    return cycleGroup[nextIndex == cycleGroup.endIndex ? cycleGroup.startIndex : nextIndex]
+  }
+
+  private var cycleGroup: [BauhausShapeKind]? {
+    switch self {
+    case .square, .circle, .paddedCircle:
+      BauhausShapeLibraryOrder.basic
+    case .semicircleTop, .semicircleTrailing, .semicircleBottom, .semicircleLeading:
+      BauhausShapeLibraryOrder.arcSemicircles
+    case .semicircleFlatTop, .semicircleFlatTrailing, .semicircleFlatBottom, .semicircleFlatLeading:
+      BauhausShapeLibraryOrder.flatSemicircles
+    case .quarterCircleTopLeading, .quarterCircleTopTrailing, .quarterCircleBottomTrailing, .quarterCircleBottomLeading:
+      BauhausShapeLibraryOrder.quarterCircles
+    case .triangleFlatTop, .triangleFlatTrailing, .triangleFlatBottom, .triangleFlatLeading:
+      BauhausShapeLibraryOrder.edgeTriangles
+    case .triangleTopLeading, .triangleTopTrailing, .triangleBottomTrailing, .triangleBottomLeading:
+      BauhausShapeLibraryOrder.cornerTriangles
+    }
+  }
 }
 
 fileprivate struct BauhausSwatchStrip: View {
@@ -1559,47 +1614,77 @@ fileprivate struct BauhausShapeLibraryTile: View {
 
 fileprivate struct BauhausCaptureControls: View {
 
+  @Binding var selectedShape: BauhausShapeKind
   @Binding var selectedShapeSwatch: BauhausSwatch
   @Binding var selectedBackgroundSwatch: BauhausSwatch
+  @Binding var isErasing: Bool
 
+  let canUndo: Bool
+  let canRedo: Bool
   let isClearDisabled: Bool
   let isExportDisabled: Bool
   let showsExport: Bool
   let colors: BauhausResolvedColors
+  let onUndo: @MainActor @Sendable () -> Void
+  let onRedo: @MainActor @Sendable () -> Void
   let onClear: @MainActor @Sendable () -> Void
   let onExport: @MainActor @Sendable () -> Void
   let onSelectSwatch: @MainActor @Sendable () -> Void
 
+  private var selectedTile: BauhausTile {
+    BauhausTile(
+      shape: selectedShape,
+      shapeSwatch: selectedShapeSwatch,
+      backgroundSwatch: selectedBackgroundSwatch
+    )
+  }
+
+  private var canCycleBrush: Bool {
+    isErasing == false && selectedShape.nextBrushVariant != nil
+  }
+
   var body: some View {
-    ScrollView(.horizontal) {
-      HStack(spacing: 14) {
-        Button(role: .destructive, action: onClear) {
-          Image(systemName: "trash")
+    VStack(spacing: 14) {
+      HStack(spacing: 12) {
+        BauhausCurrentToolPreview(
+          tile: selectedTile,
+          isErasing: isErasing,
+          showsCycleCue: canCycleBrush,
+          colors: colors
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: cycleBrush)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+          isErasing ? "Current eraser" : canCycleBrush ? "Next brush" : "Current brush"
+        )
+        .accessibilityAddTraits(.isButton)
+
+        Spacer(minLength: 0)
+      }
+
+      HStack(spacing: 8) {
+        Button(action: onUndo) {
+          Image(systemName: "arrow.uturn.backward")
         }
-        .disabled(isClearDisabled)
-        .accessibilityLabel("Clear artwork")
+        .disabled(canUndo == false)
+        .accessibilityLabel("Undo")
+
+        Button(action: onRedo) {
+          Image(systemName: "arrow.uturn.forward")
+        }
+        .disabled(canRedo == false)
+        .accessibilityLabel("Redo")
 
         Spacer(minLength: 0)
 
-        VStack(spacing: 8) {
-          BauhausSwatchStrip(
-            title: "Shape",
-            selectedSwatch: $selectedShapeSwatch,
-            colors: colors,
-            dotSize: 24,
-            onSelect: onSelectSwatch
-          )
-          BauhausSwatchStrip(
-            title: "Background",
-            selectedSwatch: $selectedBackgroundSwatch,
-            colors: colors,
-            dotSize: 24,
-            onSelect: onSelectSwatch
-          )
+        Button {
+          isErasing.toggle()
+          onSelectSwatch()
+        } label: {
+          Image(systemName: isErasing ? "eraser.fill" : "eraser")
         }
-        .frame(maxWidth: 360)
-
-        Spacer(minLength: 0)
+        .accessibilityLabel(isErasing ? "Use brush" : "Erase cells")
 
         if showsExport {
           Button(action: onExport) {
@@ -1608,11 +1693,112 @@ fileprivate struct BauhausCaptureControls: View {
           .disabled(isExportDisabled)
           .accessibilityLabel("Finish artwork")
         }
+
+        Button(role: .destructive, action: onClear) {
+          Image(systemName: "trash")
+        }
+        .disabled(isClearDisabled)
+        .accessibilityLabel("Clear artwork")
       }
+
+      VStack(spacing: 10) {
+        BauhausSwatchStrip(
+          title: "Shape",
+          selectedSwatch: $selectedShapeSwatch,
+          colors: colors,
+          dotSize: 26,
+          onSelect: selectPaintTool
+        )
+        BauhausSwatchStrip(
+          title: "Background",
+          selectedSwatch: $selectedBackgroundSwatch,
+          colors: colors,
+          dotSize: 26,
+          onSelect: selectPaintTool
+        )
+      }
+
+      BauhausShapeLibrary(
+        selectedShape: $selectedShape,
+        selectedShapeSwatch: selectedShapeSwatch,
+        selectedBackgroundSwatch: selectedBackgroundSwatch,
+        colors: colors,
+        onSelect: selectPaintTool
+      )
     }
-    .scrollBounceBehavior(.automatic)
+    .padding(14)
+    .background {
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .fill(colors.chrome.paper)
+    }
     .buttonStyle(.bordered)
-    .controlSize(.large)
+    .controlSize(.regular)
+  }
+
+  private func selectPaintTool() {
+    isErasing = false
+    onSelectSwatch()
+  }
+
+  private func cycleBrush() {
+    guard isErasing == false,
+          let nextShape = selectedShape.nextBrushVariant
+    else {
+      onSelectSwatch()
+      return
+    }
+
+    selectedShape = nextShape
+    onSelectSwatch()
+  }
+}
+
+fileprivate struct BauhausCurrentToolPreview: View {
+
+  let tile: BauhausTile
+  let isErasing: Bool
+  let showsCycleCue: Bool
+  let colors: BauhausResolvedColors
+
+  var body: some View {
+    HStack(spacing: 10) {
+      ZStack {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .fill(tile.backgroundSwatch.color(in: colors))
+
+        if isErasing {
+          Image(systemName: "eraser.fill")
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(.secondary)
+        } else {
+          BauhausShape(kind: tile.shape)
+            .fill(tile.shapeSwatch.color(in: colors))
+            .padding(10)
+        }
+      }
+      .frame(width: 52, height: 52)
+      .overlay(alignment: .bottomTrailing) {
+        if showsCycleCue {
+          Image(systemName: "chevron.forward")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.secondary)
+            .padding(4)
+            .background {
+              Circle()
+                .fill(.background.opacity(0.92))
+            }
+            .offset(x: 4, y: 4)
+        }
+      }
+      .overlay {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .strokeBorder(colors.chrome.tileBorder, lineWidth: 1)
+      }
+
+      Text(isErasing ? "Erase" : "Brush")
+        .font(.headline.weight(.semibold))
+        .frame(minWidth: 64, alignment: .leading)
+    }
   }
 }
 
@@ -1706,43 +1892,51 @@ public extension BauhausShapeKind {
   fileprivate var accessibilityLabel: Text {
     switch self {
     case .square:
-      Text("Apply square")
+      Text("Square")
     case .circle:
-      Text("Apply filled circle")
+      Text("Filled circle")
     case .paddedCircle:
-      Text("Apply padded circle")
+      Text("Padded circle")
     case .semicircleTop:
-      Text("Apply top arc semicircle")
+      Text("Top arc semicircle")
     case .semicircleTrailing:
-      Text("Apply trailing arc semicircle")
+      Text("Trailing arc semicircle")
     case .semicircleBottom:
-      Text("Apply bottom arc semicircle")
+      Text("Bottom arc semicircle")
     case .semicircleLeading:
-      Text("Apply leading arc semicircle")
+      Text("Leading arc semicircle")
     case .semicircleFlatTop:
-      Text("Apply top flat semicircle")
+      Text("Top flat semicircle")
     case .semicircleFlatTrailing:
-      Text("Apply trailing flat semicircle")
+      Text("Trailing flat semicircle")
     case .semicircleFlatBottom:
-      Text("Apply bottom flat semicircle")
+      Text("Bottom flat semicircle")
     case .semicircleFlatLeading:
-      Text("Apply leading flat semicircle")
+      Text("Leading flat semicircle")
     case .quarterCircleTopLeading:
-      Text("Apply top-leading quarter circle")
+      Text("Top-leading quarter circle")
     case .quarterCircleTopTrailing:
-      Text("Apply top-trailing quarter circle")
+      Text("Top-trailing quarter circle")
     case .quarterCircleBottomTrailing:
-      Text("Apply bottom-trailing quarter circle")
+      Text("Bottom-trailing quarter circle")
     case .quarterCircleBottomLeading:
-      Text("Apply bottom-leading quarter circle")
+      Text("Bottom-leading quarter circle")
+    case .triangleFlatTop:
+      Text("Top-edge triangle")
+    case .triangleFlatTrailing:
+      Text("Trailing-edge triangle")
+    case .triangleFlatBottom:
+      Text("Bottom-edge triangle")
+    case .triangleFlatLeading:
+      Text("Leading-edge triangle")
     case .triangleTopLeading:
-      Text("Apply top-leading triangle")
+      Text("Top-leading triangle")
     case .triangleTopTrailing:
-      Text("Apply top-trailing triangle")
+      Text("Top-trailing triangle")
     case .triangleBottomTrailing:
-      Text("Apply bottom-trailing triangle")
+      Text("Bottom-trailing triangle")
     case .triangleBottomLeading:
-      Text("Apply bottom-leading triangle")
+      Text("Bottom-leading triangle")
     }
   }
 
@@ -1782,6 +1976,14 @@ public extension BauhausShapeKind {
       return quarterCirclePath(in: rect, corner: .bottomTrailing)
     case .quarterCircleBottomLeading:
       return quarterCirclePath(in: rect, corner: .bottomLeading)
+    case .triangleFlatTop:
+      return edgeTrianglePath(in: rect, edge: .top)
+    case .triangleFlatTrailing:
+      return edgeTrianglePath(in: rect, edge: .trailing)
+    case .triangleFlatBottom:
+      return edgeTrianglePath(in: rect, edge: .bottom)
+    case .triangleFlatLeading:
+      return edgeTrianglePath(in: rect, edge: .leading)
     case .triangleTopLeading:
       return trianglePath(in: rect, corner: .topLeading)
     case .triangleTopTrailing:
@@ -1887,6 +2089,32 @@ public extension BauhausShapeKind {
       path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
       path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
       path.addArc(center: CGPoint(x: rect.minX, y: rect.maxY), radius: radius, startAngle: .degrees(270), endAngle: .degrees(360), clockwise: false)
+    }
+
+    path.closeSubpath()
+    return path
+  }
+
+  private func edgeTrianglePath(in rect: CGRect, edge: Edge) -> Path {
+    var path = Path()
+
+    switch edge {
+    case .top:
+      path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+      path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+      path.addLine(to: CGPoint(x: rect.midX, y: rect.midY))
+    case .trailing:
+      path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+      path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+      path.addLine(to: CGPoint(x: rect.midX, y: rect.midY))
+    case .bottom:
+      path.move(to: CGPoint(x: rect.maxX, y: rect.maxY))
+      path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+      path.addLine(to: CGPoint(x: rect.midX, y: rect.midY))
+    case .leading:
+      path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+      path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+      path.addLine(to: CGPoint(x: rect.midX, y: rect.midY))
     }
 
     path.closeSubpath()
@@ -2050,6 +2278,16 @@ fileprivate struct BauhausShapePartsPreview: View {
           colors: colors
         )
         BauhausShapePartPreviewSection(
+          title: "Triangle Edge",
+          shapes: BauhausShapeLibraryOrder.edgeTriangles,
+          colors: colors
+        )
+        BauhausShapePartPreviewSection(
+          title: "Triangle Corner",
+          shapes: BauhausShapeLibraryOrder.cornerTriangles,
+          colors: colors
+        )
+        BauhausShapePartPreviewSection(
           title: "Semicircle Arc",
           shapes: BauhausShapeLibraryOrder.arcSemicircles,
           colors: colors
@@ -2062,11 +2300,6 @@ fileprivate struct BauhausShapePartsPreview: View {
         BauhausShapePartPreviewSection(
           title: "Quarter Circle",
           shapes: BauhausShapeLibraryOrder.quarterCircles,
-          colors: colors
-        )
-        BauhausShapePartPreviewSection(
-          title: "Triangle",
-          shapes: BauhausShapeLibraryOrder.triangles,
           colors: colors
         )
       }
@@ -2128,26 +2361,20 @@ fileprivate struct BauhausShapePartPreviewTile: View {
 fileprivate struct BauhausShapeLibraryPreview: View {
 
   @Environment(\.colorScheme) private var colorScheme
+  @State private var selectedShape = BauhausShapeKind.circle
   @State private var selectedShapeSwatch = BauhausPreviewFixtures.primaryShapeSwatch
   @State private var selectedBackgroundSwatch = BauhausPreviewFixtures.primaryBackgroundSwatch
-  @State private var currentTile = BauhausTile(
-    shape: .circle,
-    shapeSwatch: BauhausPreviewFixtures.primaryShapeSwatch,
-    backgroundSwatch: BauhausPreviewFixtures.primaryBackgroundSwatch
-  )
 
   var body: some View {
     let colors = BauhausColorPalette.default.colors(for: colorScheme)
 
     BauhausPreviewCanvas {
       BauhausShapeLibrary(
+        selectedShape: $selectedShape,
         selectedShapeSwatch: selectedShapeSwatch,
         selectedBackgroundSwatch: selectedBackgroundSwatch,
-        currentTile: currentTile,
         colors: colors,
-        onApply: { tile in
-          currentTile = tile
-        }
+        onSelect: {}
       )
     }
   }
@@ -2156,20 +2383,28 @@ fileprivate struct BauhausShapeLibraryPreview: View {
 fileprivate struct BauhausCaptureControlsPreview: View {
 
   @Environment(\.colorScheme) private var colorScheme
+  @State private var selectedShape = BauhausShapeKind.circle
   @State private var selectedShapeSwatch = BauhausPreviewFixtures.primaryShapeSwatch
   @State private var selectedBackgroundSwatch = BauhausPreviewFixtures.primaryBackgroundSwatch
+  @State private var isErasing = false
 
   var body: some View {
     let colors = BauhausColorPalette.default.colors(for: colorScheme)
 
     BauhausPreviewCanvas {
       BauhausCaptureControls(
+        selectedShape: $selectedShape,
         selectedShapeSwatch: $selectedShapeSwatch,
         selectedBackgroundSwatch: $selectedBackgroundSwatch,
+        isErasing: $isErasing,
+        canUndo: true,
+        canRedo: true,
         isClearDisabled: false,
         isExportDisabled: false,
         showsExport: true,
         colors: colors,
+        onUndo: {},
+        onRedo: {},
         onClear: {},
         onExport: {},
         onSelectSwatch: {}

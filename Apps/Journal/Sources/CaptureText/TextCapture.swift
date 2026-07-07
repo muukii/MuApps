@@ -1,3 +1,4 @@
+import GrowingTextEditor
 import SwiftUI
 
 // MARK: - Value
@@ -38,25 +39,21 @@ public struct TextCaptureView: View {
   }
 
   public var body: some View {
-    ZStack(alignment: .topLeading) {
-      Group {
-        if text.isEmpty {
-          Text(placeholder)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 24)
-            .allowsHitTesting(false)
-        }
-
-        TextEditor(text: $text)
-          .foregroundStyle(.primary)
-          .focused($isFocused)
-          .scrollContentBackground(.hidden)
-          .padding(16)
-      }
-      .font(.system(size: 32))
-      .fontWeight(.bold)
+    GrowingTextEditor(
+      text: $text,
+      configuration: GrowingTextEditorConfiguration(
+        minLines: 4,
+        maxLines: 12,
+        horizontalPadding: 16,
+        verticalPadding: 16
+      ),
+      font: .system(size: 32, weight: .bold)
+    ) {
+      Text(placeholder)
     }
+    .focused($isFocused)
+    .foregroundStyle(.primary)
+    .frame(maxWidth: .infinity, alignment: .topLeading)
     .toolbar {
       ToolbarItem(placement: .confirmationAction) {
         Button("Save") {
