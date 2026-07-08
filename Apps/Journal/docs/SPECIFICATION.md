@@ -880,10 +880,13 @@ the gallery's **Lab** section).
   Capture demos are intentionally hidden from Settings. In Debug builds, **Lab**
   links to Haptics and Haptic Doodle so those tools can be tried from the current
   app root; Release builds omit the Lab section. An **About** section has
-  **Privacy Policy**, which opens an in-app policy explaining local storage,
-  iCloud Private Database sync, optional permissions, sharing, widgets, and the
-  absence of developer-operated analytics/ads/tracking, plus **Show
-  Onboarding**, which re-presents `OnboardingView` in a `fullScreenCover`;
+  **Help**, which opens a practical support screen for iCloud sync, deleting
+  owned versus shared vault data, Cloud Storage estimates, widgets, privacy, and
+  Debug-only development/production CloudKit environment guidance; **Privacy
+  Policy**, which opens an in-app policy explaining local storage, iCloud Private
+  Database sync, optional permissions, sharing, widgets, and the absence of
+  developer-operated analytics/ads/tracking; plus **Show Onboarding**, which
+  re-presents `OnboardingView` in a `fullScreenCover`;
   dismissing it returns to the app without changing `hasCompletedOnboarding`.
 
 ---

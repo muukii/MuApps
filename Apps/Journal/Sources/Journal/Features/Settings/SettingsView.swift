@@ -155,6 +155,12 @@ struct SettingsView: View {
 
       Section("About") {
         NavigationLink {
+          JournalHelpView()
+        } label: {
+          Label("Help", systemImage: "questionmark.circle")
+        }
+
+        NavigationLink {
           PrivacyPolicyView()
         } label: {
           Label("Privacy Policy", systemImage: "hand.raised")
