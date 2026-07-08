@@ -25,11 +25,71 @@ struct JournalApp: App {
 
   var body: some Scene {
     WindowGroup {
+      #if DEBUG
+      switch JournalDebugLaunchRoute.activeRoute {
+      case .bookInputMorphSandbox(let initialState):
+        BookInputMorphSandbox(initialState: initialState)
+          .preferredColorScheme(.dark)
+
+      case .bookAttachmentMenuPreview:
+        BookAttachmentMenuPreview(initialMenuState: .expanded)
+          .preferredColorScheme(.dark)
+
+      case nil:
+        RootView(vaultRuntime: vaultRuntime)
+          .task { DoodleHaptics.prepareForDrawing() }
+      }
+      #else
       RootView(vaultRuntime: vaultRuntime)
         .task { DoodleHaptics.prepareForDrawing() }
+      #endif
     }
   }
 }
+
+#if DEBUG
+/// Launch arguments for opening isolated Journal prototype surfaces.
+private enum JournalDebugLaunchRoute {
+
+  /// Debug-only prototype roots supported by Journal launches.
+  enum Route {
+
+    /// Opens the minimal matched-geometry playground based on the Book input sample.
+    case bookInputMorphSandbox(initialState: BookInputMorphSandbox.InitialState)
+
+    /// Opens the fuller Book attachment menu prototype.
+    case bookAttachmentMenuPreview
+  }
+
+  /// Opens the minimal Book input morph sandbox as the app root.
+  private static let bookInputMorphSandboxArgument = "-BookInputMorphSandbox"
+
+  /// Opens the minimal Book input morph sandbox in its expanded state.
+  private static let bookInputMorphSandboxExpandedArgument = "-BookInputMorphSandboxExpanded"
+
+  /// Opens the Book attachment menu prototype as the app root.
+  private static let bookAttachmentMenuPreviewArgument = "-BookAttachmentMenuPreview"
+
+  /// Prototype route requested by the current debug launch, if any.
+  static var activeRoute: Route? {
+    let arguments = ProcessInfo.processInfo.arguments
+
+    if arguments.contains(bookInputMorphSandboxExpandedArgument) {
+      return .bookInputMorphSandbox(initialState: .expanded)
+    }
+
+    if arguments.contains(bookInputMorphSandboxArgument) {
+      return .bookInputMorphSandbox(initialState: .collapsed)
+    }
+
+    if arguments.contains(bookAttachmentMenuPreviewArgument) {
+      return .bookAttachmentMenuPreview
+    }
+
+    return nil
+  }
+}
+#endif
 
 /// Reads the persisted theme and appearance preference, then applies them to the
 /// whole app. Kept separate from `JournalApp` so the `@AppStorage` reads live in
