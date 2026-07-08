@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftUISnapDraggingModifier
 
 /// Minimal sandbox for experimenting with a bottom source surface morphing into a Book overlay.
 ///
@@ -18,6 +19,7 @@ struct BookInputMorphSandbox: View {
   }
 
   @State private var isExpanded: Bool
+  @State private var destinationDragOffset: CGSize = .zero
   @Namespace private var namespace
 
   init(initialState: InitialState = .collapsed) {
@@ -28,9 +30,6 @@ struct BookInputMorphSandbox: View {
     ZStack {
       Color.black
         .ignoresSafeArea()
-        .onTapGesture {
-          collapse()
-        }
 
       RoundedRectangle(cornerRadius: 28, style: .continuous)
         .fill(.green)
@@ -40,8 +39,12 @@ struct BookInputMorphSandbox: View {
           BookInputMorphDestination(
             isExpanded: isExpanded,
             namespace: namespace,
+            dragOffset: $destinationDragOffset,
             onActivate: {
               expand()
+            },
+            onDismissDrag: {
+              collapse()
             },
             onSelectItem: { _ in
               collapse()
@@ -70,10 +73,12 @@ struct BookInputMorphSandbox: View {
   }
 
   private func expand() {
+    destinationDragOffset = .zero
     isExpanded = true
   }
 
   private func collapse() {
+    destinationDragOffset = .zero
     isExpanded = false
   }
 }
@@ -133,7 +138,9 @@ private struct BookInputMorphDestination: View {
 
   let isExpanded: Bool
   let namespace: Namespace.ID
+  @Binding var dragOffset: CGSize
   let onActivate: @MainActor @Sendable () -> Void
+  let onDismissDrag: @MainActor @Sendable () -> Void
   let onSelectItem: @MainActor @Sendable (BookInputMorphMenuItem) -> Void
 
   var body: some View {
@@ -152,6 +159,32 @@ private struct BookInputMorphDestination: View {
         .geometryGroup()
       }
       .clipShape(RoundedRectangle(cornerRadius: BookInputMorphMetrics.surfaceCornerRadius))
+      .modifier(
+        SnapDraggingModifier(
+          gestureMode: .simultaneous,
+          offset: $dragOffset,
+          activation: .init(minimumDistance: 8),
+          axis: [.horizontal, .vertical],
+          horizontalBoundary: .init(min: -46, max: 46, bandLength: 120),
+          verticalBoundary: .init(min: 0, max: .infinity, bandLength: 140),
+          springParameter: .interpolation(mass: 1, stiffness: 34, damping: 22),
+          handler: .init(
+            onEndDragging: { velocity, offset, contentSize in
+              if isExpanded,
+                shouldDismissMenu(
+                  velocity: velocity,
+                  offset: offset,
+                  contentSize: contentSize
+                )
+              {
+                onDismissDrag()
+              }
+
+              return .zero
+            }
+          )
+        )
+      )
       .matchedGeometryEffect(
         id: isExpanded
           ? BookInputMorphMatchedElement.activeSurface
@@ -159,6 +192,15 @@ private struct BookInputMorphDestination: View {
         in: namespace,
         isSource: false
       )
+  }
+
+  private func shouldDismissMenu(
+    velocity: CGVector,
+    offset: CGSize,
+    contentSize: CGSize
+  ) -> Bool {
+    velocity.dy > 760
+      || offset.height > min(140, contentSize.height * 0.32)
   }
 }
 
@@ -178,6 +220,7 @@ private struct BookInputMorphDestinationContentView: View {
           .foregroundStyle(.white)
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
           .padding(.leading, 24)
+          .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
       .accessibilityLabel("Open Menu")
