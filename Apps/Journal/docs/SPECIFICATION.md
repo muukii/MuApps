@@ -691,12 +691,15 @@ the gallery's **Lab** section).
   collaboration UI, and limits sharing to specified recipients with read-write
   permission. The share button and row context menu both present the direct
   `UICloudSharingController` invite sheet; participant vault rows do not offer
-  invite issuance. New vault creation keeps icon selection compact in the form
-  and drills into separate SF Symbol and Emoji browsers. The Emoji browser owns
-  its own lazy-scrolling grid over the Unicode fully-qualified catalog and shows
-  one primary item for each skin-tone family. Choosing a family opens a
-  secondary palette containing its exact neutral, single-tone, and mixed-tone
-  variants. Existing vault rows show that icon in the picker, expose **Change
+  invite issuance. New vault creation keeps icon selection to one compact row
+  in the form and drills into one **Icon** browser. Curated SF Symbols and the
+  Unicode fully-qualified Emoji catalog share a single lazy-scrolling grid with
+  no family tabs or section split. The always-visible search field filters both
+  kinds together by SF Symbol name, English and Japanese Emoji names/keywords,
+  or an Emoji pasted directly into the field. The grid shows one primary item
+  for each skin-tone family; choosing that item opens a secondary palette with
+  its exact neutral, single-tone, and mixed-tone variants. Existing vault rows
+  show that icon in the picker, expose **Change
   Icon** from the row context menu, and carry the icon into the composer toolbar,
   storage estimate rows, and widget vault headers. Icon metadata is stored
   alongside the title in the vault's CloudKit `VaultInfo` record, so changes

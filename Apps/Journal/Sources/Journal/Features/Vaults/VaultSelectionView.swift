@@ -1,7 +1,9 @@
 import AppUIComponents
 import CloudKit
+import Foundation
 import JournalVault
 import MuColor
+import Observation
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
@@ -1143,7 +1145,7 @@ private struct VaultIconEditorSheet: View {
   }
 }
 
-/// Preset picker for the two supported vault icon families.
+/// Compact entry point for the unified SF Symbol and Emoji browser.
 private struct VaultIconPickerSection: View {
 
   @Binding var selection: VaultIcon
@@ -1151,124 +1153,58 @@ private struct VaultIconPickerSection: View {
   var body: some View {
     Section("Icon") {
       NavigationLink {
-        VaultSystemImagePicker(selection: $selection)
+        VaultIconBrowser(selection: $selection)
       } label: {
-        VaultIconFamilyNavigationLabel(
-          family: .systemImage,
-          selection: selection,
-          title: "SF Symbols",
-          systemImage: "square.grid.2x2"
-        )
-      }
-
-      NavigationLink {
-        VaultEmojiPicker(selection: $selection)
-      } label: {
-        VaultIconFamilyNavigationLabel(
-          family: .emoji,
-          selection: selection,
-          title: "Emoji",
-          systemImage: "face.smiling"
-        )
+        VaultIconSelectionNavigationLabel(selection: selection)
       }
     }
   }
 }
 
-/// Compact form-row label that previews the current selection for one icon family.
-private struct VaultIconFamilyNavigationLabel: View {
+/// Form-row label that keeps the current icon visible before opening the browser.
+private struct VaultIconSelectionNavigationLabel: View {
 
-  let family: VaultIconFamily
   let selection: VaultIcon
-  let title: LocalizedStringResource
-  let systemImage: String
 
   var body: some View {
     HStack(spacing: 12) {
-      Label {
-        Text(title)
-      } icon: {
-        Image(systemName: systemImage)
-      }
+      Label("Choose Icon", systemImage: "square.grid.2x2")
 
       Spacer(minLength: 8)
 
-      if family.contains(selection) {
-        VaultIconMark(icon: selection, size: 32, font: .body)
-      }
+      VaultIconMark(icon: selection, size: 32, font: .body)
     }
     .accessibilityElement(children: .combine)
-    .accessibilityValue(
-      family.contains(selection)
-        ? Text(selection.accessibilityLabel)
-        : Text("")
-    )
+    .accessibilityValue(Text(selection.accessibilityLabel))
   }
 }
 
-/// Dedicated browser for the small curated SF Symbol collection.
-private struct VaultSystemImagePicker: View {
+/// Unified browser that searches curated SF Symbols and generated Emoji families.
+private struct VaultIconBrowser: View {
 
   @Binding var selection: VaultIcon
-
-  private let columns = [
-    GridItem(.adaptive(minimum: 52), spacing: 12)
-  ]
-
-  var body: some View {
-    ScrollView {
-      LazyVGrid(columns: columns, spacing: 12) {
-        ForEach(VaultIconPreset.systemImages, id: \.value) { icon in
-          VaultIconOptionButton(
-            icon: icon,
-            isSelected: selection == icon,
-            showsVariantIndicator: false,
-            onSelect: { selection = icon }
-          )
-        }
-      }
-      .padding(16)
-    }
-    .navigationTitle("SF Symbols")
-    .journalInlineNavigationTitle()
-  }
-}
-
-/// Lazy, independently scrolling browser over the generated Unicode emoji catalog.
-private struct VaultEmojiPicker: View {
-
-  @Binding var selection: VaultIcon
+  @State private var model = VaultIconSearchModel()
   @State private var presentedFamily: VaultEmojiCatalog.Family?
 
-  private let columns = [
-    GridItem(.adaptive(minimum: 52), spacing: 12)
-  ]
-
   var body: some View {
-    ScrollView {
-      LazyVGrid(columns: columns, spacing: 12) {
-        ForEach(VaultEmojiCatalog.families) { family in
-          let selectedEmoji = selection.emojiValue
-          let displayedEmoji = family.displayValue(selectedEmoji: selectedEmoji)
+    @Bindable var model = model
 
-          VaultIconOptionButton(
-            icon: .emoji(displayedEmoji),
-            isSelected: family.contains(selectedEmoji),
-            showsVariantIndicator: family.hasSkinToneVariants,
-            onSelect: {
-              if family.hasSkinToneVariants {
-                presentedFamily = family
-              } else {
-                selection = .emoji(family.baseValue)
-              }
-            }
-          )
-        }
+    ZStack {
+      if model.visibleItems.isEmpty {
+        ContentUnavailableView.search(text: model.query)
+      } else {
+        VaultIconBrowserGrid(
+          items: model.visibleItems,
+          selection: $selection,
+          onPresentEmojiVariations: { family in
+            presentedFamily = family
+          }
+        )
       }
-      .padding(16)
     }
-    .navigationTitle("Emoji")
+    .navigationTitle("Icon")
     .journalInlineNavigationTitle()
+    .vaultIconSearch(text: $model.query)
     .sheet(item: $presentedFamily) { family in
       VaultEmojiVariationPicker(
         family: family,
@@ -1282,6 +1218,75 @@ private struct VaultEmojiPicker: View {
   }
 }
 
+/// Independently scrolling grid so the form never measures the full catalog.
+private struct VaultIconBrowserGrid: View {
+
+  let items: [VaultIconBrowserItem]
+  @Binding var selection: VaultIcon
+  let onPresentEmojiVariations: @MainActor @Sendable (VaultEmojiCatalog.Family) -> Void
+
+  private let columns = [
+    GridItem(.adaptive(minimum: 44), spacing: 8)
+  ]
+
+  var body: some View {
+    ScrollView {
+      LazyVGrid(columns: columns, spacing: 8) {
+        ForEach(items) { item in
+          VaultIconBrowserItemButton(
+            item: item,
+            selection: $selection,
+            onPresentEmojiVariations: onPresentEmojiVariations
+          )
+        }
+      }
+      .padding(12)
+    }
+  }
+}
+
+/// Selection behavior for one heterogeneous item in the unified grid.
+private struct VaultIconBrowserItemButton: View {
+
+  let item: VaultIconBrowserItem
+  @Binding var selection: VaultIcon
+  let onPresentEmojiVariations: @MainActor @Sendable (VaultEmojiCatalog.Family) -> Void
+
+  var body: some View {
+    ZStack {
+      switch item.content {
+      case .systemImage(let preset):
+        let icon = preset.icon
+        VaultIconOptionButton(
+          icon: icon,
+          accessibilityLabel: String(localized: preset.accessibilityName),
+          size: 44,
+          isSelected: selection == icon,
+          showsVariantIndicator: false,
+          onSelect: { selection = icon }
+        )
+      case .emoji(let family):
+        let selectedEmoji = selection.emojiValue
+        let displayedEmoji = family.displayValue(selectedEmoji: selectedEmoji)
+        VaultIconOptionButton(
+          icon: .emoji(displayedEmoji),
+          accessibilityLabel: VaultIcon.emoji(displayedEmoji).accessibilityLabel,
+          size: 44,
+          isSelected: family.contains(selectedEmoji),
+          showsVariantIndicator: family.hasSkinToneVariants,
+          onSelect: {
+            if family.hasSkinToneVariants {
+              onPresentEmojiVariations(family)
+            } else {
+              selection = .emoji(family.baseValue)
+            }
+          }
+        )
+      }
+    }
+  }
+}
+
 /// Secondary palette for the fully-qualified skin-tone forms of one emoji.
 private struct VaultEmojiVariationPicker: View {
 
@@ -1291,18 +1296,20 @@ private struct VaultEmojiVariationPicker: View {
   @Binding var selection: VaultIcon
 
   private let columns = [
-    GridItem(.adaptive(minimum: 52), spacing: 12)
+    GridItem(.adaptive(minimum: 48), spacing: 8)
   ]
 
   var body: some View {
     NavigationStack {
       ScrollView {
-        LazyVGrid(columns: columns, spacing: 12) {
+        LazyVGrid(columns: columns, spacing: 8) {
           ForEach(family.values, id: \.self) { value in
             let icon = VaultIcon.emoji(value)
 
             VaultIconOptionButton(
               icon: icon,
+              accessibilityLabel: icon.accessibilityLabel,
+              size: 48,
               isSelected: selection == icon,
               showsVariantIndicator: false,
               onSelect: {
@@ -1312,7 +1319,7 @@ private struct VaultEmojiVariationPicker: View {
             )
           }
         }
-        .padding(16)
+        .padding(12)
       }
       .navigationTitle("Variations")
       .journalInlineNavigationTitle()
@@ -1327,36 +1334,53 @@ private struct VaultEmojiVariationPicker: View {
   }
 }
 
-/// One selectable icon cell shared by the dedicated symbol and emoji browsers.
+/// One selectable cell in the unified browser and variation palette.
 private struct VaultIconOptionButton: View {
 
   let icon: VaultIcon
+  let accessibilityLabel: String
+  /// Logical cell size. Variation sheets use extra room because presentation scaling reduces it.
+  let size: CGFloat
   let isSelected: Bool
   let showsVariantIndicator: Bool
   let onSelect: @MainActor @Sendable () -> Void
 
   var body: some View {
     Button(action: onSelect) {
-      VaultIconMark(icon: icon, size: 48, font: .title3)
-        .overlay {
-          if isSelected {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .stroke(.tint, lineWidth: 2)
-          }
+      ZStack {
+        Color.clear
+
+        if isSelected {
+          RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(.tint.opacity(0.12))
         }
-        .overlay(alignment: .bottomTrailing) {
-          if showsVariantIndicator {
-            Image(systemName: "ellipsis.circle.fill")
-              .font(.caption2)
-              .symbolRenderingMode(.palette)
-              .foregroundStyle(.tint, .background)
-              .offset(x: 3, y: 3)
-              .accessibilityHidden(true)
-          }
+
+        VaultIconGlyph(icon: icon, font: .title3)
+      }
+      .frame(width: size, height: size)
+      .overlay {
+        if isSelected {
+          RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .stroke(.tint, lineWidth: 2)
         }
+      }
+      .overlay(alignment: .bottomTrailing) {
+        if showsVariantIndicator {
+          Image(systemName: "ellipsis.circle.fill")
+            .font(.caption2)
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(.tint, .background)
+            .offset(x: 2, y: 2)
+            .accessibilityHidden(true)
+          }
+      }
+      .contentShape(Rectangle())
+      .accessibilityElement(children: .ignore)
     }
     .buttonStyle(.plain)
-    .accessibilityLabel(icon.accessibilityLabel)
+    .frame(width: size, height: size)
+    .contentShape(Rectangle())
+    .accessibilityLabel(accessibilityLabel)
     .accessibilityAddTraits(isSelected ? .isSelected : [])
     .accessibilityHint(
       showsVariantIndicator
@@ -1377,6 +1401,21 @@ private struct VaultIconMark: View {
       RoundedRectangle(cornerRadius: 8, style: .continuous)
         .fill(.tint.opacity(0.12))
 
+      VaultIconGlyph(icon: icon, font: font)
+    }
+    .frame(width: size, height: size)
+    .accessibilityHidden(true)
+  }
+}
+
+/// Glyph-only rendering used where the browser should not add a cell surface.
+private struct VaultIconGlyph: View {
+
+  let icon: VaultIcon
+  let font: Font
+
+  var body: some View {
+    ZStack {
       switch icon.kind {
       case .systemImage:
         Image(systemName: icon.value)
@@ -1387,51 +1426,241 @@ private struct VaultIconMark: View {
           .font(font)
       }
     }
-    .frame(width: size, height: size)
-    .accessibilityHidden(true)
   }
 }
 
-private enum VaultIconFamily {
+/// Picker-local state that recomputes a cached result list only when query changes.
+@MainActor
+@Observable
+private final class VaultIconSearchModel {
 
-  case systemImage
-  case emoji
+  var query = "" {
+    didSet {
+      visibleItems = Self.filterItems(query: query)
+    }
+  }
 
-  func contains(_ icon: VaultIcon) -> Bool {
-    switch self {
-    case .systemImage:
-      switch icon.kind {
-      case .systemImage:
-        true
-      case .emoji:
-        false
+  private(set) var visibleItems = VaultIconBrowserItem.all
+
+  private static func filterItems(query: String) -> [VaultIconBrowserItem] {
+    let tokens = VaultIconSearchNormalizer.tokens(from: query)
+    guard tokens.isEmpty == false else {
+      return VaultIconBrowserItem.all
+    }
+
+    return VaultIconBrowserItem.all
+      .enumerated()
+      .compactMap { offset, item -> (score: Int, offset: Int, item: VaultIconBrowserItem)? in
+        let scores = tokens.compactMap { token in
+          VaultIconSearchNormalizer.matchScore(
+            queryToken: token,
+            searchTerms: item.searchTerms
+          )
+        }
+        guard scores.count == tokens.count else { return nil }
+        return (scores.reduce(0, +), offset, item)
       }
-    case .emoji:
-      switch icon.kind {
-      case .systemImage:
-        false
-      case .emoji:
-        true
+      .sorted { lhs, rhs in
+        if lhs.score == rhs.score {
+          lhs.offset < rhs.offset
+        } else {
+          lhs.score < rhs.score
+        }
+      }
+      .map(\.item)
+  }
+}
+
+/// A heterogeneous, stably identified item displayed in the unified grid.
+private struct VaultIconBrowserItem: Identifiable, Sendable {
+
+  enum ID: Hashable, Sendable {
+    case systemImage(String)
+    case emoji(String)
+  }
+
+  enum Content: Sendable {
+    case systemImage(VaultSystemImagePreset)
+    case emoji(VaultEmojiCatalog.Family)
+  }
+
+  let id: ID
+  let content: Content
+  let searchTerms: [String]
+
+  static let all: [VaultIconBrowserItem] = {
+    let systemImages = VaultIconPreset.systemImages.map { preset in
+      VaultIconBrowserItem(
+        id: .systemImage(preset.name),
+        content: .systemImage(preset),
+        searchTerms: VaultIconSearchNormalizer.tokens(
+          from: "\(preset.name) \(preset.searchTerms)"
+        )
+      )
+    }
+    let emojis = VaultEmojiCatalog.families.map { family in
+      VaultIconBrowserItem(
+        id: .emoji(family.id),
+        content: .emoji(family),
+        searchTerms: VaultIconSearchNormalizer.splitNormalized(family.searchTerms)
+      )
+    }
+    return systemImages + emojis
+  }()
+}
+
+/// A curated SF Symbol plus semantic terms for the same bilingual search field.
+private struct VaultSystemImagePreset: Identifiable, Sendable {
+
+  let name: String
+  let accessibilityName: LocalizedStringResource
+  let searchTerms: String
+
+  var id: String { name }
+  var icon: VaultIcon { .systemImage(name) }
+}
+
+private enum VaultIconSearchNormalizer {
+
+  private static let locale = Locale(identifier: "en_US_POSIX")
+
+  static func normalize(_ value: String) -> String {
+    let folded = value.folding(
+      options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+      locale: locale
+    )
+    let kanaNormalized = folded.applyingTransform(.hiraganaToKatakana, reverse: false)
+      ?? folded
+    return kanaNormalized
+      .replacingOccurrences(of: ".", with: " ")
+      .replacingOccurrences(of: "-", with: " ")
+      .replacingOccurrences(of: "_", with: " ")
+  }
+
+  static func tokens(from query: String) -> [String] {
+    splitNormalized(normalize(query))
+  }
+
+  static func splitNormalized(_ value: String) -> [String] {
+    value
+      .split(whereSeparator: { $0.isWhitespace })
+      .map(String.init)
+  }
+
+  static func matchScore(queryToken: String, searchTerms: [String]) -> Int? {
+    var bestScore: Int?
+    let isLatinQuery = queryToken.unicodeScalars.contains { scalar in
+      (0x30...0x39).contains(scalar.value)
+        || (0x61...0x7A).contains(scalar.value)
+    }
+
+    for term in searchTerms {
+      let score: Int?
+      if term == queryToken {
+        score = 0
+      } else if term.hasPrefix(queryToken) {
+        score = 1
+      } else if isLatinQuery == false && term.hasSuffix(queryToken) {
+        score = 2
+      } else {
+        score = nil
+      }
+
+      if let score, score < (bestScore ?? .max) {
+        bestScore = score
       }
     }
+    return bestScore
+  }
+}
+
+private struct VaultIconSearchModifier: ViewModifier {
+
+  @Binding var text: String
+
+  func body(content: Content) -> some View {
+    #if os(iOS)
+    content.searchable(
+      text: $text,
+      placement: .navigationBarDrawer(displayMode: .always),
+      prompt: "Search Icons"
+    )
+    #else
+    content.searchable(text: $text, prompt: "Search Icons")
+    #endif
+  }
+}
+
+private extension View {
+
+  func vaultIconSearch(text: Binding<String>) -> some View {
+    modifier(VaultIconSearchModifier(text: text))
   }
 }
 
 private enum VaultIconPreset {
 
-  static let systemImages: [VaultIcon] = [
-    .systemImage("shippingbox"),
-    .systemImage("tray.full"),
-    .systemImage("book.closed"),
-    .systemImage("sparkles"),
-    .systemImage("camera"),
-    .systemImage("waveform"),
-    .systemImage("paintpalette"),
-    .systemImage("leaf"),
-    .systemImage("heart"),
-    .systemImage("moon.stars"),
-    .systemImage("person.2"),
-    .systemImage("lock"),
+  static let systemImages: [VaultSystemImagePreset] = [
+    .init(
+      name: "shippingbox",
+      accessibilityName: "Storage box",
+      searchTerms: "shipping box package storage vault 箱 荷物 保管"
+    ),
+    .init(
+      name: "tray.full",
+      accessibilityName: "Inbox",
+      searchTerms: "tray inbox archive storage トレイ 受信箱 保管"
+    ),
+    .init(
+      name: "book.closed",
+      accessibilityName: "Journal",
+      searchTerms: "book journal diary notebook 本 日記 ノート"
+    ),
+    .init(
+      name: "sparkles",
+      accessibilityName: "Sparkles",
+      searchTerms: "sparkles star magic shine きらきら 星 魔法"
+    ),
+    .init(
+      name: "camera",
+      accessibilityName: "Camera",
+      searchTerms: "camera photo カメラ 写真"
+    ),
+    .init(
+      name: "waveform",
+      accessibilityName: "Audio",
+      searchTerms: "waveform audio voice sound 波形 音声 録音"
+    ),
+    .init(
+      name: "paintpalette",
+      accessibilityName: "Art",
+      searchTerms: "paint palette art color 絵 色 パレット"
+    ),
+    .init(
+      name: "leaf",
+      accessibilityName: "Nature",
+      searchTerms: "leaf nature plant 葉 自然 植物"
+    ),
+    .init(
+      name: "heart",
+      accessibilityName: "Favorite",
+      searchTerms: "heart love favorite ハート 愛 お気に入り"
+    ),
+    .init(
+      name: "moon.stars",
+      accessibilityName: "Night",
+      searchTerms: "moon stars night 月 星 夜"
+    ),
+    .init(
+      name: "person.2",
+      accessibilityName: "People",
+      searchTerms: "people person group shared 人 グループ 共有"
+    ),
+    .init(
+      name: "lock",
+      accessibilityName: "Private",
+      searchTerms: "lock private security 鍵 ロック 非公開"
+    ),
   ]
 }
 
@@ -1449,9 +1678,12 @@ private extension VaultIcon {
   var accessibilityLabel: String {
     switch kind {
     case .systemImage:
-      String(localized: "SF Symbol \(value)")
+      if let preset = VaultIconPreset.systemImages.first(where: { $0.name == value }) {
+        return String(localized: preset.accessibilityName)
+      }
+      return String(localized: "SF Symbol \(value)")
     case .emoji:
-      String(localized: "Emoji \(value)")
+      return String(localized: "Emoji \(value)")
     }
   }
 }

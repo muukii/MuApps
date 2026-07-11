@@ -1,5 +1,5 @@
-// Generated from Unicode emoji-test.txt latest, Version 17.0.
-// Source: https://unicode.org/Public/emoji/latest/emoji-test.txt
+// Generated from Unicode Emoji 17.0 emoji-test.txt.
+// Source: https://www.unicode.org/Public/17.0.0/emoji/emoji-test.txt
 // Contains fully-qualified emoji entries only; component-only rows are excluded.
 
 import Foundation
@@ -24,6 +24,9 @@ enum VaultEmojiCatalog {
 
     /// Fully-qualified neutral and skin-tone forms available for selection.
     let values: [String]
+
+    /// Generated, normalized English and Japanese terms for unified icon search.
+    let searchTerms: String
 
     /// Whether the family opens a secondary skin-tone palette.
     var hasSkinToneVariants: Bool {
@@ -4016,7 +4019,12 @@ enum VaultEmojiCatalog {
 
       let baseValue = values.first(where: { containsSkinToneModifier($0) == false })
         ?? firstValue
-      return Family(id: key, baseValue: baseValue, values: values)
+      return Family(
+        id: key,
+        baseValue: baseValue,
+        values: values,
+        searchTerms: VaultEmojiSearchTerms.byFamilyID[key] ?? baseValue
+      )
     }
   }()
 
