@@ -1,6 +1,10 @@
 import CapturePhoto
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// Native sheet shell for capturing a photo card from the composer.
 ///
@@ -24,7 +28,7 @@ struct ThreadDraftPhotoCaptureSheet: View {
         dismiss()
       }
       .navigationTitle("Photo")
-      .navigationBarTitleDisplayMode(.inline)
+      .journalInlineNavigationTitle()
     }
   }
 }

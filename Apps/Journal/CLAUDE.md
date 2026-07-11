@@ -5,7 +5,7 @@ Guidance for working in `Apps/Journal/`. The repo-root `CLAUDE.md` and
 
 ## What this app is
 
-A journaling app (iPhone + iPad) where each captured thing becomes one **Card**.
+A journaling app (iPhone + iPad + native macOS) where each captured thing becomes one **Card**.
 iCloud sync and vault collaboration are hard requirements. The app shell now
 writes and reads user-facing entries through the `JournalVault` architecture:
 per-vault SwiftData stores with CloudKit mirroring disabled and explicit sync
@@ -76,11 +76,13 @@ behavior).
   (`.appPrimaryContainer`, etc.) and `PrimaryContainer`/`SecondaryContainer`
   rather than hard-coded colors. Five seed colors only — no new hues.
 - **`CaptureSuggestions` is device-only and fragile to link.** `JournalingSuggestions`
-  is absent from the Simulator SDK *and* the Mac (Designed for iPad) runtime.
+  is absent from the Simulator SDK and the Mac Designed-for-iPad runtime; Apple
+  does not ship the framework for native macOS.
   Keep all framework-touching code behind `#if canImport(JournalingSuggestions)`,
   keep `@_weakLinked import JournalingSuggestions` in every file that imports it
   (a plain `import` re-strengthens the autolink and crashes on Mac at launch),
-  and keep the `ProcessInfo.isiOSAppOnMac` runtime guard + `AnyView` erasure.
+  compile the fallback for native macOS, and keep the
+  `ProcessInfo.isiOSAppOnMac` runtime guard + `AnyView` erasure for Designed-for-iPad.
 
 ## Build & run
 

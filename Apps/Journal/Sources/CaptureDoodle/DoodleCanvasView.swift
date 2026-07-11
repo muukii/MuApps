@@ -1,6 +1,10 @@
 import Observation
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 // MARK: - Controller
 
@@ -369,6 +373,7 @@ public struct DoodleCanvasView: View {
       } label: {
         Image(systemName: "arrow.uturn.backward")
       }
+      .keyboardShortcut("z", modifiers: .command)
 
       Button {
         startReplay()
@@ -416,11 +421,12 @@ public struct DoodleCanvasView: View {
   }
 }
 
-// MARK: - UIKit input bridge
+// MARK: - Platform input bridge
 
 /// A transparent UIView that hosts `DrawingGestureRecognizer` and forwards
 /// timestamped points to the canvas. Rendering lives in SwiftUI; this view only
 /// captures input (and reports its size so exports match the on-screen geometry).
+#if canImport(UIKit)
 private struct DoodleInputView: UIViewRepresentable {
   let canvas: DoodleCanvas
 
@@ -451,6 +457,72 @@ private struct DoodleInputView: UIViewRepresentable {
     }
   }
 }
+#elseif canImport(AppKit)
+/// A transparent AppKit input surface that keeps mouse/trackpad strokes in the
+/// same timestamped vector pipeline as touch and Pencil input on iOS.
+private struct DoodleInputView: NSViewRepresentable {
+  let canvas: DoodleCanvas
+
+  func makeNSView(context: Context) -> InputView {
+    let view = InputView()
+    view.canvas = canvas
+    return view
+  }
+
+  func updateNSView(_ nsView: InputView, context: Context) {
+    nsView.canvas = canvas
+  }
+
+  @MainActor
+  final class InputView: NSView {
+    weak var canvas: DoodleCanvas?
+    private var isDrawing = false
+
+    override var isFlipped: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func layout() {
+      super.layout()
+      canvas?.updateCanvasSize(bounds.size)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+      let point = timedPoint(for: event)
+      isDrawing = true
+      canvas?.touchDown()
+      canvas?.begin(point)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+      guard isDrawing else { return }
+      canvas?.append([timedPoint(for: event)])
+    }
+
+    override func mouseUp(with event: NSEvent) {
+      guard isDrawing else { return }
+      isDrawing = false
+      canvas?.end(timedPoint(for: event))
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+      cancelCurrentStroke()
+    }
+
+    private func timedPoint(for event: NSEvent) -> TimedPoint {
+      TimedPoint(
+        location: convert(event.locationInWindow, from: nil),
+        timestamp: event.timestamp
+      )
+    }
+
+    private func cancelCurrentStroke() {
+      guard isDrawing else { return }
+      isDrawing = false
+      canvas?.cancel()
+    }
+  }
+}
+#endif
 
 private extension CGPoint {
 

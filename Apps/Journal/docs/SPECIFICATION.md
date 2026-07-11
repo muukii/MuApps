@@ -7,11 +7,12 @@ functional change lands (see [Documentation Policy](#documentation-policy)).
 
 ## Overview
 
-`Journal` is a journaling app for iPhone and iPad. Each thing a user records —
-text, a photo, a doodle, Bauhaus grid artwork, ambient sound, a Journaling
-Suggestion — becomes one **Card**. iCloud sync and vault collaboration are hard
-product requirements, so the app is moving to **per-vault SwiftData stores with
-CloudKit mirroring disabled** and explicit CloudKit sync through `JournalVault`.
+`Journal` is a journaling app for iPhone, iPad, and native macOS. Each thing a
+user records — text, a photo, a doodle, Bauhaus grid artwork, ambient sound, or
+(on supported iPhone/iPad hardware) a Journaling Suggestion — becomes one
+**Card**. iCloud sync and vault collaboration are hard product requirements, so
+the app is moving to **per-vault SwiftData stores with CloudKit mirroring
+disabled** and explicit CloudKit sync through `JournalVault`.
 
 ### Project status
 
@@ -23,8 +24,9 @@ exists today is:
   an explicit CloudKit sync boundary.
 - Six **capture components**, each built as an isolated framework so it can be
   developed and exercised on its own, independent of the undecided UI.
-- A **vault-first app shell** (`VaultSelectionView` → `CreationView`) that asks
-  for a vault before composing, then writes text, link, photo, audio, doodle, and
+- A **Creation-first app shell** that automatically activates the restored or
+  first available vault, presents `VaultSelectionView` as a management sheet,
+  then writes text, link, photo, audio, doodle, and
   Bauhaus Cards into the selected `VaultInstance` through card-specific editors,
   plus a **dev gallery**
   (`CaptureGalleryView`) that launches each component standalone for on-device
@@ -51,6 +53,14 @@ roots are grouped under `Apps/Journal/Sources/<TargetName>/`; the app icon
 package is `Apps/Journal/Sources/Journal/Icon.icon`. The target and module names
 remain `Journal`; the user-facing app bundle display name is `Tinycurve`,
 and the WidgetKit extension bundle display name is `Tinycurve Widget`.
+The same app, framework, test, and widget targets compile natively for iPhone,
+iPad, and macOS. The Mac product keeps bundle id `app.muukii.journal`, CloudKit
+container, and App Group identity aligned with iOS. Native macOS app and widget
+Debug builds use an Apple Development identity because
+CloudKit and App Group entitlements cannot run under ad-hoc local signing.
+The native Mac app runs in App Sandbox with outgoing network, user-selected
+read-only files, camera, microphone, location, and Photos access enabled; each
+privacy-sensitive feature still requests runtime authorization before use.
 
 ```
 Journal (app, app.muukii.journal)
@@ -103,6 +113,13 @@ accepted shared vaults. That empty catalog is the new-user state; the app does
 not create preset vaults at install time and does not open the old App Group
 SwiftData SQLite store.
 
+The App Group vault tree is scoped by the active CloudKit server environment:
+Debug builds read and write `Journal/development`, while Release, TestFlight,
+and App Store builds read and write `Journal/production`. Each environment owns
+its own catalog, per-vault stores, media files, and CKSyncEngine state so
+development records, production records, change tokens, and archived
+`CKRecord` system fields do not cross environments.
+
 Because the app has not shipped with user data, Journal does not keep product
 migration APIs or legacy import DTOs. Schema changes can replace the pre-release
 store shape directly; developer-only recovery can be built outside the app if it
@@ -138,7 +155,9 @@ modality label because there is not yet a visual authored renderer for audio.
 The Home Screen families show the selected vault title, latest-card body,
 rendered visual media, or audio label plus the relative timestamp; the Lock
 Screen accessory families use short labels or symbols that fit the tighter
-surfaces.
+surfaces. Native macOS exposes the small / medium / large families; the Lock
+Screen accessory families remain iOS-only because WidgetKit does not make them
+available on macOS.
 It maps the `Card` to a `Sendable` `NoteSnapshot` so the timeline entry and
 views stay free of live SwiftData model references; it shows an empty state when
 there are no vaults or when the chosen vault has no cards.
@@ -162,6 +181,9 @@ Declared in `Project.swift` on the app target:
 - `aps-environment` = `$(APS_ENVIRONMENT)` — expanded per configuration
   (`development` for Debug, `production` for Release). Required so shipped builds
   receive CloudKit's silent pushes for background sync.
+- `JournalCloudKitEnvironment` Info.plist key = `$(APS_ENVIRONMENT)` — lets
+  `JournalVault` scope local App Group storage and launch-routing cache keys to
+  the same CloudKit server environment as the entitlements.
 - `com.apple.developer.journal.allow` = `["suggestions"]` — lets
   `CaptureSuggestions` present the system Journaling Suggestions picker. Note the
   value is a **string array**, not a boolean; it must match what the App ID's
@@ -209,17 +231,18 @@ rather than reaching for CloudKit transport objects or opening their own
 
 ### `VaultContentStore` — one vault database
 
-Each vault has its own SQLite store and media directory under the App Group
-layout:
+Each vault has its own SQLite store and media directory under the active
+CloudKit environment's App Group layout:
 
 ```text
 Journal/
-  catalog.sqlite
-  Vaults/
-    <vault-id>/
-      store.sqlite
-      media/
-      sync-state/
+  development/ or production/
+    catalog.sqlite
+    SyncState/
+    Vaults/
+      <vault-id>/
+        store.sqlite
+        media/
 ```
 
 `VaultContentStore.createThread(cards:)` writes a root `CardEdge` plus child
@@ -367,8 +390,14 @@ front/back flip) built directly on AVFoundation. Handles authorization states
 (`unknown` / `authorized` / `denied` / `unavailable`) and emits the still through
 `onCapture`.
 
+On macOS, AVFoundation selects the default video device (including a
+built-in or Continuity Camera) without applying an iPhone front/back filter, and
+the front/back flip control is hidden because that camera relationship does not
+exist on Mac.
+
 - `CapturedPhoto`: `Sendable, Equatable` — `imageData: Data` (JPEG bytes),
-  `pixelSize: CGSize`, lazy `image: UIImage?`.
+  `pixelSize: CGSize`, and a lazy platform-native decoded image (`UIImage` on
+  iOS, `NSImage` on macOS).
 - `CameraController` owns the `AVCaptureSession`, camera input, and still-photo
   output; `CameraPreviewView` mounts an `AVCaptureVideoPreviewLayer` in SwiftUI.
 - Saving a photo card passes the JPEG bytes through `MediaProcessing`, which
@@ -409,6 +438,8 @@ continuous texture light while its intensity and sharpness follow finger speed;
 replay surfaces skip the touch boundary taps and run only the speed-shaped
 texture along the compressed playback timeline. Unsupported hardware, including
 Simulator, no-ops.
+The native macOS canvas has an AppKit input adapter so mouse and trackpad drags
+enter the same timestamped vector-stroke pipeline; Command-Z invokes canvas undo.
 The drawable surface is fixed to the same 4:5 portrait paper proportion as journal cards
 (`width / height = 4 / 5`), and the toolbar is single-color: width slider,
 undo, replay, clear, and export when `onExport` is supplied. When `onChange` is
@@ -519,11 +550,12 @@ flattened, `Sendable` value model.
   `#if canImport(JournalingSuggestions)`; the Simulator gets a placeholder. No
   explicit Tuist `.sdk` link (it would break Simulator builds) — Swift
   autolinking handles it.
-- `JournalingSuggestions` is also absent from the **Mac (Designed for iPad)**
-  runtime, so it is imported `@_weakLinked` in both files that import it (any
-  plain `import` re-strengthens the autolink → dyld launch failure on Mac). A
-  runtime guard (`ProcessInfo.isiOSAppOnMac`) shows the placeholder and erases the
-  picker behind `AnyView` so its type metadata is never instantiated on Mac.
+- The native macOS build cannot import Journaling Suggestions, so it compiles a
+  fallback and excludes the compose entry point. The framework is also absent
+  from the Designed-for-iPad runtime, which keeps `@_weakLinked` imports (a plain
+  `import` re-strengthens
+  the autolink and causes a dyld launch failure), plus the
+  `ProcessInfo.isiOSAppOnMac` runtime guard and `AnyView` type erasure.
 - Suggestions only appear on a **real device** with the Settings opt-in enabled,
   and the App ID needs the Journaling Suggestions capability so the managed
   profile carries the entitlement key. Min deployment iOS 26.1 (no `@available`
@@ -604,45 +636,53 @@ the gallery's **Lab** section).
   appearance; `Light` and `Dark` override it for Journal. It is also the root
   router. On a fresh install, it starts in **Loading** while
   `JournalVaultRuntime` resolves initial vault availability: if iCloud is
-  available, it performs the first CloudKit vault discovery pass; if iCloud is
+  available, it performs the first CloudKit vault discovery pass by fetching
+  Journal vault zones and each vault's lightweight `VaultInfo` title without
+  waiting for card records or `CKAsset` media downloads; if iCloud is
   unavailable or unused, it resolves to local-only state; if iCloud is
   temporarily unavailable or cannot be determined, it resolves with deferred
-  CloudKit recovery instead of blocking forever. A resolved decision records
-  `JournalDefaults.hasResolvedInitialVaultAvailability`. Later launches restore
-  a route immediately from that cached decision and
-  `JournalDefaults.hasCompletedOnboarding`, while `JournalVaultRuntime` still
-  starts and runs recovery in the background. Existing local or recovered vault
-  state routes to the existing-user vault flow (`VaultSelectionView` →
-  `CreationView`). If `JournalDefaults.lastSelectedVaultID` names a catalog
-  vault after launch refresh, the root keeps the launch loading surface visible,
-  opens that vault without a user-visible picker-to-composer transition, and
-  restores the composer as the default selected vault. Missing, invalid, or
-  unopened vault IDs are cleared and then reveal the normal vault picker. If no
-  vault state exists and onboarding has not been completed, it routes to **New
-  User** onboarding.
-  Completing onboarding records
-  `@AppStorage(JournalDefaults.hasCompletedOnboarding)` and then enters the
-  vault picker, where the user can create the first vault. When initial iCloud
-  recovery was deferred, the vault picker shows a compact diagnostic banner and
-  Settings' debug-only **Vault Runtime** screen shows the last availability
-  resolution. It also owns the
+  CloudKit recovery instead of blocking forever. A resolved decision records the
+  active CloudKit environment's
+  `JournalDefaults.hasResolvedInitialVaultAvailability` key. After the catalog
+  refresh, a non-empty catalog always activates a vault before Home appears:
+  `JournalDefaults.lastSelectedVaultID` is preferred when it still names a
+  catalog vault, otherwise the first catalog vault is selected automatically.
+  There is no user-visible selection-required state. A successful activation
+  enters the persistent Creation-first Home without showing the picker. If no
+  vault state exists and onboarding has not been completed, Root routes to **New
+  User** onboarding. Completing onboarding records
+  `@AppStorage(JournalDefaults.hasCompletedOnboarding)` and enters Home's
+  **No Vaults** state. That state omits Creation, Entries, and Save actions; it
+  offers **New Vault**, **Refresh**, and Settings directly. When initial iCloud
+  recovery was deferred, No Vaults and the Vault sheet show a compact diagnostic
+  banner, while Settings' debug-only **Vault Runtime** screen shows the last
+  availability resolution. Root also owns the
   scene-local `JournalNotificationCenter` and wraps the app content in
   `JournalNotificationHost`, which injects that model through the SwiftUI
   environment and overlays app-wide bottom capsule notifications above the
   current screen. Incoming CloudKit vault invitations are bridged from UIKit
   scene metadata into `JournalVaultRuntime.acceptShare(metadata:)`; success
-  completes onboarding if needed and returns the user to the vault picker.
-- **`VaultSelectionView`** — the post-onboarding entry screen. It reads
-  `JournalVaultRuntime.vaults`, shows the catalog in picker order as a standard
-  SwiftUI `List`, and calls `JournalVaultRuntime.selectVault(_:)` before
-  entering the composer. A successful manual selection, including a newly
-  created vault, records that vault as `JournalDefaults.lastSelectedVaultID` for
-  the next launch. The toolbar
-  also opens a **New Vault** sheet; creating a vault calls
-  `JournalVaultRuntime.createVault(title:)`, seeds the local vault store, reloads
-  the catalog, opens the new vault, and then enters the composer. Settings are
-  reachable from this screen so app-wide preferences remain available before a
-  vault is active. Owned vault rows always show a separate share button inside
+  completes onboarding if needed and activates the first available vault only
+  when no vault is already active.
+- **`JournalHomeView`** — the persistent post-onboarding presenter. Its normal
+  states are Creation backed by an active vault and **No Vaults**. It owns the
+  Vault sheet, direct first-vault creation sheet, and no-vault Settings sheet so
+  changing or deleting a vault never replaces the active modal presenter.
+  `CreationView` is keyed by the active `vaultID`, ensuring view-local drafts do
+  not cross into a newly selected vault.
+- **`VaultSelectionView`** — a medium/large sheet opened from the active vault
+  label in Creation. It reads `JournalVaultRuntime.vaults`, shows the catalog in
+  picker order as a standard SwiftUI `List`, marks the active vault with a
+  checkmark, and calls `JournalVaultRuntime.selectVault(_:)` for another row.
+  Selecting the current vault simply closes the sheet; another row closes it
+  only after that vault opens successfully. Failed switches retain the previous
+  active vault and leave the sheet visible. A successful manual selection,
+  including a newly created vault, records that vault as
+  `JournalDefaults.lastSelectedVaultID` for the next launch. The toolbar has
+  **Done** and **New Vault** actions. Creating a vault calls
+  `JournalVaultRuntime.createVault(title:icon:)`, seeds the local vault store,
+  reloads the catalog, opens the new vault, and then dismisses the Vault sheet.
+  Owned vault rows always show a separate share button inside
   the cell; once the catalog knows the vault has a CloudKit share, the row also
   shows a system `SWCollaborationView` control. This matches the Notes-style
   split between explicit invite issuance and collaboration state/management. The
@@ -651,17 +691,30 @@ the gallery's **Lab** section).
   collaboration UI, and limits sharing to specified recipients with read-write
   permission. The share button and row context menu both present the direct
   `UICloudSharingController` invite sheet; participant vault rows do not offer
-  invite issuance. New vault creation includes an icon picker with SF Symbol and
-  emoji presets. Existing vault rows show that icon in the picker, expose
-  **Change Icon** from the row context menu, and carry the icon into the
-  composer toolbar, storage estimate rows, and widget vault headers. Icon
-  metadata is local catalog presentation data; it is not currently synchronized
-  through the vault's CloudKit `VaultInfo` record. Vault rows can be deleted from
-  the row context menu after a destructive confirmation.
+  invite issuance. New vault creation keeps icon selection compact in the form
+  and drills into separate SF Symbol and Emoji browsers. The Emoji browser owns
+  its own lazy-scrolling grid over the Unicode fully-qualified catalog and shows
+  one primary item for each skin-tone family. Choosing a family opens a
+  secondary palette containing its exact neutral, single-tone, and mixed-tone
+  variants. Existing vault rows show that icon in the picker, expose **Change
+  Icon** from the row context menu, and carry the icon into the composer toolbar,
+  storage estimate rows, and widget vault headers. Icon metadata is stored
+  alongside the title in the vault's CloudKit `VaultInfo` record, so changes
+  propagate to the owner's other devices and writable share participants.
+  Legacy `VaultInfo` records without icon fields retain the receiving device's
+  current catalog icon. Writable vault rows expose **Rename** from the row
+  context menu. The rename sheet trims the entered title, rejects empty or
+  unchanged titles, updates the vault's sync-visible
+  `VaultInfo` title, mirrors it into the local catalog summary, refreshes widget
+  timelines, and hides the action for read-only shared vaults. Vault rows can be
+  deleted from the row context menu after a destructive confirmation.
   Owned vault deletion removes the CloudKit custom zone before deleting local
   catalog/content files, so the vault disappears for everyone with access.
   Participant vault deletion targets the accepted shared zone and then removes
-  the local catalog/content files for this user.
+  the local catalog/content files for this user. Deleting the active vault
+  automatically activates the following catalog row, or the preceding row when
+  the deleted vault was last; deleting the final vault dismisses the sheet and
+  reveals Home's No Vaults state.
 - **`OnboardingView`** — the first-run introduction, also re-showable on demand
   from Settings. Four horizontally-paged screens (`TabView` with
   `.tabViewStyle(.page)`) plus a fixed **Get Started** / **Next** call-to-action
@@ -716,21 +769,24 @@ the gallery's **Lab** section).
   recording replay events when the document has a replay timeline. Tapping a
   link card opens a native **Link** sheet with URL keyboard
   input; values such as `example.com` are normalized to HTTPS before save, and
-  valid web URLs show iOS's native LinkPresentation preview in the composer.
+  valid web URLs show the platform-native LinkPresentation preview in the composer.
   Tapping an audio card opens a native **Voice Record** sheet, showing
   **Play** and **Record Again** for an existing
-  `AudioRecording` or `AudioCaptureView` for a new take. The bottom composer
-  controls keep a compact **Add** Liquid Glass button beside the separate
-  prominent **Save** button. Tapping **Add** enters an in-place add mode: already
-  staged draft cards remain visible behind a blurred composer background, while
-  an overlay palette expands from the Add button and presents the concrete
-  content-type actions — Text, Link, Camera, Photos, Bauhaus, Doodle, Voice, and
-  Suggestions when enabled. Tapping outside the palette, tapping the close
-  button, or dragging the overlay downward past its dismissal threshold dismisses
-  add mode without changing the staged drafts. Choosing one of those
-  quick-capture actions closes add mode and presents the matching native sheet or
-  picker. Text opens the last untouched
-  text placeholder when one
+  `AudioRecording` or `AudioCaptureView` for a new take. The bottom composer is
+  a Book-style glass input bar with a `+` add affordance, a central
+  **Write a card** affordance that opens text composition, and a trailing glass
+  up-arrow for saving. The `+` is a standard SwiftUI `Menu` whose system-owned
+  presentation contains Text, Link, Camera, Photos, Bauhaus, Doodle, Voice, and
+  Suggestions when enabled, each represented by a standard menu label and SF
+  Symbol. The system handles menu placement, interaction, accessibility, and
+  dismissal. Choosing one of those quick-capture actions dismisses the menu and
+  presents the matching native sheet or picker.
+  On macOS, the bottom composer is centered and capped at `720pt`, draft
+  cards are capped at `640pt`, and pointer/keyboard operation supplements the
+  same controls: Command-Shift-N writes a text card, Command-Return posts the
+  thread, Command-Shift-V opens Vaults, Command-Shift-L opens Entries, and
+  Command-comma opens Settings.
+  Text opens the last untouched text placeholder when one
   exists; otherwise it creates a new text draft and opens the Text sheet. Text,
   Doodle, and Bauhaus sheets reflect edits into the draft as the user works and
   rely on interactive dismissal rather than **Done** or **Cancel** buttons. Camera
@@ -886,7 +942,8 @@ the gallery's **Lab** section).
   Policy**, which opens an in-app policy explaining local storage, iCloud Private
   Database sync, optional permissions, sharing, widgets, and the absence of
   developer-operated analytics/ads/tracking; plus **Show Onboarding**, which
-  re-presents `OnboardingView` in a `fullScreenCover`;
+  re-presents `OnboardingView` in a full-screen cover on iOS and a native sheet
+  on macOS;
   dismissing it returns to the app without changing `hasCompletedOnboarding`.
 
 ---
@@ -900,6 +957,8 @@ tuist install
 tuist generate
 xcodebuild -workspace MuApps.xcworkspace -scheme Journal \
   -destination 'platform=iOS Simulator,name=iPhone 17' build
+xcodebuild -workspace MuApps.xcworkspace -scheme Journal \
+  -destination 'platform=macOS,arch=arm64' build
 ```
 
 Each capture component also has its own scheme (`CaptureText`, `CapturePhoto`,
@@ -908,6 +967,10 @@ Each capture component also has its own scheme (`CaptureText`, `CapturePhoto`,
 
 **Simulator note:** this machine has no iPhone 16 simulator — use **iPhone 17 /
 OS 27.0**.
+
+**Mac signing note:** a native macOS build containing CloudKit and App Group
+capabilities must be signed with an Apple Development certificate. An unsigned
+or ad-hoc build can compile but cannot launch the product runtime truthfully.
 
 ### iCloud / CloudKit verification
 

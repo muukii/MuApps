@@ -33,6 +33,8 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
   private var syncDatabases: [VaultID: VaultSyncDatabase] = [:]
   private var descriptors: [VaultID: VaultDescriptor] = [:]
   private var localMutationTask: Task<Void, Never>?
+  private var backgroundFetchTask: Task<Void, Never>?
+  private var foregroundSyncTasks: [VaultID: Task<Void, Never>] = [:]
 
   public init(
     containerIdentifier: String = VaultCloudKitContainer.identifier,
@@ -89,8 +91,9 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
       await resetEnginesIfPreReleaseRefetchRequested()
       switch try await container.accountStatus() {
       case .available:
-        try await fetchInitialVaultAvailability()
+        try await discoverInitialVaultAvailability()
         await refreshDescriptors()
+        scheduleBackgroundFetchAllChanges()
         return .resolvedWithCloudKit
 
       case .noAccount:
@@ -108,6 +111,8 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
       @unknown default:
         return .resolvedWithDeferredCloudKit("Unknown iCloud account status.")
       }
+    } catch is CancellationError {
+      return .unresolved("Initial iCloud recovery was cancelled.")
     } catch {
       return .resolvedWithDeferredCloudKit(error.localizedDescription)
     }
@@ -118,26 +123,13 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     await resetEnginesIfPreReleaseRefetchRequested()
     guard
       let descriptor = descriptors[vaultID],
-      let engine = engines[databaseScope(for: descriptor)]
+      engines[databaseScope(for: descriptor)] != nil
     else {
       log.error("activate for unknown vault \(vaultID.uuidString, privacy: .public)")
       return
     }
 
-    do {
-      try await engine.fetchChanges(.init(scope: .zoneIDs([descriptor.zoneID])))
-    } catch {
-      log.error("activate fetch failed \(vaultID.uuidString, privacy: .public): \(error)")
-    }
-
-    do {
-      let database = try syncDatabase(for: descriptor)
-      if try await database.hasPendingMutations() {
-        try await engine.sendChanges()
-      }
-    } catch {
-      log.error("activate send failed \(vaultID.uuidString, privacy: .public): \(error)")
-    }
+    scheduleForegroundSync(for: descriptor)
   }
 
   public func prepareShare(for vaultID: VaultID) async throws -> VaultSharePreparation {
@@ -444,7 +436,11 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
         )
 
         if let title = outcome.importedVaultTitle {
-          try? await catalog.applyImportedVaultInfo(vaultID: vaultID, title: title)
+          try? await catalog.applyImportedVaultInfo(
+            vaultID: vaultID,
+            title: title,
+            icon: outcome.importedVaultIcon
+          )
         }
         try? await catalog.noteVaultSynced(vaultID)
 
@@ -691,7 +687,80 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     try await sharedEngine.fetchChanges(options)
   }
 
-  private func fetchInitialVaultAvailability() async throws {
+  private func discoverInitialVaultAvailability() async throws {
+    await resetEnginesIfPreReleaseRefetchRequested()
+
+    try await discoverInitialVaults(scope: .private)
+    try await discoverInitialVaults(scope: .shared)
+  }
+
+  /// Performs the launch-blocking CloudKit discovery pass without fetching card
+  /// content or asset-backed attachment resources. Full record import is kicked
+  /// after launch routing resolves so large media does not hold the loading
+  /// screen hostage.
+  private func discoverInitialVaults(scope: CKDatabase.Scope) async throws {
+    let database = cloudDatabase(for: scope)
+    let zones = try await database.allRecordZones()
+
+    for zone in zones {
+      try Task.checkCancellation()
+
+      let zoneID = zone.zoneID
+      guard let vaultID = VaultID(zoneName: zoneID.zoneName) else { continue }
+      await materializeVaultIfNeeded(vaultID: vaultID, zoneID: zoneID, scope: scope)
+      try await applyInitialVaultInfoIfAvailable(
+        vaultID: vaultID,
+        zoneID: zoneID,
+        database: database
+      )
+    }
+  }
+
+  /// Reads only the lightweight title record needed to show the vault picker.
+  ///
+  /// This direct fetch deliberately does not advance `CKSyncEngine` change
+  /// tokens. The later background engine fetch may import the same `VaultInfo`
+  /// again, which is fine because catalog title application is idempotent.
+  private func applyInitialVaultInfoIfAvailable(
+    vaultID: VaultID,
+    zoneID: CKRecordZone.ID,
+    database: CKDatabase
+  ) async throws {
+    let recordID = CKRecord.ID(recordName: vaultID.uuidString, zoneID: zoneID)
+
+    do {
+      let record = try await database.record(for: recordID)
+      guard record.recordType == VaultRecordType.vaultInfo.rawValue else { return }
+      try await catalog.applyImportedVaultInfo(
+        vaultID: vaultID,
+        title: VaultInfoRecord(record: record).title,
+        icon: VaultRecordMapper.vaultIcon(from: record)
+      )
+    } catch let error as CKError where error.isUnknownItem(for: recordID) {
+      log.info(
+        "vault info missing during initial discovery \(vaultID.uuidString, privacy: .public)"
+      )
+    }
+  }
+
+  private func scheduleBackgroundFetchAllChanges() {
+    guard backgroundFetchTask == nil else { return }
+    backgroundFetchTask = Task { await self.runBackgroundFetchAllChanges() }
+  }
+
+  private func runBackgroundFetchAllChanges() async {
+    defer { backgroundFetchTask = nil }
+
+    do {
+      try await fetchAllChanges()
+    } catch is CancellationError {
+      log.debug("background fetch cancelled")
+    } catch {
+      log.error("background fetch failed: \(error)")
+    }
+  }
+
+  private func fetchAllChanges() async throws {
     await resetEnginesIfPreReleaseRefetchRequested()
 
     if let privateEngine = engines[.private] {
@@ -700,6 +769,49 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
 
     if let sharedEngine = engines[.shared] {
       try await sharedEngine.fetchChanges(.init(scope: .all))
+    }
+  }
+
+  private func scheduleForegroundSync(for descriptor: VaultDescriptor) {
+    let vaultID = descriptor.vaultID
+    guard foregroundSyncTasks[vaultID] == nil else { return }
+
+    foregroundSyncTasks[vaultID] = Task {
+      await self.runForegroundSync(vaultID: vaultID)
+    }
+  }
+
+  private func runForegroundSync(vaultID: VaultID) async {
+    defer { foregroundSyncTasks[vaultID] = nil }
+
+    await refreshDescriptorsIfUnknown(vaultID)
+    guard
+      let descriptor = descriptors[vaultID],
+      let engine = engines[databaseScope(for: descriptor)]
+    else {
+      log.error("foreground sync for unknown vault \(vaultID.uuidString, privacy: .public)")
+      return
+    }
+
+    if backgroundFetchTask == nil {
+      do {
+        try await engine.fetchChanges(.init(scope: .zoneIDs([descriptor.zoneID])))
+      } catch is CancellationError {
+        log.debug("foreground fetch cancelled \(vaultID.uuidString, privacy: .public)")
+      } catch {
+        log.error("foreground fetch failed \(vaultID.uuidString, privacy: .public): \(error)")
+      }
+    }
+
+    do {
+      let database = try syncDatabase(for: descriptor)
+      if try await database.hasPendingMutations() {
+        try await engine.sendChanges()
+      }
+    } catch is CancellationError {
+      log.debug("foreground send cancelled \(vaultID.uuidString, privacy: .public)")
+    } catch {
+      log.error("foreground send failed \(vaultID.uuidString, privacy: .public): \(error)")
     }
   }
 

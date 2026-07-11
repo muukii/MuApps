@@ -3,7 +3,11 @@ import CaptureDoodle
 import JournalVault
 import MuColor
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// Export-only layout for a single journal card.
 ///

@@ -1,6 +1,9 @@
 import AppUIComponents
-import GrowingTextEditor
+import CaptureText
 import MuColor
+#if os(iOS)
+import NextGrowingTextViewSwiftUI
+#endif
 import SwiftUI
 
 /// Native sheet shell for editing a text card from the composer.
@@ -15,7 +18,7 @@ struct ThreadDraftTextEditorSheet: View {
     NavigationStack {
       ThreadDraftTextEditorContent(text: $card.text)
         .navigationTitle("Text")
-        .navigationBarTitleDisplayMode(.inline)
+        .journalInlineNavigationTitle()
     }
   }
 }
@@ -64,7 +67,7 @@ struct ThreadDraftLinkEditorSheet: View {
     NavigationStack {
       ThreadDraftLinkEditorContent(urlString: $card.text)
         .navigationTitle("Link")
-        .navigationBarTitleDisplayMode(.inline)
+        .journalInlineNavigationTitle()
     }
   }
 }
@@ -85,9 +88,11 @@ struct ThreadDraftLinkEditorContent: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 18) {
         TextField("https://example.com", text: $urlString)
+          #if os(iOS)
           .keyboardType(.URL)
           .textInputAutocapitalization(.never)
           .textContentType(.URL)
+          #endif
           .autocorrectionDisabled()
           .submitLabel(.done)
           .focused($isFocused)

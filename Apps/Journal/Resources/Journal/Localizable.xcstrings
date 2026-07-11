@@ -1,6 +1,9 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "" : {
+
+    },
     "%@, %@" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -53,6 +56,23 @@
         }
       }
     },
+    "A vault update is already in progress." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A vault update is already in progress."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultの更新がすでに進行中です。"
+          }
+        }
+      }
+    },
     "About" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -71,7 +91,22 @@
       }
     },
     "Add Card" : {
-
+      "comment" : "Accessibility label for the Creation composer menu button.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カードを追加"
+          }
+        }
+      }
     },
     "Add Tinycurve widgets for a quick view of the latest card in a vault you choose." : {
       "extractionState" : "stale",
@@ -667,6 +702,9 @@
         }
       }
     },
+    "Book" : {
+
+    },
     "By Type" : {
       "localizations" : {
         "en" : {
@@ -884,6 +922,7 @@
       }
     },
     "Choose Media" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1188,6 +1227,23 @@
     "Could Not Manage Collaboration" : {
 
     },
+    "Could not rename vault." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not rename vault."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vault名を変更できませんでした。"
+          }
+        }
+      }
+    },
     "Could not save" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1236,6 +1292,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "作成"
+          }
+        }
+      }
+    },
+    "Create your first vault to start making cards." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create your first vault to start making cards."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最初のVaultを作成して、カードを作り始めましょう。"
           }
         }
       }
@@ -1813,6 +1885,15 @@
           }
         }
       }
+    },
+    "Hello" : {
+
+    },
+    "HelloHelloHelloHelloHelloHelloHelloHelloHello" : {
+
+    },
+    "Help" : {
+
     },
     "Home Screen" : {
       "extractionState" : "stale",
@@ -2489,6 +2570,22 @@
         }
       }
     },
+    "Opening Vault" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opening Vault"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaultを開いています"
+          }
+        }
+      }
+    },
     "Owned by you" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2809,6 +2906,40 @@
         }
       }
     },
+    "Rename" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rename"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名前を変更"
+          }
+        }
+      }
+    },
+    "Rename Vault" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rename Vault"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vault名を変更"
+          }
+        }
+      }
+    },
     "Retake Photo" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3041,6 +3172,118 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "CloudKit に保存される Vault データの Journal 推定値を表示します。"
+          }
+        }
+      }
+    },
+    "Emoji" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Emoji"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "絵文字"
+          }
+        }
+      }
+    },
+    "Emoji %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Emoji %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "絵文字 %@"
+          }
+        }
+      }
+    },
+    "Icon" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Icon"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アイコン"
+          }
+        }
+      }
+    },
+    "SF Symbol %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SF Symbol %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SF Symbol %@"
+          }
+        }
+      }
+    },
+    "SF Symbols" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SF Symbols"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SF Symbols"
+          }
+        }
+      }
+    },
+    "Shows skin tone variations" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows skin tone variations"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "肌の色のバリエーションを表示します"
+          }
+        }
+      }
+    },
+    "Variations" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Variations"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バリエーション"
           }
         }
       }
@@ -3537,6 +3780,23 @@
         }
       }
     },
+    "This vault is read-only." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This vault is read-only."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このVaultは読み取り専用です。"
+          }
+        }
+      }
+    },
     "Tinycurve does not include developer-operated analytics, advertising SDKs, third-party trackers, or cross-app tracking." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3995,6 +4255,9 @@
           }
         }
       }
+    },
+    "Write a card" : {
+
     },
     "Write your thoughts..." : {
       "extractionState" : "stale",

@@ -2,7 +2,11 @@ import CloudKit
 import JournalVault
 import SharedWithYou
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// SwiftUI bridge for the system collaboration control shown for a shared vault.
 ///
@@ -10,7 +14,19 @@ import UIKit
 /// `NSItemProvider`, so mounting it in a row or toolbar does not perform
 /// CloudKit transport work. Journal does not set `activeParticipantCount`
 /// because the catalog tracks total participants, not live presence.
-public struct VaultCollaborationControl: UIViewRepresentable {
+#if canImport(UIKit)
+/// SwiftUI representable protocol used by the collaboration control on iOS.
+public typealias VaultCollaborationViewRepresentable = UIViewRepresentable
+/// System CloudKit sharing delegate used by the collaboration control on iOS.
+public typealias VaultCollaborationSharingDelegate = UICloudSharingControllerDelegate
+#else
+/// SwiftUI representable protocol used by the collaboration control on macOS.
+public typealias VaultCollaborationViewRepresentable = NSViewRepresentable
+/// System CloudKit sharing delegate used by the collaboration control on macOS.
+public typealias VaultCollaborationSharingDelegate = NSCloudSharingServiceDelegate
+#endif
+
+public struct VaultCollaborationControl: VaultCollaborationViewRepresentable {
 
   let vaultID: VaultID
   let title: String
@@ -32,6 +48,7 @@ public struct VaultCollaborationControl: UIViewRepresentable {
     self.onError = onError
   }
 
+  #if canImport(UIKit)
   public func makeUIView(context: Context) -> SWCollaborationView {
     let view = SWCollaborationView(itemProvider: makeItemProvider())
     configure(view, context: context)
@@ -41,6 +58,17 @@ public struct VaultCollaborationControl: UIViewRepresentable {
   public func updateUIView(_ view: SWCollaborationView, context: Context) {
     configure(view, context: context)
   }
+  #else
+  public func makeNSView(context: Context) -> SWCollaborationView {
+    let view = SWCollaborationView(itemProvider: makeItemProvider())
+    configure(view, context: context)
+    return view
+  }
+
+  public func updateNSView(_ view: SWCollaborationView, context: Context) {
+    configure(view, context: context)
+  }
+  #endif
 
   public func makeCoordinator() -> Coordinator {
     Coordinator(
@@ -76,11 +104,16 @@ public struct VaultCollaborationControl: UIViewRepresentable {
   private func configure(_ view: SWCollaborationView, context: Context) {
     context.coordinator.title = title
     view.headerTitle = title
+    #if canImport(UIKit)
     view.accessibilityLabel = String(localized: "Manage Collaboration")
     view.cloudSharingControllerDelegate = context.coordinator
+    #else
+    view.setAccessibilityLabel(String(localized: "Manage Collaboration"))
+    view.cloudSharingServiceDelegate = context.coordinator
+    #endif
   }
 
-  public final class Coordinator: NSObject, UICloudSharingControllerDelegate {
+  public final class Coordinator: NSObject, VaultCollaborationSharingDelegate {
 
     private let vaultID: VaultID
     var title: String
@@ -102,6 +135,7 @@ public struct VaultCollaborationControl: UIViewRepresentable {
       self.onError = onError
     }
 
+    #if canImport(UIKit)
     public func itemTitle(for cloudSharingController: UICloudSharingController) -> String? {
       title
     }
@@ -130,5 +164,39 @@ public struct VaultCollaborationControl: UIViewRepresentable {
         onError(error)
       }
     }
+    #else
+    public func sharingService(_ sharingService: NSSharingService, didSave share: CKShare) {
+      let prepareShare = prepareShare
+      let vaultID = vaultID
+      let onError = onError
+      Task { @MainActor [prepareShare, vaultID, onError] in
+        do {
+          _ = try await prepareShare(vaultID)
+        } catch {
+          onError(error)
+        }
+      }
+    }
+
+    public func sharingService(_ sharingService: NSSharingService, didStopSharing share: CKShare) {
+      let onSharingStopped = onSharingStopped
+      let vaultID = vaultID
+      Task { @MainActor [onSharingStopped, vaultID] in
+        await onSharingStopped(vaultID)
+      }
+    }
+
+    public func sharingService(
+      _ sharingService: NSSharingService,
+      didCompleteForItems items: [Any],
+      error: (any Error)?
+    ) {
+      guard let error else { return }
+      let onError = onError
+      Task { @MainActor [onError, error] in
+        onError(error)
+      }
+    }
+    #endif
   }
 }

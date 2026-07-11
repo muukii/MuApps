@@ -1,6 +1,17 @@
 import Foundation
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
+
+/// Raster image emitted by Bauhaus export on the active Apple platform.
+#if canImport(UIKit)
+public typealias BauhausRasterImage = UIImage
+#elseif canImport(AppKit)
+public typealias BauhausRasterImage = NSImage
+#endif
 
 /// Persistable Bauhaus card content.
 ///
@@ -66,7 +77,7 @@ public struct BauhausGridDocument: Codable, Equatable, Sendable {
     colorPalette: BauhausColorPalette = .default,
     size: CGSize = CGSize(width: 512, height: 512),
     scale: CGFloat = 1
-  ) -> UIImage? {
+  ) -> BauhausRasterImage? {
     artwork.image(
       colorScheme: colorScheme,
       colorPalette: colorPalette,
@@ -246,7 +257,7 @@ public struct BauhausGridArtwork: Codable, Equatable, Sendable {
     colorPalette: BauhausColorPalette = .default,
     size: CGSize = CGSize(width: 512, height: 512),
     scale: CGFloat = 1
-  ) -> UIImage? {
+  ) -> BauhausRasterImage? {
     guard size.width > 0, size.height > 0 else { return nil }
     let renderer = ImageRenderer(
       content: BauhausGridArtworkView(artwork: self, colorPalette: colorPalette)
@@ -255,7 +266,11 @@ public struct BauhausGridArtwork: Codable, Equatable, Sendable {
     )
     renderer.scale = max(scale, 1)
     renderer.isOpaque = true
+    #if canImport(UIKit)
     return renderer.uiImage
+    #elseif canImport(AppKit)
+    return renderer.nsImage
+    #endif
   }
 
   private func index(for position: BauhausGridPosition) -> Int? {
@@ -1077,7 +1092,9 @@ public struct BauhausGridCaptureView: View {
     }
     .background(.background)
     .navigationTitle("Bauhaus")
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
     .sensoryFeedback(.selection, trigger: selectionFeedbackTrigger)
     .sensoryFeedback(.impact(weight: .light), trigger: editFeedbackTrigger)
     .sensoryFeedback(.success, trigger: completionFeedbackTrigger)

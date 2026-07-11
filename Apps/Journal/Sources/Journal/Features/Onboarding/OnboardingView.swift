@@ -48,8 +48,10 @@ struct OnboardingView: View {
             PermissionsPage().tag(2)
             ThemePage().tag(3)
           }
+          #if os(iOS)
           .tabViewStyle(.page(indexDisplayMode: .always))
           .indexViewStyle(.page(backgroundDisplayMode: .interactive))
+          #endif
 
           ctaBar
         }

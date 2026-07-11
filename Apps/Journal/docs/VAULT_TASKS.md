@@ -242,7 +242,9 @@ flowchart TD
   - Root routing は fresh install のみ blocking Loading とする。
     `hasResolvedInitialVaultAvailability` がある launch では cached route を即表示し、
     vault runtime / background sync は毎回走らせる。
-  - iCloud available では初回 vault discovery を待つ。iCloud no account / restricted では
+  - iCloud available では初回 vault discovery を待つ。blocking 範囲は Journal vault zone と
+    `VaultInfo` title record までに限定し、card/media import と `CKAsset` download は
+    resolved 後の background sync に任せる。iCloud no account / restricted では
     local-only state として解決し、iCloud を使っていない user を Loading に閉じ込めない。
   - temporarily unavailable / network failure / account status could not determine では
     deferred CloudKit recovery として解決し、次回以降の background sync に任せる。

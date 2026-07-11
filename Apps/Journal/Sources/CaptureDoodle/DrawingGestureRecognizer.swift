@@ -1,12 +1,15 @@
-import UIKit
+import CoreGraphics
+import Foundation
 
-/// A touch location paired with its `UITouch.timestamp` (seconds since boot,
-/// monotonic). Timestamps flow all the way into the stored model so a doodle can
-/// be replayed at the speed it was drawn.
+/// A platform pointer location paired with a monotonic event timestamp.
+/// Timestamps flow into the stored model so a doodle replays at authored speed.
 struct TimedPoint {
   var location: CGPoint
   var timestamp: TimeInterval
 }
+
+#if canImport(UIKit)
+import UIKit
 
 /// Single-touch drawing recognizer ported from Brightroom's
 /// `_EditingCanvasDrawingGestureRecognizer`. Consumes coalesced touches for
@@ -34,10 +37,11 @@ final class DrawingGestureRecognizer: UIGestureRecognizer {
     cancelsTouchesInView = false
     delaysTouchesBegan = false
     delaysTouchesEnded = false
-    allowedTouchTypes = [
+    let supportedTouchTypes = [
       NSNumber(value: UITouch.TouchType.direct.rawValue),
       NSNumber(value: UITouch.TouchType.pencil.rawValue),
     ]
+    allowedTouchTypes = supportedTouchTypes
   }
 
   override func reset() {
@@ -129,3 +133,4 @@ final class DrawingGestureRecognizer: UIGestureRecognizer {
     state = .cancelled
   }
 }
+#endif

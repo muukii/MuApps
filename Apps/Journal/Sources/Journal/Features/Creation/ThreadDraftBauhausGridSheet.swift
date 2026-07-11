@@ -25,7 +25,7 @@ struct ThreadDraftBauhausGridSheet: View {
         }
       )
       .navigationTitle("Bauhaus")
-      .navigationBarTitleDisplayMode(.inline)
+      .journalInlineNavigationTitle()
     }
   }
 }

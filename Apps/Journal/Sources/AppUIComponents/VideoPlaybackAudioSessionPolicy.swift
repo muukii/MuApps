@@ -20,6 +20,7 @@ enum VideoPlaybackAudioSessionPolicy {
     guard isConfigured == false else { return }
     isConfigured = true
 
+    #if os(iOS)
     do {
       try AVAudioSession.sharedInstance().setCategory(
         .playback,
@@ -29,5 +30,6 @@ enum VideoPlaybackAudioSessionPolicy {
     } catch {
       print("[VideoPlaybackAudioSessionPolicy] Failed to configure audio session: \(error.localizedDescription)")
     }
+    #endif
   }
 }

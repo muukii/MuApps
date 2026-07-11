@@ -40,6 +40,23 @@ struct VaultCatalogStoreTests {
   }
 
   @Test
+  func createVault_seedsSelectedIconInCatalogAndVaultInfo() throws {
+    let layout = makeTemporaryLayout()
+    let registry = VaultStoreRegistry(layout: layout)
+    let catalog = try VaultCatalogStore.open(layout: layout)
+    let icon = VaultIcon.emoji("\u{1F4DA}")
+
+    let vaultID = try catalog.createVault(title: "Reading", icon: icon, using: registry)
+
+    #expect(try catalog.vaultDescriptors().first?.icon == icon)
+    let store = try registry.store(for: vaultID)
+    let info = try #require(
+      try store.container.mainContext.fetch(FetchDescriptor<VaultInfo>()).first
+    )
+    #expect(info.icon == icon)
+  }
+
+  @Test
   func materializeRemoteVault_isIdempotentAndKeepsOwnership() throws {
     let layout = makeTemporaryLayout()
     let catalog = try VaultCatalogStore.open(layout: layout)
@@ -71,6 +88,42 @@ struct VaultCatalogStoreTests {
     #expect(try catalog.vaultDescriptors().first?.title == "New")
     let summaries = try catalog.container.mainContext.fetch(FetchDescriptor<VaultSummary>())
     #expect(summaries.first?.title == "New")
+  }
+
+  @Test
+  func applyImportedVaultInfo_updatesIconWhenPresentAndPreservesItWhenMissing() throws {
+    let layout = makeTemporaryLayout()
+    let registry = VaultStoreRegistry(layout: layout)
+    let catalog = try VaultCatalogStore.open(layout: layout)
+    let originalIcon = VaultIcon.systemImage("book.closed")
+    let importedIcon = VaultIcon.emoji("\u{1F30A}")
+    let vaultID = try catalog.createVault(
+      title: "Old",
+      icon: originalIcon,
+      using: registry
+    )
+
+    try catalog.applyImportedVaultInfo(vaultID: vaultID, title: "New", icon: importedIcon)
+    #expect(try catalog.vaultDescriptors().first?.icon == importedIcon)
+
+    try catalog.applyImportedVaultInfo(vaultID: vaultID, title: "Newest", icon: nil)
+    let descriptor = try #require(try catalog.vaultDescriptors().first)
+    #expect(descriptor.title == "Newest")
+    #expect(descriptor.icon == importedIcon)
+  }
+
+  @Test
+  func renameVault_updatesIndexAndSummaryTitles() throws {
+    let layout = makeTemporaryLayout()
+    let registry = VaultStoreRegistry(layout: layout)
+    let catalog = try VaultCatalogStore.open(layout: layout)
+    let vaultID = try catalog.createVault(title: "Draft", using: registry)
+
+    try catalog.renameVault(vaultID: vaultID, title: "Published")
+
+    #expect(try catalog.vaultDescriptors().first?.title == "Published")
+    let summaries = try catalog.container.mainContext.fetch(FetchDescriptor<VaultSummary>())
+    #expect(summaries.first?.title == "Published")
   }
 
   @Test

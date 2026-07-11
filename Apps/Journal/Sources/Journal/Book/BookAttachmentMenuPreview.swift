@@ -1,5 +1,7 @@
 import SwiftUI
+#if canImport(SwiftUISnapDraggingModifier)
 import SwiftUISnapDraggingModifier
+#endif
 
 /// Preview-only Book surface for iterating on an input-attached menu.
 ///

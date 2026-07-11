@@ -27,10 +27,10 @@ public struct SuggestionCaptureButton<Label: View>: View {
 
   public var body: some View {
     #if canImport(JournalingSuggestions)
-    // `JournalingSuggestions` is weak-linked and absent from the Mac (Designed for
-    // iPad) runtime. Guard on `isiOSAppOnMac` so its symbols are never touched
-    // there, and erase the picker through `AnyView` so the composed view type
-    // doesn't force the picker's (missing) type metadata to instantiate on Mac.
+    // `JournalingSuggestions` is weak-linked for the Designed-for-iPad runtime.
+    // Guard on `isiOSAppOnMac` so its symbols are never touched by an iPad app
+    // running directly on Apple silicon. Native macOS compiles the unavailable
+    // fallback below because this framework is absent from the macOS SDK.
     if ProcessInfo.processInfo.isiOSAppOnMac {
       UnavailableSuggestionButton(label: label)
     } else {
@@ -100,7 +100,8 @@ public struct SuggestionCaptureView: View {
 // MARK: - Fileprivate Views
 
 /// Disabled placeholder shown wherever the picker can't run: the Simulator (no
-/// module) or the Mac Designed-for-iPad runtime (module absent).
+/// module) or the Mac Designed-for-iPad runtime (module absent). Native macOS
+/// compiles this fallback because the module cannot be imported there.
 private struct UnavailableSuggestionButton<Label: View>: View {
   let label: @MainActor @Sendable () -> Label
 

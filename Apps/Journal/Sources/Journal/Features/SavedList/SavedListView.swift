@@ -8,7 +8,11 @@ import JournalVault
 import MuColor
 import SwiftData
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 import WidgetKit
 import Algorithms
 
@@ -33,7 +37,7 @@ struct SavedListView: View {
       }
     }
     .navigationTitle(vaultRuntime.selectedVault?.title ?? String(localized: "Entries"))
-    .navigationBarTitleDisplayMode(.inline)
+    .journalInlineNavigationTitle()
   }
 }
 
@@ -105,7 +109,7 @@ private struct VaultSavedListContentView: View {
     .background(.background)
     .toolbar {
       if hasStackedEntries {
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItem(placement: .journalTrailingAction) {
           Button {
             withAnimation(.smooth) {
               areStacksExpanded.toggle()
@@ -810,7 +814,7 @@ private struct VaultSavedDaySectionView: View {
               onEdit: onEdit,
               onDelete: onDelete
             )
-            .navigationTransition(.zoom(sourceID: entry.edgeID, in: transitionNamespace))
+            .journalZoomNavigationTransition(sourceID: entry.edgeID, in: transitionNamespace)
           } label: {
             VaultSavedEntryStackTile(
               entry: entry,
@@ -929,7 +933,7 @@ private struct VaultSavedEntryStackTile: View {
         childCount: childEntries.count
       )
       .matchedGeometryEffect(id: entry.edgeID, in: stackNamespace)
-      .matchedTransitionSource(id: entry.edgeID, in: transitionNamespace)
+      .journalMatchedTransitionSource(id: entry.edgeID, in: transitionNamespace)
     }
   }
 }
@@ -991,7 +995,7 @@ private struct VaultSavedEntryDetailView: View {
     }
     .background(.background)
     .navigationTitle(rootTitle)
-    .navigationBarTitleDisplayMode(.inline)
+    .journalInlineNavigationTitle()
     .confirmationDialog(
       "Delete Card",
       isPresented: deleteConfirmationPresentation,

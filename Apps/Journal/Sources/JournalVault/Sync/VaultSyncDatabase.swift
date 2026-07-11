@@ -214,8 +214,9 @@ actor VaultSyncDatabase: ModelActor {
     var repairedInvalidEdgeCount = 0
 
     /// Set when a `VaultInfo` record was imported, so the catalog can pick up
-    /// the vault's current title.
+    /// the vault's current title and any synchronized icon.
     var importedVaultTitle: String?
+    var importedVaultIcon: VaultIcon?
   }
 
   /// Imports fetched remote changes into the vault store as one transaction.
@@ -261,6 +262,7 @@ actor VaultSyncDatabase: ModelActor {
         }
         VaultRecordMapper.update(info, from: record)
         outcome.importedVaultTitle = info.title
+        outcome.importedVaultIcon = info.icon
 
       case .card:
         touchedRelationships = true

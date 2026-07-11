@@ -18,6 +18,22 @@ let journalWidgetBundleDisplayName: Plist.Value = "Tinycurve Widget"
 /// Short bundle name for the WidgetKit extension.
 let journalWidgetBundleName: Plist.Value = "TinycurveWidget"
 
+/// Apple platforms that compile the shared SwiftUI Journal product.
+///
+/// The Mac destination is native macOS. Platform adapters keep AppKit and UIKit
+/// at the UI boundary while JournalVault remains shared.
+let journalDestinations: Destinations = [.iPhone, .iPad, .mac]
+
+/// Minimum OS versions for Journal's native iOS and macOS products.
+let journalDeploymentTargets: DeploymentTargets = .multiplatform(
+  iOS: "26.1",
+  macOS: "26.0"
+)
+
+/// Runtime key used by `JournalVault` to scope local stores to the active
+/// CloudKit server environment.
+let journalCloudKitEnvironmentInfoPlistKey = "JournalCloudKitEnvironment"
+
 let journalVersionInfoPlistKeys: [String: Plist.Value] = [
   "CFBundleShortVersionString": "$(MARKETING_VERSION)",
   "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
@@ -31,6 +47,7 @@ let journalInfoPlist: InfoPlist = .extendingDefault(with: journalVersionInfoPlis
   // Required for CloudKit share URLs to launch the app and deliver
   // CKShare.Metadata to the scene delegate.
   "CKSharingSupported": true,
+  journalCloudKitEnvironmentInfoPlistKey: "$(APS_ENVIRONMENT)",
   // CloudKit pushes remote changes to the device; the explicit vault sync
   // layer consumes these notifications for per-vault zones.
   "UIBackgroundModes": .array(["remote-notification"]),
@@ -59,10 +76,10 @@ func journalFramework(
 ) -> Target {
   .target(
     name: name,
-    destinations: .app,
+    destinations: journalDestinations,
     product: product,
     bundleId: "app.muukii.journal.\(name)",
-    deploymentTargets: .app,
+    deploymentTargets: journalDeploymentTargets,
     infoPlist: .default,
     resources: resources,
     buildableFolders: [BuildableFolder(stringLiteral: "Sources/\(name)")],
@@ -92,21 +109,24 @@ let project = Project(
   targets: [
     .target(
       name: "Journal",
-      destinations: .app,
+      destinations: journalDestinations,
       product: .app,
       bundleId: "app.muukii.journal",
-      deploymentTargets: .app,
+      deploymentTargets: journalDeploymentTargets,
       infoPlist: journalInfoPlist,
       resources: [
         "Resources/Journal/**",
       ],
       buildableFolders: ["Sources/Journal"],
-      // iCloud + CloudKit for SwiftData cross-device sync. The container id is
-      // the single source of truth read by `ModelConfiguration(cloudKitDatabase:)`.
+      // iCloud + CloudKit for JournalVault's explicit vault sync. The container
+      // id is the transport boundary used by `CloudKitVaultSyncEngine`.
       // `aps-environment` enables the push channel CloudKit uses for live sync;
       // its value is expanded from $(APS_ENVIRONMENT) per configuration below so
       // Release builds get `production` (otherwise shipped builds never receive
       // CloudKit's silent pushes and background sync silently no-ops).
+      // The Info.plist mirrors that value for runtime storage scoping:
+      // development and production keep separate local catalogs, vault stores,
+      // media files, and CKSyncEngine state.
       // `com.apple.developer.journal.allow` lets `CaptureSuggestions` present the
       // system Journaling Suggestions picker (inert without it; device-only). Its
       // value is the string array `["suggestions"]`, NOT a boolean — it must match
@@ -130,16 +150,23 @@ let project = Project(
         .sdk(name: "PhotosUI", type: .framework),
         .sdk(name: "SharedWithYou", type: .framework),
         .external(name: "ScrollEdgeEffect"),
-        .external(name: "SwiftUISnapDraggingModifier"),
+        // The package's gesture bridge is UIKit-only. Native macOS uses the
+        // local AppKit/SwiftUI compatibility modifier in the Journal target.
+        .external(
+          name: "SwiftUISnapDraggingModifier",
+          condition: .when([.ios])
+        ),
+        .external(
+          name: "NextGrowingTextViewSwiftUI",
+          condition: .when([.ios])
+        ),
         .external(name: "Algorithms"),
-        .external(name: "VariableBlur"),
         .target(name: "AppUIComponents"),
         .target(name: "JournalVault"),
         // Embeds the widget extension into the app bundle.
         .target(name: "JournalWidget"),
         .target(name: "MuColor"),
         .target(name: "MuHaptics"),
-        .target(name: "GrowingTextEditor"),
         .target(name: "CaptureText"),
         .target(name: "CapturePhoto"),
         .target(name: "MediaProcessing"),
@@ -151,6 +178,15 @@ let project = Project(
       settings: .settings(
         base: .appTarget.merging([
           "ASSETCATALOG_COMPILER_APPICON_NAME": "Icon",
+          // CloudKit and App Group entitlements cannot run under ad-hoc signing.
+          "CODE_SIGN_IDENTITY[sdk=macosx*]": "Apple Development",
+          "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": "Support/Journal-macOS.entitlements",
+          // Native Mac sandbox capabilities used by the same capture features
+          // that request privacy permission through Info.plist on iOS.
+          "ENABLE_RESOURCE_ACCESS_AUDIO_INPUT[sdk=macosx*]": "YES",
+          "ENABLE_RESOURCE_ACCESS_CAMERA[sdk=macosx*]": "YES",
+          "ENABLE_RESOURCE_ACCESS_LOCATION[sdk=macosx*]": "YES",
+          "ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY[sdk=macosx*]": "YES",
         ]),
         configurations: [
           .debug(
@@ -178,10 +214,10 @@ let project = Project(
     // the selected VaultInstance for save/list UI.
     .target(
       name: "JournalVault",
-      destinations: .app,
+      destinations: journalDestinations,
       product: .framework,
       bundleId: "app.muukii.journal.JournalVault",
-      deploymentTargets: .app,
+      deploymentTargets: journalDeploymentTargets,
       infoPlist: .default,
       buildableFolders: ["Sources/JournalVault"],
       dependencies: [
@@ -201,10 +237,10 @@ let project = Project(
 
     .target(
       name: "JournalVaultTests",
-      destinations: .app,
+      destinations: journalDestinations,
       product: .unitTests,
       bundleId: "app.muukii.journal.JournalVaultTests",
-      deploymentTargets: .app,
+      deploymentTargets: journalDeploymentTargets,
       infoPlist: .default,
       buildableFolders: ["Tests/JournalVaultTests"],
       dependencies: [
@@ -228,10 +264,10 @@ let project = Project(
     // configuration like the app's.
     .target(
       name: "JournalWidget",
-      destinations: .app,
+      destinations: journalDestinations,
       product: .appExtension,
       bundleId: "app.muukii.journal.JournalWidget",
-      deploymentTargets: .app,
+      deploymentTargets: journalDeploymentTargets,
       infoPlist: .dictionary([
         "CFBundleDisplayName": journalWidgetBundleDisplayName,
         "CFBundleExecutable": "$(EXECUTABLE_NAME)",
@@ -239,6 +275,7 @@ let project = Project(
         "CFBundleName": journalWidgetBundleName,
         "CFBundleShortVersionString": "$(MARKETING_VERSION)",
         "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
+        journalCloudKitEnvironmentInfoPlistKey: "$(APS_ENVIRONMENT)",
         "NSExtension": .dictionary([
           "NSExtensionPointIdentifier": "com.apple.widgetkit-extension",
         ]),
@@ -261,6 +298,11 @@ let project = Project(
       settings: .settings(
         base: .base.merging([
           "APPLICATION_EXTENSION_API_ONLY": "YES",
+          "CODE_SIGN_IDENTITY[sdk=macosx*]": "Apple Development",
+          "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": "Support/JournalWidget-macOS.entitlements",
+          "ENABLE_APP_SANDBOX[sdk=macosx*]": "YES",
+          "ENABLE_HARDENED_RUNTIME[sdk=macosx*]": "YES",
+          "ENABLE_OUTGOING_NETWORK_CONNECTIONS[sdk=macosx*]": "YES",
         ]),
         configurations: [
           .debug(
@@ -297,18 +339,17 @@ let project = Project(
         .target(name: "CaptureDoodle"),
         .target(name: "JournalVault"),
         .target(name: "MuColor"),
-        .external(name: "GaussianLinearGradient"),
-        .external(name: "VariableBlur")
+        .external(name: "GaussianLinearGradient")
       ]
     ),
     journalFramework(name: "MuHaptics"),
-    // Pure SwiftUI multiline text input that grows by measuring a hidden
-    // non-scrolling `TextEditor` instead of bridging to `UITextView`.
-    journalFramework(name: "GrowingTextEditor", product: .framework),
     journalFramework(
       name: "CaptureText",
       dependencies: [
-        .target(name: "GrowingTextEditor"),
+        .external(
+          name: "NextGrowingTextViewSwiftUI",
+          condition: .when([.ios])
+        ),
       ]
     ),
     journalFramework(name: "CapturePhoto"),
@@ -347,10 +388,10 @@ let project = Project(
     // MARK: - UI Tests (temporary, for Settings UI verification)
     .target(
       name: "JournalUITests",
-      destinations: .app,
+      destinations: journalDestinations,
       product: .uiTests,
       bundleId: "app.muukii.journal.UITests",
-      deploymentTargets: .app,
+      deploymentTargets: journalDeploymentTargets,
       infoPlist: .default,
       buildableFolders: ["Tests/JournalUITests"],
       dependencies: [

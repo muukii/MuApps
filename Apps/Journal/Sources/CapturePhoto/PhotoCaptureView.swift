@@ -43,15 +43,17 @@ public struct PhotoCaptureView: View {
     VStack {
       HStack {
         Spacer()
-        Button {
-          Task { await controller.flip() }
-        } label: {
-          Image(systemName: "arrow.triangle.2.circlepath.camera.fill")
-            .font(.title2)
-            .padding(12)
-            .background(.ultraThinMaterial, in: Circle())
+        if controller.canFlipCamera {
+          Button {
+            Task { await controller.flip() }
+          } label: {
+            Image(systemName: "arrow.triangle.2.circlepath.camera.fill")
+              .font(.title2)
+              .padding(12)
+              .background(.ultraThinMaterial, in: Circle())
+          }
+          .tint(.white)
         }
-        .tint(.white)
       }
       .padding()
 
@@ -100,6 +102,7 @@ public struct PhotoCaptureView: View {
 // MARK: - Preview bridge
 
 /// Hosts `AVCaptureVideoPreviewLayer` inside SwiftUI.
+#if canImport(UIKit)
 private struct CameraPreviewView: UIViewRepresentable {
   let session: AVCaptureSession
   let isMirrored: Bool
@@ -114,7 +117,56 @@ private struct CameraPreviewView: UIViewRepresentable {
     uiView.configure(session: session, isMirrored: isMirrored)
   }
 }
+#elseif canImport(AppKit)
+/// Hosts the same AVFoundation preview session in a layer-backed AppKit view.
+private struct CameraPreviewView: NSViewRepresentable {
+  let session: AVCaptureSession
+  let isMirrored: Bool
 
+  func makeNSView(context: Context) -> PreviewView {
+    let view = PreviewView()
+    view.configure(session: session, isMirrored: isMirrored)
+    return view
+  }
+
+  func updateNSView(_ nsView: PreviewView, context: Context) {
+    nsView.configure(session: session, isMirrored: isMirrored)
+  }
+}
+
+private final class PreviewView: NSView {
+  private let previewLayer = AVCaptureVideoPreviewLayer()
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    layer?.addSublayer(previewLayer)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func layout() {
+    super.layout()
+    previewLayer.frame = bounds
+  }
+
+  func configure(session: AVCaptureSession, isMirrored: Bool) {
+    previewLayer.videoGravity = .resizeAspectFill
+    if previewLayer.session !== session {
+      previewLayer.session = session
+    }
+    if let connection = previewLayer.connection, connection.isVideoMirroringSupported {
+      connection.automaticallyAdjustsVideoMirroring = false
+      connection.isVideoMirrored = isMirrored
+    }
+  }
+}
+#endif
+
+#if canImport(UIKit)
 private final class PreviewView: UIView {
 
   override static var layerClass: AnyClass {
@@ -152,3 +204,4 @@ private final class PreviewView: UIView {
     }
   }
 }
+#endif

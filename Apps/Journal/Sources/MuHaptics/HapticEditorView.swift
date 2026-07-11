@@ -1,5 +1,9 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// A simple on-device editor for building and playing arbitrary haptic patterns.
 ///
@@ -123,7 +127,12 @@ fileprivate struct HapticEditorContent: View {
           .frame(maxWidth: .infinity, alignment: .leading)
 
         Button {
+          #if canImport(UIKit)
           UIPasteboard.general.string = code
+          #elseif canImport(AppKit)
+          NSPasteboard.general.clearContents()
+          NSPasteboard.general.setString(code, forType: .string)
+          #endif
         } label: {
           Label("Copy Swift Code", systemImage: "doc.on.doc")
         }
@@ -138,9 +147,11 @@ fileprivate struct HapticEditorContent: View {
       }
     }
     .navigationTitle("Haptics")
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
     .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
+      ToolbarItem(placement: playbackToolbarPlacement) {
         Button {
           onPlay()
         } label: {
@@ -149,6 +160,14 @@ fileprivate struct HapticEditorContent: View {
         .disabled(!isSupported || pattern.events.isEmpty)
       }
     }
+  }
+
+  private var playbackToolbarPlacement: ToolbarItemPlacement {
+    #if os(iOS)
+    .topBarTrailing
+    #else
+    .primaryAction
+    #endif
   }
 
   /// New events start just after the current timeline so they don't overlap.

@@ -1,5 +1,4 @@
 import CloudKit
-import CoreLocation
 import Foundation
 
 /// Field-level mapping between vault store rows and their CloudKit records.
@@ -15,6 +14,8 @@ enum VaultRecordMapper {
 
   enum VaultInfoKey {
     static let title = "title"
+    static let iconKind = "iconKind"
+    static let iconValue = "iconValue"
     static let createdAt = "createdAt"
     static let updatedAt = "updatedAt"
   }
@@ -62,39 +63,43 @@ enum VaultRecordMapper {
   // MARK: - Outgoing
 
   static func applyFields(of info: VaultInfo, to record: CKRecord) {
-    record[VaultInfoKey.title] = info.title
-    record[VaultInfoKey.createdAt] = info.createdAt
-    record[VaultInfoKey.updatedAt] = info.updatedAt
+    let infoRecord = VaultInfoRecord(record: record)
+    infoRecord.title = info.title
+    infoRecord.iconKindRawValue = info.iconKindRawValue
+    infoRecord.iconValue = info.iconValue
+    infoRecord.createdAt = info.createdAt
+    infoRecord.updatedAt = info.updatedAt
   }
 
   static func applyFields(of card: Card, to record: CKRecord) {
-    record[CardKey.kind] = card.kindRawValue
-    record[CardKey.body] = card.body
-    record[CardKey.createdAt] = card.createdAt
-    record[CardKey.updatedAt] = card.updatedAt
-    record[CardKey.location] = card.location.map {
-      CLLocation(latitude: $0.latitude, longitude: $0.longitude)
-    }
+    let cardRecord = CardRecord(record: record)
+    cardRecord.kindRawValue = card.kindRawValue
+    cardRecord.body = card.body
+    cardRecord.createdAt = card.createdAt
+    cardRecord.updatedAt = card.updatedAt
+    cardRecord.location = card.location
   }
 
   static func applyFields(of edge: CardEdge, to record: CKRecord) {
-    record[CardEdgeKey.cardID] = edge.cardID.uuidString
+    let edgeRecord = CardEdgeRecord(record: record)
+    edgeRecord.cardIDRawValue = edge.cardID.uuidString
     // A plain field, not CKRecord.parent: the sharing boundary is the zone, and
     // tree semantics (cycles, cascades) are domain rules, not record hierarchy.
-    record[CardEdgeKey.parentEdgeID] = edge.parentEdgeID?.uuidString
-    record[CardEdgeKey.sortIndex] = edge.sortIndex
-    record[CardEdgeKey.layout] = edge.layout
-    record[CardEdgeKey.createdAt] = edge.createdAt
-    record[CardEdgeKey.updatedAt] = edge.updatedAt
+    edgeRecord.parentEdgeIDRawValue = edge.parentEdgeID?.uuidString
+    edgeRecord.sortIndex = edge.sortIndex
+    edgeRecord.layout = edge.layout
+    edgeRecord.createdAt = edge.createdAt
+    edgeRecord.updatedAt = edge.updatedAt
   }
 
   static func applyFields(of attachment: Attachment, to record: CKRecord) {
-    record[AttachmentKey.cardID] = attachment.cardID.uuidString
-    record[AttachmentKey.kind] = attachment.kindRawValue
-    record[AttachmentKey.byteSize] = attachment.byteSize
-    record[AttachmentKey.primaryResourceID] = attachment.primaryResourceID.uuidString
-    record[AttachmentKey.thumbnail] = attachment.thumbnail
-    record[AttachmentKey.createdAt] = attachment.createdAt
+    let attachmentRecord = AttachmentRecord(record: record)
+    attachmentRecord.cardIDRawValue = attachment.cardID.uuidString
+    attachmentRecord.kindRawValue = attachment.kindRawValue
+    attachmentRecord.byteSize = attachment.byteSize
+    attachmentRecord.primaryResourceIDRawValue = attachment.primaryResourceID.uuidString
+    attachmentRecord.thumbnail = attachment.thumbnail
+    attachmentRecord.createdAt = attachment.createdAt
   }
 
   /// `assetFileURL` is the local resource file to upload. When the file is not
@@ -105,104 +110,133 @@ enum VaultRecordMapper {
     assetFileURL: URL?,
     to record: CKRecord
   ) {
-    record[AttachmentResourceKey.attachmentID] = resource.attachmentID.uuidString
-    record[AttachmentResourceKey.role] = resource.roleRawValue
-    record[AttachmentResourceKey.byteSize] = resource.byteSize
-    record[AttachmentResourceKey.contentType] = resource.contentType
-    record[AttachmentResourceKey.pixelWidth] = resource.pixelWidth
-    record[AttachmentResourceKey.pixelHeight] = resource.pixelHeight
-    record[AttachmentResourceKey.duration] = resource.duration
-    record[AttachmentResourceKey.isHDR] = resource.isHDR
-    record[AttachmentResourceKey.colorSpaceName] = resource.colorSpaceName
-    record[AttachmentResourceKey.createdAt] = resource.createdAt
+    let resourceRecord = AttachmentResourceRecord(record: record)
+    resourceRecord.attachmentIDRawValue = resource.attachmentID.uuidString
+    resourceRecord.roleRawValue = resource.roleRawValue
+    resourceRecord.byteSize = resource.byteSize
+    resourceRecord.contentType = resource.contentType
+    resourceRecord.pixelWidth = resource.pixelWidth
+    resourceRecord.pixelHeight = resource.pixelHeight
+    resourceRecord.duration = resource.duration
+    resourceRecord.isHDR = resource.isHDR
+    resourceRecord.colorSpaceName = resource.colorSpaceName
+    resourceRecord.createdAt = resource.createdAt
     if let assetFileURL {
-      record[AttachmentResourceKey.file] = CKAsset(fileURL: assetFileURL)
+      resourceRecord.file = CKAsset(fileURL: assetFileURL)
     }
   }
 
   // MARK: - Incoming
 
   static func update(_ info: VaultInfo, from record: CKRecord) {
-    info.title = record[VaultInfoKey.title] as? String ?? ""
-    if let createdAt = record[VaultInfoKey.createdAt] as? Date {
-      info.createdAt = createdAt
+    let infoRecord = VaultInfoRecord(record: record)
+    info.title = infoRecord.title
+    if record[VaultInfoKey.iconKind] != nil, record[VaultInfoKey.iconValue] != nil {
+      info.iconKindRawValue = infoRecord.iconKindRawValue
+      info.iconValue = infoRecord.iconValue
     }
-    if let updatedAt = record[VaultInfoKey.updatedAt] as? Date {
-      info.updatedAt = updatedAt
+    if record[VaultInfoKey.createdAt] != nil {
+      info.createdAt = infoRecord.createdAt
     }
+    if record[VaultInfoKey.updatedAt] != nil {
+      info.updatedAt = infoRecord.updatedAt
+    }
+  }
+
+  /// Decodes valid icon metadata without inventing a value for legacy records.
+  static func vaultIcon(from record: CKRecord) -> VaultIcon? {
+    let infoRecord = VaultInfoRecord(record: record)
+    guard
+      let rawKind = infoRecord.iconKindRawValue,
+      let kind = VaultIcon.Kind(rawValue: rawKind),
+      let value = infoRecord.iconValue,
+      value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    else {
+      return nil
+    }
+    return VaultIcon(kind: kind, value: value)
   }
 
   static func update(_ card: Card, from record: CKRecord) {
-    if let kind = record[CardKey.kind] as? String {
-      card.kindRawValue = kind
+    let cardRecord = CardRecord(record: record)
+    if record[CardKey.kind] != nil {
+      card.kindRawValue = cardRecord.kindRawValue
     }
-    card.body = record[CardKey.body] as? String ?? ""
-    if let createdAt = record[CardKey.createdAt] as? Date {
-      card.createdAt = createdAt
+    card.body = cardRecord.body
+    if record[CardKey.createdAt] != nil {
+      card.createdAt = cardRecord.createdAt
     }
-    if let updatedAt = record[CardKey.updatedAt] as? Date {
-      card.updatedAt = updatedAt
+    if record[CardKey.updatedAt] != nil {
+      card.updatedAt = cardRecord.updatedAt
     }
-    if let location = record[CardKey.location] as? CLLocation {
-      card.location = Coordinate(location.coordinate)
-    } else {
-      card.location = nil
-    }
+    card.location = cardRecord.location
   }
 
   static func update(_ edge: CardEdge, from record: CKRecord) {
-    if let cardID = (record[CardEdgeKey.cardID] as? String).flatMap(UUID.init(uuidString:)) {
+    let edgeRecord = CardEdgeRecord(record: record)
+    if
+      record[CardEdgeKey.cardID] != nil,
+      let cardID = UUID(uuidString: edgeRecord.cardIDRawValue)
+    {
       edge.setCardReferenceID(cardID)
     }
     edge.setParentEdgeReferenceID(
-      (record[CardEdgeKey.parentEdgeID] as? String)
-        .flatMap(UUID.init(uuidString:))
+      edgeRecord.parentEdgeIDRawValue.flatMap(UUID.init(uuidString:))
     )
-    edge.sortIndex = record[CardEdgeKey.sortIndex] as? Int ?? 0
-    edge.layout = record[CardEdgeKey.layout] as? Data
-    if let createdAt = record[CardEdgeKey.createdAt] as? Date {
-      edge.createdAt = createdAt
+    edge.sortIndex = edgeRecord.sortIndex
+    edge.layout = edgeRecord.layout
+    if record[CardEdgeKey.createdAt] != nil {
+      edge.createdAt = edgeRecord.createdAt
     }
-    if let updatedAt = record[CardEdgeKey.updatedAt] as? Date {
-      edge.updatedAt = updatedAt
+    if record[CardEdgeKey.updatedAt] != nil {
+      edge.updatedAt = edgeRecord.updatedAt
     }
   }
 
   static func update(_ attachment: Attachment, from record: CKRecord) {
-    if let cardID = (record[AttachmentKey.cardID] as? String).flatMap(UUID.init(uuidString:)) {
+    let attachmentRecord = AttachmentRecord(record: record)
+    if
+      record[AttachmentKey.cardID] != nil,
+      let cardID = UUID(uuidString: attachmentRecord.cardIDRawValue)
+    {
       attachment.setCardReferenceID(cardID)
     }
-    if let kind = record[AttachmentKey.kind] as? String {
-      attachment.kindRawValue = kind
+    if record[AttachmentKey.kind] != nil {
+      attachment.kindRawValue = attachmentRecord.kindRawValue
     }
-    attachment.byteSize = record[AttachmentKey.byteSize] as? Int ?? 0
-    if let primaryResourceID = (record[AttachmentKey.primaryResourceID] as? String)
-      .flatMap(UUID.init(uuidString:))
+    attachment.byteSize = attachmentRecord.byteSize
+    if
+      record[AttachmentKey.primaryResourceID] != nil,
+      let primaryResourceID = UUID(uuidString: attachmentRecord.primaryResourceIDRawValue)
     {
       attachment.setPrimaryResourceReferenceID(primaryResourceID)
     }
-    attachment.thumbnail = record[AttachmentKey.thumbnail] as? Data
-    if let createdAt = record[AttachmentKey.createdAt] as? Date {
-      attachment.createdAt = createdAt
+    attachment.thumbnail = attachmentRecord.thumbnail
+    if record[AttachmentKey.createdAt] != nil {
+      attachment.createdAt = attachmentRecord.createdAt
     }
   }
 
   static func update(_ resource: AttachmentResource, from record: CKRecord) {
-    if let attachmentID = (record[AttachmentResourceKey.attachmentID] as? String).flatMap(UUID.init(uuidString:)) {
+    let resourceRecord = AttachmentResourceRecord(record: record)
+    if
+      record[AttachmentResourceKey.attachmentID] != nil,
+      let attachmentID = UUID(uuidString: resourceRecord.attachmentIDRawValue)
+    {
       resource.setAttachmentReferenceID(attachmentID)
     }
-    if let role = record[AttachmentResourceKey.role] as? String {
-      resource.roleRawValue = role
+    if record[AttachmentResourceKey.role] != nil {
+      resource.roleRawValue = resourceRecord.roleRawValue
     }
-    resource.byteSize = record[AttachmentResourceKey.byteSize] as? Int ?? 0
-    resource.contentType = record[AttachmentResourceKey.contentType] as? String
-    resource.pixelWidth = record[AttachmentResourceKey.pixelWidth] as? Int
-    resource.pixelHeight = record[AttachmentResourceKey.pixelHeight] as? Int
-    resource.duration = record[AttachmentResourceKey.duration] as? Double
-    resource.isHDR = record[AttachmentResourceKey.isHDR] as? Bool ?? false
-    resource.colorSpaceName = record[AttachmentResourceKey.colorSpaceName] as? String
-    if let createdAt = record[AttachmentResourceKey.createdAt] as? Date {
-      resource.createdAt = createdAt
+    resource.byteSize = resourceRecord.byteSize
+    resource.contentType = resourceRecord.contentType
+    resource.pixelWidth = resourceRecord.pixelWidth
+    resource.pixelHeight = resourceRecord.pixelHeight
+    resource.duration = resourceRecord.duration
+    resource.isHDR = resourceRecord.isHDR
+    resource.colorSpaceName = resourceRecord.colorSpaceName
+    if record[AttachmentResourceKey.createdAt] != nil {
+      resource.createdAt = resourceRecord.createdAt
     }
   }
 

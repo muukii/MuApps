@@ -5,7 +5,11 @@ import CaptureDoodle
 import Foundation
 import MuColor
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// A pre-share review screen for one prepared card snapshot.
 ///
@@ -51,7 +55,7 @@ struct CardSharePreviewScreen: View {
       }
       .background(.background)
       .navigationTitle("Share Preview")
-      .navigationBarTitleDisplayMode(.inline)
+      .journalInlineNavigationTitle()
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Done") {
@@ -61,6 +65,16 @@ struct CardSharePreviewScreen: View {
         }
 
         ToolbarItem(placement: .confirmationAction) {
+          #if os(macOS)
+          if let fileURL = currentPreviewState.fileURL {
+            ShareLink(item: fileURL) {
+              Text(selectedMode == .image ? "Share Image" : "Share Video")
+            }
+          } else {
+            Button(selectedMode == .image ? "Share Image" : "Share Video") {}
+              .disabled(true)
+          }
+          #else
           switch selectedMode {
           case .image:
             Button("Share Image", action: shareImage)
@@ -69,6 +83,7 @@ struct CardSharePreviewScreen: View {
             Button("Share Video", action: shareVideo)
               .disabled(isShareActionDisabled)
           }
+          #endif
         }
       }
       .task(id: previewRenderRequest) {
@@ -81,9 +96,11 @@ struct CardSharePreviewScreen: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
       }
+      #if os(iOS)
       .sheet(item: $activityPresentation) { presentation in
         ActivityView(activityItems: [presentation.fileURL])
       }
+      #endif
       .alert("Couldn't Share", isPresented: $isShareFailurePresented) {
         Button("OK", role: .cancel) {}
       }
@@ -531,6 +548,7 @@ private struct CardShareVideoRGBA: Sendable, Equatable {
 
   @MainActor
   private init(uiColor: UIColor) {
+    #if canImport(UIKit)
     let resolved = uiColor.resolvedColor(with: .current)
     var red: CGFloat = 0
     var green: CGFloat = 0
@@ -548,6 +566,15 @@ private struct CardShareVideoRGBA: Sendable, Equatable {
         alpha: components[safe: 3] ?? 1
       )
     }
+    #else
+    let resolved = uiColor.usingColorSpace(.deviceRGB) ?? uiColor
+    var red: CGFloat = 0
+    var green: CGFloat = 0
+    var blue: CGFloat = 0
+    var alpha: CGFloat = 0
+    resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+    self.init(red: red, green: green, blue: blue, alpha: alpha)
+    #endif
   }
 
   private init(red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) {

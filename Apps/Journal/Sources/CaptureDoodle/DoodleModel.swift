@@ -1,6 +1,17 @@
 import CoreGraphics
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
+
+/// Raster image emitted by doodle export on the active Apple platform.
+#if canImport(UIKit)
+public typealias DoodleRasterImage = UIImage
+#elseif canImport(AppKit)
+public typealias DoodleRasterImage = NSImage
+#endif
 
 // MARK: - Vector model
 
@@ -69,16 +80,24 @@ public struct DoodleDrawing: Sendable, Equatable, Codable {
   /// debug preview. Normal card UI should render `DoodleDrawingView` so the
   /// drawing remains vector content.
   @MainActor
-  public func image(inkColor: Color, scale: CGFloat? = nil) -> UIImage? {
+  public func image(inkColor: Color, scale: CGFloat? = nil) -> DoodleRasterImage? {
     guard canvasSize.width > 0, canvasSize.height > 0 else { return nil }
     let renderer = ImageRenderer(
       content: DoodleStrokesView(strokes: strokes, liveStroke: nil, inkColor: inkColor, revealedTime: nil)
         .frame(width: canvasSize.width, height: canvasSize.height)
     )
+    #if canImport(UIKit)
     let resolvedScale = scale ?? UITraitCollection.current.displayScale
+    #elseif canImport(AppKit)
+    let resolvedScale = scale ?? NSScreen.main?.backingScaleFactor ?? 1
+    #endif
     renderer.scale = resolvedScale > 0 ? resolvedScale : 1
     renderer.isOpaque = false
+    #if canImport(UIKit)
     return renderer.uiImage
+    #elseif canImport(AppKit)
+    return renderer.nsImage
+    #endif
   }
 }
 

@@ -42,6 +42,12 @@ public enum CKFieldBridge {
     if let converted = convert(rawValue, valueKind: valueKind, to: Value.self) {
       return converted
     }
+    if let defaultValue {
+      return defaultValue
+    }
+    if let nilValue = optionalNilValue(Value.self) {
+      return nilValue
+    }
 
     preconditionFailure(
       "CloudKit field '\(fieldName)' cannot be read as \(Value.self)"
@@ -152,7 +158,7 @@ extension CKFieldBridge {
 private protocol AnyOptional {
   static var wrappedType: Any.Type { get }
   static var nilValue: Any { get }
-  static func some(_ value: Any) -> Any
+  static func some(_ value: Any) -> Any?
   var wrappedValue: Any? { get }
 }
 
@@ -160,8 +166,10 @@ extension Optional: AnyOptional {
   static var wrappedType: Any.Type { Wrapped.self }
   static var nilValue: Any { Optional<Wrapped>.none as Any }
 
-  static func some(_ value: Any) -> Any {
-    let wrappedValue = value as! Wrapped
+  static func some(_ value: Any) -> Any? {
+    guard let wrappedValue = value as? Wrapped else {
+      return nil
+    }
     return Optional(wrappedValue) as Any
   }
 

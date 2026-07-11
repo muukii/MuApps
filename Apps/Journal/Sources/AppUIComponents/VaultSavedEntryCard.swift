@@ -2,7 +2,6 @@ import GaussianLinearGradient
 import JournalVault
 import MuColor
 import SwiftUI
-import VariableBlur
 
 /// Display value consumed by saved vault card components.
 ///

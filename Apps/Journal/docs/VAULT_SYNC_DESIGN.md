@@ -317,6 +317,9 @@ vault store、CloudKit outbox が作られる。
 Root screen routing は、fresh install だけ blocking Loading から始める。
 初回は `JournalVaultRuntime.resolveInitialVaultAvailability()` を待ち、
 iCloud available なら private / shared database の初回 vault discovery を行う。
+この blocking discovery は Journal vault zone と `VaultInfo` display metadata record までに限定し、
+`Card` / `Attachment` / `AttachmentResource.file` の full import と `CKAsset` download は
+resolved decision 後の background `CKSyncEngine.fetchChanges` に任せる。
 iCloud no account / restricted では local-only state として resolution を完了し、
 CloudKit を使っていない user を Loading に閉じ込めない。
 iCloud temporarily unavailable、account status could not determine、network failure では
@@ -554,6 +557,8 @@ erDiagram
   VAULT_INFO {
     uuid id
     string title
+    string iconKind
+    string iconValue
   }
 
   CARD_EDGE {

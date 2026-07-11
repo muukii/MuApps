@@ -1,7 +1,12 @@
 @preconcurrency import AVFoundation
+import CoreImage
 import ImageIO
 import Observation
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// Owns the AVFoundation camera session and bridges camera state to SwiftUI.
 /// Internal to the framework so AVFoundation setup stays behind the component's
@@ -23,6 +28,15 @@ final class CameraController {
   private(set) var authorization: AuthorizationState = .unknown
   private(set) var isFront = false
   private(set) var isRunning = false
+
+  /// Whether the current platform exposes meaningful front/back camera choices.
+  var canFlipCamera: Bool {
+    #if os(macOS)
+    false
+    #else
+    true
+    #endif
+  }
 
   @ObservationIgnored private let cameraSession = CameraSession()
   @ObservationIgnored private var activePhotoCaptureProcessor: PhotoCaptureProcessor?
@@ -58,6 +72,7 @@ final class CameraController {
   }
 
   func flip() async {
+    guard canFlipCamera else { return }
     await start(front: !isFront)
   }
 
@@ -90,7 +105,15 @@ final class CameraController {
 
   private func start(front: Bool) async {
     do {
-      try await cameraSession.configureAndStart(position: front ? .front : .back)
+      #if os(macOS)
+      // Mac cameras don't model the iPhone front/back relationship. Asking for
+      // an unspecified video device lets AVFoundation select the built-in or
+      // user-selected continuity camera instead of filtering every device out.
+      let position = AVCaptureDevice.Position.unspecified
+      #else
+      let position: AVCaptureDevice.Position = front ? .front : .back
+      #endif
+      try await cameraSession.configureAndStart(position: position)
       isFront = front
       isRunning = true
     } catch {
@@ -152,7 +175,9 @@ private final class CameraSession: @unchecked Sendable {
 
       do {
         self.session.sessionPreset = .photo
+        #if os(iOS)
         self.session.automaticallyConfiguresCaptureDeviceForWideColor = true
+        #endif
 
         if let currentInput = self.currentInput {
           self.session.removeInput(currentInput)
@@ -195,7 +220,9 @@ private final class CameraSession: @unchecked Sendable {
     with settings: AVCapturePhotoSettings,
     delegate: PhotoCaptureProcessor
   ) {
+    #if os(iOS)
     photoOutput.connection(with: .video)?.setPortraitVideoRotationIfSupported()
+    #endif
     photoOutput.capturePhoto(with: settings, delegate: delegate)
   }
 
@@ -208,12 +235,23 @@ private final class CameraSession: @unchecked Sendable {
   }
 
   private static func bestBuiltInCamera(position: AVCaptureDevice.Position) throws -> AVCaptureDevice {
+    if position == .unspecified,
+       let defaultVideoDevice = AVCaptureDevice.default(for: .video) {
+      return defaultVideoDevice
+    }
+
+    #if os(iOS)
+    let deviceTypes: [AVCaptureDevice.DeviceType] = [
+      .builtInWideAngleCamera,
+      .builtInUltraWideCamera,
+      .builtInTelephotoCamera,
+    ]
+    #else
+    let deviceTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera]
+    #endif
+
     let discoverySession = AVCaptureDevice.DiscoverySession(
-      deviceTypes: [
-        .builtInWideAngleCamera,
-        .builtInUltraWideCamera,
-        .builtInTelephotoCamera,
-      ],
+      deviceTypes: deviceTypes,
       mediaType: .video,
       position: position
     )
@@ -273,6 +311,7 @@ private final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelega
       throw CameraError.missingImageRepresentation
     }
 
+    #if canImport(UIKit)
     let orientation = photo.cgImagePropertyOrientation.uiImageOrientation
     let image = UIImage(cgImage: cgImage, scale: 1, orientation: orientation)
     let outputImage = isMirrored ? image.withHorizontallyFlippedOrientation() : image
@@ -282,12 +321,30 @@ private final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelega
     }
 
     return CapturedPhoto(imageData: data, pixelSize: outputImage.size)
+    #elseif canImport(AppKit)
+    let orientedImage = CIImage(cgImage: cgImage)
+      .oriented(photo.cgImagePropertyOrientation)
+    let context = CIContext(options: [.useSoftwareRenderer: false])
+    guard let outputCGImage = context.createCGImage(orientedImage, from: orientedImage.extent) else {
+      throw CameraError.missingImageRepresentation
+    }
+
+    let bitmap = NSBitmapImageRep(cgImage: outputCGImage)
+    guard let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else {
+      throw CameraError.missingJPEGData
+    }
+    return CapturedPhoto(
+      imageData: data,
+      pixelSize: CGSize(width: outputCGImage.width, height: outputCGImage.height)
+    )
+    #endif
   }
 }
 
 private extension AVCapturePhoto {
 
   var cgImagePropertyOrientation: CGImagePropertyOrientation {
+    #if os(iOS)
     guard
       let value = metadata[String(kCGImagePropertyOrientation)] as? NSNumber,
       let orientation = CGImagePropertyOrientation(rawValue: value.uint32Value)
@@ -296,9 +353,15 @@ private extension AVCapturePhoto {
     }
 
     return orientation
+    #else
+    // Desktop capture devices deliver their still image in display orientation;
+    // AVCapturePhoto does not expose the iOS metadata dictionary on macOS.
+    return .up
+    #endif
   }
 }
 
+#if canImport(UIKit)
 private extension CGImagePropertyOrientation {
 
   var uiImageOrientation: UIImage.Orientation {
@@ -322,6 +385,7 @@ private extension CGImagePropertyOrientation {
     }
   }
 }
+#endif
 
 private extension DispatchQueue {
 

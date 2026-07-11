@@ -1,6 +1,10 @@
 @preconcurrency import LinkPresentation
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// SwiftUI wrapper around iOS's native rich link preview.
 ///
@@ -89,6 +93,7 @@ private enum LinkPreviewMetadataCache {
   }
 }
 
+#if canImport(UIKit)
 private struct LinkPreviewRepresentable: UIViewRepresentable {
 
   let url: URL
@@ -161,3 +166,69 @@ private final class LinkPreviewContainerView: UIView {
     CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
   }
 }
+#elseif canImport(AppKit)
+private struct LinkPreviewRepresentable: NSViewRepresentable {
+  let url: URL
+  let metadata: LPLinkMetadata?
+
+  func makeNSView(context: Context) -> LinkPreviewContainerView {
+    LinkPreviewContainerView(metadata: metadata ?? Self.placeholderMetadata(for: url))
+  }
+
+  func updateNSView(_ nsView: LinkPreviewContainerView, context: Context) {
+    nsView.metadata = metadata ?? Self.placeholderMetadata(for: url)
+  }
+
+  private static func placeholderMetadata(for url: URL) -> LPLinkMetadata {
+    let metadata = LPLinkMetadata()
+    metadata.originalURL = url
+    metadata.url = url
+    metadata.title = url.host(percentEncoded: false) ?? url.absoluteString
+    return metadata
+  }
+}
+
+/// Width-constrained native AppKit host for `LPLinkView`.
+private final class LinkPreviewContainerView: NSView {
+  private let linkView: LPLinkView
+
+  var metadata: LPLinkMetadata {
+    didSet {
+      linkView.metadata = metadata
+      linkView.invalidateIntrinsicContentSize()
+      invalidateIntrinsicContentSize()
+      needsLayout = true
+    }
+  }
+
+  init(metadata: LPLinkMetadata) {
+    self.metadata = metadata
+    self.linkView = LPLinkView(metadata: metadata)
+    super.init(frame: .zero)
+
+    wantsLayer = true
+    layer?.backgroundColor = NSColor.clear.cgColor
+    linkView.translatesAutoresizingMaskIntoConstraints = false
+    linkView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    linkView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    linkView.setContentHuggingPriority(.defaultLow, for: .vertical)
+    linkView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+    addSubview(linkView)
+    NSLayoutConstraint.activate([
+      linkView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      linkView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      linkView.topAnchor.constraint(equalTo: topAnchor),
+      linkView.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override var intrinsicContentSize: NSSize {
+    NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+  }
+}
+#endif

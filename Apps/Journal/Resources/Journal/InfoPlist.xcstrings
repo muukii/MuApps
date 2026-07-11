@@ -1,108 +1,120 @@
 {
-  "sourceLanguage": "en",
-  "strings": {
-    "CFBundleDisplayName": {
-      "comment": "Bundle display name",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tinycurve"
+  "sourceLanguage" : "en",
+  "strings" : {
+    "CFBundleDisplayName" : {
+      "comment" : "Bundle display name",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycurve"
           }
         },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tinycurve"
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycurve"
           }
         }
       }
     },
-    "CFBundleName": {
-      "comment": "Bundle name",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "TinycurveJ"
+    "CFBundleName" : {
+      "comment" : "Bundle name",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TinycurveJ"
           }
         },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "TinycurveJ"
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TinycurveJ"
           }
         }
       }
     },
-    "NSCameraUsageDescription": {
-      "comment": "Privacy - Camera Usage Description",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Take a photo to attach to a journal entry."
+    "NSCameraUsageDescription" : {
+      "comment" : "Privacy - Camera Usage Description",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Take a photo to attach to a journal entry."
           }
         },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "記録に添付する写真を撮影するためにカメラを使用します。"
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記録に添付する写真を撮影するためにカメラを使用します。"
           }
         }
       }
     },
-    "NSLocationWhenInUseUsageDescription": {
-      "comment": "Privacy - Location When In Use Usage Description",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Attach where you are to a journal entry."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "記録に現在地を添付するために位置情報を使用します。"
+    "NSHumanReadableCopyright" : {
+      "comment" : "Copyright (human-readable)",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Copyright ©. All rights reserved."
           }
         }
       }
     },
-    "NSMicrophoneUsageDescription": {
-      "comment": "Privacy - Microphone Usage Description",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Record the ambient sound around you to attach to a journal entry."
+    "NSLocationWhenInUseUsageDescription" : {
+      "comment" : "Privacy - Location When In Use Usage Description",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Attach where you are to a journal entry."
           }
         },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "記録に添付する環境音を録音するためにマイクを使用します。"
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記録に現在地を添付するために位置情報を使用します。"
           }
         }
       }
     },
-    "NSPhotoLibraryUsageDescription": {
-      "comment": "Privacy - Photo Library Usage Description",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose a photo to attach to a journal entry."
+    "NSMicrophoneUsageDescription" : {
+      "comment" : "Privacy - Microphone Usage Description",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record the ambient sound around you to attach to a journal entry."
           }
         },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "記録に添付する写真を選ぶために写真ライブラリを使用します。"
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記録に添付する環境音を録音するためにマイクを使用します。"
+          }
+        }
+      }
+    },
+    "NSPhotoLibraryUsageDescription" : {
+      "comment" : "Privacy - Photo Library Usage Description",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a photo to attach to a journal entry."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記録に添付する写真を選ぶために写真ライブラリを使用します。"
           }
         }
       }
     }
   },
-  "version": "1.0"
+  "version" : "1.0"
 }

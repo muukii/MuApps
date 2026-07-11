@@ -47,7 +47,7 @@ public struct VaultShareAcceptance: @unchecked Sendable {
 /// existing iCloud vaults. Later launches still start the sync engine, but the
 /// UI can route from cached local state while CloudKit catches up.
 public enum VaultInitialAvailabilityResolution: Equatable, Sendable {
-  /// CloudKit was available and the engine performed the initial vault discovery pass.
+  /// CloudKit was available and the engine performed the initial vault/title discovery pass.
   case resolvedWithCloudKit
 
   /// CloudKit cannot be used by this user or environment, so the app can begin
@@ -197,7 +197,7 @@ public protocol VaultSyncEngine: Sendable {
   /// vaults or local-only state.
   ///
   /// This is the only sync operation that may block first-launch routing. It
-  /// should not mean that all records or assets are up to date.
+  /// should not mean that all card records or assets are up to date.
   func resolveInitialVaultAvailability() async -> VaultInitialAvailabilityResolution
 
   /// Declares foreground interest in one vault (its screen was opened): kick a

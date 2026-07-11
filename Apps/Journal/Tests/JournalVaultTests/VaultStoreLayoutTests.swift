@@ -6,6 +6,34 @@ import Testing
 struct VaultStoreLayoutTests {
 
   @Test
+  func cloudKitEnvironmentParsesInfoPlistValues() {
+    #expect(VaultCloudKitEnvironment(infoPlistValue: "development") == .development)
+    #expect(VaultCloudKitEnvironment(infoPlistValue: "production") == .production)
+    #expect(VaultCloudKitEnvironment(infoPlistValue: " Production ") == .production)
+    #expect(VaultCloudKitEnvironment(infoPlistValue: "staging") == nil)
+    #expect(VaultCloudKitEnvironment(infoPlistValue: nil) == nil)
+  }
+
+  @Test
+  func appGroupRootIsScopedByCloudKitEnvironment() {
+    let containerURL = FileManager.default.temporaryDirectory
+      .appending(path: "JournalAppGroup-\(UUID().uuidString)", directoryHint: .isDirectory)
+
+    let developmentURL = VaultStoreLayout.appGroupRootDirectoryURL(
+      containerURL: containerURL,
+      cloudKitEnvironment: .development
+    )
+    let productionURL = VaultStoreLayout.appGroupRootDirectoryURL(
+      containerURL: containerURL,
+      cloudKitEnvironment: .production
+    )
+
+    #expect(developmentURL.path.hasSuffix("Journal/development"))
+    #expect(productionURL.path.hasSuffix("Journal/production"))
+    #expect(developmentURL != productionURL)
+  }
+
+  @Test
   func pathsAreVaultScoped() {
     let layout = makeTemporaryLayout()
     let vaultID = VaultID()

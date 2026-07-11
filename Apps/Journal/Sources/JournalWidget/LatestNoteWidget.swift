@@ -4,7 +4,11 @@ import CaptureDoodle
 import JournalVault
 import SwiftData
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 import WidgetKit
 
 // MARK: - Widget
@@ -18,14 +22,16 @@ import WidgetKit
 struct LatestNoteWidget: Widget {
 
   private let kind = JournalWidgetKind.latestNote
+  #if os(iOS)
   private let supportedFamilies: [WidgetFamily] = [
-    .systemSmall,
-    .systemMedium,
-    .systemLarge,
-    .accessoryInline,
-    .accessoryCircular,
-    .accessoryRectangular,
+    .systemSmall, .systemMedium, .systemLarge,
+    .accessoryInline, .accessoryCircular, .accessoryRectangular,
   ]
+  #else
+  private let supportedFamilies: [WidgetFamily] = [
+    .systemSmall, .systemMedium, .systemLarge,
+  ]
+  #endif
 
   var body: some WidgetConfiguration {
     AppIntentConfiguration(
@@ -428,6 +434,7 @@ private struct LatestNoteView: View {
   let entry: LatestNoteEntry
 
   var body: some View {
+    #if os(iOS)
     switch family {
     case .accessoryInline:
       LatestNoteInlineAccessoryView(entry: entry)
@@ -436,15 +443,23 @@ private struct LatestNoteView: View {
     case .accessoryRectangular:
       LatestNoteRectangularAccessoryView(entry: entry)
     default:
-      if let note = entry.note {
-        LatestNoteContentCard(
-          vault: entry.vault,
-          note: note,
-          family: family
-        )
-      } else {
-        LatestNoteEmptyState(vault: entry.vault)
-      }
+      standardFamilyContent
+    }
+    #else
+    standardFamilyContent
+    #endif
+  }
+
+  @ViewBuilder
+  private var standardFamilyContent: some View {
+    if let note = entry.note {
+      LatestNoteContentCard(
+        vault: entry.vault,
+        note: note,
+        family: family
+      )
+    } else {
+      LatestNoteEmptyState(vault: entry.vault)
     }
   }
 }
@@ -639,6 +654,7 @@ private struct WidgetPhotoView: View {
   var accessibilityLabel: LocalizedStringResource = "Photo"
 
   var body: some View {
+    #if canImport(UIKit)
     if let uiImage = imageData.flatMap(UIImage.init(data:)) {
       WidgetRenderedMediaFrame {
         Image(uiImage: uiImage)
@@ -651,6 +667,20 @@ private struct WidgetPhotoView: View {
     } else {
       WidgetMediaLabel(title: fallbackTitle, systemImage: fallbackSystemImage)
     }
+    #elseif canImport(AppKit)
+    if let nsImage = imageData.flatMap(NSImage.init(data:)) {
+      WidgetRenderedMediaFrame {
+        Image(nsImage: nsImage)
+          .resizable()
+          .scaledToFill()
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .clipped()
+      }
+      .accessibilityLabel(Text(accessibilityLabel))
+    } else {
+      WidgetMediaLabel(title: fallbackTitle, systemImage: fallbackSystemImage)
+    }
+    #endif
   }
 }
 

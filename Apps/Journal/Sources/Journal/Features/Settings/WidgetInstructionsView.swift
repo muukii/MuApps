@@ -21,7 +21,7 @@ struct WidgetInstructionsView: View {
     }
     .background(.background)
     .navigationTitle("Widgets")
-    .navigationBarTitleDisplayMode(.inline)
+    .journalInlineNavigationTitle()
   }
 }
 

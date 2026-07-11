@@ -42,6 +42,16 @@ public enum VaultCloudKitSchema {
         .string,
         missing: .defaultValue("empty title")
       ),
+      optionalField(
+        VaultRecordMapper.VaultInfoKey.iconKind,
+        .string,
+        missing: .preserveExistingValue
+      ),
+      optionalField(
+        VaultRecordMapper.VaultInfoKey.iconValue,
+        .string,
+        missing: .preserveExistingValue
+      ),
       dateField(VaultRecordMapper.VaultInfoKey.createdAt),
       dateField(VaultRecordMapper.VaultInfoKey.updatedAt),
     ],

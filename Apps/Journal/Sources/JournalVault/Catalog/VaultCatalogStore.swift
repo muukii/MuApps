@@ -144,7 +144,7 @@ extension VaultCatalogStore {
     try layout.ensureVaultDirectories(for: vaultID)
 
     let store = try registry.store(for: vaultID)
-    try store.seedVaultInfo(title: title)
+    try store.seedVaultInfo(title: title, icon: icon)
 
     let context = container.mainContext
     context.insert(
@@ -205,11 +205,39 @@ extension VaultCatalogStore {
     try context.save()
   }
 
-  /// Applies a vault title imported from its `VaultInfo` record.
+  /// Applies display metadata imported from a vault's `VaultInfo` record.
+  ///
+  /// `icon == nil` means the remote record predates synchronized icons; in
+  /// that case the catalog keeps its existing local icon.
   @MainActor
-  public func applyImportedVaultInfo(vaultID: VaultID, title: String) throws {
+  public func applyImportedVaultInfo(
+    vaultID: VaultID,
+    title: String,
+    icon: VaultIcon? = nil
+  ) throws {
     let context = container.mainContext
     guard let index = try fetchIndex(vaultID: vaultID, in: context) else { return }
+    index.title = title
+    if let icon {
+      index.iconKindRawValue = icon.kind.rawValue
+      index.iconValue = icon.value
+    }
+    if let summary = try fetchSummary(vaultID: vaultID, in: context) {
+      summary.title = title
+    }
+    try context.save()
+  }
+
+  /// Updates the local catalog title used by picker, widgets, and settings.
+  ///
+  /// This does not touch the vault content store. Callers that are changing the
+  /// shared vault title should update `VaultInfo` first, then mirror that title
+  /// into the catalog through this method.
+  @MainActor
+  public func renameVault(vaultID: VaultID, title: String) throws {
+    let context = container.mainContext
+    guard let index = try fetchIndex(vaultID: vaultID, in: context) else { return }
+
     index.title = title
     if let summary = try fetchSummary(vaultID: vaultID, in: context) {
       summary.title = title
@@ -217,7 +245,10 @@ extension VaultCatalogStore {
     try context.save()
   }
 
-  /// Updates the local catalog icon used by picker, widget, and launch surfaces.
+  /// Mirrors the shared vault icon into picker, widget, and launch surfaces.
+  ///
+  /// This method does not enqueue CloudKit work. Callers must update the
+  /// content store's `VaultInfo` first, matching `renameVault`.
   @MainActor
   public func updateVaultIcon(vaultID: VaultID, icon: VaultIcon) throws {
     let context = container.mainContext

@@ -3,16 +3,18 @@ import Foundation
 /// On-disk layout of Journal's vault persistence tree.
 ///
 /// ```text
-/// <root>/                      "Journal" inside the App Group container
-///   catalog.sqlite             VaultCatalogStore
-///   Vaults/
-///     <vault-id>/
-///       store.sqlite           VaultContentStore(vaultID)
-///       media/                 attachment bytes, one file per attachment id
-///   SyncState/                 CKSyncEngine state serializations. Engine state
+/// <App Group>/Journal/
+///   development/               Debug builds, CloudKit Development database
+///   production/                Release/TestFlight/App Store, CloudKit Production database
+///     catalog.sqlite           VaultCatalogStore
+///     Vaults/
+///       <vault-id>/
+///         store.sqlite         VaultContentStore(vaultID)
+///         media/               attachment bytes, one file per attachment id
+///     SyncState/               CKSyncEngine state serializations. Engine state
 ///                              is per CloudKit *database* (private / shared),
-///                              not per vault, so it lives at the root.
-///   Vaults/<vault-id>/needs-cloudkit-refetch
+///                              not per vault, so it lives at the environment root.
+///     Vaults/<vault-id>/needs-cloudkit-refetch
 ///                              Pre-release recovery marker consumed by the
 ///                              CloudKit sync engine after a local store reset.
 /// ```
@@ -38,8 +40,14 @@ public struct VaultStoreLayout: Hashable, Sendable {
     self.rootDirectoryURL = rootDirectoryURL
   }
 
-  /// The production layout: `<App Group container>/Journal`.
-  public static func appGroup() throws -> VaultStoreLayout {
+  /// The app/widget layout for one CloudKit environment.
+  ///
+  /// Development and production CloudKit databases are independent, so their
+  /// local catalog, vault stores, media, and CKSyncEngine tokens must not share
+  /// one on-disk root.
+  public static func appGroup(
+    cloudKitEnvironment: VaultCloudKitEnvironment = .current
+  ) throws -> VaultStoreLayout {
     guard
       let container = FileManager.default.containerURL(
         forSecurityApplicationGroupIdentifier: appGroupIdentifier
@@ -48,8 +56,20 @@ public struct VaultStoreLayout: Hashable, Sendable {
       throw Error.appGroupContainerUnavailable
     }
     return VaultStoreLayout(
-      rootDirectoryURL: container.appending(path: "Journal", directoryHint: .isDirectory)
+      rootDirectoryURL: appGroupRootDirectoryURL(
+        containerURL: container,
+        cloudKitEnvironment: cloudKitEnvironment
+      )
     )
+  }
+
+  static func appGroupRootDirectoryURL(
+    containerURL: URL,
+    cloudKitEnvironment: VaultCloudKitEnvironment
+  ) -> URL {
+    containerURL
+      .appending(path: "Journal", directoryHint: .isDirectory)
+      .appending(path: cloudKitEnvironment.storageDirectoryName, directoryHint: .isDirectory)
   }
 
   // MARK: - Paths

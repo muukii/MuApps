@@ -23,7 +23,7 @@ struct JournalHelpView: View {
     }
     .background(.background)
     .navigationTitle("Help")
-    .navigationBarTitleDisplayMode(.inline)
+    .journalInlineNavigationTitle()
   }
 }
 

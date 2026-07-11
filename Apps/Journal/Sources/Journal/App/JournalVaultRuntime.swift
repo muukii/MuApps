@@ -206,6 +206,10 @@ final class JournalVaultRuntime {
 
   /// Selects a vault and asks its instance to enter foreground sync interest.
   func selectVault(_ vaultID: VaultID) async {
+    if selectedVault?.vaultID == vaultID, selectedVaultState == .active {
+      return
+    }
+
     guard let descriptor = vaults.first(where: { $0.vaultID == vaultID }) else {
       lastMessage = "Vault not found."
       return
@@ -311,14 +315,64 @@ final class JournalVaultRuntime {
     }
   }
 
-  /// Updates a vault's local presentation icon and refreshes dependent UI state.
+  /// Updates a writable vault's shared icon and refreshes dependent UI state.
   func updateVaultIcon(vaultID: VaultID, icon: VaultIcon) async -> Bool {
+    guard let descriptor = vaults.first(where: { $0.vaultID == vaultID }) else {
+      lastMessage = "Vault not found."
+      return false
+    }
+
+    guard descriptor.permission != .readOnly else {
+      lastMessage = "This vault is read-only."
+      return false
+    }
+
     do {
+      let store = try registry.store(for: vaultID)
+      try store.updateVaultIcon(icon, title: descriptor.title)
       try catalogStore.updateVaultIcon(vaultID: vaultID, icon: icon)
       try reloadCatalog()
       refreshSelectedVaultDescriptor()
+      refreshSelectedVaultPendingMutationCount()
       WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
       lastMessage = "Updated vault icon."
+      return true
+    } catch {
+      lastMessage = error.localizedDescription
+      return false
+    }
+  }
+
+  /// Renames a writable vault and refreshes all title-bearing UI surfaces.
+  ///
+  /// The vault store write updates the sync-visible `VaultInfo` row; the catalog
+  /// write mirrors that title into the lightweight picker/widget metadata.
+  func renameVault(vaultID: VaultID, title rawTitle: String) async -> Bool {
+    let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard title.isEmpty == false else {
+      lastMessage = "Vault title is required."
+      return false
+    }
+
+    guard let descriptor = vaults.first(where: { $0.vaultID == vaultID }) else {
+      lastMessage = "Vault not found."
+      return false
+    }
+
+    guard descriptor.permission != .readOnly else {
+      lastMessage = "This vault is read-only."
+      return false
+    }
+
+    do {
+      let store = try registry.store(for: vaultID)
+      try store.renameVault(title: title)
+      try catalogStore.renameVault(vaultID: vaultID, title: title)
+      try reloadCatalog()
+      refreshSelectedVaultDescriptor()
+      refreshSelectedVaultPendingMutationCount()
+      WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
+      lastMessage = "Renamed vault."
       return true
     } catch {
       lastMessage = error.localizedDescription
@@ -333,13 +387,11 @@ final class JournalVaultRuntime {
   /// still-existing zone and bring the vault back.
   @discardableResult
   func deleteVault(_ descriptor: VaultDescriptor) async -> Bool {
+    let isDeletingSelectedVault = selectedVault?.vaultID == descriptor.vaultID
+    let deletedVaultIndex = vaults.firstIndex { $0.vaultID == descriptor.vaultID }
+
     do {
       try await syncEngine.deleteVault(descriptor)
-
-      if selectedVault?.vaultID == descriptor.vaultID {
-        selectedVault = nil
-        selectedVaultState = .inactive
-      }
 
       instanceRegistry.discardInstance(for: descriptor.vaultID)
       registry.discardStore(for: descriptor.vaultID)
@@ -347,8 +399,23 @@ final class JournalVaultRuntime {
       try catalogStore.deleteVault(vaultID: descriptor.vaultID)
       try reloadCatalog()
 
+      if isDeletingSelectedVault {
+        selectedVault = nil
+        selectedVaultState = .inactive
+
+        if let fallbackDescriptor = deletionFallbackDescriptor(
+          deletedVaultIndex: deletedVaultIndex
+        ) {
+          await openSelectedVault(fallbackDescriptor)
+        }
+      }
+
       WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
-      lastMessage = "Deleted \(descriptor.title)."
+      if case .failed = selectedVaultState {
+        // Preserve the fallback-open error so the Home recovery state can show it.
+      } else {
+        lastMessage = "Deleted \(descriptor.title)."
+      }
       if case .failed = state {
         state = .ready
       }
@@ -406,17 +473,41 @@ final class JournalVaultRuntime {
   #endif
 
   private func openSelectedVault(_ descriptor: VaultDescriptor) async {
-    selectedVaultState = .opening
+    let previousVault = selectedVault
+    let wasPreviouslyActive = previousVault != nil && selectedVaultState == .active
+
+    if wasPreviouslyActive == false {
+      selectedVaultState = .opening
+    }
 
     do {
       let instance = try instanceRegistry.instance(for: descriptor)
-      selectedVault = instance
       await instance.activateForeground()
+      selectedVault = instance
       selectedVaultState = .active
     } catch {
-      selectedVault = nil
-      selectedVaultState = .failed(error.localizedDescription)
+      lastMessage = error.localizedDescription
+
+      if wasPreviouslyActive, let previousVault {
+        selectedVault = previousVault
+        selectedVaultState = .active
+      } else {
+        selectedVault = nil
+        selectedVaultState = .failed(error.localizedDescription)
+      }
     }
+  }
+
+  /// Chooses the row that replaces a deleted active vault.
+  ///
+  /// The row that followed the deleted vault keeps its index; deleting the last
+  /// row falls back to the new last row. An empty catalog intentionally returns
+  /// `nil`, which is the Home screen's `noVault` state.
+  private func deletionFallbackDescriptor(deletedVaultIndex: Int?) -> VaultDescriptor? {
+    guard vaults.isEmpty == false else { return nil }
+
+    let preferredIndex = min(deletedVaultIndex ?? 0, vaults.index(before: vaults.endIndex))
+    return vaults[preferredIndex]
   }
 
   private func reloadCatalog() throws {

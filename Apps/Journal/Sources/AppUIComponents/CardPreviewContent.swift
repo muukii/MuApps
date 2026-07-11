@@ -3,7 +3,9 @@ import CaptureDoodle
 import JournalVault
 import MuColor
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 
 /// Renders the card-kind-specific content inside a Journal card.
 ///
@@ -2170,9 +2172,11 @@ private enum CardPreviewMediaFileReader {
         return nil
       }
 
+      #if canImport(UIKit)
       if let preparedImage = await image.byPreparingForDisplay() {
         return preparedImage
       }
+      #endif
 
       return image
     }.value
@@ -2187,9 +2191,11 @@ private enum CardPreviewMediaFileReader {
         return nil
       }
 
+      #if canImport(UIKit)
       if let preparedImage = await image.byPreparingForDisplay() {
         return preparedImage
       }
+      #endif
 
       return image
     }.value

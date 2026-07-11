@@ -1,6 +1,10 @@
 import QuartzCore
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// A recorder for creating playable tap-only haptic timelines by hand.
 ///
@@ -105,7 +109,12 @@ public struct HapticTapSequencerView: View {
   }
 
   private func copySwiftCode() {
+    #if canImport(UIKit)
     UIPasteboard.general.string = sequence.swiftSourceCode
+    #elseif canImport(AppKit)
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(sequence.swiftSourceCode, forType: .string)
+    #endif
   }
 }
 
@@ -242,9 +251,11 @@ fileprivate struct HapticTapSequencerContent: View {
       }
     }
     .navigationTitle("Haptic Doodle")
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
     .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
+      ToolbarItem(placement: playbackToolbarPlacement) {
         Button {
           onPlay()
         } label: {
@@ -253,6 +264,14 @@ fileprivate struct HapticTapSequencerContent: View {
         .disabled(!isSupported || sequence.isEmpty)
       }
     }
+  }
+
+  private var playbackToolbarPlacement: ToolbarItemPlacement {
+    #if os(iOS)
+    .topBarTrailing
+    #else
+    .primaryAction
+    #endif
   }
 }
 

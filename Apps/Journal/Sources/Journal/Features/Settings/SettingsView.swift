@@ -7,6 +7,12 @@ import SwiftUI
 
 /// App-wide `UserDefaults` keys for Journal.
 enum JournalDefaults {
+  private static let cloudKitEnvironmentKeySuffix = VaultCloudKitEnvironment.current.rawValue
+
+  private static func cloudKitScopedKey(_ baseKey: String) -> String {
+    "\(baseKey).\(cloudKitEnvironmentKeySuffix)"
+  }
+
   /// Selected color theme id. Resolved against `Theme.all` via `Theme.with(id:)`,
   /// falling back to `Theme.default` for unknown ids.
   static let themeID = "journal.theme.id"
@@ -30,14 +36,22 @@ enum JournalDefaults {
   ///
   /// Stored as a `VaultID.uuidString` because this is a per-device presentation
   /// preference, not catalog data that should sync through `JournalVault`.
-  static let lastSelectedVaultID = "journal.vault.lastSelected.id"
+  /// Scoped by CloudKit environment because development and production catalogs
+  /// live in separate local stores.
+  static var lastSelectedVaultID: String {
+    cloudKitScopedKey("journal.vault.lastSelected.id")
+  }
 
   /// Whether the app has resolved its first vault availability decision.
   ///
   /// `RootView` uses this as a presentation cache only. The vault runtime still
   /// starts on every launch, but only the first install launch blocks while the
   /// app decides whether to recover iCloud vaults or continue from local-only state.
-  static let hasResolvedInitialVaultAvailability = "journal.vault.initialAvailability.resolved"
+  /// Scoped by CloudKit environment so a Debug recovery decision cannot skip the
+  /// Release/TestFlight production discovery pass.
+  static var hasResolvedInitialVaultAvailability: String {
+    cloudKitScopedKey("journal.vault.initialAvailability.resolved")
+  }
 }
 
 /// The user's app-wide appearance preference.
@@ -177,10 +191,10 @@ struct SettingsView: View {
     .scrollContentBackground(.hidden)
     .background(.background)
     .navigationTitle("Settings")
-    .navigationBarTitleDisplayMode(.inline)
+    .journalInlineNavigationTitle()
     .sensoryFeedback(.selection, trigger: appearancePreferenceID)
     .sensoryFeedback(.selection, trigger: shouldAttachLocationToNewCards)
-    .fullScreenCover(isPresented: $isShowingOnboarding) {
+    .journalFullScreenCover(isPresented: $isShowingOnboarding) {
       OnboardingView(onComplete: { isShowingOnboarding = false })
     }
   }
@@ -310,9 +324,9 @@ fileprivate struct CloudStorageEstimateView: View {
     .scrollContentBackground(.hidden)
     .background(.background)
     .navigationTitle("Cloud Storage")
-    .navigationBarTitleDisplayMode(.inline)
+    .journalInlineNavigationTitle()
     .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
+      ToolbarItem(placement: .journalTrailingAction) {
         Button {
           Task { await refresh() }
         } label: {
@@ -602,7 +616,7 @@ fileprivate struct VaultCloudStorageEstimateDetailView: View {
     .scrollContentBackground(.hidden)
     .background(.background)
     .navigationTitle(vaultEstimate.descriptor.storageDisplayTitle)
-    .navigationBarTitleDisplayMode(.inline)
+    .journalInlineNavigationTitle()
   }
 }
 
@@ -880,7 +894,7 @@ fileprivate struct VaultRuntimeDebugView: View {
     .scrollContentBackground(.hidden)
     .background(.background)
     .navigationTitle("Vault Runtime")
-    .navigationBarTitleDisplayMode(.inline)
+    .journalInlineNavigationTitle()
     .task { await runtime.refresh() }
   }
 }

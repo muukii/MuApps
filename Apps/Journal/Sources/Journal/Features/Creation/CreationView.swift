@@ -15,7 +15,11 @@ import Photos
 import PhotosUI
 import ScrollEdgeEffect
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 import UniformTypeIdentifiers
 import WidgetKit
 
@@ -50,10 +54,10 @@ struct CreationView: View {
   @State private var isSettingsPresented: Bool = false
   @State private var isChangeVaultConfirmationPresented = false
   @State private var isImportingMediaFromLibrary: Bool = false
-  @State private var isAddModePresented: Bool = false
+  @State private var selectedLibraryMediaItem: PhotosPickerItem?
+  @State private var isLibraryMediaPickerPresented = false
   @State private var collaborationError: CollaborationErrorMessage?
   @Namespace private var namespace
-  @Namespace private var addModeNamespace
 
   /// Shared one-shot location bridge. Each draft card stores the resolved
   /// coordinate it wants to persist; this object only handles permission and
@@ -67,7 +71,12 @@ struct CreationView: View {
   var body: some View {
 
     NavigationStack {
-      ZStack {
+      CreationContainer(
+        canSave: canSaveDrafts,
+        isSaving: isSaving || isImportingMediaFromLibrary,
+        onComposeText: presentTextCapture,
+        onSave: save
+      ) {
         ZStack {
           Rectangle()
             .fill(.background)
@@ -84,10 +93,11 @@ struct CreationView: View {
                     openDraft(draft)
                   }
                 )
-                .matchedTransitionSource(id: draft, in: namespace)
+                .journalMatchedTransitionSource(id: draft, in: namespace)
                 .containerRelativeFrame(.horizontal) { length, _ in
                   length * 0.5
                 }
+                .frame(maxWidth: CreationViewMetrics.maximumDraftCardWidth)
               }
 
             }
@@ -99,56 +109,24 @@ struct CreationView: View {
           .scrollPosition(id: $scrollTargetID, anchor: .center)
           .scrollTargetBehavior(.viewAligned)
         }
-        .blur(radius: isAddModePresented ? 16 : 0)
-        .allowsHitTesting(isAddModePresented == false)
-
-        if isAddModePresented {
-          CreationAddModeOverlay(
-            isSuggestionCaptureEnabled:
-              JournalFeatureFlags.isJournalingSuggestionsCaptureEnabled,
-            addModeNamespace: addModeNamespace,
-            onDismiss: {
-              setAddModePresented(false)
-            },
-            onComposeText: {
-              performAddModeAction(presentTextCapture)
-            },
-            onComposeLink: {
-              performAddModeAction(presentLinkCapture)
-            },
-            onCapturePhoto: {
-              performAddModeAction(presentPhotoCapture)
-            },
-            onChooseMediaFromLibrary: { item in
-              setAddModePresented(false)
-              importMediaFromLibrary(item)
-            },
-            onMediaPickerUnavailable: {
-              setAddModePresented(false)
-              notifications.post(.mediaImportFailed)
-            },
-            onDrawDoodle: {
-              performAddModeAction(presentDoodleCanvas)
-            },
-            onComposeBauhaus: {
-              performAddModeAction(presentBauhausGrid)
-            },
-            onRecordVoice: {
-              performAddModeAction(presentVoiceRecorder)
-            },
-            onChooseSuggestion: { suggestion in
-              setAddModePresented(false)
-              finishSuggestionCapture(suggestion)
-            }
-          )
-          .transition(.opacity)
-        }
+      } menuContent: {
+        CreationAddMenuContent(
+          isSuggestionCaptureEnabled:
+            JournalFeatureFlags.isJournalingSuggestionsCaptureEnabled,
+          onComposeText: presentTextCapture,
+          onComposeLink: presentLinkCapture,
+          onCapturePhoto: presentPhotoCapture,
+          onChooseMediaFromLibrary: presentLibraryMediaPicker,
+          onDrawDoodle: presentDoodleCanvas,
+          onComposeBauhaus: presentBauhausGrid,
+          onRecordVoice: presentVoiceRecorder,
+          onChooseSuggestion: finishSuggestionCapture
+        )
       }
-      .animation(.smooth(duration: 0.22), value: isAddModePresented)
       .toolbarTitleDisplayMode(.inlineLarge)
       .toolbar(content: {
         if onChangeVault != nil {
-          ToolbarItem(placement: .navigationBarLeading) {
+          ToolbarItem(placement: .journalLeadingAction) {
             Button {
               requestVaultChange()
             } label: {
@@ -158,11 +136,12 @@ struct CreationView: View {
               )
             }
             .accessibilityLabel("Change Vault")
+            .keyboardShortcut("v", modifiers: [.command, .shift])
           }
         }
 
         if let collaborationVault = selectedCollaborationVault {
-          ToolbarItem(placement: .navigationBarTrailing) {
+          ToolbarItem(placement: .journalTrailingAction) {
             VaultCollaborationControl(
               vaultID: collaborationVault.vaultID,
               title: collaborationVault.title,
@@ -175,44 +154,32 @@ struct CreationView: View {
           }
         }
 
-        ToolbarItem(placement: .navigationBarTrailing) {
+        ToolbarItem(placement: .journalTrailingAction) {
           NavigationLink.init {
             SavedListView()
-              .navigationTransition(.zoom(sourceID: "list", in: namespace))
+              .journalZoomNavigationTransition(sourceID: "list", in: namespace)
           } label: {
             Image(systemName: "calendar")
           }
-          .matchedTransitionSource(id: "list", in: namespace)
+          .journalMatchedTransitionSource(id: "list", in: namespace)
+          .keyboardShortcut("l", modifiers: [.command, .shift])
         }
 
-        ToolbarItem(placement: .navigationBarTrailing) {
+        ToolbarItem(placement: .journalTrailingAction) {
           Button(action: {
             isSettingsPresented.toggle()
           }) {
             Image(systemName: "gearshape")
           }
-          .matchedTransitionSource(id: "settings", in: namespace)
+          .journalMatchedTransitionSource(id: "settings", in: namespace)
+          .keyboardShortcut(",", modifiers: .command)
         }
       })
       .safeAreaInset(edge: .top, content: {
         DateView()
-          .blur(radius: isAddModePresented ? 8 : 0)
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(.horizontal)
       })
-      .safeAreaInset(edge: .bottom) {
-        ThreadDraftActionRow(
-          draftCards: draftCards,
-          isSaving: isSaving || isImportingMediaFromLibrary,
-          isAddModePresented: isAddModePresented,
-          addModeNamespace: addModeNamespace,
-          onToggleAddMode: {
-            setAddModePresented(isAddModePresented == false)
-          },
-          onSave: save
-        )
-        .padding(.horizontal)
-      }
     }
     .sheet(item: $textEditorPresentation) { presentation in
       ThreadDraftTextEditorSheet(
@@ -230,7 +197,7 @@ struct CreationView: View {
       .presentationDragIndicator(.visible)
       .presentationBackground(.background)
     }
-    .fullScreenCover(item: $doodleCanvasPresentation) { presentation in
+    .journalFullScreenCover(item: $doodleCanvasPresentation) { presentation in
       ThreadDraftDoodleCanvasCover(
         card: presentation.target,
         onChange: { drawing in
@@ -301,7 +268,7 @@ struct CreationView: View {
     }
     .sheet(isPresented: $isSettingsPresented) {
       SettingsScreen()
-        .navigationTransition(.zoom(sourceID: "settings", in: namespace))
+        .journalZoomNavigationTransition(sourceID: "settings", in: namespace)
         .presentationBackground(.background)
     }
     .confirmationDialog(
@@ -323,9 +290,21 @@ struct CreationView: View {
         dismissButton: .default(Text("OK"))
       )
     }
+    .photosPicker(
+      isPresented: $isLibraryMediaPickerPresented,
+      selection: $selectedLibraryMediaItem,
+      matching: .any(of: [.images, .livePhotos, .videos]),
+      preferredItemEncoding: .current,
+      photoLibrary: .shared()
+    )
     .appNavigationBarStyle()
     .onAppear {
       attachLocationToCurrentDraftsIfNeeded()
+    }
+    .onChange(of: selectedLibraryMediaItem) { _, item in
+      guard let item else { return }
+      selectedLibraryMediaItem = nil
+      importMediaFromLibrary(item)
     }
     .onChange(of: shouldAttachLocationToNewCards) { _, isEnabled in
       if isEnabled {
@@ -370,15 +349,12 @@ struct CreationView: View {
     return descriptor
   }
 
-  private func setAddModePresented(_ isPresented: Bool) {
-    withAnimation(.smooth(duration: 0.22)) {
-      isAddModePresented = isPresented
+  private var canSaveDrafts: Bool {
+    guard draftCards.isEmpty == false else {
+      return false
     }
-  }
 
-  private func performAddModeAction(_ action: @MainActor () -> Void) {
-    setAddModePresented(false)
-    action()
+    return draftCards.allSatisfy(\.canSave)
   }
 
   private func requestVaultChange() {
@@ -461,6 +437,20 @@ struct CreationView: View {
 
   private func presentPhotoCapture() {
     photoCapturePresentation = PhotoCapturePresentation(target: nil)
+  }
+
+  private func presentLibraryMediaPicker() {
+    Task { @MainActor in
+      do {
+        try await PhotoLibraryImport.ensurePhotoLibraryReadAccess()
+        isLibraryMediaPickerPresented = true
+      } catch {
+        photoLibraryImportLog.error(
+          "Photo library permission request failed: \(String(describing: error), privacy: .public)"
+        )
+        notifications.post(.mediaImportFailed)
+      }
+    }
   }
 
   private func presentDoodleCanvas() {
@@ -733,8 +723,6 @@ struct CreationView: View {
 
     guard drafts.isEmpty == false, isSaving == false else { return }
 
-    setAddModePresented(false)
-
     // Read the thread snapshot now so persistence works from the card payloads
     // the user had authored at the moment they tapped save.
     isSaving = true
@@ -770,6 +758,20 @@ struct CreationView: View {
     }
   }
 
+}
+
+/// Platform-adaptive geometry for the primary creation surface.
+private enum CreationViewMetrics {
+
+  /// Prevents resizable Mac windows from stretching a 4:5 draft into an
+  /// oversized reading surface while preserving the existing iOS geometry.
+  static let maximumDraftCardWidth: CGFloat = {
+    #if os(macOS)
+    640
+    #else
+    .infinity
+    #endif
+  }()
 }
 
 /// Presentation payload for a collaboration management error.
@@ -1261,283 +1263,56 @@ private extension CMTime {
   }
 }
 
-/// Stable identifiers for add-mode matched geometry elements.
-private enum CreationAddModeMatchedElement {
-
-  /// The shared surface that grows from the Add button into the overlay panel.
-  static let panelSurface = "creation-add-mode-panel-surface"
-}
-
-/// Bottom action row for building and posting a thread.
-///
-/// Owns the `canSave` check so card payload changes are observed *here* rather
-/// than in `CreationView.body` — editing one detail screen only re-renders this
-/// row and the affected card summary, not the whole compose screen.
-private struct ThreadDraftActionRow: View {
-
-  let draftCards: [ThreadDraftCard]
-  let isSaving: Bool
-  let isAddModePresented: Bool
-  let addModeNamespace: Namespace.ID
-  let onToggleAddMode: @MainActor @Sendable () -> Void
-  let onSave: @MainActor @Sendable () -> Void
-
-  private var canSave: Bool {
-    guard draftCards.isEmpty == false else {
-      return false
-    }
-
-    return draftCards.allSatisfy {
-      $0.canSave
-    }
-  }
-
-  var body: some View {
-    HStack(spacing: 12) {
-      Button(action: onToggleAddMode) {
-        Label {
-          Text(isAddModePresented ? "Close" : "Add")
-        } icon: {
-          Image(systemName: isAddModePresented ? "xmark" : "plus")
-        }
-        .frame(minWidth: 96)
-      }
-      .controlSize(.large)
-      .buttonStyle(.glass(.regular.interactive()))
-      .background {
-        if isAddModePresented == false {
-          Capsule()
-            .fill(.clear)
-            .matchedGeometryEffect(
-              id: CreationAddModeMatchedElement.panelSurface,
-              in: addModeNamespace,
-              properties: .frame,
-              anchor: .center
-            )
-        }
-      }
-      .disabled(isSaving)
-      .accessibilityLabel(isAddModePresented ? "Close Add Mode" : "Add Card")
-
-      Spacer(minLength: 0)
-
-      Button(action: onSave) {
-        Text("Save")
-          .foregroundStyle(.appOnTint)
-      }
-      .controlSize(.large)
-      .buttonStyle(.glass(.regular.tint(.accentColor).interactive()))
-      .disabled(canSave == false || isSaving)
-      .accessibilityLabel("Post Thread")
-
-    }
-  }
-}
-
-/// Overlay palette for choosing the next capture modality without hiding the
-/// draft cards already staged in the composer.
-private struct CreationAddModeOverlay: View {
+/// Concrete Journal actions shown inside the standard SwiftUI add menu.
+private struct CreationAddMenuContent: View {
 
   let isSuggestionCaptureEnabled: Bool
-  let addModeNamespace: Namespace.ID
-  let onDismiss: @MainActor @Sendable () -> Void
   let onComposeText: @MainActor @Sendable () -> Void
   let onComposeLink: @MainActor @Sendable () -> Void
   let onCapturePhoto: @MainActor @Sendable () -> Void
-  let onChooseMediaFromLibrary: @MainActor @Sendable (PhotosPickerItem) -> Void
-  let onMediaPickerUnavailable: @MainActor @Sendable () -> Void
+  let onChooseMediaFromLibrary: @MainActor @Sendable () -> Void
   let onDrawDoodle: @MainActor @Sendable () -> Void
   let onComposeBauhaus: @MainActor @Sendable () -> Void
   let onRecordVoice: @MainActor @Sendable () -> Void
   let onChooseSuggestion: @MainActor @Sendable (CapturedSuggestion) -> Void
 
-  @State private var selectedLibraryMediaItem: PhotosPickerItem?
-  @State private var isLibraryMediaPickerPresented = false
-
-  private static let columns = [
-    GridItem(.flexible(), spacing: 10),
-    GridItem(.flexible(), spacing: 10),
-  ]
-
   var body: some View {
-    ZStack(alignment: .bottom) {
-      Rectangle()
-        .fill(.background.opacity(0.22))
-        .ignoresSafeArea()
-        .contentShape(Rectangle())
-        .onTapGesture {
-          onDismiss()
-        }
+    Button(action: onComposeText) {
+      Label("Text", systemImage: "text.alignleft")
+    }
 
-      VStack(spacing: 14) {
-        HStack(spacing: 12) {
-          Text("Add Card")
-            .font(.headline.weight(.semibold))
+    Button(action: onComposeLink) {
+      Label("Link", systemImage: "link")
+    }
 
-          Spacer(minLength: 0)
+    Button(action: onCapturePhoto) {
+      Label("Camera", systemImage: "camera")
+    }
 
-          Button(action: onDismiss) {
-            Image(systemName: "xmark")
-              .font(.system(size: 15, weight: .semibold))
-              .frame(width: 34, height: 34)
-              .contentShape(Circle())
-          }
-          .buttonStyle(.plain)
-          .glassEffect(.regular.interactive(), in: .circle)
-          .accessibilityLabel("Close Add Mode")
-        }
+    Button(action: onChooseMediaFromLibrary) {
+      Label("Photos", systemImage: "photo.on.rectangle.angled")
+    }
 
-        LazyVGrid(columns: Self.columns, spacing: 10) {
-          CreationAddModeOptionButton(
-            systemName: "text.alignleft",
-            title: "Text",
-            action: onComposeText
-          )
+    Button(action: onComposeBauhaus) {
+      Label("Bauhaus", systemImage: "square.grid.3x3.square")
+    }
 
-          CreationAddModeOptionButton(
-            systemName: "link",
-            title: "Link",
-            action: onComposeLink
-          )
+    Button(action: onDrawDoodle) {
+      Label("Doodle", systemImage: "scribble.variable")
+    }
 
-          CreationAddModeOptionButton(
-            systemName: "camera",
-            title: "Camera",
-            action: onCapturePhoto
-          )
+    Button(action: onRecordVoice) {
+      Label("Voice", systemImage: "waveform")
+    }
 
-          Button {
-            presentLibraryMediaPicker()
-          } label: {
-            CreationAddModeOptionLabel(
-              systemName: "photo.on.rectangle.angled",
-              title: "Photos"
-            )
-          }
-          .buttonStyle(.plain)
-          .accessibilityLabel(Text("Choose Media"))
-          .photosPicker(
-            isPresented: $isLibraryMediaPickerPresented,
-            selection: $selectedLibraryMediaItem,
-            matching: .any(of: [.images, .livePhotos, .videos]),
-            preferredItemEncoding: .current,
-            photoLibrary: .shared()
-          )
-          .onChange(of: selectedLibraryMediaItem) { _, item in
-            guard let item else { return }
-            selectedLibraryMediaItem = nil
-            onChooseMediaFromLibrary(item)
-          }
-
-          CreationAddModeOptionButton(
-            systemName: "square.grid.3x3.square",
-            title: "Bauhaus",
-            action: onComposeBauhaus
-          )
-
-          CreationAddModeOptionButton(
-            systemName: "scribble.variable",
-            title: "Doodle",
-            action: onDrawDoodle
-          )
-
-          CreationAddModeOptionButton(
-            systemName: "waveform",
-            title: "Voice",
-            action: onRecordVoice
-          )
-
-          if isSuggestionCaptureEnabled {
-            SuggestionCaptureButton {
-              CreationAddModeOptionLabel(
-                systemName: "sparkles",
-                title: "Suggestion"
-              )
-            } onCommit: { suggestion in
-              onChooseSuggestion(suggestion)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("Suggestion"))
-          }
-        }
+    if isSuggestionCaptureEnabled {
+      SuggestionCaptureButton {
+        Label("Suggestion", systemImage: "sparkles")
+      } onCommit: { suggestion in
+        onChooseSuggestion(suggestion)
       }
-      .padding(16)
-      .background {
-        RoundedRectangle(cornerRadius: 24, style: .continuous)
-          .fill(.regularMaterial)
-          .matchedGeometryEffect(
-            id: CreationAddModeMatchedElement.panelSurface,
-            in: addModeNamespace,
-            properties: .frame,
-            anchor: .center
-          )
-      }
-      .overlay {
-        RoundedRectangle(cornerRadius: 24, style: .continuous)
-          .strokeBorder(.white.opacity(0.18), lineWidth: 1)
-      }
-      .padding(.horizontal, 18)
-      .padding(.bottom, 18)
+      .accessibilityLabel(Text("Suggestion"))
     }
-  }
-
-  private func presentLibraryMediaPicker() {
-    Task { @MainActor in
-      do {
-        try await PhotoLibraryImport.ensurePhotoLibraryReadAccess()
-        isLibraryMediaPickerPresented = true
-      } catch {
-        photoLibraryImportLog.error(
-          "Photo library permission request failed: \(String(describing: error), privacy: .public)"
-        )
-        onMediaPickerUnavailable()
-      }
-    }
-  }
-}
-
-/// One command in the add-mode capture palette.
-private struct CreationAddModeOptionButton: View {
-
-  let systemName: String
-  let title: LocalizedStringResource
-  let action: @MainActor @Sendable () -> Void
-
-  var body: some View {
-    Button(action: action) {
-      CreationAddModeOptionLabel(systemName: systemName, title: title)
-    }
-    .buttonStyle(.plain)
-    .accessibilityLabel(Text(title))
-  }
-}
-
-/// Shared visual label for add-mode option buttons.
-private struct CreationAddModeOptionLabel: View {
-
-  let systemName: String
-  let title: LocalizedStringResource
-
-  var body: some View {
-    HStack(spacing: 10) {
-      Image(systemName: systemName)
-        .font(.system(size: 17, weight: .semibold))
-        .frame(width: 24)
-
-      Text(title)
-        .font(.subheadline.weight(.semibold))
-        .lineLimit(1)
-
-      Spacer(minLength: 0)
-    }
-    .foregroundStyle(.appOnSecondaryContainer)
-    .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-    .padding(.horizontal, 12)
-    .background {
-      RoundedRectangle(cornerRadius: 8, style: .continuous)
-        .fill(.appSecondaryContainer.opacity(0.82))
-    }
-    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
   }
 }
 

@@ -158,6 +158,28 @@ struct VaultSyncDatabaseTests {
   }
 
   @Test
+  func importChanges_reportsVaultInfoDisplayMetadata() async throws {
+    let store = try VaultContentStore.open(vaultID: VaultID(), layout: makeTemporaryLayout())
+    let database = VaultSyncDatabase(store: store)
+    let icon = VaultIcon.emoji("\u{1F4DA}")
+    let record = CKRecord(
+      recordType: VaultRecordType.vaultInfo.rawValue,
+      recordID: CKRecord.ID(recordName: store.vaultID.uuidString, zoneID: store.vaultID.zoneID())
+    )
+    let info = VaultInfo(vaultID: store.vaultID.rawValue, title: "Reading", icon: icon)
+    VaultRecordMapper.applyFields(of: info, to: record)
+
+    let outcome = try await database.importChanges(modifications: [record], deletions: [])
+
+    #expect(outcome.importedVaultTitle == "Reading")
+    #expect(outcome.importedVaultIcon == icon)
+    let context = ModelContext(store.container)
+    let importedInfo = try #require(try context.fetch(FetchDescriptor<VaultInfo>()).first)
+    #expect(importedInfo.icon == icon)
+    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 0)
+  }
+
+  @Test
   func importChanges_localPendingSaveWins() async throws {
     let (store, cardID) = try await makeStoreWithCard()  // pending save exists
     let database = VaultSyncDatabase(store: store)

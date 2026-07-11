@@ -245,13 +245,78 @@ extension VaultContentStore {
   /// materialized vault must **not** call this — for a joined vault the row
   /// arrives from CloudKit, and a local placeholder would race the server's.
   @MainActor
-  public func seedVaultInfo(title: String) throws {
+  public func seedVaultInfo(title: String, icon: VaultIcon = .default) throws {
     let context = container.mainContext
     guard try context.fetchCount(FetchDescriptor<VaultInfo>()) == 0 else { return }
-    context.insert(VaultInfo(vaultID: vaultID.rawValue, title: title))
+    context.insert(VaultInfo(vaultID: vaultID.rawValue, title: title, icon: icon))
     try noteSave(.vaultInfo, recordName: vaultID.uuidString, in: context)
     try context.save()
     onLocalMutation()
+  }
+
+  /// Updates the vault's shared display title and queues the `VaultInfo` save.
+  ///
+  /// `VaultInfo` is the sync-visible metadata record for a vault. Renaming it
+  /// here keeps the local SwiftData row and CloudKit outbox in the same
+  /// transaction, just like card writes.
+  @MainActor
+  @discardableResult
+  public func renameVault(title: String) throws -> Bool {
+    let context = container.mainContext
+    let now = Date()
+
+    if let info = try fetchVaultInfo(in: context) {
+      guard info.title != title else { return false }
+      info.title = title
+      info.updatedAt = now
+    } else {
+      context.insert(
+        VaultInfo(
+          vaultID: vaultID.rawValue,
+          title: title,
+          createdAt: now,
+          updatedAt: now
+        )
+      )
+    }
+
+    try noteSave(.vaultInfo, recordName: vaultID.uuidString, in: context)
+    try context.save()
+    onLocalMutation()
+    return true
+  }
+
+  /// Updates the vault's shared display icon and queues the `VaultInfo` save.
+  ///
+  /// `title` is used only to repair a missing metadata row. Normal owned and
+  /// imported vaults already have `VaultInfo` before this method is called.
+  @MainActor
+  @discardableResult
+  public func updateVaultIcon(_ icon: VaultIcon, title: String) throws -> Bool {
+    let context = container.mainContext
+    let now = Date()
+
+    if let info = try fetchVaultInfo(in: context) {
+      guard info.icon != icon else { return false }
+      info.iconKindRawValue = icon.kind.rawValue
+      info.iconValue = icon.value
+      info.updatedAt = now
+    } else {
+      context.insert(
+        VaultInfo(
+          vaultID: vaultID.rawValue,
+          title: title,
+          icon: icon,
+          createdAt: now,
+          updatedAt: now
+        )
+      )
+    }
+
+    try noteSave(.vaultInfo, recordName: vaultID.uuidString, in: context)
+    try context.save()
+    onLocalMutation()
+    return true
   }
 
   /// Saves a post. Every save creates a root `CardEdge`; additional drafts
@@ -655,6 +720,13 @@ extension VaultContentStore {
   @MainActor
   private func fetchCard(id: UUID, in context: ModelContext) throws -> Card? {
     var descriptor = FetchDescriptor<Card>(predicate: #Predicate { $0.id == id })
+    descriptor.fetchLimit = 1
+    return try context.fetch(descriptor).first
+  }
+
+  @MainActor
+  private func fetchVaultInfo(in context: ModelContext) throws -> VaultInfo? {
+    var descriptor = FetchDescriptor<VaultInfo>()
     descriptor.fetchLimit = 1
     return try context.fetch(descriptor).first
   }

@@ -24,7 +24,7 @@ struct ThreadDraftVoiceRecorderSheet: View {
         dismiss()
       }
       .navigationTitle("Voice Record")
-      .navigationBarTitleDisplayMode(.inline)
+      .journalInlineNavigationTitle()
     }
   }
 }
@@ -121,8 +121,10 @@ private struct ThreadDraftAudioExistingContent: View {
 
   private func play() {
     do {
+      #if os(iOS)
       try AVAudioSession.sharedInstance().setCategory(.playback)
       try AVAudioSession.sharedInstance().setActive(true)
+      #endif
       let player = try AVAudioPlayer(contentsOf: fileURL)
       player.play()
       self.player = player

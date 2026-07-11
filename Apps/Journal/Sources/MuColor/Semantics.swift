@@ -1,5 +1,9 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 public struct Palette: Sendable {
 
@@ -58,6 +62,7 @@ public struct Palette: Sendable {
   }
 
   private static func color(named name: String, colorScheme: ColorScheme) -> Color {
+    #if canImport(UIKit)
     guard let color = UIColor(
       named: name,
       in: .module,
@@ -66,6 +71,21 @@ public struct Palette: Sendable {
       fatalError("Missing MuColor asset named \(name).")
     }
     return Color(uiColor: color)
+    #elseif canImport(AppKit)
+    guard
+      let color = NSColor(named: name, bundle: .module),
+      let appearance = NSAppearance(
+        named: colorScheme == .dark ? .darkAqua : .aqua
+      )
+    else {
+      fatalError("Missing MuColor asset named \(name).")
+    }
+    var resolvedColor = color
+    appearance.performAsCurrentDrawingAppearance {
+      resolvedColor = color.usingColorSpace(.deviceRGB) ?? color
+    }
+    return Color(nsColor: resolvedColor)
+    #endif
   }
 
   // MARK: - Derived (seed 色の不透明度違いのみ。新しい色相は足さない)
@@ -87,6 +107,7 @@ public struct Palette: Sendable {
 
 }
 
+#if canImport(UIKit)
 private extension UITraitCollection {
 
   convenience init(colorScheme: ColorScheme) {
@@ -100,11 +121,12 @@ private extension UITraitCollection {
     }
   }
 }
+#endif
 
 extension EnvironmentValues {
   /// The active palette. Injected by `PrimaryContainer`; read it to derive raw
-  /// `Color`/`UIColor` values where a `ShapeStyle` won't do (e.g. configuring a
-  /// `UINavigationBarAppearance`).
+  /// platform color values where a `ShapeStyle` won't do (for example,
+  /// configuring UIKit or AppKit chrome).
   @Entry public var appPalette: Palette = .default
 }
 

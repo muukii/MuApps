@@ -1,7 +1,9 @@
 import Foundation
 import Observation
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 
 /// Scene-local notification presenter for the Journal app.
 ///
@@ -57,8 +59,10 @@ public final class JournalNotificationCenter {
   }
 
   private func playHaptic(for semantics: JournalNotification.Semantics) {
+    #if canImport(UIKit)
     guard let feedbackType = semantics.notificationFeedbackType else { return }
     UINotificationFeedbackGenerator().notificationOccurred(feedbackType)
+    #endif
   }
 }
 
@@ -122,6 +126,7 @@ public struct JournalNotification: Identifiable, Sendable {
   }
 }
 
+#if canImport(UIKit)
 private extension JournalNotification.Semantics {
 
   var notificationFeedbackType: UINotificationFeedbackGenerator.FeedbackType? {
@@ -137,6 +142,7 @@ private extension JournalNotification.Semantics {
     }
   }
 }
+#endif
 
 public extension JournalNotification {
 

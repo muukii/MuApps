@@ -75,7 +75,7 @@ struct CardEditDraftEditor: View {
     }
     .background(.background)
     .navigationTitle(draft.kind.editorTitle)
-    .navigationBarTitleDisplayMode(.inline)
+    .journalInlineNavigationTitle()
     .toolbar {
       ToolbarItem(placement: .confirmationAction) {
         Button {

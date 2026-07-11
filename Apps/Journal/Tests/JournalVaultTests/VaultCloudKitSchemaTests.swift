@@ -20,6 +20,8 @@ struct VaultCloudKitSchemaTests {
     let expectedFields: [VaultRecordType: Set<String>] = [
       .vaultInfo: [
         VaultRecordMapper.VaultInfoKey.title,
+        VaultRecordMapper.VaultInfoKey.iconKind,
+        VaultRecordMapper.VaultInfoKey.iconValue,
         VaultRecordMapper.VaultInfoKey.createdAt,
         VaultRecordMapper.VaultInfoKey.updatedAt,
       ],

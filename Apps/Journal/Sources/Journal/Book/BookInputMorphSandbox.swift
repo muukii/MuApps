@@ -1,5 +1,12 @@
+#if os(iOS)
+import NextGrowingTextViewSwiftUI
+#else
+import CaptureText
+#endif
 import SwiftUI
+#if canImport(SwiftUISnapDraggingModifier)
 import SwiftUISnapDraggingModifier
+#endif
 
 /// Minimal sandbox for experimenting with a bottom source surface morphing into a Book overlay.
 ///
@@ -18,6 +25,7 @@ struct BookInputMorphSandbox: View {
     case expanded
   }
 
+  @State private var text: String = ""
   @State private var isExpanded: Bool
   @State private var destinationDragOffset: CGSize = .zero
   @Namespace private var namespace
@@ -27,41 +35,107 @@ struct BookInputMorphSandbox: View {
   }
 
   var body: some View {
-    ZStack {
-      Color.black
-        .ignoresSafeArea()
+    VStack {
+      ZStack {
+        Color.black
+          .ignoresSafeArea()
 
-      RoundedRectangle(cornerRadius: 28, style: .continuous)
-        .fill(.green)
-        .frame(height: 300)
-        .padding(24)
-        .overlay(alignment: .bottomLeading) {
-          BookInputMorphDestination(
-            isExpanded: isExpanded,
-            namespace: namespace,
-            dragOffset: $destinationDragOffset,
-            onActivate: {
-              expand()
-            },
-            onDismissDrag: {
-              collapse()
-            },
-            onSelectItem: { _ in
-              collapse()
-            }
-          )
-          .padding(44)
-        }
+        RoundedRectangle(cornerRadius: 28, style: .continuous)
+          .fill(.green)
+          .frame(height: 300)
+          .padding(24)
+          .overlay(alignment: .bottomLeading) {
+
+          }
+      }
+
+      bottomView
     }
-    .safeAreaInset(edge: .bottom) {
-      BookInputMorphSource(
-        namespace: namespace,
-        onToggle: {
-          toggle()
-        }
-      )
-    }
+    //    .safeAreaInset(edge: .bottom) {
+    //      BookInputMorphSource(
+    //        namespace: namespace,
+    //        onToggle: {
+    //          toggle()
+    //        }
+    //      )
+    //    }
+    //    .safeAreaInset(
+    //      edge: .bottom,
+    //      content: {
+    //        bottomView
+    //      }
+    //    )
     .animation(BookInputMorphMetrics.animation, value: isExpanded)
+  }
+
+  private var bottomView: some View {
+    VStack {
+
+      Color.clear
+        //            .frame(height: BookInputMorphMetrics.sourceRegionHeight)
+        .matchedGeometryEffect(
+          id: BookInputMorphMatchedElement.activeSurface,
+          in: namespace,
+          isSource: true
+        )
+
+      HStack(alignment: .bottom) {
+
+        BookInputMorphDestination(
+          isExpanded: isExpanded,
+          namespace: namespace,
+          dragOffset: $destinationDragOffset,
+          onActivate: {
+            expand()
+          },
+          onDismissDrag: {
+            collapse()
+          },
+          onSelectItem: { _ in
+            collapse()
+          }
+        )
+        .padding(44)
+
+        GrowingTextEditor(
+          text: $text,
+          configuration: .init(
+            minLines: 1,
+            maxLines: 10,
+            horizontalPadding: 0,
+            verticalPadding: 0,
+            lineSpacing: 2
+          ),
+          placeholder: {
+            Text("What's on your mind?")
+          }
+        )
+
+        Button {
+          // Handle send action
+        } label: {
+          Circle()
+            .foregroundStyle(.primary)
+            .frame(width: 34, height: 34)
+            .overlay {
+              Image(systemName: "arrow.up")
+                .foregroundStyle(.white)
+            }
+            .contentShape(Rectangle())
+        }
+        .padding(.bottom, 2)
+        .padding(.trailing, 1)
+      }
+      .padding(.vertical, 6)
+      .padding(.horizontal, 8)
+      .padding(.leading, 4)
+      //      .glassEffect(
+      //        .regular.interactive(),
+      //        in: .rect(cornerRadius: 24, style: .continuous)
+      //      )
+      //        .glassEffectTransition(.matchedGeometry)
+      .padding(16)
+    }
   }
 
   private func toggle() {
@@ -144,54 +218,65 @@ private struct BookInputMorphDestination: View {
   let onSelectItem: @MainActor @Sendable (BookInputMorphMenuItem) -> Void
 
   var body: some View {
-    RoundedRectangle(cornerRadius: BookInputMorphMetrics.surfaceCornerRadius, style: .continuous)
-      .fill(.blue)
-      .frame(
-        width: isExpanded ? nil : BookInputMorphMetrics.collapsedDestinationWidth,
-        height: BookInputMorphMetrics.destinationHeight
+    Color.clear
+    .overlay {
+      BookInputMorphDestinationContentView(
+        content: .init(isExpanded: isExpanded),
+        onActivate: onActivate,
+        onSelectItem: onSelectItem
       )
-      .overlay {
-        BookInputMorphDestinationContentView(
-          content: .init(isExpanded: isExpanded),
-          onActivate: onActivate,
-          onSelectItem: onSelectItem
-        )
-        .geometryGroup()
-      }
-      .clipShape(RoundedRectangle(cornerRadius: BookInputMorphMetrics.surfaceCornerRadius))
-      .modifier(
-        SnapDraggingModifier(
-          gestureMode: .simultaneous,
-          offset: $dragOffset,
-          activation: .init(minimumDistance: 8),
-          axis: [.horizontal, .vertical],
-          horizontalBoundary: .init(min: -46, max: 46, bandLength: 120),
-          verticalBoundary: .init(min: 0, max: .infinity, bandLength: 140),
-          springParameter: .interpolation(mass: 1, stiffness: 34, damping: 22),
-          handler: .init(
-            onEndDragging: { velocity, offset, contentSize in
-              if isExpanded,
-                shouldDismissMenu(
-                  velocity: velocity,
-                  offset: offset,
-                  contentSize: contentSize
-                )
-              {
-                onDismissDrag()
-              }
-
-              return .zero
+      .geometryGroup()
+    }
+    .clipShape(
+      RoundedRectangle(cornerRadius: BookInputMorphMetrics.surfaceCornerRadius)
+    )
+    .animation(
+      .smooth,
+      body: {
+        $0.glassEffect(
+          { () -> Glass in
+            switch isExpanded {
+            case false: return .identity
+            case true: return .regular
             }
-          )
+          }().interactive(),
+          in: .rect(cornerRadius: BookInputMorphMetrics.surfaceCornerRadius)
+        )
+      }
+    )
+    .modifier(
+      SnapDraggingModifier(
+        gestureMode: .simultaneous,
+        offset: $dragOffset,
+        activation: .init(minimumDistance: 8),
+        axis: [.horizontal, .vertical],
+        horizontalBoundary: .init(min: -46, max: 46, bandLength: 120),
+        verticalBoundary: .init(min: 0, max: .infinity, bandLength: 140),
+        springParameter: .interpolation(mass: 1, stiffness: 34, damping: 22),
+        handler: .init(
+          onEndDragging: { velocity, offset, contentSize in
+            if isExpanded,
+              shouldDismissMenu(
+                velocity: velocity,
+                offset: offset,
+                contentSize: contentSize
+              )
+            {
+              onDismissDrag()
+            }
+
+            return .zero
+          }
         )
       )
-      .matchedGeometryEffect(
-        id: isExpanded
-          ? BookInputMorphMatchedElement.activeSurface
-          : BookInputMorphMatchedElement.restingSurface,
-        in: namespace,
-        isSource: false
-      )
+    )
+    .matchedGeometryEffect(
+      id: isExpanded
+        ? BookInputMorphMatchedElement.activeSurface
+        : BookInputMorphMatchedElement.restingSurface,
+      in: namespace,
+      isSource: false
+    )
   }
 
   private func shouldDismissMenu(
@@ -212,33 +297,39 @@ private struct BookInputMorphDestinationContentView: View {
   let onSelectItem: @MainActor @Sendable (BookInputMorphMenuItem) -> Void
 
   var body: some View {
-    switch content {
-    case .addButton:
-      Button(action: onActivate) {
-        Image(systemName: "plus")
-          .font(.system(size: 30, weight: .regular))
-          .foregroundStyle(.white)
-          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-          .padding(.leading, 24)
-          .contentShape(Rectangle())
-      }
-      .buttonStyle(.plain)
-      .accessibilityLabel("Open Menu")
-
-    case .menuItems:
-      VStack(alignment: .leading, spacing: 0) {
-        ForEach(BookInputMorphMenuItem.defaultItems) { item in
-          Button {
-            onSelectItem(item)
-          } label: {
-            BookInputMorphMenuRow(item: item)
-          }
-          .buttonStyle(.plain)
+    ZStack {
+      switch content {
+      case .addButton:
+        Button(action: onActivate) {
+          Image(systemName: "plus")
+            .font(.system(size: 30, weight: .regular))
+            .foregroundStyle(.white)
+            .frame(
+              maxWidth: .infinity,
+              maxHeight: .infinity,
+              alignment: .center
+            )
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open Menu")
+
+      case .menuItems:
+        VStack(alignment: .leading, spacing: 0) {
+          ForEach(BookInputMorphMenuItem.defaultItems) { item in
+            Button {
+              onSelectItem(item)
+            } label: {
+              BookInputMorphMenuRow(item: item)
+            }
+            .buttonStyle(.plain)
+          }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .padding(.vertical, 10)
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-      .padding(.vertical, 10)
     }
+
   }
 }
 
@@ -283,44 +374,6 @@ private struct BookInputMorphMenuRow: View {
     .padding(.horizontal, 16)
     .frame(height: 46)
     .contentShape(Rectangle())
-  }
-}
-
-/// Bottom safe-area source region for the morph.
-private struct BookInputMorphSource: View {
-
-  let namespace: Namespace.ID
-  let onToggle: @MainActor @Sendable () -> Void
-
-  var body: some View {
-    ZStack(alignment: .topLeading) {
-      Color.clear
-        .frame(height: BookInputMorphMetrics.sourceRegionHeight)
-        .matchedGeometryEffect(
-          id: BookInputMorphMatchedElement.activeSurface,
-          in: namespace,
-          isSource: true
-        )
-
-      Button(action: onToggle) {
-        RoundedRectangle(cornerRadius: BookInputMorphMetrics.surfaceCornerRadius, style: .continuous)
-          .fill(.white.opacity(0.18))
-          .frame(
-            width: BookInputMorphMetrics.sourceHandleSize.width,
-            height: BookInputMorphMetrics.sourceHandleSize.height
-          )
-          .overlay(alignment: .leading) {
-            Image(systemName: "plus")
-              .font(.system(size: 24, weight: .regular))
-              .foregroundStyle(.white)
-              .padding(.leading, 20)
-          }
-      }
-      .buttonStyle(.plain)
-      .padding(.horizontal, 24)
-      .padding(.top, 12)
-      .accessibilityLabel("Toggle Morph")
-    }
   }
 }
 

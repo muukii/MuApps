@@ -64,6 +64,28 @@ struct VaultRecordMapperTests {
   }
 
   @Test
+  func cardImport_missingFieldsKeepsTolerantFallbacks() {
+    let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let updatedAt = Date(timeIntervalSince1970: 1_700_000_060)
+    let card = Card(
+      kind: .photo,
+      body: "local body",
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      location: Coordinate(latitude: 35.0, longitude: 139.7)
+    )
+    let record = makeRecord(type: .card, recordName: card.id.uuidString)
+
+    VaultRecordMapper.update(card, from: record)
+
+    #expect(card.kind == .photo)
+    #expect(card.body == "")
+    #expect(card.createdAt == createdAt)
+    #expect(card.updatedAt == updatedAt)
+    #expect(card.location == nil)
+  }
+
+  @Test
   func cardEdgeFields_roundTrip() {
     let parentID = UUID()
     let edge = CardEdge(
@@ -98,6 +120,32 @@ struct VaultRecordMapperTests {
   }
 
   @Test
+  func cardEdgeImport_missingFieldsKeepsTolerantFallbacks() {
+    let cardID = UUID()
+    let parentID = UUID()
+    let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let updatedAt = Date(timeIntervalSince1970: 1_700_000_060)
+    let edge = CardEdge(
+      cardID: cardID,
+      parentEdgeID: parentID,
+      sortIndex: 8,
+      layout: Data([0x0C]),
+      createdAt: createdAt,
+      updatedAt: updatedAt
+    )
+    let record = makeRecord(type: .cardEdge, recordName: edge.id.uuidString)
+
+    VaultRecordMapper.update(edge, from: record)
+
+    #expect(edge.cardID == cardID)
+    #expect(edge.parentEdgeID == nil)
+    #expect(edge.sortIndex == 0)
+    #expect(edge.layout == nil)
+    #expect(edge.createdAt == createdAt)
+    #expect(edge.updatedAt == updatedAt)
+  }
+
+  @Test
   func attachmentFields_roundTrip() {
     let attachment = JournalVault.Attachment(
       cardID: UUID(),
@@ -121,6 +169,31 @@ struct VaultRecordMapperTests {
     #expect(imported.byteSize == 128)
     #expect(imported.primaryResourceID == attachment.primaryResourceID)
     #expect(imported.thumbnail == Data([0x0A, 0x0B]))
+  }
+
+  @Test
+  func attachmentImport_missingFieldsKeepsTolerantFallbacks() {
+    let cardID = UUID()
+    let primaryResourceID = UUID()
+    let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let attachment = JournalVault.Attachment(
+      cardID: cardID,
+      kind: .audio,
+      byteSize: 256,
+      primaryResourceID: primaryResourceID,
+      thumbnail: Data([0x0D]),
+      createdAt: createdAt
+    )
+    let record = makeRecord(type: .attachment, recordName: attachment.id.uuidString)
+
+    VaultRecordMapper.update(attachment, from: record)
+
+    #expect(attachment.cardID == cardID)
+    #expect(attachment.kind == .audio)
+    #expect(attachment.byteSize == 0)
+    #expect(attachment.primaryResourceID == primaryResourceID)
+    #expect(attachment.thumbnail == nil)
+    #expect(attachment.createdAt == createdAt)
   }
 
   @Test
@@ -159,8 +232,41 @@ struct VaultRecordMapperTests {
   }
 
   @Test
+  func attachmentResourceImport_missingFieldsKeepsTolerantFallbacks() {
+    let attachmentID = UUID()
+    let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let resource = JournalVault.AttachmentResource(
+      attachmentID: attachmentID,
+      role: .audio,
+      byteSize: 512,
+      contentType: "public.mpeg-4-audio",
+      pixelWidth: 320,
+      pixelHeight: 200,
+      duration: 3.5,
+      isHDR: true,
+      colorSpaceName: "Display P3",
+      createdAt: createdAt
+    )
+    let record = makeRecord(type: .attachmentResource, recordName: resource.id.uuidString)
+
+    VaultRecordMapper.update(resource, from: record)
+
+    #expect(resource.attachmentID == attachmentID)
+    #expect(resource.role == .audio)
+    #expect(resource.byteSize == 0)
+    #expect(resource.contentType == nil)
+    #expect(resource.pixelWidth == nil)
+    #expect(resource.pixelHeight == nil)
+    #expect(resource.duration == nil)
+    #expect(!resource.isHDR)
+    #expect(resource.colorSpaceName == nil)
+    #expect(resource.createdAt == createdAt)
+  }
+
+  @Test
   func vaultInfoFields_roundTrip() {
-    let info = VaultInfo(vaultID: UUID(), title: "Trip")
+    let icon = VaultIcon.emoji("\u{1F5FE}")
+    let info = VaultInfo(vaultID: UUID(), title: "Trip", icon: icon)
     let record = makeRecord(type: .vaultInfo, recordName: info.vaultID.uuidString)
     VaultRecordMapper.applyFields(of: info, to: record)
 
@@ -168,7 +274,29 @@ struct VaultRecordMapperTests {
     VaultRecordMapper.update(imported, from: record)
 
     #expect(imported.title == "Trip")
+    #expect(imported.icon == icon)
     #expect(imported.createdAt == info.createdAt)
+  }
+
+  @Test
+  func vaultInfoImport_missingFieldsKeepsTolerantFallbacks() {
+    let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let updatedAt = Date(timeIntervalSince1970: 1_700_000_060)
+    let info = VaultInfo(
+      vaultID: UUID(),
+      title: "Existing",
+      icon: .systemImage("book.closed"),
+      createdAt: createdAt,
+      updatedAt: updatedAt
+    )
+    let record = makeRecord(type: .vaultInfo, recordName: info.vaultID.uuidString)
+
+    VaultRecordMapper.update(info, from: record)
+
+    #expect(info.title == "")
+    #expect(info.icon == .systemImage("book.closed"))
+    #expect(info.createdAt == createdAt)
+    #expect(info.updatedAt == updatedAt)
   }
 
   @Test

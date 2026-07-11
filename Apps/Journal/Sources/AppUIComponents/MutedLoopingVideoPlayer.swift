@@ -1,6 +1,10 @@
 import AVFoundation
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// Configures AVFoundation playback objects for SwiftUI Observation.
 ///
@@ -148,6 +152,7 @@ private struct MutedLoopingVideoPlayback {
 }
 
 /// A minimal UIKit bridge that displays an existing player in an `AVPlayerLayer`.
+#if canImport(UIKit)
 private struct MutedLoopingVideoPlayerLayer: UIViewRepresentable {
 
   let player: AVPlayer
@@ -174,7 +179,65 @@ private struct MutedLoopingVideoPlayerLayer: UIViewRepresentable {
     uiView.removePlayer()
   }
 }
+#elseif canImport(AppKit)
+/// Native AppKit host for the shared `AVPlayerLayer` playback state.
+private struct MutedLoopingVideoPlayerLayer: NSViewRepresentable {
+  let player: AVPlayer
+  let videoGravity: AVLayerVideoGravity
 
+  func makeNSView(context: Context) -> MutedLoopingVideoPlayerLayerView {
+    MutedLoopingVideoPlayerLayerView()
+  }
+
+  func updateNSView(
+    _ nsView: MutedLoopingVideoPlayerLayerView,
+    context: Context
+  ) {
+    nsView.configure(player: player, videoGravity: videoGravity)
+  }
+
+  static func dismantleNSView(
+    _ nsView: MutedLoopingVideoPlayerLayerView,
+    coordinator: ()
+  ) {
+    nsView.removePlayer()
+  }
+}
+
+@MainActor
+private final class MutedLoopingVideoPlayerLayerView: NSView {
+  private let playerLayer = AVPlayerLayer()
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    layer?.addSublayer(playerLayer)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func layout() {
+    super.layout()
+    playerLayer.frame = bounds
+  }
+
+  func configure(player: AVPlayer, videoGravity: AVLayerVideoGravity) {
+    playerLayer.videoGravity = videoGravity
+    if playerLayer.player !== player {
+      playerLayer.player = player
+    }
+  }
+
+  func removePlayer() {
+    playerLayer.player = nil
+  }
+}
+#endif
+
+#if canImport(UIKit)
 @MainActor
 private final class MutedLoopingVideoPlayerLayerView: UIView {
 
@@ -203,6 +266,7 @@ private final class MutedLoopingVideoPlayerLayerView: UIView {
     playerLayer.player = nil
   }
 }
+#endif
 
 #Preview("Muted Looping Video Player") {
   MutedLoopingVideoPlayer(

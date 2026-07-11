@@ -1,4 +1,5 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
 
 /// SwiftUI bridge for the system activity view controller.
@@ -25,3 +26,4 @@ struct ActivityView: UIViewControllerRepresentable {
 
   func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
+#endif

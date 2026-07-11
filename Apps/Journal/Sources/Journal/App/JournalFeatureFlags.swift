@@ -10,9 +10,10 @@ enum JournalFeatureFlags {
   ///
   /// Suggestion cards remain renderable in all builds, but creating new ones is
   /// limited to Debug while the capture flow and visual design are still under
-  /// review.
+  /// review. Native macOS never exposes the entry point because the framework
+  /// is only available to iOS-family builds.
   static var isJournalingSuggestionsCaptureEnabled: Bool {
-    #if DEBUG
+    #if DEBUG && os(iOS)
     true
     #else
     false

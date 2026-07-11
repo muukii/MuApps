@@ -1,5 +1,9 @@
 import CloudKit
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// App-lifecycle bridge for CloudKit share invitation metadata.
 ///
@@ -55,7 +59,8 @@ final class CloudKitShareAcceptanceRouter {
   }
 }
 
-/// UIKit application delegate used only to install `JournalSceneDelegate`.
+/// Platform app delegate that forwards CloudKit invitation metadata.
+#if canImport(UIKit)
 final class JournalAppDelegate: UIResponder, UIApplicationDelegate {
 
   func application(
@@ -92,3 +97,13 @@ final class JournalSceneDelegate: UIResponder, UIWindowSceneDelegate {
     CloudKitShareAcceptanceRouter.shared.enqueue(cloudKitShareMetadata)
   }
 }
+#elseif canImport(AppKit)
+final class JournalAppDelegate: NSObject, NSApplicationDelegate {
+  func application(
+    _ application: NSApplication,
+    userDidAcceptCloudKitShareWith metadata: CKShare.Metadata
+  ) {
+    CloudKitShareAcceptanceRouter.shared.enqueue(metadata)
+  }
+}
+#endif

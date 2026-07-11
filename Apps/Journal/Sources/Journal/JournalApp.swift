@@ -9,7 +9,11 @@ import SwiftUI
 @main
 struct JournalApp: App {
 
+  #if os(iOS)
   @UIApplicationDelegateAdaptor(JournalAppDelegate.self) private var appDelegate
+  #else
+  @NSApplicationDelegateAdaptor(JournalAppDelegate.self) private var appDelegate
+  #endif
 
   let vaultRuntime: JournalVaultRuntime
 
@@ -95,10 +99,9 @@ private enum JournalDebugLaunchRoute {
 /// whole app. Kept separate from `JournalApp` so the `@AppStorage` reads live in
 /// a `View`, where changes re-render the tree.
 ///
-/// Also the root router: it blocks on loading until the first vault
-/// availability decision is resolved, then restores the last known user class
-/// immediately while the runtime still refreshes local storage and CloudKit in
-/// the background.
+/// Also the root router: it blocks on loading until initial vault availability
+/// and automatic vault activation are resolved, then enters onboarding or the
+/// persistent Journal home.
 private struct RootView: View {
 
   /// Top-level app routes derived from persisted bootstrap state and the vault runtime.
@@ -106,33 +109,23 @@ private struct RootView: View {
     /// The app is checking whether vault storage and CloudKit recovery are available.
     case loading
 
-    /// The user has vault state or has completed onboarding and can enter the vault flow.
-    case existingUser(ExistingUserRoute)
+    /// The user has completed onboarding and enters the persistent Journal home.
+    case home
 
     /// No local or remote vault state exists and onboarding has not been completed.
     case newUser
   }
 
-  /// Routes inside the existing-user vault flow.
-  private enum ExistingUserRoute: Equatable {
-    /// User chooses, creates, refreshes, or shares a vault.
-    case vaultSelection
-
-    /// User is composing into the currently selected vault.
-    case creation
-  }
-
-  /// Launch-only gate for opening the persisted default vault.
+  /// Launch-only gate for activating a vault before the persistent home appears.
   ///
-  /// When a stored vault id exists, `RootView` keeps showing the launch loading
-  /// surface until restore either opens that vault or proves it should be
-  /// ignored. This prevents the vault picker from flashing before the composer.
-  private enum LastSelectedVaultRestoreState: Equatable {
-    /// The launch restore decision has not completed yet.
+  /// Every non-empty catalog must enter Home with an active vault. The stored
+  /// vault is preferred; when it is unavailable, the first catalog vault is
+  /// activated instead of exposing an intermediate selection-required screen.
+  private enum InitialVaultActivationState: Equatable {
+    /// The launch activation decision has not completed yet.
     case pending
 
-    /// The launch restore decision finished, whether by opening a vault or
-    /// falling back to normal routing.
+    /// The launch activation decision has finished.
     case resolved
   }
 
@@ -145,8 +138,7 @@ private struct RootView: View {
   @AppStorage(JournalDefaults.lastSelectedVaultID) private var lastSelectedVaultID: String = ""
   @State private var notificationCenter = JournalNotificationCenter()
   @State private var vaultRuntime: JournalVaultRuntime
-  @State private var existingUserRoute: ExistingUserRoute = .vaultSelection
-  @State private var lastSelectedVaultRestoreState: LastSelectedVaultRestoreState = .pending
+  @State private var initialVaultActivationState: InitialVaultActivationState = .pending
 
   init(vaultRuntime: JournalVaultRuntime) {
     _vaultRuntime = State(initialValue: vaultRuntime)
@@ -162,21 +154,9 @@ private struct RootView: View {
           RootLoadingView()
             .transition(.opacity)
 
-        case .existingUser(.creation):
-          CreationView(
-            onChangeVault: {
-              withAnimation(.smooth) {
-                existingUserRoute = .vaultSelection
-              }
-            }
-          )
-          .transition(.opacity)
-
-        case .existingUser(.vaultSelection):
-          VaultSelectionView(
-            onVaultSelected: {
-              enterCreationWithSelectedVault(animated: true)
-            }
+        case .home:
+          JournalHomeView(
+            onActiveVaultChanged: persistActiveVaultSelection
           )
           .transition(.opacity)
 
@@ -207,77 +187,54 @@ private struct RootView: View {
       hasResolvedInitialVaultAvailability = true
     }
 
-    await restoreLastSelectedVaultIfPossible()
+    await activateInitialVaultIfPossible()
   }
 
   private var rootRoute: RootRoute {
     guard hasResolvedInitialVaultAvailability else { return .loading }
-    if shouldWaitForLastSelectedVaultRestore { return .loading }
+    guard initialVaultActivationState == .resolved else { return .loading }
 
     if vaultRuntime.vaults.isEmpty == false || hasCompletedOnboarding {
-      return .existingUser(existingUserRoute)
+      return .home
     }
 
     return .newUser
   }
 
-  private var shouldWaitForLastSelectedVaultRestore: Bool {
-    lastSelectedVaultID.isEmpty == false && lastSelectedVaultRestoreState == .pending
-  }
-
   private func completeNewUserOnboarding() {
     withAnimation(.smooth) {
       hasCompletedOnboarding = true
-      existingUserRoute = .vaultSelection
     }
   }
 
-  private func enterCreationWithSelectedVault(animated: Bool) {
+  private func activateInitialVaultIfPossible() async {
+    defer { initialVaultActivationState = .resolved }
+
+    guard let fallbackVaultID = vaultRuntime.vaults.first?.vaultID else {
+      lastSelectedVaultID = ""
+      return
+    }
+
+    let preferredVaultID: VaultID
+    if let storedVaultID = VaultID(uuidString: lastSelectedVaultID),
+       vaultRuntime.vaults.contains(where: { $0.vaultID == storedVaultID }) {
+      preferredVaultID = storedVaultID
+    } else {
+      preferredVaultID = fallbackVaultID
+    }
+
+    await vaultRuntime.selectVault(preferredVaultID)
+    persistActiveVaultSelection()
+  }
+
+  private func persistActiveVaultSelection() {
     guard let selectedVault = vaultRuntime.selectedVault,
           vaultRuntime.selectedVaultState == .active else {
+      lastSelectedVaultID = ""
       return
     }
 
-    lastSelectedVaultRestoreState = .resolved
     lastSelectedVaultID = selectedVault.vaultID.uuidString
-
-    guard animated else {
-      existingUserRoute = .creation
-      return
-    }
-
-    withAnimation(.smooth) {
-      existingUserRoute = .creation
-    }
-  }
-
-  private func restoreLastSelectedVaultIfPossible() async {
-    defer { lastSelectedVaultRestoreState = .resolved }
-
-    guard vaultRuntime.vaults.isEmpty == false,
-          lastSelectedVaultID.isEmpty == false else {
-      return
-    }
-
-    guard let vaultID = VaultID(uuidString: lastSelectedVaultID) else {
-      lastSelectedVaultID = ""
-      return
-    }
-
-    guard vaultRuntime.vaults.contains(where: { $0.vaultID == vaultID }) else {
-      lastSelectedVaultID = ""
-      return
-    }
-
-    await vaultRuntime.selectVault(vaultID)
-
-    guard vaultRuntime.selectedVault?.vaultID == vaultID,
-          vaultRuntime.selectedVaultState == .active else {
-      lastSelectedVaultID = ""
-      return
-    }
-
-    enterCreationWithSelectedVault(animated: false)
   }
 
   private func acceptIncomingCloudKitShares() async {
@@ -290,13 +247,313 @@ private struct RootView: View {
     do {
       try await vaultRuntime.acceptShare(metadata: metadata)
       notificationCenter.post(.vaultInviteAccepted)
+
+      if vaultRuntime.selectedVaultState != .active,
+         let firstVaultID = vaultRuntime.vaults.first?.vaultID {
+        await vaultRuntime.selectVault(firstVaultID)
+      }
+      persistActiveVaultSelection()
+
       withAnimation(.smooth) {
         hasCompletedOnboarding = true
         hasResolvedInitialVaultAvailability = true
-        existingUserRoute = .vaultSelection
+        initialVaultActivationState = .resolved
       }
     } catch {
       notificationCenter.post(.vaultInviteAcceptanceFailed)
+    }
+  }
+}
+
+/// Persistent post-onboarding shell.
+///
+/// Vault management is presented over this view, so changing or deleting the
+/// active vault never replaces the sheet's presenter. A non-empty catalog is
+/// expected to have an active vault; the only normal empty state is `noVault`.
+private struct JournalHomeView: View {
+
+  private let onActiveVaultChanged: @MainActor @Sendable () -> Void
+
+  @Environment(JournalVaultRuntime.self) private var vaultRuntime
+
+  @State private var isVaultSelectionPresented = false
+  @State private var isVaultCreationPresented = false
+  @State private var isSettingsPresented = false
+  @State private var vaultSheetDetent: PresentationDetent = .medium
+
+  init(onActiveVaultChanged: @escaping @MainActor @Sendable () -> Void) {
+    self.onActiveVaultChanged = onActiveVaultChanged
+  }
+
+  var body: some View {
+    JournalHomeContent(
+      state: contentState,
+      initialAvailabilityResolution: vaultRuntime.lastInitialAvailabilityResolution,
+      onOpenVaults: presentVaultSelection,
+      onCreateVault: { isVaultCreationPresented = true },
+      onRefreshVaults: refreshVaults,
+      onRetryVaultActivation: retryVaultActivation,
+      onOpenSettings: { isSettingsPresented = true }
+    )
+    .sheet(isPresented: $isVaultSelectionPresented) {
+      VaultSelectionView(
+        onVaultSelected: finishVaultSelection,
+        onClose: { isVaultSelectionPresented = false },
+        onActiveVaultChanged: activeVaultChangedInsidePicker
+      )
+      .presentationDetents(
+        [.medium, .large],
+        selection: $vaultSheetDetent
+      )
+      .presentationDragIndicator(.visible)
+      .presentationBackground(.background)
+    }
+    .sheet(isPresented: $isVaultCreationPresented) {
+      VaultCreationSheet(
+        onCreate: createVault,
+        onCancel: { isVaultCreationPresented = false }
+      )
+      .presentationBackground(.background)
+    }
+    .sheet(isPresented: $isSettingsPresented) {
+      SettingsScreen()
+        .presentationBackground(.background)
+    }
+  }
+
+  private var contentState: JournalHomeContentState {
+    if vaultRuntime.vaults.isEmpty {
+      return .noVault
+    }
+
+    switch vaultRuntime.selectedVaultState {
+    case .inactive, .opening:
+      return .openingVault
+
+    case .active:
+      guard let selectedVault = vaultRuntime.selectedVault else {
+        return .vaultUnavailable(String(localized: "The selected vault is not available."))
+      }
+      return .creation(vaultID: selectedVault.vaultID)
+
+    case .failed:
+      return .vaultUnavailable(String(localized: "The selected vault is not available."))
+    }
+  }
+
+  private func presentVaultSelection() {
+    vaultSheetDetent = .medium
+    isVaultSelectionPresented = true
+  }
+
+  private func finishVaultSelection() {
+    onActiveVaultChanged()
+    isVaultSelectionPresented = false
+  }
+
+  private func activeVaultChangedInsidePicker() {
+    onActiveVaultChanged()
+    if vaultRuntime.vaults.isEmpty {
+      isVaultSelectionPresented = false
+    }
+  }
+
+  private func createVault(title: String, icon: VaultIcon) async -> String? {
+    guard await vaultRuntime.createVault(title: title, icon: icon) != nil else {
+      return vaultRuntime.lastMessage ?? String(localized: "Could not create vault.")
+    }
+
+    onActiveVaultChanged()
+    isVaultCreationPresented = false
+    return nil
+  }
+
+  private func refreshVaults() {
+    Task { @MainActor in
+      await vaultRuntime.refresh()
+      await activateFirstVaultIfNeeded()
+    }
+  }
+
+  private func retryVaultActivation() {
+    Task { @MainActor in
+      await activateFirstVaultIfNeeded()
+    }
+  }
+
+  private func activateFirstVaultIfNeeded() async {
+    guard vaultRuntime.selectedVaultState != .active,
+          let firstVaultID = vaultRuntime.vaults.first?.vaultID else {
+      onActiveVaultChanged()
+      return
+    }
+
+    await vaultRuntime.selectVault(firstVaultID)
+    onActiveVaultChanged()
+  }
+}
+
+/// Render states for the persistent Journal home.
+private enum JournalHomeContentState: Equatable {
+  /// No local or recovered vault exists, so Creation actions are unavailable.
+  case noVault
+
+  /// The runtime is opening the automatically selected vault.
+  case openingVault
+
+  /// Creation is backed by the active vault with this stable identity.
+  case creation(vaultID: VaultID)
+
+  /// A non-empty catalog exists, but its automatic vault activation failed.
+  case vaultUnavailable(String)
+}
+
+/// Stateless content switch for `JournalHomeView`.
+private struct JournalHomeContent: View {
+
+  let state: JournalHomeContentState
+  let initialAvailabilityResolution: VaultInitialAvailabilityResolution?
+  let onOpenVaults: @MainActor @Sendable () -> Void
+  let onCreateVault: @MainActor @Sendable () -> Void
+  let onRefreshVaults: @MainActor @Sendable () -> Void
+  let onRetryVaultActivation: @MainActor @Sendable () -> Void
+  let onOpenSettings: @MainActor @Sendable () -> Void
+
+  var body: some View {
+    switch state {
+    case .noVault:
+      JournalNoVaultView(
+        initialAvailabilityResolution: initialAvailabilityResolution,
+        onCreateVault: onCreateVault,
+        onRefreshVaults: onRefreshVaults,
+        onOpenSettings: onOpenSettings
+      )
+
+    case .openingVault:
+      JournalVaultOpeningView()
+
+    case .creation(let vaultID):
+      CreationView(onChangeVault: onOpenVaults)
+        .id(vaultID)
+
+    case .vaultUnavailable(let message):
+      JournalVaultUnavailableView(
+        message: message,
+        onRetry: onRetryVaultActivation,
+        onOpenVaults: onOpenVaults,
+        onOpenSettings: onOpenSettings
+      )
+    }
+  }
+}
+
+/// Home content shown when the catalog has no vaults.
+private struct JournalNoVaultView: View {
+
+  let initialAvailabilityResolution: VaultInitialAvailabilityResolution?
+  let onCreateVault: @MainActor @Sendable () -> Void
+  let onRefreshVaults: @MainActor @Sendable () -> Void
+  let onOpenSettings: @MainActor @Sendable () -> Void
+
+  var body: some View {
+    NavigationStack {
+      JournalNoVaultContent(
+        initialAvailabilityResolution: initialAvailabilityResolution,
+        onCreateVault: onCreateVault,
+        onRefreshVaults: onRefreshVaults
+      )
+      .toolbar {
+        ToolbarItem(placement: .journalTrailingAction) {
+          Button(action: onOpenSettings) {
+            Image(systemName: "gearshape")
+          }
+          .accessibilityLabel("Settings")
+        }
+      }
+    }
+  }
+}
+
+/// Empty-catalog message and recovery actions.
+private struct JournalNoVaultContent: View {
+
+  let initialAvailabilityResolution: VaultInitialAvailabilityResolution?
+  let onCreateVault: @MainActor @Sendable () -> Void
+  let onRefreshVaults: @MainActor @Sendable () -> Void
+
+  var body: some View {
+    VStack(spacing: 18) {
+      if let initialAvailabilityResolution,
+         initialAvailabilityResolution.isCloudKitDeferred {
+        VaultCloudKitDeferredBanner(resolution: initialAvailabilityResolution)
+          .padding(.horizontal, 16)
+      }
+
+      ContentUnavailableView {
+        Label("No Vaults", systemImage: "shippingbox")
+      } description: {
+        Text("Create your first vault to start making cards.")
+      } actions: {
+        Button(action: onCreateVault) {
+          Label("New Vault", systemImage: "plus")
+        }
+
+        Button(action: onRefreshVaults) {
+          Label("Refresh", systemImage: "arrow.clockwise")
+        }
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(.background)
+  }
+}
+
+/// Transient Home content while the automatically chosen vault is opening.
+private struct JournalVaultOpeningView: View {
+
+  var body: some View {
+    VStack(spacing: 14) {
+      ProgressView()
+      Text("Opening Vault")
+        .font(.headline)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(.background)
+  }
+}
+
+/// Recovery content for a catalog whose automatic vault activation failed.
+private struct JournalVaultUnavailableView: View {
+
+  let message: String
+  let onRetry: @MainActor @Sendable () -> Void
+  let onOpenVaults: @MainActor @Sendable () -> Void
+  let onOpenSettings: @MainActor @Sendable () -> Void
+
+  var body: some View {
+    NavigationStack {
+      ContentUnavailableView {
+        Label("Vault Not Ready", systemImage: "exclamationmark.triangle")
+      } description: {
+        Text(message)
+      } actions: {
+        Button(action: onRetry) {
+          Label("Retry", systemImage: "arrow.clockwise")
+        }
+
+        Button(action: onOpenVaults) {
+          Label("Vaults", systemImage: "shippingbox")
+        }
+      }
+      .background(.background)
+      .toolbar {
+        ToolbarItem(placement: .journalTrailingAction) {
+          Button(action: onOpenSettings) {
+            Image(systemName: "gearshape")
+          }
+          .accessibilityLabel("Settings")
+        }
+      }
     }
   }
 }

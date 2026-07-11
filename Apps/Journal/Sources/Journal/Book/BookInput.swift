@@ -1,14 +1,18 @@
-import GrowingTextEditor
+#if os(iOS)
+import NextGrowingTextViewSwiftUI
+#else
+import CaptureText
+#endif
 import SwiftUI
+#if canImport(SwiftUISnapDraggingModifier)
 import SwiftUISnapDraggingModifier
+#endif
 
 private struct _Book: View {
 
   @State private var text: String = ""
   @State private var isShowingMenu: Bool = false
   @State private var menuOffset: CGSize = .zero
-  @State private var menuArcProgress: CGFloat = 0
-  @State private var menuArcPeakOffset: CGSize = .zero
 
   @Namespace private var namespace
 
@@ -25,58 +29,31 @@ private struct _Book: View {
         VStack {
 
           Rectangle()
-            .opacity(0)
-            .frame(height: 1)
-            .matchedGeometryEffect(id: "destination", in: namespace)
+//            .opacity(0)
+            .frame(height: 100)
+            .matchedGeometryEffect(
+              id: "destination",
+              in: namespace,
+              isSource: true
+            )
 
           HStack(alignment: .bottom) {
 
             Color.clear
-              .frame(width: 34, height: 34)
-              .matchedGeometryEffect(
-                id: "MenuPosition",
-                in: namespace,
-                properties: [.position],
-                isSource: true,
-              )
+              .frame(width: 32,height: 32)
               .overlay {
-                if isShowingMenu == false {
-                  Color.clear
-                    .overlay {
-                      Button {
-                        withAnimation(.smooth) {
-                          menuArcProgress = 1
-                          menuArcPeakOffset = .init(width: 0, height: -200)
-                          isShowingMenu = true
-                        }
-                      } label: {
-                        Circle()
-                          .foregroundStyle(.primary)
-                          .frame(width: 34, height: 34)
-                          .overlay {
-                            Image(systemName: "arrow.up")
-                              .foregroundStyle(.white)
-                          }
-                          .contentShape(Rectangle())
-
-                      }
-                      
-                    }
-                    .offset(
-                      .init(
-                        width: menuOffset.width * 0.1,
-                        height: menuOffset.height * 0.1
-                      )
-                    )
-                    .matchedGeometryEffect(
-                      id: "MenuFrame",
-                      in: namespace,
-                      properties: .position,
-                    )
-                }
-              }
-              .padding(.bottom, 2)
-              .padding(.trailing, 1)
+              menuContainer
+                  .offset(menuOffset)
+                  .zIndex(2)
+                .matchedGeometryEffect(
+                  id: "destination",
+                  in: namespace,
+                  properties: isShowingMenu ? .position : [],
+                  isSource: false
+                )
+            }
+            .padding(.bottom, 2)
+            .padding(.trailing, 1)
 
             GrowingTextEditor(
               text: $text,
@@ -120,22 +97,53 @@ private struct _Book: View {
 
       }
     )
-    .overlay {
+    //    .overlay {
+    //      if isShowingMenu {
+    //        Color.clear.hidden()
+    //          .overlay(alignment: .bottom) {
+    //            menuOverlay
+    //          }
+    //          .transition(.scale(0).combined(with: .opacity))
+    //          .matchedGeometryEffect(
+    //            id: "destination",
+    //            in: namespace,
+    //            properties: .frame,
+    //            anchor: .center,
+    //            isSource: false,
+    //          )
+    //      }
+    //    }
+
+  }
+
+  @ViewBuilder
+  private var menuContainer: some View {
+    ZStack {
+      Color.red
       if isShowingMenu {
-        Color.clear.hidden()
-          .overlay(alignment: .bottom) {
-            menuOverlay
+        menuOverlay
+          .transition(.opacity)
+
+      } else {
+        Button {
+          withAnimation(.smooth) {
+            isShowingMenu = true
           }
-          .transition(.scale(0).combined(with: .opacity))
-          .matchedGeometryEffect(
-            id: "destination",
-            in: namespace,
-            properties: .frame,
-            anchor: .center,
-            isSource: false,
-          )
+        } label: {
+          Circle()
+            .foregroundStyle(.primary)
+            .frame(width: 34, height: 34)
+            .overlay {
+              Image(systemName: "arrow.up")
+                .foregroundStyle(.white)
+            }
+            .contentShape(Rectangle())
+
+        }
+        .transition(.opacity)
       }
     }
+    .geometryGroup()
 
   }
 
@@ -182,10 +190,6 @@ private struct _Book: View {
               offset: offset,
               contentSize: contentSize
             ) {
-              menuArcPeakOffset = menuDismissArcPeakOffset(
-                velocity: velocity,
-                offset: offset
-              )
 
               withAnimation {
                 isShowingMenu = false
@@ -200,17 +204,6 @@ private struct _Book: View {
       )
     )
     .scaleEffect(menuOverlayScale, anchor: .center)
-    .matchedGeometryEffect(
-      id: "MenuFrame",
-      in: namespace,
-      properties: .position
-    )
-    .modifier(
-      BookInputArcOffsetEffect(
-        progress: menuArcProgress,
-        peakOffset: menuArcPeakOffset
-      )
-    )
   }
 
   private var menuOverlayScale: CGFloat {
@@ -219,19 +212,6 @@ private struct _Book: View {
     }
 
     return 1 + min(abs(menuOffset.height) / 2400, 0.025)
-  }
-
-  private func menuDismissArcPeakOffset(
-    velocity: CGVector,
-    offset: CGSize
-  ) -> CGSize {
-    let horizontalIntent = offset.width * 0.35 + velocity.dx * 0.06
-    let upwardLift = max(offset.height * 0.18, velocity.dy * 0.045, 36)
-
-    return .init(
-      width: horizontalIntent.clamped(to: -90...90),
-      height: -upwardLift.clamped(to: 36...140)
-    )
   }
 
   private func shouldDismissMenu(

@@ -30,7 +30,9 @@ public struct SuggestionCaptureDemoView: View {
     }
     .background(.background)
     .navigationTitle("Suggestions")
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
   }
 }
 

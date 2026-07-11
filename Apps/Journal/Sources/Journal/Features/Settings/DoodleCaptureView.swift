@@ -30,9 +30,9 @@ struct DoodleCaptureView: View {
       }
     }
     .navigationTitle("Doodle")
-    .navigationBarTitleDisplayMode(.inline)
+    .journalInlineNavigationTitle()
     .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
+      ToolbarItem(placement: .journalTrailingAction) {
         Menu {
           Picker("Theme", selection: $themeID) {
             ForEach(Theme.all) { theme in

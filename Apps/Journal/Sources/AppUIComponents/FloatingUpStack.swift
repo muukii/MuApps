@@ -64,7 +64,7 @@ struct FloatingUpStack: View {
     .coordinateSpace(name: scrollCoordinateSpace)
     .background(
       LinearGradient(
-        colors: [Color(.systemBackground), Color(.secondarySystemBackground)],
+        colors: backgroundColors,
         startPoint: .top,
         endPoint: .bottom
       )
@@ -86,6 +86,14 @@ struct FloatingUpStack: View {
         }
       }
     }
+  }
+
+  private var backgroundColors: [Color] {
+    #if canImport(UIKit)
+    [Color(.systemBackground), Color(.secondarySystemBackground)]
+    #else
+    [Color(nsColor: .windowBackgroundColor), Color(nsColor: .controlBackgroundColor)]
+    #endif
   }
 
   private var stackSpacing: CGFloat {

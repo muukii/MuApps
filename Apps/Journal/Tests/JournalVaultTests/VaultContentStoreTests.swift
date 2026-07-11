@@ -18,6 +18,63 @@ struct VaultContentStoreTests {
     )
   }
 
+  // MARK: - VaultInfo
+
+  @Test
+  func renameVault_updatesVaultInfoAndRearmsOutbox() throws {
+    let mutationCount = Mutex(0)
+    let store = try makeStore {
+      mutationCount.withLock { $0 += 1 }
+    }
+    try store.seedVaultInfo(title: "Old")
+
+    let context = store.container.mainContext
+    let originalInfo = try #require(try context.fetch(FetchDescriptor<VaultInfo>()).first)
+    let originalUpdatedAt = originalInfo.updatedAt
+
+    let didRename = try store.renameVault(title: "New")
+
+    let info = try #require(try context.fetch(FetchDescriptor<VaultInfo>()).first)
+    #expect(didRename)
+    #expect(info.title == "New")
+    #expect(info.updatedAt >= originalUpdatedAt)
+
+    let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
+    #expect(outbox.count == 1)
+    #expect(outbox.first?.recordType == VaultRecordType.vaultInfo.rawValue)
+    #expect(outbox.first?.recordName == store.vaultID.uuidString)
+    #expect(outbox.first?.kind == .save)
+    #expect(mutationCount.withLock { $0 } == 2)
+  }
+
+  @Test
+  func updateVaultIcon_updatesVaultInfoAndRearmsOutbox() throws {
+    let mutationCount = Mutex(0)
+    let store = try makeStore {
+      mutationCount.withLock { $0 += 1 }
+    }
+    try store.seedVaultInfo(title: "Trip")
+
+    let context = store.container.mainContext
+    let originalInfo = try #require(try context.fetch(FetchDescriptor<VaultInfo>()).first)
+    let originalUpdatedAt = originalInfo.updatedAt
+    let icon = VaultIcon.emoji("\u{1F5FE}")
+
+    let didUpdate = try store.updateVaultIcon(icon, title: "Trip")
+
+    let info = try #require(try context.fetch(FetchDescriptor<VaultInfo>()).first)
+    #expect(didUpdate)
+    #expect(info.icon == icon)
+    #expect(info.updatedAt >= originalUpdatedAt)
+
+    let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
+    #expect(outbox.count == 1)
+    #expect(outbox.first?.recordType == VaultRecordType.vaultInfo.rawValue)
+    #expect(outbox.first?.recordName == store.vaultID.uuidString)
+    #expect(outbox.first?.kind == .save)
+    #expect(mutationCount.withLock { $0 } == 2)
+  }
+
   // MARK: - createThread
 
   @Test

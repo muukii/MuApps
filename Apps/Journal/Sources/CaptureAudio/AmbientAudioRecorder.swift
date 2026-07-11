@@ -68,9 +68,11 @@ public final class AmbientAudioRecorder {
   public func start() throws {
     guard state != .recording else { return }
 
+    #if os(iOS)
     let session = AVAudioSession.sharedInstance()
     try session.setCategory(.record, mode: .default)
     try session.setActive(true)
+    #endif
 
     let url = FileManager.default.temporaryDirectory
       .appendingPathComponent("ambient-\(UUID().uuidString)")
@@ -104,7 +106,9 @@ public final class AmbientAudioRecorder {
     let finalDuration = recorder.currentTime
     recorder.stop()
     stopPolling()
+    #if os(iOS)
     try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    #endif
 
     self.recorder = nil
     self.fileURL = nil

@@ -1,6 +1,8 @@
 @_spi(Advanced) import SwiftUIIntrospect
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 import MuColor
 
 /// Recolors the navigation bar's **title** and **icons** (bar-button items and the
@@ -55,9 +57,13 @@ extension View {
   /// which matches iOS 26 *and every later OS* (the plain `.iOS(.v26)` form only
   /// fires when 26 is the current major, so it would no-op on iOS 27+).
   public func appNavigationBarStyle(_ style: AppNavigationBarStyle) -> some View {
+    #if canImport(UIKit)
     introspect(.navigationStack, on: .iOS(.v26...)) { navigationController in
       style.apply(to: navigationController.navigationBar)
     }
+    #else
+    tint(style.iconColor)
+    #endif
   }
 
   /// Convenience for the common title + icon case.
@@ -95,11 +101,13 @@ struct AppNavigationBarStyleModifier: ViewModifier {
 
 // MARK: - Appearance application
 
+#if canImport(UIKit)
 extension AppNavigationBarStyle {
 
   /// Mutates `bar`'s per-instance appearances in place. Title color is applied to
   /// copies of the bar's current appearances so the system background material is
   /// preserved; only `backgroundColor` opts into an opaque fill.
+  @MainActor
   fileprivate func apply(to bar: UINavigationBar) {
 
     let titleUIColor = UIColor(titleColor)
@@ -128,3 +136,4 @@ extension AppNavigationBarStyle {
     bar.compactAppearance = bar.compactAppearance.map(restyled)
   }
 }
+#endif

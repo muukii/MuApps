@@ -22,7 +22,7 @@ struct PrivacyPolicyView: View {
     }
     .background(.background)
     .navigationTitle("Privacy Policy")
-    .navigationBarTitleDisplayMode(.inline)
+    .journalInlineNavigationTitle()
   }
 }
 

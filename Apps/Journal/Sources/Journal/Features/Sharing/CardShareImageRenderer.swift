@@ -1,6 +1,10 @@
 import MuColor
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// Renders detached card snapshots into shareable raster images.
 @MainActor
@@ -27,7 +31,11 @@ enum CardShareImageRenderer {
     )
     renderer.scale = max(scale, 1)
     renderer.isOpaque = true
+    #if canImport(UIKit)
     return renderer.uiImage
+    #else
+    return renderer.nsImage
+    #endif
   }
 
   /// Renders the static SwiftUI frame used behind Doodle replay video frames.
@@ -45,7 +53,11 @@ enum CardShareImageRenderer {
     )
     renderer.scale = max(scale, 1)
     renderer.isOpaque = true
+    #if canImport(UIKit)
     return renderer.uiImage
+    #else
+    return renderer.nsImage
+    #endif
   }
 
   /// Renders the static SwiftUI frame used behind Bauhaus replay video frames.
@@ -63,7 +75,11 @@ enum CardShareImageRenderer {
     )
     renderer.scale = max(scale, 1)
     renderer.isOpaque = true
+    #if canImport(UIKit)
     return renderer.uiImage
+    #else
+    return renderer.nsImage
+    #endif
   }
 
   /// Writes a PNG export for `snapshot` into a temporary file and returns the URL.

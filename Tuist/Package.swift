@@ -55,6 +55,7 @@ let package = Package(
     .package(url: "https://github.com/FluidGroup/swiftui-async-multiplex-image", from: "1.0.0"),
     .package(url: "https://github.com/FluidGroup/swiftui-support.git", from: "0.13.0"),
     .package(path: "../submodules/swiftui-snap-dragging-modifier"),
+    .package(url: "https://github.com/FluidGroup/NextGrowingTextView.git", from: "3.0.0"),
     .package(url: "https://github.com/FluidGroup/swiftui-persistent-control.git", revision: "093554c7a02642acb306b8e8482fd3b8322314f3"),
     .package(url: "https://github.com/nikstar/VariableBlur", from: "1.3.0"),
     // Bumped to the iOS 26 support revision (#64): the prior revision capped

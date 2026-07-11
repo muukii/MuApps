@@ -37,7 +37,7 @@ struct ThemeSelectionView: View {
       }
     }
     .navigationTitle("Theme")
-    .navigationBarTitleDisplayMode(.inline)
+    .journalInlineNavigationTitle()
   }
 }
 
