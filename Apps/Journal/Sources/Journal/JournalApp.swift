@@ -48,8 +48,41 @@ struct JournalApp: App {
         .task { DoodleHaptics.prepareForDrawing() }
       #endif
     }
+
+    #if os(macOS)
+    Settings {
+      JournalSettingsSceneRoot(vaultRuntime: vaultRuntime)
+    }
+    #endif
   }
 }
+
+#if os(macOS)
+/// Supplies the app-scoped runtime and visual preferences to the independent
+/// macOS Settings scene.
+///
+/// Scenes don't inherit the environment installed below `RootView`, so the
+/// Settings window needs its own root before it can reuse `SettingsScreen`.
+private struct JournalSettingsSceneRoot: View {
+
+  let vaultRuntime: JournalVaultRuntime
+
+  @AppStorage(JournalDefaults.themeID) private var themeID: String = Theme.default.id
+  @AppStorage(JournalDefaults.appearancePreferenceID)
+  private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
+
+  var body: some View {
+    let appearancePreference = JournalAppearancePreference.with(id: appearancePreferenceID)
+
+    PrimaryContainer(theme: Theme.with(id: themeID)) {
+      SettingsScreen()
+    }
+    .environment(vaultRuntime)
+    .preferredColorScheme(appearancePreference.colorScheme)
+    .frame(minWidth: 520, minHeight: 520)
+  }
+}
+#endif
 
 #if DEBUG
 /// Launch arguments for opening isolated Journal prototype surfaces.
@@ -275,10 +308,15 @@ private struct JournalHomeView: View {
   private let onActiveVaultChanged: @MainActor @Sendable () -> Void
 
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
+  #if os(macOS)
+  @Environment(\.openSettings) private var openSettings
+  #endif
 
   @State private var isVaultSelectionPresented = false
   @State private var isVaultCreationPresented = false
+  #if os(iOS)
   @State private var isSettingsPresented = false
+  #endif
   @State private var vaultSheetDetent: PresentationDetent = .medium
 
   init(onActiveVaultChanged: @escaping @MainActor @Sendable () -> Void) {
@@ -293,7 +331,7 @@ private struct JournalHomeView: View {
       onCreateVault: { isVaultCreationPresented = true },
       onRefreshVaults: refreshVaults,
       onRetryVaultActivation: retryVaultActivation,
-      onOpenSettings: { isSettingsPresented = true }
+      onOpenSettings: presentSettings
     )
     .sheet(isPresented: $isVaultSelectionPresented) {
       VaultSelectionView(
@@ -315,10 +353,13 @@ private struct JournalHomeView: View {
       )
       .presentationBackground(.background)
     }
+    #if os(iOS)
     .sheet(isPresented: $isSettingsPresented) {
       SettingsScreen()
+        .presentationSizing(.form)
         .presentationBackground(.background)
     }
+    #endif
   }
 
   private var contentState: JournalHomeContentState {
@@ -344,6 +385,16 @@ private struct JournalHomeView: View {
   private func presentVaultSelection() {
     vaultSheetDetent = .medium
     isVaultSelectionPresented = true
+  }
+
+  /// Opens the platform-native Settings presentation without changing the iOS
+  /// sheet used by the existing phone and tablet interface.
+  private func presentSettings() {
+    #if os(macOS)
+    openSettings()
+    #else
+    isSettingsPresented = true
+    #endif
   }
 
   private func finishVaultSelection() {

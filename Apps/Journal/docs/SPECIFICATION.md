@@ -666,8 +666,10 @@ the gallery's **Lab** section).
   when no vault is already active.
 - **`JournalHomeView`** — the persistent post-onboarding presenter. Its normal
   states are Creation backed by an active vault and **No Vaults**. It owns the
-  Vault sheet, direct first-vault creation sheet, and no-vault Settings sheet so
-  changing or deleting a vault never replaces the active modal presenter.
+  Vault sheet and direct first-vault creation sheet. On iOS it also owns the
+  no-vault Settings sheet; on macOS its Settings action opens the app-level
+  Settings scene, so changing or deleting a vault never replaces an active modal
+  presenter.
   `CreationView` is keyed by the active `vaultID`, ensuring view-local drafts do
   not cross into a newly selected vault.
 - **`VaultSelectionView`** — a medium/large sheet opened from the active vault
@@ -936,6 +938,17 @@ the gallery's **Lab** section).
   step-by-step instructions for adding Tinycurve to the Home Screen, Lock Screen
   below the clock, and StandBy. The guide frames the widget as showing the
   latest card in a chosen vault.
+  On iPhone and iPad, the toolbar action continues to present
+  `SettingsScreen` as the existing dismissible sheet, including its zoom
+  transition from Creation. The sheet uses form presentation sizing so SwiftUI
+  chooses a compact settings width on iPad while retaining the platform-native
+  sheet treatment on iPhone. On native macOS, `JournalApp` declares a SwiftUI
+  `Settings` scene instead: the application menu and Command-comma open one
+  system-managed Settings window, toolbar actions target that same window, and
+  the window's standard close control replaces an in-content dismiss button.
+  The independent scene receives the same `JournalVaultRuntime`, theme, and
+  appearance preference as the main window. Its size remains stable while
+  navigating between Settings pages rather than resizing around each detail.
   Capture demos are intentionally hidden from Settings. In Debug builds, **Lab**
   links to Haptics and Haptic Doodle so those tools can be tried from the current
   app root; Release builds omit the Lab section. An **About** section has

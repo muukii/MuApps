@@ -51,7 +51,9 @@ struct CreationView: View {
   @State private var quickDoodleSheetDetent: PresentationDetent = .large
   @State private var quickBauhausSheetDetent: PresentationDetent = .large
   @State private var scrollTargetID: ThreadDraftCard?
+  #if os(iOS)
   @State private var isSettingsPresented: Bool = false
+  #endif
   @State private var isChangeVaultConfirmationPresented = false
   @State private var isImportingMediaFromLibrary: Bool = false
   @State private var selectedLibraryMediaItem: PhotosPickerItem?
@@ -166,6 +168,12 @@ struct CreationView: View {
         }
 
         ToolbarItem(placement: .journalTrailingAction) {
+          #if os(macOS)
+          SettingsLink {
+            Image(systemName: "gearshape")
+          }
+          .accessibilityLabel("Settings")
+          #else
           Button(action: {
             isSettingsPresented.toggle()
           }) {
@@ -173,6 +181,7 @@ struct CreationView: View {
           }
           .journalMatchedTransitionSource(id: "settings", in: namespace)
           .keyboardShortcut(",", modifiers: .command)
+          #endif
         }
       })
       .safeAreaInset(edge: .top, content: {
@@ -266,11 +275,14 @@ struct CreationView: View {
       .presentationDragIndicator(.visible)
       .presentationBackground(.background)
     }
+    #if os(iOS)
     .sheet(isPresented: $isSettingsPresented) {
       SettingsScreen()
         .journalZoomNavigationTransition(sourceID: "settings", in: namespace)
+        .presentationSizing(.form)
         .presentationBackground(.background)
     }
+    #endif
     .confirmationDialog(
       "Discard Drafts?",
       isPresented: $isChangeVaultConfirmationPresented,
