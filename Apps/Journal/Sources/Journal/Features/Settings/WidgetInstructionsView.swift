@@ -251,5 +251,5 @@ fileprivate struct WidgetInstructionCard: View {
   NavigationStack {
     WidgetInstructionsView()
   }
-  .environment(\.appPalette, Theme.default.light)
+  .environment(\.appPalette, .default)
 }

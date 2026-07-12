@@ -58,7 +58,7 @@ flowchart TD
   - CloudKit-only legacy migration task は削除した。
   - 現在 product startup に migration は wire されていない。
 - 確認箇所:
-  - `Sources/Journal/JournalApp.swift`
+  - `Sources/Journal/TinycurveApp.swift`
   - `Sources/Journal/App/JournalVaultRuntime.swift`
   - `docs/VAULT_SYNC_DESIGN.md`
 
@@ -83,7 +83,7 @@ flowchart TD
   - preset vault を自動作成せず、vault picker から新規 vault を作成できる。
   - 作成した vault を選択して `CreationView` へ入れる。
   - vault picker から owned/participant vault を削除できる。
-  - `Journal` scheme の simulator build が通る。
+  - `Tinycurve` scheme の simulator build が通る。
 - Verification:
   - 2026-07-04: `Journal` simulator build succeeded on `iPhone 17`.
 
@@ -190,7 +190,7 @@ flowchart TD
   - shared database subscription / fetch の timing。
   - accept 成功後、shared database の new zone が即時 fetch できない場合の retry / refresh。
 - Done:
-  - `JournalAppDelegate` / `JournalSceneDelegate` route both running-scene and
+  - `TinycurveAppDelegate` / `TinycurveSceneDelegate` route both running-scene and
     cold-launch `CKShare.Metadata` into SwiftUI through
     `CloudKitShareAcceptanceRouter`.
   - `JournalVaultRuntime.acceptShare(metadata:)` delegates acceptance to

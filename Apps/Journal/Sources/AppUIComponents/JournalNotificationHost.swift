@@ -142,12 +142,12 @@ private struct JournalNotificationBar: View {
 #Preview {
   @Previewable @State var center = JournalNotificationCenter()
 
-  PrimaryContainer(theme: .default) {
+  PrimaryContainer(accentColor: .default) {
     JournalNotificationHost(center: center) {
       Color.clear
         .background(.background)
         .task {
-          center.post(.threadSaveFailed)
+          center.post(.cardPostFailed)
         }
     }
   }

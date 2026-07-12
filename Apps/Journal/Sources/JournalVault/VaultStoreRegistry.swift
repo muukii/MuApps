@@ -12,6 +12,9 @@ public final class VaultStoreRegistry: Sendable {
 
   public let layout: VaultStoreLayout
 
+  /// Recovery behavior inherited by every first store open in this process.
+  public let openRecoveryPolicy: VaultContentStore.OpenRecoveryPolicy
+
   private struct State {
     var stores: [VaultID: VaultContentStore] = [:]
     var subscribers: [UUID: AsyncStream<VaultID>.Continuation] = [:]
@@ -19,8 +22,12 @@ public final class VaultStoreRegistry: Sendable {
 
   private let state = Mutex(State())
 
-  public init(layout: VaultStoreLayout) {
+  public init(
+    layout: VaultStoreLayout,
+    openRecoveryPolicy: VaultContentStore.OpenRecoveryPolicy = .resetPreReleaseStore
+  ) {
     self.layout = layout
+    self.openRecoveryPolicy = openRecoveryPolicy
   }
 
   /// Returns the vault's open store, opening it on first access. Opening
@@ -34,6 +41,7 @@ public final class VaultStoreRegistry: Sendable {
       let store = try VaultContentStore.open(
         vaultID: vaultID,
         layout: layout,
+        recoveryPolicy: openRecoveryPolicy,
         onLocalMutation: { [weak self] in self?.broadcast(vaultID) }
       )
       state.stores[vaultID] = store

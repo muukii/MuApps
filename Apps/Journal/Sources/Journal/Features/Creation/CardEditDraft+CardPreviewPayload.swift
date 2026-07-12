@@ -19,13 +19,21 @@ extension CardEditDraft {
       return .text(text)
     case .link:
       return .link(text)
+    case .file:
+      return .file(CardPreviewFilePayload(displayName: text))
     case .photo:
-      return .photo(CardPreviewPhotoPayload(imageData: photo?.imageData))
+      return .photo(
+        CardPreviewPhotoPayload(
+          imageData: photo?.imageData,
+          pixelSize: photo?.pixelSize
+        )
+      )
     case .video:
       return .video(
         CardPreviewVideoPayload(
           fileURL: video?.fileURL,
-          thumbnailData: video?.thumbnailData
+          thumbnailData: video?.thumbnailData,
+          pixelSize: video?.pixelSize
         )
       )
     case .livePhoto:
@@ -33,7 +41,8 @@ extension CardEditDraft {
         CardPreviewLivePhotoPayload(
           stillImageData: livePhoto?.stillImageData,
           pairedVideoFileURL: livePhoto?.pairedVideoFileURL,
-          thumbnailData: livePhoto?.thumbnailData
+          thumbnailData: livePhoto?.thumbnailData,
+          pixelSize: livePhoto?.pixelSize
         )
       )
     case .audio:

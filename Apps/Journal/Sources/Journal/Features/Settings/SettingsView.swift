@@ -2,6 +2,7 @@
 import MuHaptics
 #endif
 import JournalVault
+import JournalIntents
 import MuColor
 import SwiftUI
 
@@ -13,9 +14,11 @@ enum JournalDefaults {
     "\(baseKey).\(cloudKitEnvironmentKeySuffix)"
   }
 
-  /// Selected color theme id. Resolved against `Theme.all` via `Theme.with(id:)`,
-  /// falling back to `Theme.default` for unknown ids.
-  static let themeID = "journal.theme.id"
+  /// Selected key accent color id.
+  ///
+  /// The storage key intentionally retains its legacy spelling so existing
+  /// theme choices can be mapped to the new accent-only model.
+  static let accentColorID = "journal.theme.id"
 
   /// Selected appearance preference id. Resolved against
   /// `JournalAppearancePreference` before applying the scene color scheme.
@@ -103,7 +106,8 @@ struct SettingsView: View {
 
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
 
-  @AppStorage(JournalDefaults.themeID) private var themeID: String = Theme.default.id
+  @AppStorage(JournalDefaults.accentColorID)
+  private var accentColorID: String = AccentColor.default.id
   @AppStorage(JournalDefaults.appearancePreferenceID)
   private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
   @AppStorage(JournalDefaults.shouldAttachLocationToNewCards)
@@ -132,14 +136,14 @@ struct SettingsView: View {
       #endif
 
       NavigationLink {
-        ThemeSelectionView()
+        AccentColorSelectionView()
       } label: {
         HStack {
-          Label("Theme", systemImage: "paintpalette")
+          Label("Accent Color", systemImage: "paintpalette")
 
           Spacer(minLength: 0)
 
-          Text(Theme.with(id: themeID).name)
+          Text(AccentColor.with(id: accentColorID).name)
             .foregroundStyle(.secondary)
         }
       }
@@ -147,6 +151,9 @@ struct SettingsView: View {
 
       AppearanceSection(selectionID: $appearancePreferenceID)
       LocationSection(isEnabled: $shouldAttachLocationToNewCards)
+      #if os(iOS)
+      QuickCaptureVaultSection()
+      #endif
       CloudStorageEstimateSection(runtime: vaultRuntime)
       WidgetInstructionsSection()
 
@@ -261,6 +268,99 @@ fileprivate struct LocationSection: View {
       Text("When enabled, new cards attach your current location automatically if iOS allows Journal to access it.")
     }
     .settingsListRowBackground()
+  }
+}
+
+/// A form section for the explicit destination shared by Action Button,
+/// Shortcuts, App Intents, and the Share extension.
+///
+/// The choice lives in App Group preferences rather than standard app defaults
+/// because each system entry point runs in a separate process. Journal never
+/// substitutes the last-opened vault when this selection is missing or stale.
+fileprivate struct QuickCaptureVaultSection: View {
+
+  @State private var writableVaults: [JournalWritableVault] = []
+  @State private var selectionID = ""
+  @State private var didLoad = false
+  @State private var statusMessage: String?
+
+  var body: some View {
+    Section {
+      Picker("Quick Capture Vault", selection: $selectionID) {
+        Text("Choose a Vault")
+          .tag("")
+
+        ForEach(writableVaults) { vault in
+          Text(displayTitle(for: vault))
+            .tag(vault.id.uuidString)
+        }
+      }
+      .disabled(writableVaults.isEmpty)
+
+      if writableVaults.isEmpty {
+        Label("No writable vaults are available.", systemImage: "exclamationmark.triangle")
+          .foregroundStyle(.secondary)
+      }
+    } header: {
+      Text("Quick Capture")
+    } footer: {
+      if let statusMessage {
+        Text(statusMessage)
+      } else {
+        Text("Used by the Action Button, Shortcuts, and system sharing. Journal never chooses another vault automatically.")
+      }
+    }
+    .settingsListRowBackground()
+    .task { loadSelection() }
+    .onChange(of: selectionID) { _, newValue in
+      guard didLoad else { return }
+      saveSelection(newValue)
+    }
+  }
+
+  @MainActor
+  private func loadSelection() {
+    didLoad = false
+    defer { didLoad = true }
+
+    do {
+      let service = JournalPostingService()
+      writableVaults = try service.writableVaults()
+      let storedID = try JournalQuickCapturePreferences().selectedVaultID()
+
+      if let storedID,
+         writableVaults.contains(where: { $0.id == storedID }) {
+        selectionID = storedID.uuidString
+        statusMessage = nil
+      } else {
+        selectionID = ""
+        statusMessage = storedID == nil
+          ? nil
+          : String(localized: "The previous Quick Capture Vault is no longer writable. Choose another vault.")
+      }
+    } catch {
+      writableVaults = []
+      selectionID = ""
+      statusMessage = error.localizedDescription
+    }
+  }
+
+  @MainActor
+  private func saveSelection(_ id: String) {
+    do {
+      let vault = writableVaults.first { $0.id.uuidString == id }
+      try JournalQuickCapturePreferences().setSelectedVault(vault)
+      statusMessage = vault == nil
+        ? String(localized: "Choose a vault before using Quick Capture.")
+        : nil
+    } catch {
+      statusMessage = error.localizedDescription
+    }
+  }
+
+  private func displayTitle(for vault: JournalWritableVault) -> String {
+    let title = vault.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    return title.isEmpty ? String(localized: "Untitled Vault") : title
   }
 }
 
@@ -705,6 +805,8 @@ fileprivate extension JournalVault.Attachment.Kind {
       "Videos"
     case .livePhoto:
       "Live Photos"
+    case .file:
+      "Files"
     case .audio:
       "Audio"
     case .suggestion:
@@ -727,6 +829,8 @@ fileprivate extension JournalVault.Attachment.Kind {
       "video"
     case .livePhoto:
       "livephoto"
+    case .file:
+      "doc"
     case .audio:
       "waveform"
     case .suggestion:

@@ -1,4 +1,4 @@
-# CLAUDE.md — Journal
+# CLAUDE.md — Tinycurve
 
 Guidance for working in `Apps/Journal/`. The repo-root `CLAUDE.md` and
 `coding-guide.md` still apply; this file adds Journal-specific context.
@@ -26,7 +26,7 @@ behavior).
 
 ## Layout
 
-- `Sources/Journal/` — app shell: `JournalApp`, creation/list/settings features,
+- `Sources/Journal/` — app shell: `TinycurveApp`, creation/list/settings features,
   app-local components, notification UI, and app resources such as `Icon.icon`.
 - `Sources/JournalVault/` — **target-architecture data layer** (dynamic framework,
   extension-API-only): per-vault SwiftData stores with CloudKit mirroring
@@ -88,7 +88,7 @@ behavior).
 
 ```bash
 tuist install && tuist generate
-xcodebuild -workspace MuApps.xcworkspace -scheme Journal \
+xcodebuild -workspace MuApps.xcworkspace -scheme Tinycurve \
   -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```
 

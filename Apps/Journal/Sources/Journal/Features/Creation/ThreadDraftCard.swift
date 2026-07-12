@@ -10,8 +10,8 @@ import MediaProcessing
 import Observation
 import UniformTypeIdentifiers
 
-/// A selected video kept in a temporary file until the vault save moves it into
-/// the selected vault's media directory.
+/// A selected video kept in a temporary file until the vault save commits a
+/// copy in the selected vault's media directory.
 struct CapturedVideo: Sendable, Equatable, Codable {
   var fileURL: URL
   var thumbnailData: Data?
@@ -167,7 +167,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   /// Captured still photo kept in the component's own value type until save.
   var photo: CapturedPhoto?
 
-  /// Selected video kept in a temporary file until save.
+  /// Selected video kept in a temporary file until a successful save cleans it up.
   var video: CapturedVideo?
 
   /// Selected Live Photo kept as still + paired movie resources until save.
@@ -212,6 +212,10 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
       return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     case .link:
       return linkURL != nil
+    case .file:
+      // Files arrive through the Share extension and are not authored or
+      // replaced by the in-app draft editor.
+      return false
     case .photo:
       return photo != nil
     case .video:
@@ -226,6 +230,37 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
       return doodle != nil
     case .bauhaus:
       return bauhaus?.artwork.isEmpty == false
+    case .unknown:
+      return false
+    @unknown default:
+      return false
+    }
+  }
+
+  /// Whether the currently selected modality contains no authored input at all.
+  ///
+  /// This differs from `canSave`: an invalid but non-empty link is still authored
+  /// input and must not be silently discarded when its editor closes.
+  var isCurrentKindContentEmpty: Bool {
+    switch kind {
+    case .text, .link:
+      return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    case .file:
+      return false
+    case .photo:
+      return photo == nil
+    case .video:
+      return video == nil
+    case .livePhoto:
+      return livePhoto == nil
+    case .audio:
+      return audio == nil
+    case .suggestion:
+      return suggestion == nil
+    case .doodle:
+      return doodle == nil
+    case .bauhaus:
+      return bauhaus?.artwork.isEmpty ?? true
     case .unknown:
       return false
     @unknown default:
@@ -415,6 +450,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     suggestionMediaFileURLsByResourceID = [:]
     doodle = nil
     bauhaus = nil
+    location = nil
   }
 }
 
@@ -454,6 +490,8 @@ struct CardEditDraftSnapshot: Sendable, Codable {
         text: linkURL.storageString,
         location: location
       )
+    case .file:
+      throw CardEditDraftSnapshotError.unsupportedKind
     case .photo:
       guard let photo else { throw CardEditDraftSnapshotError.missingMediaPayload }
       let thumbnail = try? MediaThumbnailGenerator.imageThumbnail(from: photo.imageData).data
@@ -515,7 +553,14 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       guard let audio else { throw CardEditDraftSnapshotError.missingMediaPayload }
       return VaultContentStore.CardDraft(
         kind: .audio,
-        mediaFileURL: audio.fileURL,
+        mediaResources: [
+          VaultContentStore.AttachmentResourceDraft(
+            role: .audio,
+            fileURL: audio.fileURL,
+            contentType: "public.mpeg-4-audio",
+            duration: audio.duration
+          )
+        ],
         location: location
       )
     case .suggestion:
@@ -549,6 +594,24 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       throw CardEditDraftSnapshotError.unsupportedKind
     @unknown default:
       throw CardEditDraftSnapshotError.unsupportedKind
+    }
+  }
+
+  /// Removes app-owned temporary media after persistence has committed.
+  ///
+  /// Vault persistence consumes these files only after its transaction commits;
+  /// explicit discard uses this helper when no save will take ownership.
+  func removeTemporaryMediaFiles() {
+    let fileURLs = Set(
+      [
+        video?.fileURL,
+        livePhoto?.pairedVideoFileURL,
+        audio?.fileURL,
+      ].compactMap { $0 }
+    )
+
+    for fileURL in fileURLs {
+      try? FileManager.default.removeItem(at: fileURL)
     }
   }
 }

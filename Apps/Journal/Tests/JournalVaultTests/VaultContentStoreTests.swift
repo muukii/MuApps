@@ -225,6 +225,154 @@ struct VaultContentStoreTests {
   }
 
   @Test
+  func createThread_fileStagingFailure_rollsBackAndCanRetry() throws {
+    let store = try makeStore()
+    let stillURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("staging-still-\(UUID().uuidString)")
+      .appendingPathExtension("heic")
+    let pairedVideoURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("staging-paired-\(UUID().uuidString)")
+      .appendingPathExtension("mov")
+    let stillBytes = Data([0x21, 0x22, 0x23])
+    let pairedVideoBytes = Data([0x31, 0x32, 0x33])
+    try stillBytes.write(to: stillURL)
+
+    let draft = VaultContentStore.CardDraft(
+      kind: .livePhoto,
+      mediaResources: [
+        .init(role: .stillImage, fileURL: stillURL),
+        .init(role: .pairedVideo, fileURL: pairedVideoURL),
+      ]
+    )
+
+    var didFail = false
+    do {
+      try store.createThread(cards: [draft])
+    } catch {
+      didFail = true
+    }
+
+    #expect(didFail)
+    #expect(FileManager.default.fileExists(atPath: stillURL.path))
+    #expect(
+      try FileManager.default.contentsOfDirectory(
+        at: store.mediaDirectoryURL,
+        includingPropertiesForKeys: nil
+      ).isEmpty
+    )
+
+    let context = store.container.mainContext
+    #expect(try context.fetchCount(FetchDescriptor<Card>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<JournalVault.Attachment>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<JournalVault.AttachmentResource>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 0)
+
+    try pairedVideoBytes.write(to: pairedVideoURL)
+    try store.createThread(cards: [draft])
+
+    #expect(FileManager.default.fileExists(atPath: stillURL.path) == false)
+    #expect(FileManager.default.fileExists(atPath: pairedVideoURL.path) == false)
+    #expect(try context.fetchCount(FetchDescriptor<Card>()) == 1)
+    #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 1)
+    #expect(try context.fetchCount(FetchDescriptor<JournalVault.Attachment>()) == 1)
+    #expect(try context.fetchCount(FetchDescriptor<JournalVault.AttachmentResource>()) == 2)
+    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 5)
+  }
+
+  @Test
+  func createThread_copyResource_preservesSourceAfterCommit() throws {
+    let store = try makeStore()
+    let sourceURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("copy-source-\(UUID().uuidString)")
+      .appendingPathExtension("mov")
+    let bytes = Data([0x41, 0x42, 0x43])
+    try bytes.write(to: sourceURL)
+    defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+    try store.createThread(cards: [
+      .init(
+        kind: .video,
+        mediaResources: [
+          .init(
+            role: .originalVideo,
+            fileURL: sourceURL,
+            fileTransferMode: .copy
+          )
+        ]
+      )
+    ])
+
+    #expect(FileManager.default.fileExists(atPath: sourceURL.path))
+    let resource = try #require(
+      try store.container.mainContext.fetch(
+        FetchDescriptor<JournalVault.AttachmentResource>()
+      ).first
+    )
+    #expect(try Data(contentsOf: store.fileURL(for: resource)) == bytes)
+  }
+
+  @Test
+  func updateCard_fileStagingFailure_restoresSavedCardAndMedia() throws {
+    let store = try makeStore()
+    let originalBytes = Data([0x51, 0x52, 0x53])
+    let root = try #require(
+      try store.createThread(cards: [
+        .init(kind: .photo, mediaData: originalBytes)
+      ]).first
+    )
+    let context = store.container.mainContext
+    let originalResource = try #require(
+      try context.fetch(FetchDescriptor<JournalVault.AttachmentResource>()).first
+    )
+    let originalResourceID = originalResource.id
+    let originalFileURL = store.fileURL(for: originalResource)
+
+    let stillURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("update-still-\(UUID().uuidString)")
+      .appendingPathExtension("heic")
+    let pairedVideoURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("update-paired-\(UUID().uuidString)")
+      .appendingPathExtension("mov")
+    try Data([0x61, 0x62]).write(to: stillURL)
+    try Data([0x71, 0x72]).write(to: pairedVideoURL)
+    defer { try? FileManager.default.removeItem(at: stillURL) }
+    defer { try? FileManager.default.removeItem(at: pairedVideoURL) }
+
+    // Both inputs pass preflight validation. Reusing one resource id makes the
+    // second staged destination collide after the old attachment and card have
+    // already been mutated, exercising the transactional rollback path.
+    let collidingResourceID = UUID()
+
+    var didFail = false
+    do {
+      try store.updateCard(
+        cardID: root.cardID,
+        with: .init(
+          kind: .livePhoto,
+          mediaResources: [
+            .init(id: collidingResourceID, role: .stillImage, fileURL: stillURL),
+            .init(id: collidingResourceID, role: .pairedVideo, fileURL: pairedVideoURL),
+          ]
+        )
+      )
+    } catch {
+      didFail = true
+    }
+
+    #expect(didFail)
+    let card = try #require(try context.fetch(FetchDescriptor<Card>()).first)
+    let resources = try context.fetch(FetchDescriptor<JournalVault.AttachmentResource>())
+    #expect(card.kind == .photo)
+    #expect(resources.count == 1)
+    #expect(resources.first?.id == originalResourceID)
+    #expect(try Data(contentsOf: originalFileURL) == originalBytes)
+    #expect(FileManager.default.fileExists(atPath: stillURL.path))
+    #expect(FileManager.default.fileExists(atPath: pairedVideoURL.path))
+    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 4)
+  }
+
+  @Test
   func createThread_linkDraft_storesURLWithoutAttachment() throws {
     let store = try makeStore()
 
@@ -245,6 +393,82 @@ struct VaultContentStoreTests {
       Set(outbox.map(\.recordType))
         == [VaultRecordType.card.rawValue, VaultRecordType.cardEdge.rawValue]
     )
+  }
+
+  @Test
+  func createThread_fileDraft_storesDisplayNameAndOriginalFile() throws {
+    let store = try makeStore()
+    let sourceURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("trip-itinerary-\(UUID().uuidString)")
+      .appendingPathExtension("pdf")
+    let bytes = Data([0x25, 0x50, 0x44, 0x46])
+    try bytes.write(to: sourceURL)
+    defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+    try store.createThread(cards: [
+      .init(
+        kind: .file,
+        text: "Trip Itinerary.pdf",
+        mediaResources: [
+          .init(
+            role: .file,
+            fileURL: sourceURL,
+            contentType: "com.adobe.pdf"
+          )
+        ]
+      )
+    ])
+
+    let context = store.container.mainContext
+    let card = try #require(try context.fetch(FetchDescriptor<Card>()).first)
+    let attachment = try #require(
+      try context.fetch(FetchDescriptor<JournalVault.Attachment>()).first
+    )
+    let resource = try #require(
+      try context.fetch(FetchDescriptor<JournalVault.AttachmentResource>()).first
+    )
+
+    #expect(card.kind == .file)
+    #expect(card.body == "Trip Itinerary.pdf")
+    #expect(attachment.kind == .file)
+    #expect(attachment.primaryResourceID == resource.id)
+    #expect(attachment.byteSize == bytes.count)
+    #expect(resource.role == .file)
+    #expect(resource.byteSize == bytes.count)
+    #expect(resource.contentType == "com.adobe.pdf")
+    #expect(store.fileURL(for: resource).pathExtension == "pdf")
+    #expect(try Data(contentsOf: store.fileURL(for: resource)) == bytes)
+    #expect(FileManager.default.fileExists(atPath: sourceURL.path) == false)
+
+    let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
+    #expect(outbox.count == 4)  // card + edge + attachment + resource
+  }
+
+  @Test
+  func createThread_missingFilePayload_rejectsEntirePostBeforeWriting() throws {
+    let store = try makeStore()
+
+    do {
+      try store.createThread(cards: [
+        .init(kind: .text, text: "This must not be saved"),
+        .init(kind: .file, text: "Missing.pdf"),
+      ])
+      Issue.record("Expected the file draft without bytes to be rejected")
+    } catch let error as VaultContentStore.Error {
+      switch error {
+      case .missingMediaPayload(let kind):
+        #expect(kind == .file)
+      case .cardNotFound:
+        Issue.record("Expected missingMediaPayload, received \(error)")
+      }
+    }
+
+    let context = store.container.mainContext
+    #expect(try context.fetchCount(FetchDescriptor<Card>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<JournalVault.Attachment>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<JournalVault.AttachmentResource>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 0)
   }
 
   @Test

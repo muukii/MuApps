@@ -44,7 +44,7 @@ private struct DeviceHeadroomReporter: UIViewRepresentable {
   }
 
   private func updateHeadroom(_ value: Float) {
-    guard deviceHeadroom != value else { return }
+    guard abs(deviceHeadroom - value) > 0.005 else { return }
 
     Task { @MainActor in
       deviceHeadroom = value
@@ -54,14 +54,40 @@ private struct DeviceHeadroomReporter: UIViewRepresentable {
 
 private final class HeadroomView: UIView {
   var onHeadroomChange: ((Float) -> Void)?
+  private var samplingTask: Task<Void, Never>?
 
   override func didMoveToWindow() {
     super.didMoveToWindow()
+
+    samplingTask?.cancel()
+    samplingTask = nil
+
+    guard window != nil else { return }
+
     updateHeadroom()
+
+    // currentEDRHeadroom can change while EDR content is onscreen and has no
+    // dedicated change notification. Sampling slowly keeps shaders aligned
+    // with the live limit without tying observation to the render frame rate.
+    samplingTask = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        do {
+          try await Task.sleep(for: .seconds(1))
+        } catch {
+          return
+        }
+
+        guard let self, self.window != nil else { return }
+        self.updateHeadroom()
+      }
+    }
   }
 
   func updateHeadroom() {
     let screen = window?.windowScene?.screen
-    onHeadroomChange?(Float(screen?.currentEDRHeadroom ?? CGFloat(DeviceHeadroomKey.defaultValue)))
+    let currentHeadroom = Float(
+      screen?.currentEDRHeadroom ?? CGFloat(DeviceHeadroomKey.defaultValue)
+    )
+    onHeadroomChange?(max(currentHeadroom, DeviceHeadroomKey.defaultValue))
   }
 }

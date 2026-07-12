@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en" data-appearance="light" data-accent="forest">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journal — Accent Study</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #ffffff;
+      --ink: #101010;
+      --muted: #737373;
+      --surface: #f4f4f2;
+      --line: rgba(16, 16, 16, 0.12);
+      --accent: #18704b;
+      --on-accent: #ffffff;
+      --shadow: 0 22px 70px rgba(0, 0, 0, 0.08);
+    }
+
+    html[data-appearance="dark"] {
+      color-scheme: dark;
+      --canvas: #000000;
+      --ink: #f7f7f5;
+      --muted: #929292;
+      --surface: #151515;
+      --line: rgba(255, 255, 255, 0.14);
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+    }
+
+    html[data-accent="cobalt"] { --accent: #2468d8; }
+    html[data-accent="vermilion"] { --accent: #d94b32; }
+    html[data-accent="orchid"] { --accent: #9b55bd; }
+    html[data-accent="amber"] { --accent: #d68a00; --on-accent: #111111; }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+      transition: background-color 280ms ease, color 280ms ease;
+    }
+
+    button { font: inherit; }
+
+    .page {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 28px 0 72px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+    }
+
+    .brand-mark {
+      width: 16px;
+      height: 20px;
+      border: 1.5px solid currentColor;
+      border-radius: 3px 6px 6px 3px;
+      position: relative;
+    }
+
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      width: 5px;
+      height: 5px;
+      right: -3px;
+      top: -3px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .mode-toggle {
+      display: inline-flex;
+      padding: 3px;
+      border-radius: 999px;
+      background: var(--surface);
+    }
+
+    .mode-toggle button {
+      min-width: 64px;
+      padding: 7px 12px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .mode-toggle button[aria-pressed="true"] {
+      background: var(--canvas);
+      color: var(--ink);
+      box-shadow: 0 1px 5px rgba(0, 0, 0, 0.12);
+    }
+
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(420px, 1.1fr);
+      gap: clamp(48px, 8vw, 112px);
+      align-items: center;
+      padding: clamp(64px, 10vw, 132px) 0 88px;
+    }
+
+    .eyebrow {
+      margin: 0 0 24px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 720;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 650px;
+      margin: 0;
+      font-family: ui-rounded, "SF Pro Rounded", -apple-system, sans-serif;
+      font-size: clamp(44px, 6.8vw, 88px);
+      font-weight: 650;
+      line-height: 0.96;
+      letter-spacing: -0.065em;
+    }
+
+    .lede {
+      max-width: 530px;
+      margin: 28px 0 0;
+      color: var(--muted);
+      font-size: clamp(17px, 1.6vw, 20px);
+      line-height: 1.55;
+      letter-spacing: -0.015em;
+    }
+
+    .accent-panel {
+      margin-top: 48px;
+    }
+
+    .control-label {
+      display: block;
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .accent-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .accent-button {
+      width: 38px;
+      height: 38px;
+      padding: 4px;
+      border: 1px solid transparent;
+      border-radius: 50%;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .accent-button span {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--swatch);
+    }
+
+    .accent-button[aria-pressed="true"] { border-color: var(--ink); }
+    .accent-button:focus-visible, .mode-toggle button:focus-visible, .compose:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent), transparent 55%);
+      outline-offset: 3px;
+    }
+
+    .phone {
+      width: min(100%, 430px);
+      margin-inline: auto;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 46px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      transition: background-color 280ms ease, border-color 280ms ease;
+    }
+
+    .screen {
+      position: relative;
+      min-height: 690px;
+      overflow: hidden;
+      border-radius: 36px;
+      background: var(--canvas);
+      color: var(--ink);
+      padding: 28px 18px 22px;
+      transition: background-color 280ms ease, color 280ms ease;
+    }
+
+    .island {
+      width: 92px;
+      height: 25px;
+      margin: -17px auto 24px;
+      border-radius: 999px;
+      background: var(--ink);
+    }
+
+    .app-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      margin-bottom: 24px;
+      padding: 0 4px;
+    }
+
+    .date {
+      margin: 0 0 3px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 580;
+    }
+
+    .app-title {
+      margin: 0;
+      font-family: ui-rounded, "SF Pro Rounded", -apple-system, sans-serif;
+      font-size: 30px;
+      line-height: 1;
+      letter-spacing: -0.05em;
+    }
+
+    .avatar {
+      width: 35px;
+      height: 35px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--surface);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .memory {
+      position: relative;
+      overflow: hidden;
+      min-height: 210px;
+      border-radius: 23px;
+    }
+
+    .memory.large { grid-column: span 2; min-height: 242px; }
+
+    .photo-card {
+      background:
+        linear-gradient(180deg, transparent 42%, rgba(12, 16, 18, 0.64)),
+        radial-gradient(circle at 26% 28%, #f4cc83 0 7%, transparent 8%),
+        linear-gradient(145deg, #9dc2cc 0 43%, #48685b 44% 58%, #173c31 59% 100%);
+    }
+
+    .photo-card::before {
+      content: "";
+      position: absolute;
+      width: 210px;
+      height: 100px;
+      left: -20px;
+      bottom: 28px;
+      border-radius: 50% 50% 0 0;
+      background: #355545;
+      transform: rotate(-7deg);
+      opacity: 0.88;
+    }
+
+    .memory-copy {
+      position: absolute;
+      z-index: 1;
+      left: 18px;
+      right: 18px;
+      bottom: 17px;
+      color: white;
+    }
+
+    .memory-copy small { display: block; margin-bottom: 4px; opacity: 0.72; }
+    .memory-copy strong { font-size: 17px; letter-spacing: -0.025em; }
+
+    .note-card {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 18px;
+      background: #f0d867;
+      color: #272213;
+      transform: rotate(-0.6deg);
+    }
+
+    .quote-mark { font-family: Georgia, serif; font-size: 42px; line-height: 0.8; opacity: 0.55; }
+    .note-card p { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 20px; line-height: 1.25; }
+    .note-card small { opacity: 0.58; }
+
+    .drawing-card {
+      display: grid;
+      place-items: center;
+      background: #e8a0ad;
+    }
+
+    .drawing {
+      width: 78%;
+      height: 72%;
+    }
+
+    .compose {
+      position: absolute;
+      right: 24px;
+      bottom: 24px;
+      width: 58px;
+      height: 58px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--on-accent);
+      box-shadow: 0 10px 30px color-mix(in srgb, var(--accent), transparent 60%);
+      cursor: pointer;
+      transition: transform 160ms ease, background-color 220ms ease;
+    }
+
+    .compose:hover { transform: translateY(-2px) scale(1.02); }
+    .compose svg { width: 22px; height: 22px; }
+
+    .principle {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 1px;
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      background: var(--line);
+    }
+
+    .principle article {
+      min-height: 190px;
+      padding: 28px;
+      background: var(--canvas);
+    }
+
+    .principle b {
+      display: block;
+      width: 9px;
+      height: 9px;
+      margin-bottom: 44px;
+      border-radius: 50%;
+      background: var(--dot, var(--ink));
+    }
+
+    .principle h2 { margin: 0 0 9px; font-size: 17px; letter-spacing: -0.025em; }
+    .principle p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+
+    .caption {
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+    }
+
+    @media (max-width: 820px) {
+      .intro { grid-template-columns: 1fr; padding-top: 64px; }
+      .phone { margin-top: 12px; }
+      .principle { grid-template-columns: 1fr; }
+      .principle article { min-height: 150px; }
+      .principle b { margin-bottom: 28px; }
+    }
+
+    @media (max-width: 480px) {
+      .page { width: min(100% - 24px, 1180px); padding-top: 16px; }
+      .topbar { align-items: flex-start; }
+      .mode-toggle button { min-width: 54px; padding-inline: 9px; }
+      .intro { padding-top: 52px; gap: 48px; }
+      .screen { min-height: 620px; padding-inline: 14px; }
+      .memory { min-height: 184px; }
+      .memory.large { min-height: 220px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span> Journal / color study</div>
+      <div class="mode-toggle" aria-label="Appearance">
+        <button type="button" data-mode="light" aria-pressed="true">Light</button>
+        <button type="button" data-mode="dark" aria-pressed="false">Dark</button>
+      </div>
+    </header>
+
+    <section class="intro">
+      <div>
+        <p class="eyebrow">The content carries the color</p>
+        <h1>A quiet frame for vivid moments.</h1>
+        <p class="lede">Journal stays white or black. A single accent guides interaction, while every photo, drawing, and note keeps its own voice.</p>
+
+        <div class="accent-panel">
+          <span class="control-label">Key accent color</span>
+          <div class="accent-options" aria-label="Choose an accent color">
+            <button class="accent-button" type="button" data-color="forest" aria-label="Forest" aria-pressed="true" style="--swatch:#18704b"><span></span></button>
+            <button class="accent-button" type="button" data-color="cobalt" aria-label="Cobalt" aria-pressed="false" style="--swatch:#2468d8"><span></span></button>
+            <button class="accent-button" type="button" data-color="vermilion" aria-label="Vermilion" aria-pressed="false" style="--swatch:#d94b32"><span></span></button>
+            <button class="accent-button" type="button" data-color="orchid" aria-label="Orchid" aria-pressed="false" style="--swatch:#9b55bd"><span></span></button>
+            <button class="accent-button" type="button" data-color="amber" aria-label="Amber" aria-pressed="false" style="--swatch:#d68a00"><span></span></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="phone" aria-label="Journal preview">
+        <div class="screen">
+          <div class="island" aria-hidden="true"></div>
+          <div class="app-header">
+            <div>
+              <p class="date">Friday, July 11</p>
+              <h2 class="app-title">Moments</h2>
+            </div>
+            <div class="avatar">HK</div>
+          </div>
+
+          <div class="card-grid">
+            <article class="memory large photo-card">
+              <div class="memory-copy"><small>7:42 PM · Kamakura</small><strong>The air changed before the rain.</strong></div>
+            </article>
+            <article class="memory note-card">
+              <span class="quote-mark">“</span>
+              <p>Keep the frame quiet. Let the memory speak.</p>
+              <small>Today, 10:16</small>
+            </article>
+            <article class="memory drawing-card" aria-label="Colorful abstract drawing">
+              <svg class="drawing" viewBox="0 0 160 160" aria-hidden="true">
+                <path d="M16 88 C20 24, 74 18, 91 61 S139 75, 144 31" fill="none" stroke="#243b80" stroke-width="16" stroke-linecap="round"/>
+                <path d="M22 128 C48 93, 83 145, 138 106" fill="none" stroke="#e84b35" stroke-width="13" stroke-linecap="round"/>
+                <circle cx="114" cy="47" r="19" fill="#f5d448"/>
+              </svg>
+            </article>
+          </div>
+
+          <button class="compose" type="button" aria-label="Create a new moment">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="principle" aria-label="Color principles">
+      <article><b></b><h2>Neutral canvas</h2><p>White in Light mode. Black in Dark mode. The interface recedes behind what was captured.</p></article>
+      <article><b style="--dot:var(--accent)"></b><h2>One key accent</h2><p>Accent marks selection, focus, and the primary action. It does not tint content surfaces.</p></article>
+      <article><b style="--dot:#e8a0ad"></b><h2>Authored color</h2><p>Photos, drawings, and expressive cards own their color independently from the app appearance.</p></article>
+    </section>
+    <p class="caption">Interactive concept study · no app behavior is changed</p>
+  </main>
+
+  <script>
+    const root = document.documentElement;
+
+    document.querySelectorAll('[data-mode]').forEach((button) => {
+      button.addEventListener('click', () => {
+        root.dataset.appearance = button.dataset.mode;
+        document.querySelectorAll('[data-mode]').forEach((item) => {
+          item.setAttribute('aria-pressed', String(item === button));
+        });
+      });
+    });
+
+    document.querySelectorAll('[data-color]').forEach((button) => {
+      button.addEventListener('click', () => {
+        root.dataset.accent = button.dataset.color;
+        document.querySelectorAll('[data-color]').forEach((item) => {
+          item.setAttribute('aria-pressed', String(item === button));
+        });
+      });
+    });
+  </script>
+</body>
+</html>

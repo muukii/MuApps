@@ -283,5 +283,5 @@ fileprivate struct JournalHelpPointRow: View {
   NavigationStack {
     JournalHelpView()
   }
-  .environment(\.appPalette, Theme.default.light)
+  .environment(\.appPalette, .default)
 }

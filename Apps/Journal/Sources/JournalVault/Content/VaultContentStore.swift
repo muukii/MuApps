@@ -14,6 +14,16 @@ import SwiftData
 /// this API, so imports don't ping-pong back into the outbox.
 public struct VaultContentStore: Sendable {
 
+  /// Recovery behavior when SwiftData cannot open an existing vault store.
+  ///
+  /// The app-lifetime runtime may rebuild pre-release local data from CloudKit.
+  /// Short-lived extensions must instead preserve the store and surface an
+  /// error, because a transient cross-process open failure must never delete it.
+  public enum OpenRecoveryPolicy: Equatable, Sendable {
+    case resetPreReleaseStore
+    case failWithoutReset
+  }
+
   public static let schema = Schema([
     VaultInfo.self,
     Card.self,
@@ -42,6 +52,7 @@ public struct VaultContentStore: Sendable {
   public static func open(
     vaultID: VaultID,
     layout: VaultStoreLayout,
+    recoveryPolicy: OpenRecoveryPolicy = .resetPreReleaseStore,
     onLocalMutation: @escaping @Sendable () -> Void = {}
   ) throws -> VaultContentStore {
     try layout.ensureVaultDirectories(for: vaultID)
@@ -54,6 +65,9 @@ public struct VaultContentStore: Sendable {
     do {
       container = try ModelContainer(for: schema, configurations: configuration)
     } catch {
+      guard recoveryPolicy == .resetPreReleaseStore else {
+        throw error
+      }
       // Journal is still pre-release. If an old local schema cannot migrate,
       // discard this vault's local content store instead of carrying migration
       // code for data shapes that never shipped.
@@ -97,15 +111,15 @@ extension VaultContentStore {
     public var kind: Card.Kind
 
     /// Textual payload for body-backed cards. `.text` stores written content,
-    /// and `.link` stores the canonical URL string. Media and authored JSON
-    /// cards ignore it.
+    /// `.link` stores the canonical URL string, and `.file` stores the original
+    /// user-facing file name. Other media and authored JSON cards ignore it.
     public var text: String
 
     /// In-memory attachment bytes for photo, suggestion, doodle, and Bauhaus cards.
     public var mediaData: Data?
 
     /// Temporary file URL for audio cards; the file is **moved** into the vault
-    /// media directory at save time.
+    /// media directory only after the save transaction commits.
     public var mediaFileURL: URL?
 
     /// Explicit file resources for compound media such as Live Photos and
@@ -147,7 +161,8 @@ extension VaultContentStore {
 
   /// One resource to stage under a `CardDraft` attachment.
   ///
-  /// Resources are moved or written into the vault media directory at save time.
+  /// Resources are staged in the vault media directory, then source-file moves
+  /// are finalized only after the save transaction commits.
   /// `role` is domain metadata, not a file extension; it tells renderers and
   /// sync/export code how the file participates in the logical attachment.
   public struct AttachmentResourceDraft: Sendable {
@@ -173,9 +188,10 @@ extension VaultContentStore {
 
     /// How `fileURL` should be transferred into the vault media directory.
     ///
-    /// App-owned temporary imports can be moved. System-owned sources such as
-    /// Journaling Suggestion media must be copied so the picker source remains
-    /// untouched.
+    /// App-owned temporary imports can be moved. The store stages them by copy
+    /// and deletes the source only after commit, preserving retryability on
+    /// failure. System-owned sources such as Journaling Suggestion media stay in
+    /// `.copy` mode so the picker source remains untouched.
     public var fileTransferMode: FileTransferMode
 
     /// Optional byte count when the importer already knows it.
@@ -328,6 +344,13 @@ extension VaultContentStore {
   @discardableResult
   public func createThread(cards drafts: [CardDraft]) throws -> [CardEdge] {
     guard drafts.isEmpty == false else { return [] }
+
+    // Validate the full authored post before mutating the context or staging
+    // files. A missing child payload must not leave a partial thread behind.
+    for draft in drafts {
+      try validateAttachmentPayloadIfNeeded(draft)
+    }
+
     let context = container.mainContext
 
     // A multi-card post is one save, but its authored order still matters to
@@ -335,46 +358,64 @@ extension VaultContentStore {
     let threadCreatedAt = Date()
     var edges: [CardEdge] = []
     var rootEdge: CardEdge?
+    var destinationFileURLs: [URL] = []
+    var sourceFileURLsToDeleteAfterCommit: [URL] = []
 
-    for (offset, draft) in drafts.enumerated() {
-      let createdAt = threadCreatedAt.addingTimeInterval(TimeInterval(offset) / 1000)
+    do {
+      for (offset, draft) in drafts.enumerated() {
+        let createdAt = threadCreatedAt.addingTimeInterval(TimeInterval(offset) / 1000)
 
-      let card = Card(
-        kind: draft.kind,
-        body: Self.body(for: draft),
-        createdAt: createdAt,
-        updatedAt: createdAt,
-        location: draft.location
-      )
-      context.insert(card)
-      try noteSave(.card, recordName: card.id.uuidString, in: context)
+        let card = Card(
+          kind: draft.kind,
+          body: Self.body(for: draft),
+          createdAt: createdAt,
+          updatedAt: createdAt,
+          location: draft.location
+        )
+        context.insert(card)
+        try noteSave(.card, recordName: card.id.uuidString, in: context)
 
-      let edge = CardEdge(
-        cardID: card.id,
-        parentEdgeID: rootEdge?.id,
-        sortIndex: rootEdge == nil ? 0 : offset - 1,
-        createdAt: createdAt,
-        updatedAt: createdAt
-      )
-      edge.connect(to: card)
-      edge.connect(parent: rootEdge)
-      context.insert(edge)
-      try noteSave(.cardEdge, recordName: edge.id.uuidString, in: context)
-      if rootEdge == nil {
-        rootEdge = edge
-      }
-
-      if let stagedAttachment = try stageAttachment(from: draft, card: card, in: context) {
-        try noteSave(.attachment, recordName: stagedAttachment.attachment.id.uuidString, in: context)
-        for resource in stagedAttachment.resources {
-          try noteSave(.attachmentResource, recordName: resource.id.uuidString, in: context)
+        let edge = CardEdge(
+          cardID: card.id,
+          parentEdgeID: rootEdge?.id,
+          sortIndex: rootEdge == nil ? 0 : offset - 1,
+          createdAt: createdAt,
+          updatedAt: createdAt
+        )
+        edge.connect(to: card)
+        edge.connect(parent: rootEdge)
+        context.insert(edge)
+        try noteSave(.cardEdge, recordName: edge.id.uuidString, in: context)
+        if rootEdge == nil {
+          rootEdge = edge
         }
+
+        if let stagedAttachment = try stageAttachment(from: draft, card: card, in: context) {
+          destinationFileURLs.append(contentsOf: stagedAttachment.destinationFileURLs)
+          sourceFileURLsToDeleteAfterCommit.append(
+            contentsOf: stagedAttachment.sourceFileURLsToDeleteAfterCommit
+          )
+          try noteSave(.attachment, recordName: stagedAttachment.attachment.id.uuidString, in: context)
+          for resource in stagedAttachment.resources {
+            try noteSave(.attachmentResource, recordName: resource.id.uuidString, in: context)
+          }
+        }
+
+        edges.append(edge)
       }
 
-      edges.append(edge)
+      try context.save()
+    } catch {
+      context.rollback()
+      for fileURL in destinationFileURLs {
+        try? FileManager.default.removeItem(at: fileURL)
+      }
+      throw error
     }
 
-    try context.save()
+    for fileURL in Set(sourceFileURLsToDeleteAfterCommit) {
+      try? FileManager.default.removeItem(at: fileURL)
+    }
     onLocalMutation()
     return edges
   }
@@ -394,25 +435,42 @@ extension VaultContentStore {
       throw Error.cardNotFound(cardID)
     }
 
-    let deletedMediaFileURLs = try deleteAttachments(for: card.id, in: context)
+    var deletedMediaFileURLs: [URL] = []
+    var destinationFileURLs: [URL] = []
+    var sourceFileURLsToDeleteAfterCommit: [URL] = []
 
-    card.kind = draft.kind
-    card.body = Self.body(for: draft)
-    card.location = draft.location
-    card.updatedAt = Date()
-    try noteSave(.card, recordName: card.id.uuidString, in: context)
+    do {
+      deletedMediaFileURLs = try deleteAttachments(for: card.id, in: context)
 
-    if let stagedAttachment = try stageAttachment(from: draft, card: card, in: context) {
-      try noteSave(.attachment, recordName: stagedAttachment.attachment.id.uuidString, in: context)
-      for resource in stagedAttachment.resources {
-        try noteSave(.attachmentResource, recordName: resource.id.uuidString, in: context)
+      card.kind = draft.kind
+      card.body = Self.body(for: draft)
+      card.location = draft.location
+      card.updatedAt = Date()
+      try noteSave(.card, recordName: card.id.uuidString, in: context)
+
+      if let stagedAttachment = try stageAttachment(from: draft, card: card, in: context) {
+        destinationFileURLs = stagedAttachment.destinationFileURLs
+        sourceFileURLsToDeleteAfterCommit = stagedAttachment.sourceFileURLsToDeleteAfterCommit
+        try noteSave(.attachment, recordName: stagedAttachment.attachment.id.uuidString, in: context)
+        for resource in stagedAttachment.resources {
+          try noteSave(.attachmentResource, recordName: resource.id.uuidString, in: context)
+        }
       }
-    }
 
-    try context.save()
+      try context.save()
+    } catch {
+      context.rollback()
+      for fileURL in destinationFileURLs {
+        try? FileManager.default.removeItem(at: fileURL)
+      }
+      throw error
+    }
 
     for url in deletedMediaFileURLs {
       try? FileManager.default.removeItem(at: url)
+    }
+    for fileURL in Set(sourceFileURLsToDeleteAfterCommit) {
+      try? FileManager.default.removeItem(at: fileURL)
     }
     onLocalMutation()
   }
@@ -496,6 +554,8 @@ extension VaultContentStore {
   private struct StagedAttachment {
     var attachment: Attachment
     var resources: [AttachmentResource]
+    var destinationFileURLs: [URL]
+    var sourceFileURLsToDeleteAfterCommit: [URL]
 
     var primaryResource: AttachmentResource {
       resources[0]
@@ -528,49 +588,89 @@ extension VaultContentStore {
     attachment.connect(to: card)
 
     var stagedResources: [AttachmentResource] = []
-    for (index, resourceDraft) in resourceDrafts.enumerated() {
-      let resource = AttachmentResource(
-        id: resourceDraft.id ?? (index == 0 ? primaryResourceID : UUID()),
-        attachmentID: attachment.id,
-        role: resourceDraft.role,
-        byteSize: Self.byteSize(for: resourceDraft),
-        contentType: resourceDraft.contentType,
-        pixelWidth: resourceDraft.pixelWidth,
-        pixelHeight: resourceDraft.pixelHeight,
-        duration: resourceDraft.duration,
-        isHDR: resourceDraft.isHDR,
-        colorSpaceName: resourceDraft.colorSpaceName,
-        createdAt: attachment.createdAt
-      )
-      resource.connect(to: attachment)
+    var destinationFileURLs: [URL] = []
+    var sourceFileURLsToDeleteAfterCommit: [URL] = []
 
-      // File first, row second: a failed save leaves an orphan file, never a
-      // row pointing at missing bytes.
-      if let data = resourceDraft.data {
-        try data.write(to: fileURL(for: resource), options: .atomic)
-      } else if let sourceURL = resourceDraft.fileURL {
-        switch resourceDraft.fileTransferMode {
-        case .move:
-          try FileManager.default.moveItem(at: sourceURL, to: fileURL(for: resource))
-        case .copy:
-          try FileManager.default.copyItem(at: sourceURL, to: fileURL(for: resource))
+    do {
+      for (index, resourceDraft) in resourceDrafts.enumerated() {
+        let resource = AttachmentResource(
+          id: resourceDraft.id ?? (index == 0 ? primaryResourceID : UUID()),
+          attachmentID: attachment.id,
+          role: resourceDraft.role,
+          byteSize: Self.byteSize(for: resourceDraft),
+          contentType: resourceDraft.contentType,
+          pixelWidth: resourceDraft.pixelWidth,
+          pixelHeight: resourceDraft.pixelHeight,
+          duration: resourceDraft.duration,
+          isHDR: resourceDraft.isHDR,
+          colorSpaceName: resourceDraft.colorSpaceName,
+          createdAt: attachment.createdAt
+        )
+        resource.connect(to: attachment)
+
+        let destinationURL = fileURL(for: resource)
+        guard FileManager.default.fileExists(atPath: destinationURL.path) == false else {
+          throw CocoaError(.fileWriteFileExists)
         }
-      }
-      resource.noteLocalFileChange()
+        // Registration precedes I/O so rollback also removes a partially
+        // written destination when the file operation itself throws.
+        destinationFileURLs.append(destinationURL)
 
-      context.insert(resource)
-      stagedResources.append(resource)
+        // Stage bytes without consuming the source. A requested move is
+        // finalized only after SwiftData commits, so any failure remains
+        // retryable and cannot leave a row pointing at missing bytes.
+        if let data = resourceDraft.data {
+          try data.write(to: destinationURL, options: .atomic)
+        } else if let sourceURL = resourceDraft.fileURL {
+          try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+          switch resourceDraft.fileTransferMode {
+          case .move:
+            sourceFileURLsToDeleteAfterCommit.append(sourceURL)
+          case .copy:
+            break
+          }
+        }
+        resource.noteLocalFileChange()
+
+        context.insert(resource)
+        stagedResources.append(resource)
+      }
+    } catch {
+      for fileURL in destinationFileURLs {
+        try? FileManager.default.removeItem(at: fileURL)
+      }
+      throw error
     }
 
     context.insert(attachment)
-    return StagedAttachment(attachment: attachment, resources: stagedResources)
+    return StagedAttachment(
+      attachment: attachment,
+      resources: stagedResources,
+      destinationFileURLs: destinationFileURLs,
+      sourceFileURLsToDeleteAfterCommit: sourceFileURLsToDeleteAfterCommit
+    )
   }
 
   @MainActor
   private func validateAttachmentPayloadIfNeeded(_ draft: CardDraft) throws {
     guard let attachmentKind = Self.attachmentKind(for: draft.kind) else { return }
-    guard Self.resourceDrafts(for: draft, attachmentKind: attachmentKind).isEmpty == false else {
+    let resourceDrafts = Self.resourceDrafts(for: draft, attachmentKind: attachmentKind)
+    guard resourceDrafts.isEmpty == false else {
       throw Error.missingMediaPayload(draft.kind)
+    }
+
+    // Validate file-backed inputs before deleting the existing attachment.
+    // The later transfer can therefore fail without first invalidating the
+    // saved card for common missing-file and permission cases.
+    for resourceDraft in resourceDrafts {
+      guard let sourceURL = resourceDraft.fileURL else { continue }
+      guard sourceURL.isFileURL,
+            FileManager.default.fileExists(atPath: sourceURL.path) else {
+        throw CocoaError(.fileReadNoSuchFile)
+      }
+      guard FileManager.default.isReadableFile(atPath: sourceURL.path) else {
+        throw CocoaError(.fileReadNoPermission)
+      }
     }
   }
 
@@ -600,7 +700,7 @@ extension VaultContentStore {
 
   private static func body(for draft: CardDraft) -> String {
     switch draft.kind {
-    case .text, .link:
+    case .text, .link, .file:
       return draft.text
     case .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus, .unknown:
       return ""
@@ -664,6 +764,8 @@ extension VaultContentStore {
 
   private static func primaryResourceRole(for attachmentKind: Attachment.Kind) -> AttachmentResource.Role {
     switch attachmentKind {
+    case .file:
+      return .file
     case .photo:
       return .originalImage
     case .video:
@@ -681,6 +783,8 @@ extension VaultContentStore {
 
   private static func contentType(for attachmentKind: Attachment.Kind) -> String? {
     switch attachmentKind {
+    case .file:
+      return nil
     case .photo:
       return "public.jpeg"
     case .video:
@@ -700,6 +804,8 @@ extension VaultContentStore {
     switch cardKind {
     case .text, .link, .unknown:
       return nil
+    case .file:
+      return .file
     case .photo:
       return .photo
     case .video:

@@ -1,6 +1,8 @@
-# App Store メタデータ管理
+# Verse App Store メタデータ管理
 
-このディレクトリには、App Store Connectに登録するメタデータを管理しています。
+このディレクトリには、Verse の App Store Connect に登録するメタデータを管理しています。
+Tinycurve のメタデータは
+[`Apps/Journal/metadata/`](../Apps/Journal/metadata/) に分離しています。
 
 ## 📁 構造
 

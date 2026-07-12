@@ -97,6 +97,67 @@ public struct SuggestionCaptureView: View {
   }
 }
 
+// MARK: - Programmatic Presentation
+
+/// Bridges an external presentation binding to Apple's system-owned Journaling
+/// Suggestions picker.
+///
+/// Action Button and App Shortcut navigation cannot synthesize a tap on
+/// `JournalingSuggestionsPicker`, so app-level capture routing applies this
+/// modifier to an existing surface and toggles the binding instead. The output
+/// remains the same persistence-agnostic `CapturedSuggestion` value used by the
+/// button entry point.
+public extension View {
+
+  func journalSuggestionCapturePresenter(
+    isPresented: Binding<Bool>,
+    onCommit: @escaping @MainActor @Sendable (CapturedSuggestion) -> Void
+  ) -> some View {
+    modifier(
+      JournalSuggestionCapturePresenterModifier(
+        isPresented: isPresented,
+        onCommit: onCommit
+      )
+    )
+  }
+}
+
+private struct JournalSuggestionCapturePresenterModifier: ViewModifier {
+
+  @Binding var isPresented: Bool
+  let onCommit: @MainActor @Sendable (CapturedSuggestion) -> Void
+
+  func body(content: Content) -> some View {
+    #if canImport(JournalingSuggestions)
+    // Keep the weak-linked modifier entirely behind the same runtime guard used
+    // by the button wrapper. The framework is absent when an iPad build runs on
+    // Apple silicon Mac hardware.
+    if ProcessInfo.processInfo.isiOSAppOnMac {
+      AnyView(unavailableContent(content))
+    } else {
+      AnyView(
+        content.journalingSuggestionsPicker(
+          isPresented: $isPresented,
+          onCompletion: { suggestion in
+            let captured = await CapturedSuggestion.resolve(from: suggestion)
+            onCommit(captured)
+          }
+        )
+      )
+    }
+    #else
+    unavailableContent(content)
+    #endif
+  }
+
+  private func unavailableContent(_ content: Content) -> some View {
+    content.onChange(of: isPresented) { _, shouldPresent in
+      guard shouldPresent else { return }
+      isPresented = false
+    }
+  }
+}
+
 // MARK: - Fileprivate Views
 
 /// Disabled placeholder shown wherever the picker can't run: the Simulator (no

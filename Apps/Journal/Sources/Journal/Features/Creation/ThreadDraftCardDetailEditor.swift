@@ -5,8 +5,8 @@ import SwiftUI
 
 /// Detail editor for one creation draft card.
 ///
-/// The creation surface owns the card stack; this screen owns the kind-specific
-/// editing experience for the selected card. Each capture component stays
+/// The creation input bar owns one unpublished card; this screen owns that
+/// card's kind-specific editing experience. Each capture component stays
 /// persistence-agnostic and reports a value, which this app-shell layer converts
 /// into the normalized payload stored on `CardEditDraft`.
 struct ThreadDraftCardDetailEditor: View {
@@ -22,6 +22,7 @@ struct ThreadDraftCardDetailEditor: View {
       isSaving: isSaving,
       confirmationTitle: "Done",
       requiresSavableDraft: false,
+      showsKindPicker: false,
       onConfirm: {
         dismiss()
       }
@@ -99,7 +100,7 @@ private struct CardEditDraftKindPicker: View {
   private var selectableKinds: [Card.Kind] {
     Card.Kind.allCases.filter { kind in
       switch kind {
-      case .video, .livePhoto, .suggestion, .unknown:
+      case .file, .video, .livePhoto, .suggestion, .unknown:
         return false
       case .text, .link, .photo, .audio, .doodle, .bauhaus:
         return true
@@ -130,6 +131,12 @@ private struct CardEditDraftKindEditor: View {
         ThreadDraftTextDetailEditor(text: $draft.text)
       case .link:
         ThreadDraftLinkDetailEditor(text: $draft.text)
+      case .file:
+        ContentUnavailableView(
+          "File Editing Unavailable",
+          systemImage: "doc",
+          description: Text("Files shared to Journal stay attached to their original card.")
+        )
       case .photo:
         ThreadDraftPhotoDetailEditor(card: draft)
       case .video, .livePhoto:
@@ -189,7 +196,7 @@ private struct ThreadDraftImportedMediaDetailEditor: View {
   @Bindable var card: CardEditDraft
 
   var body: some View {
-    CardPreviewContent(payload: card.previewPayload, presentation: .savedDetail)
+    CardDetailContent(payload: card.previewPayload)
       .padding(16)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
   }
@@ -213,7 +220,7 @@ private struct ThreadDraftSuggestionDetailEditor: View {
   @Bindable var card: CardEditDraft
 
   var body: some View {
-    CardPreviewContent(payload: card.previewPayload, presentation: .savedDetail)
+    CardDetailContent(payload: card.previewPayload)
       .padding(16)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
   }
@@ -284,6 +291,8 @@ extension Card.Kind {
       return "Text Card"
     case .link:
       return "Link Card"
+    case .file:
+      return "File Card"
     case .photo:
       return "Photo Card"
     case .video:

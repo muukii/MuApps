@@ -146,22 +146,22 @@ private extension JournalNotification.Semantics {
 
 public extension JournalNotification {
 
-  /// Confirmation shown after the current composer thread is persisted.
-  static var threadSaved: JournalNotification {
+  /// Confirmation shown after the current composer card is posted.
+  static var cardPosted: JournalNotification {
     JournalNotification(
       semantics: .success,
-      title: "Saved to Journal",
+      title: "Posted to Journal",
       systemImage: "checkmark.circle.fill",
       lifetime: .transient(.seconds(2.4))
     )
   }
 
-  /// Failure shown when persistence rejects the current composer thread.
-  static var threadSaveFailed: JournalNotification {
+  /// Failure shown when persistence rejects the current composer card.
+  static var cardPostFailed: JournalNotification {
     JournalNotification(
       semantics: .failure,
-      title: "Could not save",
-      message: "Your draft stayed on screen.",
+      title: "Could not post",
+      message: "Your input is still here.",
       systemImage: "exclamationmark.triangle.fill",
       lifetime: .persistent
     )

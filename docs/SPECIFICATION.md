@@ -532,35 +532,63 @@ PhotosOrganizer is a SwiftUI utility app for iPhone and iPad that scans the user
 
 ## Overview
 
-AmbientLight is a SwiftUI iPhone app, displayed to users as Calm Light, that turns the device screen into a full-screen HDR ambient light with animated organic color patterns.
+AmbientLight is a SwiftUI iPhone and iPad app, displayed to users as Calm Light, that turns the device screen into a full-screen HDR ambient light with animated organic color patterns and bounded light-painting scenes.
 
 ## Core Features
 
 ### Ambient Display
-- Shows a full-screen animated light pattern on a black background.
+- Shows each ambient scene edge-to-edge, with bounded light-painting scenes returning to a pure-black canvas outside their emitted light.
 - Uses SwiftUI stitchable Metal shaders for GPU-rendered effects.
 - Enables high dynamic range rendering where supported by the display.
 - Hides the status bar and forces dark appearance for an uninterrupted light surface.
 - Disables the device idle timer while the app is active so the light remains on; idle timer behavior is restored when the app becomes inactive or enters the background.
 
-### Patterns
-- Includes selectable ambient patterns:
-  - Ambient Fog
+### Scenes
+- Includes selectable ambient scenes:
+  - Solar Field
+  - Amber Fog
   - Aurora
-  - Plasma
-  - Fire
-  - Smoke
-- The last selected pattern page is stored locally and restored on next launch.
+  - Color Tide
+  - Firelight
+  - Moon Smoke
+- Solar Field renders a red-to-gold circular light field over a fixed pure-black background. Its exterior bloom has a finite falloff and returns fully to black away from the light.
+- Solar Field keeps its outer silhouette stable while its red core wanders slightly, broad internal convection reshapes the red-to-gold layers, and a localized golden flare slowly travels around the rim.
+- The orbiting flare grows and recedes over independent slow periods, locally widening the rim and brightening its finite bloom without disturbing the pure-black background.
+- Solar Field keeps the saturated red center primarily within SDR and lets the rim reach the display's currently available EDR headroom at the crest of its pulse. The animation pauses while the scene is not selected, the app is inactive, or the Light Timer has turned the light off.
+- Solar Field remains a true circle across portrait and landscape layouts, using the shorter screen dimension as its scale.
+- New installations open on Solar Field by default.
+- The last selected scene is stored locally and restored on next launch.
 
 ### Interaction
-- Long-press anywhere on the display to enter pattern switcher mode.
-- In switcher mode, horizontal scrolling is enabled and each pattern is shown with side margins for browsing.
-- Tap while in switcher mode to return to full-screen display mode.
-- Tap the display to reveal a temporary matrix control overlay for pattern-specific two-axis parameter adjustment.
-- The matrix control hides automatically after a short delay, and remains visible while the user is dragging it.
+- A fresh installation opens with a single live-scene introduction explaining
+  that people can choose a scene, shape its light, and set a timer. Completing
+  the introduction reveals the production controls over the same scene rather
+  than navigating through a separate tutorial carousel.
+- During normal viewing, the interface disappears completely. Tapping the
+  display reveals the current scene's ordered position, user-facing name and
+  description, plus a bottom **Scenes / Adjust / Timer** Light Dock. The dock
+  hides again after a short inactive period or when the display is tapped.
+- **Scenes** enters the full-size scene switcher. Long-pressing anywhere remains
+  a shortcut to the same mode instead of being its only discoverable entrance.
+- In switcher mode, horizontal scrolling is enabled and each pattern is shown with side margins for browsing. The centered scene is the active selection, and one gesture advances at most one scene even on iPad. Opening or closing the switcher transforms the same live scene without changing its scroll position.
+- Select **Done** to return from switcher mode to the full-screen selected scene.
+- **Adjust** reveals a temporary matrix control overlay for pattern-specific
+  two-axis adjustment. The overlay states what each scene's gesture changes and
+  exposes **Fine Tune** and **Done** actions.
+- For Solar Field, the matrix control moves the center of the projected light horizontally and vertically.
+- The matrix control hides automatically after a short delay, remains visible
+  while the user is dragging it, and can open a native sheet containing the
+  scene's complete slider and color controls.
+
+### Light Timer
+- **Timer** presents 15-minute, 30-minute, and one-hour session choices.
+- A running timer can be replaced or stopped from the same sheet.
+- When the timer reaches zero, the rendered scene is covered by a black resting
+  screen and Calm Light releases its idle-timer override so the device can sleep.
+  Tapping **Light off** wakes the scene and restores normal keep-awake behavior.
 
 ## Platform and Integrations
-- Target platform: iPhone.
+- Target platforms: iPhone and iPad, with native full-screen layouts on both.
 - Minimum deployment target follows the MuApps shared iOS app target.
 - Bundle identifier: `app.muukii.ambientlight`.
 - User-facing display name: Calm Light.

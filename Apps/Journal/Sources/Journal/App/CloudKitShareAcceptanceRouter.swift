@@ -1,5 +1,7 @@
 import CloudKit
 #if canImport(UIKit)
+import AppIntents
+import JournalIntents
 import UIKit
 #elseif canImport(AppKit)
 import AppKit
@@ -61,7 +63,7 @@ final class CloudKitShareAcceptanceRouter {
 
 /// Platform app delegate that forwards CloudKit invitation metadata.
 #if canImport(UIKit)
-final class JournalAppDelegate: UIResponder, UIApplicationDelegate {
+final class TinycurveAppDelegate: UIResponder, UIApplicationDelegate {
 
   func application(
     _ application: UIApplication,
@@ -72,13 +74,14 @@ final class JournalAppDelegate: UIResponder, UIApplicationDelegate {
       name: nil,
       sessionRole: connectingSceneSession.role
     )
-    configuration.delegateClass = JournalSceneDelegate.self
+    configuration.delegateClass = TinycurveSceneDelegate.self
     return configuration
   }
 }
 
-/// Scene delegate entry point for CloudKit share invitations.
-final class JournalSceneDelegate: UIResponder, UIWindowSceneDelegate {
+/// Scene delegate entry point for CloudKit invitations and App Intent-driven
+/// capture navigation.
+final class TinycurveSceneDelegate: UIResponder, UIWindowSceneDelegate, AppIntentSceneDelegate {
 
   func scene(
     _ scene: UIScene,
@@ -96,9 +99,18 @@ final class JournalSceneDelegate: UIResponder, UIWindowSceneDelegate {
   ) {
     CloudKitShareAcceptanceRouter.shared.enqueue(cloudKitShareMetadata)
   }
+
+  /// Lets a `UISceneAppIntent` enqueue its typed navigation request after iOS
+  /// connects or activates the Journal scene.
+  func scene(
+    _ scene: UIScene,
+    willPerformAppIntent appIntent: any UISceneAppIntent
+  ) {
+    appIntent.performNavigation(forScene: scene)
+  }
 }
 #elseif canImport(AppKit)
-final class JournalAppDelegate: NSObject, NSApplicationDelegate {
+final class TinycurveAppDelegate: NSObject, NSApplicationDelegate {
   func application(
     _ application: NSApplication,
     userDidAcceptCloudKitShareWith metadata: CKShare.Metadata

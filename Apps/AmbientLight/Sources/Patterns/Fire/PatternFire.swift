@@ -2,15 +2,28 @@ import SwiftUI
 
 struct PatternFire: View {
 
+  private let isActive: Bool
+  @Binding private var isAdjustmentVisible: Bool
   @State private var parameters = ShaderParameters()
+
+  init(
+    isActive: Bool = true,
+    isAdjustmentVisible: Binding<Bool> = .constant(false)
+  ) {
+    self.isActive = isActive
+    _isAdjustmentVisible = isAdjustmentVisible
+  }
 
   var body: some View {
 
     Display(
+      scene: .firelight,
+      isActive: isActive,
+      isAdjustmentVisible: $isAdjustmentVisible,
       matrixX: MatrixBinding($parameters.speed, range: 0.1...2.0),
       matrixY: MatrixBinding($parameters.flameHeight, range: 0.1...1.0)
     ) {
-      _BodyView(parameters: parameters)
+      _BodyView(parameters: parameters, isActive: isActive)
     } settingsContent: {
 
       VStack(alignment: .leading) {
@@ -81,10 +94,11 @@ private struct ShaderParameters: Codable {
 
 private struct _BodyView: View {
   let parameters: ShaderParameters
+  var isActive = true
   @Environment(\.deviceHeadroom) private var deviceHeadroom
 
   var body: some View {
-    PhaseTimelineView(speed: parameters.speed) { phase, size in
+    PhaseTimelineView(speed: parameters.speed, isActive: isActive) { phase, size in
       Rectangle()
         .fill(.black)
         .colorEffect(

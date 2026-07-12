@@ -10,13 +10,19 @@ let journalBundleDisplayName: Plist.Value = "Tinycurve"
 /// Short app bundle name used by `CFBundleName`.
 /// Apple documents a 15-character limit for this value, and App Store Connect
 /// validates it together with the display name during binary upload.
-let journalBundleName: Plist.Value = "TinycurveJ"
+let journalBundleName: Plist.Value = "Tinycurve"
 
 /// User-facing name for the WidgetKit extension bundle.
 let journalWidgetBundleDisplayName: Plist.Value = "Tinycurve Widget"
 
 /// Short bundle name for the WidgetKit extension.
 let journalWidgetBundleName: Plist.Value = "TinycurveWidget"
+
+/// User-facing name associated with Journal's background App Intents.
+let journalAppIntentsBundleDisplayName: Plist.Value = "Tinycurve"
+
+/// User-facing name shown by the system Share sheet.
+let journalShareExtensionBundleDisplayName: Plist.Value = "Tinycurve"
 
 /// Apple platforms that compile the shared SwiftUI Journal product.
 ///
@@ -97,7 +103,7 @@ func journalFramework(
 // MARK: - Project
 
 let project = Project(
-  name: "Journal",
+  name: "Tinycurve",
   organizationName: AppConstants.organizationName,
   settings: .settings(
     base: .base,
@@ -108,7 +114,7 @@ let project = Project(
   ),
   targets: [
     .target(
-      name: "Journal",
+      name: "Tinycurve",
       destinations: journalDestinations,
       product: .app,
       bundleId: "app.muukii.journal",
@@ -146,12 +152,13 @@ let project = Project(
         .sdk(name: "AVFoundation", type: .framework),
         .sdk(name: "CloudKit", type: .framework),
         .sdk(name: "LinkPresentation", type: .framework),
+        .sdk(name: "MapKit", type: .framework),
         .sdk(name: "Photos", type: .framework),
         .sdk(name: "PhotosUI", type: .framework),
         .sdk(name: "SharedWithYou", type: .framework),
         .external(name: "ScrollEdgeEffect"),
         // The package's gesture bridge is UIKit-only. Native macOS uses the
-        // local AppKit/SwiftUI compatibility modifier in the Journal target.
+        // local AppKit/SwiftUI compatibility modifier in the Tinycurve target.
         .external(
           name: "SwiftUISnapDraggingModifier",
           condition: .when([.ios])
@@ -162,9 +169,14 @@ let project = Project(
         ),
         .external(name: "Algorithms"),
         .target(name: "AppUIComponents"),
+        .target(name: "JournalIntents"),
         .target(name: "JournalVault"),
         // Embeds the widget extension into the app bundle.
         .target(name: "JournalWidget"),
+        // iOS-only entry points used by Shortcuts, the Action Button, and the
+        // system Share sheet. Native macOS keeps the shared app/framework path.
+        .target(name: "JournalAppIntentsExtension", condition: .when([.ios])),
+        .target(name: "JournalShareExtension", condition: .when([.ios])),
         .target(name: "MuColor"),
         .target(name: "MuHaptics"),
         .target(name: "CaptureText"),
@@ -180,7 +192,7 @@ let project = Project(
           "ASSETCATALOG_COMPILER_APPICON_NAME": "Icon",
           // CloudKit and App Group entitlements cannot run under ad-hoc signing.
           "CODE_SIGN_IDENTITY[sdk=macosx*]": "Apple Development",
-          "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": "Support/Journal-macOS.entitlements",
+          "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": "Support/Tinycurve-macOS.entitlements",
           // Native Mac sandbox capabilities used by the same capture features
           // that request privacy permission through Info.plist on iOS.
           "ENABLE_RESOURCE_ACCESS_AUDIO_INPUT[sdk=macosx*]": "YES",
@@ -256,6 +268,164 @@ let project = Project(
       )
     ),
 
+    // MARK: - System capture foundations
+
+    // Extension-safe App Intents entities, Quick Capture preferences, app
+    // navigation requests, and the single local-post transaction boundary used
+    // by both Shortcuts and the Share extension.
+    .target(
+      name: "JournalIntents",
+      destinations: journalDestinations,
+      product: .framework,
+      bundleId: "app.muukii.journal.JournalIntents",
+      deploymentTargets: journalDeploymentTargets,
+      infoPlist: .default,
+      buildableFolders: ["Sources/JournalIntents"],
+      dependencies: [
+        .sdk(name: "AppIntents", type: .framework),
+        .sdk(name: "WidgetKit", type: .framework),
+        .target(name: "JournalVault"),
+      ],
+      settings: .settings(
+        base: .frameworkTarget.merging([
+          "APPLICATION_EXTENSION_API_ONLY": "YES",
+        ]),
+        configurations: [
+          .debug(name: "Debug"),
+          .release(name: "Release"),
+        ]
+      )
+    ),
+
+    // Runs text-only posts without launching the containing app. It commits to
+    // the App Group vault and durable outbox; CloudKit transport stays app-owned.
+    .target(
+      name: "JournalAppIntentsExtension",
+      destinations: [.iPhone, .iPad],
+      product: .extensionKitExtension,
+      bundleId: "app.muukii.journal.AppIntentsExtension",
+      deploymentTargets: .iOS("26.1"),
+      infoPlist: .extendingDefault(with: journalVersionInfoPlistKeys.merging([
+        "CFBundleDisplayName": journalAppIntentsBundleDisplayName,
+        "CFBundleExecutable": "$(EXECUTABLE_NAME)",
+        "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
+        "CFBundleName": "TinycurveAct",
+        journalCloudKitEnvironmentInfoPlistKey: "$(APS_ENVIRONMENT)",
+        "EXAppExtensionAttributes": .dictionary([
+          "EXExtensionPointIdentifier": "com.apple.appintents-extension",
+        ]),
+      ]) { _, new in new }),
+      buildableFolders: ["Sources/JournalAppIntentsExtension"],
+      entitlements: .dictionary([
+        "com.apple.security.application-groups": ["group.app.muukii.journal"],
+      ]),
+      dependencies: [
+        .sdk(name: "AppIntents", type: .framework),
+        .sdk(name: "ExtensionFoundation", type: .framework),
+        .target(name: "JournalIntents"),
+        .target(name: "JournalVault"),
+      ],
+      settings: .settings(
+        base: .base.merging([
+          "APPLICATION_EXTENSION_API_ONLY": "YES",
+        ]),
+        configurations: [
+          .debug(
+            name: "Debug",
+            settings: ["APS_ENVIRONMENT": "development"],
+            xcconfig: "xcconfig/Version.xcconfig"
+          ),
+          .release(
+            name: "Release",
+            settings: ["APS_ENVIRONMENT": "production"],
+            xcconfig: "xcconfig/Version.xcconfig"
+          ),
+        ]
+      )
+    ),
+
+    // Custom SwiftUI Share sheet for text, links, media, and files. Like the
+    // App Intents extension, it receives only App Group access and never starts
+    // CloudKit transport in its short-lived process.
+    .target(
+      name: "JournalShareExtension",
+      destinations: [.iPhone, .iPad],
+      product: .appExtension,
+      bundleId: "app.muukii.journal.ShareExtension",
+      deploymentTargets: .iOS("26.1"),
+      infoPlist: .extendingDefault(with: journalVersionInfoPlistKeys.merging([
+        "CFBundleDisplayName": journalShareExtensionBundleDisplayName,
+        "CFBundleExecutable": "$(EXECUTABLE_NAME)",
+        "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
+        "CFBundleName": "TinycurveShare",
+        journalCloudKitEnvironmentInfoPlistKey: "$(APS_ENVIRONMENT)",
+        "NSExtension": .dictionary([
+          "NSExtensionAttributes": .dictionary([
+            "NSExtensionActivationRule": .dictionary([
+              "NSExtensionActivationDictionaryVersion": 2,
+              "NSExtensionActivationUsesStrictMatching": true,
+              "NSExtensionActivationSupportsText": true,
+              "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+              "NSExtensionActivationSupportsImageWithMaxCount": 10,
+              "NSExtensionActivationSupportsMovieWithMaxCount": 10,
+              "NSExtensionActivationSupportsFileWithMaxCount": 10,
+            ]),
+          ]),
+          "NSExtensionPointIdentifier": "com.apple.share-services",
+          "NSExtensionPrincipalClass": "$(PRODUCT_MODULE_NAME).ShareViewController",
+        ]),
+      ]) { _, new in new }),
+      buildableFolders: ["Sources/JournalShareExtension"],
+      entitlements: .dictionary([
+        "com.apple.security.application-groups": ["group.app.muukii.journal"],
+      ]),
+      dependencies: [
+        .sdk(name: "AVFoundation", type: .framework),
+        .sdk(name: "UniformTypeIdentifiers", type: .framework),
+        .target(name: "JournalIntents"),
+        .target(name: "JournalVault"),
+        .target(name: "MediaProcessing"),
+      ],
+      settings: .settings(
+        base: .base.merging([
+          "APPLICATION_EXTENSION_API_ONLY": "YES",
+        ]),
+        configurations: [
+          .debug(
+            name: "Debug",
+            settings: ["APS_ENVIRONMENT": "development"],
+            xcconfig: "xcconfig/Version.xcconfig"
+          ),
+          .release(
+            name: "Release",
+            settings: ["APS_ENVIRONMENT": "production"],
+            xcconfig: "xcconfig/Version.xcconfig"
+          ),
+        ]
+      )
+    ),
+
+    .target(
+      name: "JournalIntentsTests",
+      destinations: journalDestinations,
+      product: .unitTests,
+      bundleId: "app.muukii.journal.JournalIntentsTests",
+      deploymentTargets: journalDeploymentTargets,
+      infoPlist: .default,
+      buildableFolders: ["Tests/JournalIntentsTests"],
+      dependencies: [
+        .target(name: "JournalIntents"),
+        .target(name: "JournalVault"),
+      ],
+      settings: .settings(
+        base: [:],
+        configurations: [
+          .debug(name: "Debug"),
+          .release(name: "Release"),
+        ]
+      )
+    ),
+
     // MARK: - Widget extension
 
     // Reads the vault catalog and the configured vault content store from the
@@ -293,6 +463,7 @@ let project = Project(
       dependencies: [
         .target(name: "CaptureBauhaus"),
         .target(name: "CaptureDoodle"),
+        .target(name: "JournalIntents"),
         .target(name: "JournalVault"),
       ],
       settings: .settings(
@@ -333,6 +504,7 @@ let project = Project(
         .sdk(name: "AVFoundation", type: .framework),
         .sdk(name: "CloudKit", type: .framework),
         .sdk(name: "LinkPresentation", type: .framework),
+        .sdk(name: "MapKit", type: .framework),
         .sdk(name: "SharedWithYou", type: .framework),
         .external(name: "SwiftUIIntrospect"),
         .target(name: "CaptureBauhaus"),
@@ -387,7 +559,7 @@ let project = Project(
 
     // MARK: - UI Tests (temporary, for Settings UI verification)
     .target(
-      name: "JournalUITests",
+      name: "TinycurveUITests",
       destinations: journalDestinations,
       product: .uiTests,
       bundleId: "app.muukii.journal.UITests",
@@ -395,7 +567,7 @@ let project = Project(
       infoPlist: .default,
       buildableFolders: ["Tests/JournalUITests"],
       dependencies: [
-        .target(name: "Journal"),
+        .target(name: "Tinycurve"),
       ],
       settings: .settings(
         base: [:],
@@ -404,6 +576,18 @@ let project = Project(
           .release(name: "Release"),
         ]
       )
+    ),
+  ],
+  schemes: [
+    .scheme(
+      name: "JournalIntentsTests",
+      buildAction: .buildAction(targets: ["JournalIntentsTests"]),
+      testAction: .targets([
+        .testableTarget(
+          target: "JournalIntentsTests",
+          parallelization: .swiftTestingOnly
+        ),
+      ])
     ),
   ]
 )

@@ -129,7 +129,20 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
       return
     }
 
+    // The vault may have been written by an App Intent or Share extension. Such
+    // writes cannot reach this process's local-mutation AsyncStream, so seed the
+    // durable outbox before asking CKSyncEngine to fetch and send.
+    await seedPendingChanges(for: descriptor, unstagingAll: false)
     scheduleForegroundSync(for: descriptor)
+  }
+
+  public func rescanPendingChanges() async {
+    await ensureDescriptorsLoaded()
+    await refreshDescriptors()
+
+    for descriptor in descriptors.values {
+      await seedPendingChanges(for: descriptor, unstagingAll: false)
+    }
   }
 
   public func prepareShare(for vaultID: VaultID) async throws -> VaultSharePreparation {

@@ -2,15 +2,28 @@ import SwiftUI
 
 struct PatternPlasma: View {
 
+  private let isActive: Bool
+  @Binding private var isAdjustmentVisible: Bool
   @State private var parameters = ShaderParameters()
+
+  init(
+    isActive: Bool = true,
+    isAdjustmentVisible: Binding<Bool> = .constant(false)
+  ) {
+    self.isActive = isActive
+    _isAdjustmentVisible = isAdjustmentVisible
+  }
 
   var body: some View {
 
     Display(
+      scene: .plasma,
+      isActive: isActive,
+      isAdjustmentVisible: $isAdjustmentVisible,
       matrixX: MatrixBinding($parameters.speed, range: 0.1...3.0),
       matrixY: MatrixBinding($parameters.frequency, range: 0.5...5.0)
     ) {
-      _BodyView(parameters: parameters)
+      _BodyView(parameters: parameters, isActive: isActive)
     } settingsContent: {
 
       Text("Speed: \(parameters.speed, specifier: "%.2f")")
@@ -82,10 +95,11 @@ private struct ShaderParameters: Codable {
 /// Metal Shaderを使ったプラズマエフェクト
 private struct _BodyView: View {
   let parameters: ShaderParameters
+  var isActive = true
   @Environment(\.deviceHeadroom) private var deviceHeadroom
 
   var body: some View {
-    PhaseTimelineView(speed: parameters.speed) { phase, size in
+    PhaseTimelineView(speed: parameters.speed, isActive: isActive) { phase, size in
       Rectangle()
         .fill(.black)
         .colorEffect(

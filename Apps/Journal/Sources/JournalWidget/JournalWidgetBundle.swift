@@ -7,5 +7,8 @@ import WidgetKit
 struct JournalWidgetBundle: WidgetBundle {
   var body: some Widget {
     LatestNoteWidget()
+    #if os(iOS)
+    QuickCaptureControl()
+    #endif
   }
 }

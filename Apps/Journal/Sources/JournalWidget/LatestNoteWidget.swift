@@ -1,9 +1,11 @@
 import AppIntents
 import CaptureBauhaus
 import CaptureDoodle
+import JournalIntents
 import JournalVault
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -71,74 +73,6 @@ struct LatestNoteWidgetConfiguration: WidgetConfigurationIntent {
   }
 }
 
-/// App Intents representation of a Journal vault for WidgetKit pickers.
-///
-/// This intentionally exposes only the durable vault id and title. Permissions,
-/// sync state, and content stay behind `JournalVault` stores because the picker
-/// only needs enough data to identify the timeline source.
-struct JournalVaultEntity: AppEntity, Identifiable, Hashable {
-
-  let id: String
-  let title: String
-  let icon: VaultIcon
-
-  static let typeDisplayRepresentation: TypeDisplayRepresentation = "Vault"
-  static let defaultQuery = JournalVaultEntityQuery()
-
-  var displayRepresentation: DisplayRepresentation {
-    DisplayRepresentation(title: "\(displayTitle)")
-  }
-
-  init(descriptor: VaultDescriptor) {
-    self.id = descriptor.vaultID.uuidString
-    self.title = descriptor.title
-    self.icon = descriptor.icon
-  }
-
-  init(id: String, title: String, icon: VaultIcon = .default) {
-    self.id = id
-    self.title = title
-    self.icon = icon
-  }
-
-  private var displayTitle: String {
-    let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmedTitle.isEmpty ? String(localized: "Untitled Vault") : trimmedTitle
-  }
-}
-
-/// Query object that lets WidgetKit list and resolve vault choices.
-///
-/// Widget configuration runs in the extension process, so every query opens the
-/// lightweight catalog store from the App Group instead of asking the app's
-/// `JournalVaultRuntime`.
-struct JournalVaultEntityQuery: EntityQuery, EntityStringQuery {
-
-  func entities(for identifiers: [JournalVaultEntity.ID]) async throws -> [JournalVaultEntity] {
-    let identifierSet = Set(identifiers)
-    return try await JournalWidgetVaultCatalogReader.entities()
-      .filter { identifierSet.contains($0.id) }
-  }
-
-  func suggestedEntities() async throws -> [JournalVaultEntity] {
-    try await JournalWidgetVaultCatalogReader.entities()
-  }
-
-  func defaultResult() async -> JournalVaultEntity? {
-    try? await JournalWidgetVaultCatalogReader.entities().first
-  }
-
-  func entities(matching string: String) async throws -> [JournalVaultEntity] {
-    let query = string.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard query.isEmpty == false else {
-      return try await suggestedEntities()
-    }
-
-    return try await JournalWidgetVaultCatalogReader.entities()
-      .filter { $0.title.localizedCaseInsensitiveContains(query) }
-  }
-}
-
 // MARK: - Timeline
 
 struct LatestNoteEntry: TimelineEntry {
@@ -189,6 +123,7 @@ struct NoteSnapshot: Sendable {
 enum NoteContent: Sendable {
   case text(String)
   case link(String)
+  case file(WidgetFileContent)
   case photo(Data?)
   case video(Data?)
   case livePhoto(Data?)
@@ -197,6 +132,13 @@ enum NoteContent: Sendable {
   case doodle(DoodleDrawing?)
   case bauhaus(BauhausGridDocument?)
   case unknown
+}
+
+/// Metadata needed to describe a generic file in full-size and accessory widgets.
+struct WidgetFileContent: Sendable {
+  let displayName: String
+  let contentType: String?
+  let byteSize: Int?
 }
 
 struct LatestNoteProvider: AppIntentTimelineProvider {
@@ -260,7 +202,13 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
   private func loadLatestNote(in vaultID: VaultID) async throws -> NoteSnapshot? {
     let cardSnapshot: WidgetLatestCardSnapshot? = try await MainActor.run {
       let layout = try VaultStoreLayout.appGroup()
-      let store = try VaultContentStore.open(vaultID: vaultID, layout: layout)
+      // A widget is a short-lived, read-only process. A transient open failure
+      // must never invoke the app runtime's pre-release destructive recovery.
+      let store = try VaultContentStore.open(
+        vaultID: vaultID,
+        layout: layout,
+        recoveryPolicy: .failWithoutReset
+      )
       let context = store.container.mainContext
 
       var descriptor = FetchDescriptor<Card>(
@@ -309,7 +257,9 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
     guard let resource = attachment.primaryResource else {
       return WidgetMediaAttachmentSnapshot(
         fileURL: nil,
-        thumbnailData: attachment.thumbnail
+        thumbnailData: attachment.thumbnail,
+        contentType: nil,
+        byteSize: nil
       )
     }
 
@@ -317,7 +267,9 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
     let availableFileURL = FileManager.default.fileExists(atPath: fileURL.path) ? fileURL : nil
     return WidgetMediaAttachmentSnapshot(
       fileURL: availableFileURL,
-      thumbnailData: attachment.thumbnail
+      thumbnailData: attachment.thumbnail,
+      contentType: resource.contentType,
+      byteSize: resource.byteSize
     )
   }
 }
@@ -325,6 +277,8 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
 private struct WidgetMediaAttachmentSnapshot: Sendable {
   let fileURL: URL?
   let thumbnailData: Data?
+  let contentType: String?
+  let byteSize: Int?
 }
 
 private struct WidgetLatestCardSnapshot: Sendable {
@@ -348,6 +302,14 @@ private struct WidgetLatestCardSnapshot: Sendable {
       return .text(displayText)
     case .link:
       return .link(displayText)
+    case .file:
+      return .file(
+        WidgetFileContent(
+          displayName: displayFileName,
+          contentType: mediaAttachment?.contentType,
+          byteSize: mediaAttachment?.byteSize
+        )
+      )
     case .photo:
       return .photo(mediaAttachment?.thumbnailData)
     case .video:
@@ -380,6 +342,21 @@ private struct WidgetLatestCardSnapshot: Sendable {
     let body = self.body.trimmingCharacters(in: .whitespacesAndNewlines)
     return body.isEmpty ? String(localized: "Untitled") : body
   }
+
+  private var displayFileName: String {
+    let name = body.trimmingCharacters(in: .whitespacesAndNewlines)
+    if name.isEmpty == false {
+      return name
+    }
+
+    if let fileURL = mediaAttachment?.fileURL,
+      fileURL.lastPathComponent.isEmpty == false
+    {
+      return fileURL.lastPathComponent
+    }
+
+    return String(localized: "File")
+  }
 }
 
 private enum WidgetMediaFileReader {
@@ -398,12 +375,10 @@ private enum WidgetMediaFileReader {
   }
 }
 
-/// Small catalog reader shared by the App Intent query and the timeline provider.
+/// Small catalog reader used by the timeline provider. App Intent entity queries
+/// live in JournalIntents so controls and posting actions share the same catalog
+/// representation.
 private enum JournalWidgetVaultCatalogReader {
-
-  static func entities() async throws -> [JournalVaultEntity] {
-    (try await descriptors()).map(JournalVaultEntity.init)
-  }
 
   static func resolvedVault(for entity: JournalVaultEntity?) async throws -> WidgetVaultSnapshot? {
     let descriptors = try await descriptors()
@@ -600,6 +575,8 @@ private struct NoteContentView: View {
       } icon: {
         Image(systemName: "link")
       }
+    case .file(let file):
+      WidgetFileView(file: file)
     case .photo(let imageData):
       WidgetPhotoView(imageData: imageData)
     case .video(let imageData):
@@ -794,6 +771,57 @@ private struct WidgetMediaLabel: View {
   }
 }
 
+/// Filename-first rendering for arbitrary file cards.
+private struct WidgetFileView: View {
+
+  let file: WidgetFileContent
+
+  var body: some View {
+    VStack(spacing: 5) {
+      Label {
+        Text(file.displayName)
+          .lineLimit(3)
+          .minimumScaleFactor(0.75)
+      } icon: {
+        Image(systemName: "doc")
+      }
+      .font(.body.weight(.medium))
+
+      if metadata.isEmpty == false {
+        Text(metadata.joined(separator: " · "))
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .minimumScaleFactor(0.75)
+      }
+    }
+    .foregroundStyle(.secondary)
+    .multilineTextAlignment(.center)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+  }
+
+  private var metadata: [String] {
+    var values: [String] = []
+
+    if let contentType = file.contentType,
+      contentType.isEmpty == false
+    {
+      values.append(UTType(contentType)?.localizedDescription ?? contentType)
+    }
+
+    if let byteSize = file.byteSize {
+      values.append(
+        ByteCountFormatter.string(
+          fromByteCount: Int64(byteSize),
+          countStyle: .file
+        )
+      )
+    }
+
+    return values
+  }
+}
+
 private struct LatestNoteEmptyState: View {
 
   let vault: WidgetVaultSnapshot?
@@ -886,9 +914,12 @@ extension Card.Kind {
   /// Media attachment kind the widget needs to decode this card visually.
   ///
   /// Text, link, audio, and unknown cards do not need a visual media file for
-  /// the current widget treatment.
+  /// the current widget treatment. File cards resolve their primary resource
+  /// so the widget can show its persisted content type and byte count.
   fileprivate var widgetMediaAttachmentKind: Attachment.Kind? {
     switch self {
+    case .file:
+      return .file
     case .photo:
       return .photo
     case .video:
@@ -916,6 +947,8 @@ extension NoteContent {
       return "note.text"
     case .link:
       return "link"
+    case .file:
+      return "doc"
     case .photo:
       return "photo"
     case .video:
@@ -944,6 +977,8 @@ extension NoteContent {
     case .link(let urlString):
       let trimmedURLString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
       return trimmedURLString.isEmpty ? String(localized: "Link") : trimmedURLString
+    case .file(let file):
+      return file.displayName
     case .photo:
       return String(localized: "Photo")
     case .video:

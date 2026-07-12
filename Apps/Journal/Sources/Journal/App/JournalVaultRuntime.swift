@@ -7,7 +7,7 @@ import WidgetKit
 
 /// App-process owner for the target vault persistence stack.
 ///
-/// `JournalApp` creates one runtime for the process and injects it through the
+/// `TinycurveApp` creates one runtime for the process and injects it through the
 /// SwiftUI environment. It owns the vault catalog, the per-vault instance
 /// registry, and the sync engine; app UI reads and writes through the selected
 /// vault instance.
@@ -202,6 +202,17 @@ final class JournalVaultRuntime {
     } catch {
       lastMessage = error.localizedDescription
     }
+  }
+
+  /// Reconciles local state after a Shortcuts or Share extension process may
+  /// have committed cards while the app was inactive.
+  ///
+  /// The rescan is intentionally app-lifecycle owned: extensions only create
+  /// durable local outbox rows and never start a competing CKSyncEngine.
+  func resumeAfterExternalCapture() async {
+    await start()
+    await syncEngine.rescanPendingChanges()
+    await refresh()
   }
 
   /// Selects a vault and asks its instance to enter foreground sync interest.

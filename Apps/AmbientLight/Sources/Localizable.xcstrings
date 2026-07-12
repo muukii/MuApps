@@ -1,0 +1,177 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "" : {
+
+    },
+    "%@%%" : {
+
+    },
+    "1" : {
+
+    },
+    "2" : {
+
+    },
+    "4" : {
+
+    },
+    "8" : {
+
+    },
+    "Angle: %.0f°" : {
+
+    },
+    "Animation: %.2f" : {
+
+    },
+    "Begin" : {
+
+    },
+    "Bloom: %.2f" : {
+
+    },
+    "CALM LIGHT" : {
+
+    },
+    "Choose a scene, shape its light, and let a timer end the glow quietly." : {
+
+    },
+    "Circle Size: %.2f" : {
+
+    },
+    "Color 1" : {
+
+    },
+    "Color 2" : {
+
+    },
+    "Color 3" : {
+
+    },
+    "Color 4" : {
+
+    },
+    "Color Speed: %.2f" : {
+
+    },
+    "Complexity: %.1f" : {
+
+    },
+    "Density: %.2f" : {
+
+    },
+    "Dim Factor: %.2f" : {
+
+    },
+    "Drift: %.2f" : {
+
+    },
+    "Exposure Adjust" : {
+
+    },
+    "Flame Height: %.2f" : {
+
+    },
+    "Flame Width: %.2f" : {
+
+    },
+    "Flow Direction: %@" : {
+
+    },
+    "Frequency: %.1f" : {
+
+    },
+    "Glow: %.2f" : {
+
+    },
+    "HDR" : {
+
+    },
+    "HDR Headroom: %.1fx" : {
+
+    },
+    "Headroom Values" : {
+
+    },
+    "Left: SDR / Right: HDR (headroom: 4)" : {
+
+    },
+    "Let the light end on its own" : {
+
+    },
+    "Light off" : {
+
+    },
+    "Linear" : {
+
+    },
+    "OKLAB" : {
+
+    },
+    "OKLCH" : {
+
+    },
+    "Peak Brightness: %.1fx" : {
+
+    },
+    "Radial" : {
+
+    },
+    "Red" : {
+
+    },
+    "Rim Width: %.3f" : {
+
+    },
+    "Same HDR color with different headroom values" : {
+
+    },
+    "Saturation: %.2f" : {
+
+    },
+    "Scale: %.1f" : {
+
+    },
+    "SDR" : {
+
+    },
+    "SDR vs HDR Comparison" : {
+
+    },
+    "Set down your screen.\nLet it glow." : {
+
+    },
+    "Sparks: %.2f" : {
+
+    },
+    "Speed: %.2f" : {
+
+    },
+    "sRGB" : {
+
+    },
+    "System colors with exposure adjustment (-2 to +4)" : {
+
+    },
+    "Tap to wake" : {
+
+    },
+    "Turbulence: %.2f" : {
+
+    },
+    "Wave Height: %.2f" : {
+
+    },
+    "When time ends, the light turns off and the screen can sleep." : {
+
+    },
+    "White" : {
+
+    },
+    "Yellow" : {
+
+    }
+  },
+  "version" : "1.0"
+}

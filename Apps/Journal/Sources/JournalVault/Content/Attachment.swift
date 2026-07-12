@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// A logical media attachment owned by a `Card`.
+/// A logical file-backed attachment owned by a `Card`.
 ///
 /// Concrete files live in `AttachmentResource` rows under the same vault
 /// boundary. Keeping bytes out of the store means rows and files have separate
@@ -120,12 +120,15 @@ extension Attachment {
 
 extension Attachment {
 
-  /// The capture modality behind an attachment, which determines how its
-  /// resources are interpreted (photo -> still image, Live Photo -> still + paired
-  /// movie, video -> movie, audio -> m4a, suggestion -> authored JSON plus optional
-  /// copied media, doodle / bauhaus -> encoded JSON). Raw values are stable
-  /// CloudKit payload values.
+  /// The modality behind an attachment, which determines how its resources are
+  /// interpreted (file -> original bytes, photo -> still image, Live Photo ->
+  /// still + paired movie, video -> movie, audio -> m4a, suggestion -> authored
+  /// JSON plus optional copied media, doodle / bauhaus -> encoded JSON). Raw
+  /// values are stable CloudKit payload values.
   public enum Kind: String, Codable, Sendable, CaseIterable, Hashable {
+    /// A generic imported file whose primary resource has the `.file` role.
+    case file
+
     case photo
     case video
     case livePhoto

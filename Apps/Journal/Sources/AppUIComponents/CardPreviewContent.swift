@@ -1,18 +1,19 @@
+import AVFoundation
 import CaptureBauhaus
 import CaptureDoodle
 import JournalVault
 import MuColor
 import SwiftUI
+import UniformTypeIdentifiers
 #if canImport(UIKit)
 import UIKit
 #endif
 
-/// Renders the card-kind-specific content inside a Journal card.
+/// Renders the kind-specific authored content of a Journal card.
 ///
-/// `CardSurface` owns the paper chrome: shape, fill, ratio, and padding. This
-/// view owns the inner preview for text, link, photo, audio, suggestion,
-/// doodle, Bauhaus, and unknown cards so draft summaries and saved-card
-/// surfaces stay visually aligned without sharing persistence details.
+/// Summary callers may place this inside `CardSurface`; detail callers render it
+/// independently so authored media can establish a natural, uncropped ratio.
+/// The value payload keeps the renderer detached from persistence details.
 public struct CardPreviewContent: View {
 
   let payload: CardPreviewPayload
@@ -37,6 +38,8 @@ public struct CardPreviewContent: View {
       .padding()
     case .link(let urlString):
       CardPreviewLink(urlString: urlString, presentation: presentation)
+    case .file(let file):
+      CardPreviewFile(file: file, presentation: presentation)
     case .photo(let photo):
       CardPreviewPhoto(photo: photo, presentation: presentation)
     case .video(let video):
@@ -57,23 +60,40 @@ public struct CardPreviewContent: View {
   }
 }
 
-/// Layout density for a card preview.
+/// Renders authored card content as a standalone detail view.
 ///
-/// Draft summaries, saved grid tiles, and saved detail cards share rendering
-/// primitives but not every metric. Keeping the mode explicit avoids boolean
-/// flags whose meaning changes between text, media, and audio previews.
+/// Unlike a compact preview, this view does not assume a fixed card-shaped
+/// container. Raster and video media preserve their authored aspect ratio and
+/// fit without cropping, while text and structured content use their natural
+/// height.
+public struct CardDetailContent: View {
+
+  let payload: CardPreviewPayload
+
+  public init(payload: CardPreviewPayload) {
+    self.payload = payload
+  }
+
+  public var body: some View {
+    CardPreviewContent(
+      payload: payload,
+      presentation: .savedDetail
+    )
+  }
+}
+
+/// Rendering context for authored card content.
+///
+/// Summary contexts render inside fixed card chrome. Detail keeps their compact
+/// typography and composition, but loads the complete authored payload and lets
+/// media establish its own uncropped aspect ratio outside a card container.
 public enum CardPreviewPresentation: Hashable, Sendable {
   case draftSummary
   case savedSummary
   case savedDetail
 
   fileprivate var textFont: Font {
-    switch self {
-    case .savedDetail:
-      return .title3.weight(.semibold)
-    case .draftSummary, .savedSummary:
-      return .headline.weight(.semibold)
-    }
+    .headline.weight(.semibold)
   }
 
   fileprivate var textLineLimit: Int? {
@@ -104,20 +124,57 @@ public enum CardPreviewPresentation: Hashable, Sendable {
   }
 
   fileprivate var photoAspectRatio: CGFloat {
-    switch self {
-    case .savedDetail:
-      return 4 / 3
-    case .draftSummary, .savedSummary:
-      return 1
-    }
+    1
   }
 
   fileprivate var savedMediaAspectRatio: CGFloat {
+    1
+  }
+
+  fileprivate var mediaContentMode: ContentMode {
     switch self {
     case .savedDetail:
-      return 4 / 3
+      return .fit
     case .draftSummary, .savedSummary:
-      return 1
+      return .fill
+    }
+  }
+
+  fileprivate var linkPreviewHeight: CGFloat? {
+    switch self {
+    case .savedDetail:
+      return 240
+    case .draftSummary, .savedSummary:
+      return nil
+    }
+  }
+
+  fileprivate var doodleDisplayAspectRatio: CGFloat? {
+    switch self {
+    case .draftSummary:
+      return CardMetrics.aspectRatio
+    case .savedSummary:
+      return savedMediaAspectRatio
+    case .savedDetail:
+      return nil
+    }
+  }
+
+  fileprivate var doodleArtworkPadding: CGFloat {
+    switch self {
+    case .savedSummary:
+      return 10
+    case .draftSummary, .savedDetail:
+      return 0
+    }
+  }
+
+  fileprivate var bauhausArtworkPadding: CGFloat {
+    switch self {
+    case .savedSummary:
+      return 8
+    case .draftSummary, .savedDetail:
+      return 0
     }
   }
 
@@ -139,6 +196,7 @@ public enum CardPreviewPresentation: Hashable, Sendable {
 public enum CardPreviewPayload {
   case text(String)
   case link(String)
+  case file(CardPreviewFilePayload)
   case photo(CardPreviewPhotoPayload)
   case video(CardPreviewVideoPayload)
   case livePhoto(CardPreviewLivePhotoPayload)
@@ -158,6 +216,16 @@ public enum CardPreviewPayload {
       self = .text(body)
     case .link:
       self = .link(body)
+    case .file:
+      let fileAttachment = attachment?.kind == .file ? attachment : nil
+      self = .file(
+        CardPreviewFilePayload(
+          displayName: body,
+          fileURL: fileAttachment?.fileURL,
+          contentType: fileAttachment?.contentType,
+          byteSize: fileAttachment?.byteSize
+        )
+      )
     case .photo:
       self = .photo(
         CardPreviewPhotoPayload(
@@ -165,7 +233,9 @@ public enum CardPreviewPayload {
           fileRevision: attachment?.kind == .photo
             ? attachment?.fileRevision ?? 0 : 0,
           thumbnailData: attachment?.kind == .photo
-            ? attachment?.thumbnailData : nil
+            ? attachment?.thumbnailData : nil,
+          pixelSize: attachment?.kind == .photo
+            ? attachment?.pixelSize : nil
         )
       )
     case .video:
@@ -175,7 +245,9 @@ public enum CardPreviewPayload {
           fileRevision: attachment?.kind == .video
             ? attachment?.fileRevision ?? 0 : 0,
           thumbnailData: attachment?.kind == .video
-            ? attachment?.thumbnailData : nil
+            ? attachment?.thumbnailData : nil,
+          pixelSize: attachment?.kind == .video
+            ? attachment?.pixelSize : nil
         )
       )
     case .livePhoto:
@@ -187,7 +259,9 @@ public enum CardPreviewPayload {
           fileRevision: attachment?.kind == .livePhoto
             ? attachment?.fileRevision ?? 0 : 0,
           thumbnailData: attachment?.kind == .livePhoto
-            ? attachment?.thumbnailData : nil
+            ? attachment?.thumbnailData : nil,
+          pixelSize: attachment?.kind == .livePhoto
+            ? attachment?.pixelSize : nil
         )
       )
     case .audio:
@@ -249,16 +323,21 @@ public struct CardPreviewSuggestionPayload {
   }
 }
 
-/// Saved media reference used by card previews.
+/// Saved file-backed attachment reference used by card previews.
 ///
 /// This strips attachment rows down to the fields needed for rendering, keeping
-/// record IDs, byte counts, and persistence-only metadata out of the component.
+/// record IDs and persistence-only metadata out of the component. Generic file
+/// cards additionally retain their content type and byte count so the preview
+/// can describe the attachment without opening it.
 public struct CardPreviewAttachment: Hashable, Sendable {
   public let kind: JournalVault.Attachment.Kind
   public let fileURL: URL
   public let pairedVideoFileURL: URL?
   public let fileRevision: Int
   public let thumbnailData: Data?
+  public let pixelSize: CGSize?
+  public let contentType: String?
+  public let byteSize: Int?
   public let suggestionMediaFileURLsByResourceID: [UUID: URL]
 
   public init(
@@ -267,6 +346,9 @@ public struct CardPreviewAttachment: Hashable, Sendable {
     pairedVideoFileURL: URL? = nil,
     fileRevision: Int = 0,
     thumbnailData: Data?,
+    pixelSize: CGSize? = nil,
+    contentType: String? = nil,
+    byteSize: Int? = nil,
     suggestionMediaFileURLsByResourceID: [UUID: URL] = [:]
   ) {
     self.kind = kind
@@ -274,8 +356,34 @@ public struct CardPreviewAttachment: Hashable, Sendable {
     self.pairedVideoFileURL = pairedVideoFileURL
     self.fileRevision = fileRevision
     self.thumbnailData = thumbnailData
+    self.pixelSize = pixelSize
+    self.contentType = contentType
+    self.byteSize = byteSize
     self.suggestionMediaFileURLsByResourceID =
       suggestionMediaFileURLsByResourceID
+  }
+}
+
+/// Generic file values rendered by compact and detail card previews.
+///
+/// `displayName` comes from the card body, while `fileURL` points at the
+/// primary `.file` attachment resource when it is locally available.
+public struct CardPreviewFilePayload: Hashable, Sendable {
+  public let displayName: String
+  public let fileURL: URL?
+  public let contentType: String?
+  public let byteSize: Int?
+
+  public init(
+    displayName: String,
+    fileURL: URL? = nil,
+    contentType: String? = nil,
+    byteSize: Int? = nil
+  ) {
+    self.displayName = displayName
+    self.fileURL = fileURL
+    self.contentType = contentType
+    self.byteSize = byteSize
   }
 }
 
@@ -285,17 +393,20 @@ public struct CardPreviewPhotoPayload {
   public let fileURL: URL?
   public let fileRevision: Int
   public let thumbnailData: Data?
+  public let displayAspectRatio: CGFloat?
 
   public init(
     imageData: Data? = nil,
     fileURL: URL? = nil,
     fileRevision: Int = 0,
-    thumbnailData: Data? = nil
+    thumbnailData: Data? = nil,
+    pixelSize: CGSize? = nil
   ) {
     self.imageData = imageData
     self.fileURL = fileURL
     self.fileRevision = fileRevision
     self.thumbnailData = thumbnailData
+    self.displayAspectRatio = pixelSize?.cardPreviewAspectRatio
   }
 }
 
@@ -304,15 +415,18 @@ public struct CardPreviewVideoPayload {
   public let fileURL: URL?
   public let fileRevision: Int
   public let thumbnailData: Data?
+  public let displayAspectRatio: CGFloat?
 
   public init(
     fileURL: URL? = nil,
     fileRevision: Int = 0,
-    thumbnailData: Data? = nil
+    thumbnailData: Data? = nil,
+    pixelSize: CGSize? = nil
   ) {
     self.fileURL = fileURL
     self.fileRevision = fileRevision
     self.thumbnailData = thumbnailData
+    self.displayAspectRatio = pixelSize?.cardPreviewAspectRatio
   }
 }
 
@@ -323,19 +437,22 @@ public struct CardPreviewLivePhotoPayload {
   public let pairedVideoFileURL: URL?
   public let fileRevision: Int
   public let thumbnailData: Data?
+  public let displayAspectRatio: CGFloat?
 
   public init(
     stillImageData: Data? = nil,
     fileURL: URL? = nil,
     pairedVideoFileURL: URL? = nil,
     fileRevision: Int = 0,
-    thumbnailData: Data? = nil
+    thumbnailData: Data? = nil,
+    pixelSize: CGSize? = nil
   ) {
     self.stillImageData = stillImageData
     self.fileURL = fileURL
     self.pairedVideoFileURL = pairedVideoFileURL
     self.fileRevision = fileRevision
     self.thumbnailData = thumbnailData
+    self.displayAspectRatio = pixelSize?.cardPreviewAspectRatio
   }
 }
 
@@ -416,6 +533,7 @@ private struct CardPreviewLink: View {
       JournalLinkPreview(
         url: linkURL.url,
       )
+      .frame(height: presentation.linkPreviewHeight)
       .allowsHitTesting(presentation == .savedDetail)
     } else {
       CardPreviewText(
@@ -424,6 +542,84 @@ private struct CardPreviewLink: View {
         presentation: presentation
       )
     }
+  }
+}
+
+/// Generic-file treatment shared by saved tiles and detail rows.
+///
+/// The preview deliberately describes the persisted resource instead of trying
+/// to decode arbitrary bytes. Opening or editing a generic file remains outside
+/// this renderer's responsibility.
+private struct CardPreviewFile: View {
+
+  let file: CardPreviewFilePayload
+  let presentation: CardPreviewPresentation
+
+  var body: some View {
+    VStack(spacing: presentation == .savedDetail ? 14 : 10) {
+      Image(systemName: "doc")
+        .font(iconFont)
+        .foregroundStyle(.secondary)
+
+      Text(displayName)
+        .font(presentation.textFont)
+        .lineLimit(presentation == .savedDetail ? 4 : 3)
+        .multilineTextAlignment(.center)
+        .minimumScaleFactor(0.8)
+
+      if metadata.isEmpty == false {
+        Text(metadata.joined(separator: " · "))
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(2)
+          .multilineTextAlignment(.center)
+      }
+    }
+    .padding()
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    .accessibilityElement(children: .combine)
+  }
+
+  private var iconFont: Font {
+    presentation == .savedDetail
+      ? .system(size: 52, weight: .regular)
+      : .system(size: 34, weight: .regular)
+  }
+
+  private var displayName: String {
+    let name = file.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    if name.isEmpty == false {
+      return name
+    }
+
+    if let fileURL = file.fileURL,
+      fileURL.lastPathComponent.isEmpty == false
+    {
+      return fileURL.lastPathComponent
+    }
+
+    return String(localized: "File")
+  }
+
+  private var metadata: [String] {
+    var values: [String] = []
+
+    if let contentType = file.contentType,
+      contentType.isEmpty == false
+    {
+      values.append(UTType(contentType)?.localizedDescription ?? contentType)
+    }
+
+    if let byteSize = file.byteSize {
+      values.append(
+        ByteCountFormatter.string(
+          fromByteCount: Int64(byteSize),
+          countStyle: .file
+        )
+      )
+    }
+
+    return values
   }
 }
 
@@ -568,7 +764,10 @@ private struct SuggestionCardMediaImage: View {
 
         Image(uiImage: image)
           .resizable()
-          .scaledToFill()
+          .aspectRatio(
+            image.cardPreviewAspectRatio,
+            contentMode: presentation.mediaContentMode
+          )
 
       } else {
         CardPreviewMediaPlaceholder(
@@ -896,30 +1095,15 @@ private enum SuggestionText {
 extension CardPreviewPresentation {
 
   fileprivate var suggestionTitleFont: Font {
-    switch self {
-    case .savedDetail:
-      return .title2.weight(.semibold)
-    case .draftSummary, .savedSummary:
-      return .title3.weight(.semibold)
-    }
+    .title3.weight(.semibold)
   }
 
   fileprivate var suggestionSubtitleFont: Font {
-    switch self {
-    case .savedDetail:
-      return .callout
-    case .draftSummary, .savedSummary:
-      return .caption
-    }
+    .caption
   }
 
   fileprivate var suggestionMediaAspectRatio: CGFloat {
-    switch self {
-    case .savedDetail:
-      return 4 / 3
-    case .draftSummary, .savedSummary:
-      return 1
-    }
+    1
   }
 }
 
@@ -1430,11 +1614,18 @@ private struct CardPreviewPhoto: View {
     if let image {
       Image(uiImage: image)
         .resizable()
-        .scaledToFill()
+        .aspectRatio(
+          displayAspectRatio(for: image),
+          contentMode: presentation.mediaContentMode
+        )
     } else {
       CardPreviewMediaPlaceholder(
         systemImage: "photo",
         aspectRatio: presentation.photoAspectRatio
+      )
+      .detailMediaPlaceholderFrame(
+        aspectRatio: photo.displayAspectRatio ?? 1,
+        presentation: presentation
       )
     }
   }
@@ -1458,6 +1649,14 @@ private struct CardPreviewPhoto: View {
       primaryData: CardPreviewImageDataFingerprint(photo.imageData),
       fallbackData: CardPreviewImageDataFingerprint(photo.thumbnailData)
     )
+  }
+
+  private func displayAspectRatio(for image: UIImage) -> CGFloat {
+    guard presentation == .savedDetail else {
+      return image.cardPreviewAspectRatio
+    }
+
+    return photo.displayAspectRatio ?? image.cardPreviewAspectRatio
   }
 
   @MainActor
@@ -1535,28 +1734,36 @@ private struct CardPreviewVideo: View {
         systemImage: "video",
         aspectRatio: presentation.photoAspectRatio
       )
+      .detailMediaPlaceholderFrame(
+        aspectRatio: video.displayAspectRatio ?? 16 / 9,
+        presentation: presentation
+      )
     }
   }
 
   private func playableVideo(_ fileURL: URL) -> some View {
 
-    ZStack {
-      Color.black.opacity(0.08)
+    sizedPlayableVideo {
+      ZStack {
+        Color.black.opacity(0.08)
 
-      MutedLoopingVideoPlayer(
-        fileURL: fileURL,
-        onReadyForPlayback: {
-          withAnimation(.easeInOut(duration: 0.18)) {
-            readyFileURL = fileURL
+        MutedLoopingVideoPlayer(
+          fileURL: fileURL,
+          videoGravity: presentation == .savedDetail
+            ? .resizeAspect : .resizeAspectFill,
+          onReadyForPlayback: {
+            withAnimation(.easeInOut(duration: 0.18)) {
+              readyFileURL = fileURL
+            }
           }
-        }
-      )
+        )
 
-      if let thumbnailImage {
-        Image(uiImage: thumbnailImage)
-          .resizable()
-          .scaledToFill()
-          .opacity(readyFileURL == fileURL ? 0 : 1)
+        if let thumbnailImage {
+          Image(uiImage: thumbnailImage)
+            .resizable()
+            .aspectRatio(contentMode: presentation.mediaContentMode)
+            .opacity(readyFileURL == fileURL ? 0 : 1)
+        }
       }
     }
     .overlay(alignment: .bottomTrailing) {
@@ -1564,11 +1771,28 @@ private struct CardPreviewVideo: View {
     }
   }
 
+  @ViewBuilder
+  private func sizedPlayableVideo<Content: View>(
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    if presentation == .savedDetail {
+      content()
+        .aspectRatio(displayAspectRatio, contentMode: .fit)
+    } else {
+      content()
+    }
+  }
+
   private func posterOnly(_ image: UIImage) -> some View {
 
     Image(uiImage: image)
       .resizable()
-      .scaledToFill()
+      .aspectRatio(
+        presentation == .savedDetail
+          ? video.displayAspectRatio ?? image.cardPreviewAspectRatio
+          : image.cardPreviewAspectRatio,
+        contentMode: presentation.mediaContentMode
+      )
       .overlay(alignment: .bottomTrailing) {
         CardPreviewMediaBadge(systemImage: "play.fill")
       }
@@ -1612,6 +1836,15 @@ private struct CardPreviewVideo: View {
       fallbackData: nil
     )
   }
+
+  private var displayAspectRatio: CGFloat {
+    let decodedAspectRatio = thumbnailImage?.cardPreviewAspectRatio ?? 16 / 9
+    guard presentation == .savedDetail else {
+      return decodedAspectRatio
+    }
+
+    return video.displayAspectRatio ?? decodedAspectRatio
+  }
 }
 
 private struct CardPreviewLivePhoto: View {
@@ -1639,26 +1872,29 @@ private struct CardPreviewLivePhoto: View {
   private var content: some View {
     if let image {
 
-      ZStack {
-        Image(uiImage: image)
-          .resizable()
-          .scaledToFill()
+      sizedLivePhoto {
+        ZStack {
+          Image(uiImage: image)
+            .resizable()
+            .aspectRatio(contentMode: presentation.mediaContentMode)
 
-        if isLivePhotoPlaybackActive,
-          let pairedVideoFileURL = livePhoto.pairedVideoFileURL
-        {
-          MutedLoopingVideoPlayer(
-            fileURL: pairedVideoFileURL,
-            onReadyForPlayback: {
-              withAnimation(.easeInOut(duration: 0.16)) {
-                isPairedVideoReady = true
+          if isLivePhotoPlaybackActive,
+            let pairedVideoFileURL = livePhoto.pairedVideoFileURL
+          {
+            MutedLoopingVideoPlayer(
+              fileURL: pairedVideoFileURL,
+              videoGravity: presentation == .savedDetail
+                ? .resizeAspect : .resizeAspectFill,
+              onReadyForPlayback: {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                  isPairedVideoReady = true
+                }
               }
-            }
-          )
-          .opacity(isPairedVideoReady ? 1 : 0)
+            )
+            .opacity(isPairedVideoReady ? 1 : 0)
+          }
         }
       }
-
       .contentShape(Rectangle())
       .gesture(
         livePhotoPlaybackGesture,
@@ -1672,6 +1908,10 @@ private struct CardPreviewLivePhoto: View {
         systemImage: "livephoto",
         aspectRatio: presentation.photoAspectRatio
       )
+      .detailMediaPlaceholderFrame(
+        aspectRatio: livePhoto.displayAspectRatio ?? 1,
+        presentation: presentation
+      )
     }
   }
 
@@ -1683,6 +1923,18 @@ private struct CardPreviewLivePhoto: View {
           state = true
         }
       }
+  }
+
+  @ViewBuilder
+  private func sizedLivePhoto<Content: View>(
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    if presentation == .savedDetail {
+      content()
+        .aspectRatio(displayAspectRatio, contentMode: .fit)
+    } else {
+      content()
+    }
   }
 
   private var image: UIImage? {
@@ -1704,6 +1956,18 @@ private struct CardPreviewLivePhoto: View {
       primaryData: CardPreviewImageDataFingerprint(livePhoto.stillImageData),
       fallbackData: CardPreviewImageDataFingerprint(livePhoto.thumbnailData)
     )
+  }
+
+  private var displayAspectRatio: CGFloat {
+    let decodedAspectRatio = decodedThumbnailImage?.cardPreviewAspectRatio
+      ?? decodedStillImage?.cardPreviewAspectRatio
+      ?? loadedFullSizeImage?.cardPreviewAspectRatio
+      ?? 1
+    guard presentation == .savedDetail else {
+      return decodedAspectRatio
+    }
+
+    return livePhoto.displayAspectRatio ?? decodedAspectRatio
   }
 
   @MainActor
@@ -1800,7 +2064,7 @@ private struct CardPreviewAudio: View {
         waveform
           .frame(
             maxWidth: .infinity,
-            minHeight: presentation == .savedDetail ? 96 : 52,
+            minHeight: 52,
             alignment: .center
           )
       }
@@ -1876,22 +2140,12 @@ private struct CardPreviewDoodle: View {
 
   @ViewBuilder
   private func rendered(_ drawing: DoodleDrawing) -> some View {
-    if presentation == .draftSummary {
-      DoodleDrawingView(
-        drawing: drawing,
-        inkColor: palette.tint,
-        displayAspectRatio: CardMetrics.aspectRatio
-      )
-    } else {
-
-      DoodleDrawingView(
-        drawing: drawing,
-        inkColor: palette.tint,
-        displayAspectRatio: presentation.savedMediaAspectRatio
-      )
-      .padding(presentation == .savedDetail ? 16 : 10)
-
-    }
+    DoodleDrawingView(
+      drawing: drawing,
+      inkColor: palette.tint,
+      displayAspectRatio: presentation.doodleDisplayAspectRatio
+    )
+    .padding(presentation.doodleArtworkPadding)
   }
 
   @MainActor
@@ -1974,13 +2228,9 @@ private struct CardPreviewBauhaus: View {
 
   @ViewBuilder
   private func rendered(_ document: BauhausGridDocument) -> some View {
-    if presentation == .draftSummary {
+    CardPreviewRenderedMediaFrame(presentation: presentation) {
       BauhausGridArtworkView(artwork: document.artwork)
-    } else {
-      CardPreviewRenderedMediaFrame(presentation: presentation) {
-        BauhausGridArtworkView(artwork: document.artwork)
-          .padding(presentation == .savedDetail ? 14 : 8)
-      }
+        .padding(presentation.bauhausArtworkPadding)
     }
   }
 
@@ -2157,6 +2407,50 @@ private struct CardPreviewUnknown: View {
     } else {
       CardPreviewMediaPlaceholder(systemImage: "questionmark.square.dashed")
     }
+  }
+}
+
+private extension View {
+
+  /// Reserves the eventual uncropped media geometry while a detail file loads.
+  @ViewBuilder
+  func detailMediaPlaceholderFrame(
+    aspectRatio: CGFloat,
+    presentation: CardPreviewPresentation
+  ) -> some View {
+    if presentation == .savedDetail,
+      aspectRatio.isFinite,
+      aspectRatio > 0
+    {
+      frame(maxWidth: .infinity)
+        .aspectRatio(aspectRatio, contentMode: .fit)
+    } else {
+      self
+    }
+  }
+}
+
+private extension CGSize {
+
+  /// Width divided by height when both persisted dimensions are usable.
+  var cardPreviewAspectRatio: CGFloat? {
+    guard width.isFinite,
+      height.isFinite,
+      width > 0,
+      height > 0
+    else {
+      return nil
+    }
+
+    return width / height
+  }
+}
+
+private extension UIImage {
+
+  /// Best-effort display ratio for decoded thumbnails and original images.
+  var cardPreviewAspectRatio: CGFloat {
+    size.cardPreviewAspectRatio ?? 1
   }
 }
 

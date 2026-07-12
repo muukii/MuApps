@@ -204,6 +204,13 @@ public protocol VaultSyncEngine: Sendable {
   /// fetch for its zone and push any pending changes it still holds.
   func activate(_ vaultID: VaultID) async
 
+  /// Re-reads every durable vault outbox after another process may have written.
+  ///
+  /// App extensions share Journal's SQLite stores but cannot publish through the
+  /// app process's in-memory mutation stream. The containing app calls this when
+  /// it becomes active so those already-committed rows enter the CloudKit engine.
+  func rescanPendingChanges() async
+
   /// Creates or reuses the saved zone-wide share for an owned vault.
   func prepareShare(for vaultID: VaultID) async throws -> VaultSharePreparation
 
@@ -254,6 +261,10 @@ public actor LoggingVaultSyncEngine: VaultSyncEngine {
 
   public func activate(_ vaultID: VaultID) async {
     log.info("activate vault \(vaultID.uuidString, privacy: .public) — no transport to kick")
+  }
+
+  public func rescanPendingChanges() async {
+    log.info("rescan durable outboxes — no transport to kick")
   }
 
   public func prepareShare(for vaultID: VaultID) async throws -> VaultSharePreparation {

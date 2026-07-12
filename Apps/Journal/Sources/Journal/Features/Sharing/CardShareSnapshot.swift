@@ -21,6 +21,8 @@ struct CardShareAttachmentSource: Sendable, Equatable {
   let kind: JournalVault.Attachment.Kind
   let fileURL: URL
   let thumbnail: Data?
+  let contentType: String?
+  let byteSize: Int?
 }
 
 /// A detached, share-ready copy of one saved vault entry.
@@ -73,6 +75,18 @@ struct CardShareSnapshot: Identifiable, Sendable, Equatable {
     switch kind {
     case .text, .link:
       return .text(body)
+    case .file:
+      let fileAttachment = attachment?.kind == .file ? attachment : nil
+      let availableFileURL = fileURL(for: fileAttachment)
+      return .file(
+        displayName: fileDisplayName(
+          body: body,
+          fileURL: availableFileURL ?? fileAttachment?.fileURL
+        ),
+        fileURL: availableFileURL,
+        contentType: fileAttachment?.contentType,
+        byteSize: fileAttachment?.byteSize
+      )
     case .suggestion:
       return .text(SuggestionShareTextFormatter.text(from: fileData(for: attachment)))
     case .photo, .livePhoto:
@@ -109,6 +123,18 @@ struct CardShareSnapshot: Identifiable, Sendable, Equatable {
       return nil
     }
     return attachment.fileURL
+  }
+
+  private static func fileDisplayName(body: String, fileURL: URL?) -> String {
+    if body.isEmpty == false {
+      return body
+    }
+
+    if let fileURL, fileURL.lastPathComponent.isEmpty == false {
+      return fileURL.lastPathComponent
+    }
+
+    return String(localized: "File")
   }
 }
 
@@ -248,6 +274,16 @@ private extension TimeInterval {
 enum CardShareContent: Sendable, Equatable {
   /// A written note.
   case text(String)
+
+  /// A generic file card. The export renders its display name and persisted
+  /// metadata; `fileURL` records whether the primary resource is locally
+  /// available without asking the renderer to decode arbitrary bytes.
+  case file(
+    displayName: String,
+    fileURL: URL?,
+    contentType: String?,
+    byteSize: Int?
+  )
 
   /// A photo card, preferring full-size media bytes and falling back to the
   /// mirrored thumbnail when the full file is unavailable.

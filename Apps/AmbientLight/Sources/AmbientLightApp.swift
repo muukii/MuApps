@@ -20,15 +20,8 @@ struct AmbientLightApp: App {
         .statusBarHidden()
     }
     .environment(container)
-    .onChange(of: scenePhase) { oldPhase, newPhase in
-      switch newPhase {
-      case .active:
-        container.enableIdleTimerDisabled()
-      case .inactive, .background:
-        container.disableIdleTimerDisabled()
-      @unknown default:
-        break
-      }
+    .onChange(of: scenePhase) { _, newPhase in
+      container.setScenePhase(newPhase)
     }
   }
 

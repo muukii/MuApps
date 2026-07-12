@@ -2,14 +2,13 @@ import CaptureDoodle
 import MuColor
 import SwiftUI
 
-/// Dev-gallery host for the doodle component. Supplies the theme ink color
-/// (`onPrimaryContainer`) and surface, and offers an in-place theme switch so the
-/// theme-reactive re-tinting of already-drawn strokes is visible without leaving
-/// the screen — the whole point of storing doodles as colorless vectors.
+/// Dev-gallery host for the doodle component. Supplies neutral ink and surface
+/// colors while allowing the app accent to be inspected in place.
 struct DoodleCaptureView: View {
 
   @Environment(\.appPalette) private var palette
-  @AppStorage(JournalDefaults.themeID) private var themeID: String = Theme.default.id
+  @AppStorage(JournalDefaults.accentColorID)
+  private var accentColorID: String = AccentColor.default.id
   @State private var lastDrawing: DoodleDrawing?
 
   var body: some View {
@@ -34,9 +33,9 @@ struct DoodleCaptureView: View {
     .toolbar {
       ToolbarItem(placement: .journalTrailingAction) {
         Menu {
-          Picker("Theme", selection: $themeID) {
-            ForEach(Theme.all) { theme in
-              Text(theme.name).tag(theme.id)
+          Picker("Accent Color", selection: $accentColorID) {
+            ForEach(AccentColor.all) { accentColor in
+              Text(accentColor.name).tag(accentColor.id)
             }
           }
         } label: {

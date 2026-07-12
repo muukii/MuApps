@@ -8,7 +8,7 @@ functional change lands (see [Documentation Policy](#documentation-policy)).
 ## Overview
 
 `Journal` is a journaling app for iPhone, iPad, and native macOS. Each thing a
-user records — text, a photo, a doodle, Bauhaus grid artwork, ambient sound, or
+user records — text, a shared file, a photo, a doodle, Bauhaus grid artwork, ambient sound, or
 (on supported iPhone/iPad hardware) a Journaling Suggestion — becomes one
 **Card**. iCloud sync and vault collaboration are hard product requirements, so
 the app is moving to **per-vault SwiftData stores with CloudKit mirroring
@@ -34,6 +34,10 @@ exists today is:
 - A **theming system** (`MuColor`) and **Core Haptics labs** (`MuHaptics`).
 - A **vault-selectable widget**: `JournalWidget` lets each widget instance choose
   one vault and reads the latest card from that vault's App Group store.
+- **System capture entry points**: a configurable Control for Action Button /
+  Control Center, App Shortcuts and a background text-posting intent, an explicit
+  Quick Capture Vault, and an iOS Share Extension for text, links, photos, videos,
+  and files. Locked Camera Capture is intentionally not part of this feature.
 
 Because the product shell is undecided, capture components are deliberately
 **persistence-agnostic**: each emits a plain `Sendable` value through a
@@ -45,14 +49,16 @@ before persistence sees them.
 
 ## Architecture
 
-Tuist project (`Apps/Journal/Project.swift`) with an app target, a **widget
-extension**, the vault **data-layer framework**, and several **Journal-local
-static frameworks**. The frameworks live inside the app (not in the repo's
+Tuist project `Tinycurve` (`Apps/Journal/Project.swift`) with a `Tinycurve` app
+target, **widget**,
+**App Intents**, and **Share** extensions, the vault **data-layer framework**,
+an extension-safe `JournalIntents` framework, and several **Journal-local static
+frameworks**. The frameworks live inside the app (not in the repo's
 `Shared/`) because they are app-scoped, not cross-app. All Journal target source
 roots are grouped under `Apps/Journal/Sources/<TargetName>/`; the app icon
-package is `Apps/Journal/Sources/Journal/Icon.icon`. The target and module names
-remain `Journal`; the user-facing app bundle display name is `Tinycurve`,
-and the WidgetKit extension bundle display name is `Tinycurve Widget`.
+package is `Apps/Journal/Sources/Journal/Icon.icon`. The project, app target,
+scheme, executable, module, and user-facing bundle display name are `Tinycurve`;
+the WidgetKit extension bundle display name is `Tinycurve Widget`.
 The same app, framework, test, and widget targets compile natively for iPhone,
 iPad, and macOS. The Mac product keeps bundle id `app.muukii.journal`, CloudKit
 container, and App Group identity aligned with iOS. Native macOS app and widget
@@ -63,11 +69,14 @@ read-only files, camera, microphone, location, and Photos access enabled; each
 privacy-sensitive feature still requests runtime authorization before use.
 
 ```
-Journal (app, app.muukii.journal)
+Tinycurve (app, app.muukii.journal)
 ├── JournalWidget      — WidgetKit extension (app.muukii.journal.JournalWidget)
 │   ├── JournalVault    (vault catalog/content reader)
 │   ├── CaptureDoodle   (read-only widget renderer)
 │   └── CaptureBauhaus  (read-only widget renderer)
+├── JournalAppIntentsExtension — background text posting + App Shortcuts
+├── JournalShareExtension      — iOS system Share sheet entry point
+├── JournalIntents     — shared entities, preferences, routing, posting service
 ├── CloudKitSupport    — macro-generated CKRecord transport wrappers
 ├── JournalVault       — vault catalog/content stores + explicit CloudKit sync
 ├── MuColor            — color themes / palette + container views
@@ -107,7 +116,7 @@ bundle.
 
 ### Fresh schema startup
 
-`JournalApp` creates `JournalVaultRuntime` on launch. The runtime starts the
+`TinycurveApp` creates `JournalVaultRuntime` on launch. The runtime starts the
 sync layer and leaves the catalog empty when CloudKit recovery finds no owned or
 accepted shared vaults. That empty catalog is the new-user state; the app does
 not create preset vaults at install time and does not open the old App Group
@@ -125,12 +134,14 @@ migration APIs or legacy import DTOs. Schema changes can replace the pre-release
 store shape directly; developer-only recovery can be built outside the app if it
 is ever needed.
 
-If a pre-release vault content store cannot be opened after a schema break,
+If the app-lifetime runtime cannot open a pre-release vault content store after a schema break,
 `VaultContentStore.open` discards that vault's local `store.sqlite*` files and
 `media/` directory, then recreates the store. It also clears CKSyncEngine state
 and asks the sync engine to refetch, so CloudKit records and CKAssets can
 materialize the fresh store. The reset does not remove the catalog row or sibling
 vault content stores.
+Extension processes use `.failWithoutReset` instead, so a transient concurrent
+open cannot delete shared data from a short-lived process.
 
 ### Widget extension
 
@@ -148,7 +159,8 @@ descending. It resolves visibility through `CardEdge`: parent cards that have
 children are skipped so a multi-card thread save displays the authored last
 visible card instead of its root. It shows kind-aware content: text cards use
 `Card.body` (falling back to `Untitled`), link cards use their stored URL string,
-photo cards use the save-time raster thumbnail stored on their attachment, and
+photo cards use the save-time raster thumbnail stored on their attachment, file
+cards show their original name and type/size metadata, and
 doodle / Bauhaus cards decode their authored JSON attachment and render
 `DoodleDrawingView` / `BauhausGridArtworkView`. Audio cards still show a typed
 modality label because there is not yet a visual authored renderer for audio.
@@ -169,6 +181,37 @@ remains only for relative-date freshness. Future optimization can denormalize
 latest-card previews into `VaultSummary`, but current product behavior reads the
 selected vault store directly.
 
+### System capture extensions
+
+`JournalWidget` also contributes a configurable **Quick Capture** Control. It is
+available to Control Center, Lock Screen controls, and the iPhone Action Button;
+each placement can select a writable Vault and Text, Photo, Voice, Doodle, or
+Journaling Suggestions mode. The action uses `UISceneAppIntent` and
+`AppIntentSceneDelegate` to activate Journal and present the corresponding
+in-app capture surface. It requires device authentication and does not capture a
+camera image while the phone remains locked.
+
+`JournalAppIntentsExtension` exposes **Quick Capture** and **Post Text to
+Journal** to Shortcuts, Siri, Spotlight, and Action Button action selection.
+Post Text runs in the background, accepts text from actions such as Dictate Text,
+and commits to either its explicit writable Vault parameter or the Quick Capture
+Vault. Its success boundary is the local Card transaction plus durable outbox;
+it does not claim CloudKit upload is already complete.
+
+`JournalShareExtension` presents a custom SwiftUI review sheet for text, web and
+Maps URLs, images, movies, and individual files. The user can choose any writable
+Vault, add an optional comment as the root Card, review skipped inputs, and post
+all accepted items in one `createThread(cards:)` transaction. Generic files are
+real `.file` Cards with their original display name, bytes, content type, and
+size preserved. The explicit Quick Capture Vault is preselected when valid, but
+the extension never silently substitutes another destination.
+
+All system entry points share `JournalPostingService`. App extensions receive
+only the App Group entitlement, never start CKSyncEngine, and open shared stores
+with destructive pre-release recovery disabled. When the containing app becomes
+active it rescans every durable outbox so cross-process writes enter the existing
+CloudKit engine; widgets are reloaded immediately after the local commit.
+
 ### Entitlements & capabilities
 
 Declared in `Project.swift` on the app target:
@@ -176,8 +219,8 @@ Declared in `Project.swift` on the app target:
 - `com.apple.developer.icloud-container-identifiers` = `iCloud.app.muukii.journal`
 - `com.apple.developer.icloud-services` = `CloudKit`
 - `com.apple.security.application-groups` = `["group.app.muukii.journal"]` —
-  backs the vault store layout and widget access to configured vaults. Declared
-  on **both** the app and the `JournalWidget` target.
+  backs vault stores, Quick Capture preferences, and extension access. Declared
+  on the app, Widget, App Intents, and Share targets.
 - `aps-environment` = `$(APS_ENVIRONMENT)` — expanded per configuration
   (`development` for Debug, `production` for Release). Required so shipped builds
   receive CloudKit's silent pushes for background sync.
@@ -194,6 +237,8 @@ The `JournalWidget` target carries the same App Group, iCloud container,
 CloudKit, and `aps-environment` entitlements as the app. Its live timeline read
 is local App Group storage; CloudKit access remains available for future
 extension-side recovery or summary refresh work.
+The App Intents and Share targets carry only the App Group entitlement; CloudKit,
+push, and background modes remain owned by the containing app.
 
 ### Usage descriptions (Info.plist)
 
@@ -260,8 +305,8 @@ of order.
 | Property | Type | Notes |
 |----------|------|-------|
 | `id` | `UUID` | Unique inside the vault store. |
-| `kindRawValue` | `String` | Stored/synced modality string: `.text`, `.link`, `.photo`, `.video`, `.livePhoto`, `.audio`, `.doodle`, `.bauhaus`, or a newer unknown value. `kind` maps unknown values to `.unknown`. |
-| `body` | `String` | Text content for `.text`; canonical URL string for `.link`; media cards keep this empty. |
+| `kindRawValue` | `String` | Stored/synced modality string: `.text`, `.link`, `.file`, `.photo`, `.video`, `.livePhoto`, `.audio`, `.suggestion`, `.doodle`, `.bauhaus`, or a newer unknown value. `kind` maps unknown values to `.unknown`. |
+| `body` | `String` | Text content for `.text`; canonical URL string for `.link`; original display name for `.file`; other media cards keep this empty. |
 | `attachments` | `[Attachment]` | Relationship-owned media rows for this card. |
 | `placements` | `[CardEdge]` | Relationship-owned placements that point at this card. |
 | `createdAt` | `Date` | |
@@ -299,7 +344,7 @@ compound media item such as a Live Photo.
 | `card` | `Card?` | SwiftData relationship to the owning card. |
 | `resources` | `[AttachmentResource]` | File-backed resources owned by this logical attachment. |
 | `cardID` | `UUID` | Relationship-backed reference ID for sync/import repair. |
-| `kindRawValue` | `String` | `.photo`, `.video`, `.livePhoto`, `.audio`, `.suggestion`, `.doodle`, `.bauhaus`, or unknown raw value. |
+| `kindRawValue` | `String` | `.file`, `.photo`, `.video`, `.livePhoto`, `.audio`, `.suggestion`, `.doodle`, `.bauhaus`, or unknown raw value. |
 | `byteSize` | `Int` | Denormalized primary-resource byte size kept for summaries. |
 | `primaryResourceID` | `UUID` | Primary resource used by normal rendering. |
 | `thumbnail` | `Data?` | Optional save-time raster derivative for photo, video poster, and Live Photo still surfaces. Doodle/Bauhaus leave it empty and render from authored media. |
@@ -317,7 +362,7 @@ directory before the CloudKit temporary file disappears.
 | `id` | `UUID` | Unique resource id and `media/<resource-id>` file name. |
 | `attachment` | `Attachment?` | SwiftData relationship to the owning logical attachment. |
 | `attachmentID` | `UUID` | Relationship-backed reference ID for sync/import repair. |
-| `roleRawValue` | `String` | `.originalImage`, `.stillImage`, `.pairedVideo`, `.originalVideo`, `.authoredJSON`, `.suggestionImage`, `.suggestionVideo`, `.audio`, or unknown raw value. |
+| `roleRawValue` | `String` | `.file`, `.originalImage`, `.stillImage`, `.pairedVideo`, `.originalVideo`, `.authoredJSON`, `.suggestionImage`, `.suggestionVideo`, `.audio`, or unknown raw value. |
 | `byteSize` | `Int` | Resource file byte size. |
 | `contentType` | `String?` | UTI/MIME-style content type when known. |
 | `pixelWidth` / `pixelHeight` | `Int?` | Image/video dimensions when known. |
@@ -330,7 +375,8 @@ directory before the CloudKit temporary file disappears.
 ### Card rendering boundary
 
 Normal card surfaces render from the authored value when that value is cheap and
-lossless to render. Text and link cards render their stored body/URL in SwiftUI.
+lossless to render. Text and link cards render their stored body/URL in SwiftUI;
+file cards render the original name with a document icon, content type, and size.
 Doodle and Bauhaus cards decode their saved JSON attachment and render
 `DoodleDrawingView` / `BauhausGridArtworkView` directly as SwiftUI content; if
 the vault media file has not arrived locally yet, the UI shows a modality
@@ -565,36 +611,32 @@ flattened, `Sendable` value model.
 
 ## Supporting Frameworks
 
-### MuColor — theming
+### MuColor — neutral appearance and key accent
 
-A small palette/theme system applied app-wide.
+A neutral app palette with one user-selectable key accent.
 
 - `Palette`: six seed colors (`tint`, `onTint`, `primaryContainer`,
   `onPrimaryContainer`, `secondaryContainer`, `onSecondaryContainer`) plus
   opacity-derived variants (`onPrimaryContainerVariant`, `outline`,
   `outlineVariant`, `tintRing`, …). `onTint` is the foreground color for text and
-  icons displayed directly on a tint/accent surface. No new hues are added beyond
-  the seeds. Colors are Display P3 named colors in namespaced groups under
-  `Resources/MuColor/Assets.xcassets`, such as `Theme/WarmCream/Tint`. Each
-  colorset stores the light value as Any and the dark value as the Dark
-  appearance; Swift only maps each `Theme` to its stable asset namespace and
-  resolves the requested `ColorScheme` through asset traits.
-- `Theme`: an `id` + display `name` + a **light** and **dark** `Palette` pair.
-  Ten themes: **Warm Cream** (default), **Black & White**, **Midnight**,
-  **Sage**, **Blush**, **Citrus**, **Lagoon**, **Vermilion**, **Cobalt**, and
-  **Forest**. `Black & White` is the colorless neutral theme:
-  white/black surfaces in Light mode and black/white surfaces in Dark mode, with
-  only neutral gray secondary surfaces for separation. `Theme.palette(for:)`
-  resolves the surface for the active
-  `ColorScheme`; `Theme.with(id:)` resolves a persisted id, falling back to
-  `.default`. Each theme adapts to the active Light/Dark mode, which can either
-  follow the device setting or be overridden from Settings for Journal.
+  icons displayed directly on a tint/accent surface. Primary surfaces are pure
+  white with black foreground in Light mode and pure black with white foreground
+  in Dark mode. Secondary surfaces use only neutral gray for hierarchy. These
+  surfaces never inherit the accent hue, so authored photos, doodles, Bauhaus
+  artwork, and card colors remain visually independent.
+- `AccentColor`: a persisted `id`, localized display `name`, and asset-backed key
+  color. Five accents are available: **Forest** (default), **Cobalt**,
+  **Vermilion**, **Orchid**, and **Amber**. Accent applies to selection, focus,
+  and primary actions only. `AccentColor.with(id:)` also maps ids from the former
+  ten-theme system to the closest current accent so existing preferences survive
+  the migration.
 - Container views `PrimaryContainer` / `SecondaryContainer` push a palette into
   the environment (`\.appPalette`) and apply background/foreground/tint.
-  `PrimaryContainer(theme:)` resolves the theme's light/dark palette from the
+  `PrimaryContainer(accentColor:)` resolves the accent's light/dark key color and
+  the shared neutral surfaces from the
   current color scheme at the root; nested containers inherit the resolved
   palette. App shape styles (`.appPrimaryContainer`, `.appSecondaryContainer`, …)
-  read the palette from the environment so theme and color-scheme changes
+  read the palette from the environment so accent and color-scheme changes
   re-render the tree.
 - `\.appPalette` is **public**, so any consumer can read the active palette to
   derive raw `Color`/`UIColor` values where a `ShapeStyle` won't do — e.g.
@@ -626,10 +668,10 @@ the gallery's **Lab** section).
 
 ## App Entry & Screens
 
-- **`JournalApp`** (`@main`) — builds `JournalVaultRuntime` and injects the
-  persisted theme palette via `RootView` → `PrimaryContainer`. It does not open
+- **`TinycurveApp`** (`@main`) — builds `JournalVaultRuntime` and injects the
+  persisted accent palette via `RootView` → `PrimaryContainer`. It does not open
   or inject the legacy `ModelContainer`.
-- **`RootView`** — reads the persisted theme (`@AppStorage(JournalDefaults.themeID)`)
+- **`RootView`** — reads the persisted accent (`@AppStorage(JournalDefaults.accentColorID)`)
   and appearance preference
   (`@AppStorage(JournalDefaults.appearancePreferenceID)`), applies the palette,
   and requests the chosen scene color scheme. `System` follows the device
@@ -664,6 +706,10 @@ the gallery's **Lab** section).
   scene metadata into `JournalVaultRuntime.acceptShare(metadata:)`; success
   completes onboarding if needed and activates the first available vault only
   when no vault is already active.
+  The same root consumes buffered `UISceneAppIntent` capture requests after
+  launch-time vault recovery, rejects missing/stale/read-only destinations
+  without fallback, and rescans extension-written outboxes whenever the scene
+  becomes active.
 - **`JournalHomeView`** — the persistent post-onboarding presenter. Its normal
   states are Creation backed by an active vault and **No Vaults**. It owns the
   Vault sheet and direct first-vault creation sheet. On iOS it also owns the
@@ -672,6 +718,8 @@ the gallery's **Lab** section).
   presenter.
   `CreationView` is keyed by the active `vaultID`, ensuring view-local drafts do
   not cross into a newly selected vault.
+  A system capture request for another Vault keeps its typed request alive while
+  this key changes, then presents from the replacement Creation view.
 - **`VaultSelectionView`** — a medium/large sheet opened from the active vault
   label in Creation. It reads `JournalVaultRuntime.vaults`, shows the catalog in
   picker order as a standard SwiftUI `List`, marks the active vault with a
@@ -727,8 +775,8 @@ the gallery's **Lab** section).
   1. **Welcome** — a decorative `CardSurface` stating the core idea ("Every little
      thing becomes a card") over a short welcome blurb.
   2. **Capture methods** — Text, Link, Photo, Doodle, and Ambient Sound as icon
-     + name + one-line summary. Debug builds also show Suggestions while the
-     Journaling Suggestions capture feature flag is enabled.
+     + name + one-line summary. iPhone and iPad builds also show Suggestions;
+     native macOS omits it because the system framework is unavailable.
   3. **Permissions** — optional priming for Camera, Photos, Microphone, and
      Location. Each row shows the live authorization status and an **Allow**
      button that triggers the system prompt on demand
@@ -737,122 +785,121 @@ the gallery's **Lab** section).
      `AmbientAudioRecorder.requestPermission()`,
      `LocationManager.requestAuthorization()`); the user can advance without
      granting anything.
-  4. **Theme** — a grid of theme tiles bound to the same `JournalDefaults.themeID`
-     key, so a selection applies app-wide and re-tints the onboarding immediately.
+  4. **Accent Color** — a grid of five key colors bound to
+     `JournalDefaults.accentColorID`. Journal surfaces remain neutral while the
+     selected accent updates interactive chrome immediately.
 
   The view is presentation-agnostic — it reports completion through an
   `onComplete` closure and never writes `hasCompletedOnboarding` itself — and
-  wraps its body in its own `PrimaryContainer` keyed to the stored theme so the
+  wraps its body in its own `PrimaryContainer` keyed to the stored accent so the
   palette resolves whether shown inline (first run) or over the app (Settings
   cover).
-- **`CreationView`** — the selected-vault compose screen: a date header
-  (`DateView`) showing today's weekday, month, and day, then
-  a vertical `ScrollView` of card-shaped draft summaries. The header is rendered
-  with the standard `Date.FormatStyle` field selection, so its field order and
-  separators follow the user's locale (en: "Sat, Jun 27"; ja: "6月27日(土)").
+- **`CreationView`** — the selected-vault home and compose screen. The main
+  surface embeds `SavedListView`, so cards already posted to the active vault
+  remain visible while composing. Root cards are read live from the vault's
+  SwiftData store, ordered newest first, grouped by local-calendar day, and
+  rendered in the same adaptive 4:5 card grid, including existing stack,
+  refresh, navigation, edit, share, and delete behavior. Posting targets the new
+  root edge in this list so the newly created card is brought into view.
   When the selected owned vault is already shared, the navigation toolbar also
   shows the same system `SWCollaborationView` control used by the vault picker,
-  so the active composer keeps the collaboration state and management entry
-  visible without adding a second invite button. The composer derives that state
-  from the refreshed catalog row for the selected vault, so stopping sharing in
-  the system UI removes the control after the runtime refreshes.
-  Drafts render through the same adaptive saved-entry summary card wrapper used
-  by Entries; the wrapper still owns the 4:5 paper aspect ratio, footer, tilt, and
-  modality-specific summary layout, while draft-only media payloads are fed in
-  directly instead of being loaded from attachment files. Doodle and Bauhaus
-  draft summaries render the authored value with their SwiftUI renderers instead
-  of a raster preview. Tapping a text card opens a native **Text** sheet with a
-  focused growing multiline editor. Tapping a photo card opens a native
-  **Photo** sheet, showing the existing
-  `CapturedPhoto` with **Retake Photo** or `PhotoCaptureView` for a new shot.
-  Tapping a doodle card opens a dedicated full-screen **Doodle** canvas that
-  reopens the existing `DoodleDrawing` in `DoodleCanvasView` so new strokes append
-  to the same vector drawing. Tapping a Bauhaus card opens a native **Bauhaus**
-  sheet that restores the existing `BauhausGridDocument`; the sheet keeps the
-  5 x 5 grid and brush panel together, so choosing a shape or swatch updates the
-  active brush and tapping a cell applies that brush or erases the cell while
-  recording replay events when the document has a replay timeline. Tapping a
-  link card opens a native **Link** sheet with URL keyboard
-  input; values such as `example.com` are normalized to HTTPS before save, and
-  valid web URLs show the platform-native LinkPresentation preview in the composer.
-  Tapping an audio card opens a native **Voice Record** sheet, showing
-  **Play** and **Record Again** for an existing
-  `AudioRecording` or `AudioCaptureView` for a new take. The bottom composer is
-  a Book-style glass input bar with a `+` add affordance, a central
-  **Write a card** affordance that opens text composition, and a trailing glass
-  up-arrow for saving. The `+` is a standard SwiftUI `Menu` whose system-owned
-  presentation contains Text, Link, Camera, Photos, Bauhaus, Doodle, Voice, and
-  Suggestions when enabled, each represented by a standard menu label and SF
-  Symbol. The system handles menu placement, interaction, accessibility, and
-  dismissal. Choosing one of those quick-capture actions dismisses the menu and
-  presents the matching native sheet or picker.
-  On macOS, the bottom composer is centered and capped at `720pt`, draft
-  cards are capped at `640pt`, and pointer/keyboard operation supplements the
-  same controls: Command-Shift-N writes a text card, Command-Return posts the
-  thread, Command-Shift-V opens Vaults, Command-Shift-L opens Entries, and
-  Command-comma opens Settings.
-  Text opens the last untouched text placeholder when one
-  exists; otherwise it creates a new text draft and opens the Text sheet. Text,
-  Doodle, and Bauhaus sheets reflect edits into the draft as the user works and
-  rely on interactive dismissal rather than **Done** or **Cancel** buttons. Camera
-  and Voice create/reuse a draft only after capture finishes, then dismiss back
-  to the composer. Photos opens Apple's system photo picker; after the selected
-  image is loaded and normalized into the app's `CapturedPhoto` payload, the
-  composer creates/reuses the same photo draft type used by camera capture. If a
-  selected image cannot be loaded, the composer leaves drafts unchanged and shows
-  a persistent failure notification. Doodle and Bauhaus present native sheets at
-  the large detent and resolve a draft on the first non-empty canvas/grid change,
-  reusing the first untouched text placeholder when possible and
-  restoring/removing that quick draft if the canvas/grid is cleared. The doodle
-  canvas and Bauhaus grid auto-sync committed changes into the draft; there is no
-  separate save button for those visual editors. The sparkles capture button
-  presents Apple's Journaling Suggestions picker; when the user selects a
-  suggestion, the composer creates one Suggestion card for each top-level
-  resolved element. A selected suggestion with several photos, songs, places, or
-  other elements therefore becomes several card drafts instead of one crowded
-  card; grouped system assets such as Live Photos, Location Groups, and Workout
-  Groups stay together as one card. Suggestion cards store the returned title,
-  date interval, and element payload as an authored JSON attachment, not in the
-  card body. Media returned inside the selected suggestion, such as photos,
-  videos, Live Photo components, posters, artwork, and icons, is copied into
-  additional `.suggestionImage` / `.suggestionVideo` resources when the source
-  file is locally available; the authored JSON records the copied resource ids.
-  Suggestion card previews show the selected element as the card's primary
-  subject: an element-specific category label, symbol, title, secondary metadata,
-  and date when available. Photo-like elements, such as Photos, Live Photos,
-  event posters, podcast or song artwork, render the local source image or
-  copied `.suggestionImage` resource as the card's primary media when that file
-  is available. Icon-like media, such as contact photos, Generic Media app
-  icons, Motion Activity icons, State of Mind icons, Workout icons, and Workout
-  Group icons, render as a compact image inside the card. Legacy payloads that
-  still contain multiple elements render the first element as the primary subject
-  and summarize the remaining elements below it.
-  The resolver snapshots Contacts, Event Posters, Generic Media, Live Photos,
-  Locations, Location Groups, Motion Activity, Photos, Podcasts, Reflections,
-  Songs, State of Mind, Videos, Workouts, Workout Details, and Workout Groups;
-  SwiftUI decoration values such as suggestion gradients/colors are not
-  persisted. The
-  glass up-arrow converts the current draft cards into
-  `VaultContentStore.CardDraft` values, saves them through the
-  selected `VaultInstance` as one root `CardEdge` tree, then clears the composer.
-  During this conversion, photo drafts generate their bounded raster thumbnail
-  through `MediaProcessing`; authored JSON cards such as Suggestion, Doodle, and
-  Bauhaus do not store raster thumbnails, though Suggestion may carry copied
-  media resources alongside its JSON.
-  A successful save shows a transient bottom capsule notification ("Saved to
-  Journal") with success haptics; if saving fails, the draft remains on screen
-  and a persistent bottom capsule notification explains that the save did not
-  complete with failure haptics. Notifications fade, blur, and scale in place
-  with a slight bounce instead of sliding from an edge.
-  The save button is disabled until every draft can be persisted (text requires
-  non-empty trimmed text, link requires a valid HTTP(S) URL, and media kinds
-  require a captured payload). Existing-Card continuation selection is not wired
-  yet; this composer creates a new thread from the first draft.
-  Toolbar links back to vault selection, to the vault-backed entries list
-  (`SavedListView`), and to Settings. Capture demos are kept in the dev gallery
-  rather than Settings; Debug builds show Suggestions on the compose surface as a
-  feature-flagged capture button, and selected suggestions save as
-  `Card.Kind.suggestion`.
+  keeping collaboration management available from Home. The control is derived
+  from the refreshed catalog row, so it disappears after sharing is stopped and
+  the runtime refreshes.
+
+  Creation lives in a Book-style glass input bar inset at the bottom of the
+  saved-card list. Its center is a multiline **Write a card** text field that
+  grows from one to five lines; text currently inside this field is the one
+  unpublished card, rather than a separate draft card displayed in the list.
+  The trailing glass up-arrow posts that card and is enabled only when the
+  current content is persistable: text must contain non-whitespace content, a
+  link must resolve to a valid HTTP(S) URL, and capture-backed kinds must contain
+  their completed payload. Command-Return invokes the same post action. On
+  iOS, starting a drag on the saved-card scroller dismisses the inline text
+  keyboard, including when the active vault has too few cards to scroll. On
+  macOS, the bar is centered and capped at `720pt`; Command-Shift-V opens Vaults
+  and Command-comma opens Settings.
+
+  While the input is the untouched empty text card, the leading `+` opens a
+  standard SwiftUI `Menu` containing Link, Camera, Photos, Bauhaus, Doodle,
+  Voice, and feature-flagged Suggestions. Text needs no menu item because it is
+  entered directly in the bar. The system owns menu placement, interaction,
+  accessibility, and dismissal. Once the input is no longer the untouched text
+  placeholder — including while it is in Link mode — the `+` becomes an
+  `xmark`; choosing it requires destructive confirmation before the unpublished
+  card is discarded. Changing vaults also requires confirmation while the input
+  contains an unpublished card.
+
+  Quick Capture requests use the same draft-preservation rule. With an empty
+  composer they open the focused text editor, camera, voice recorder, doodle
+  canvas, or system Suggestions picker directly. If unpublished input exists,
+  Journal asks before discarding it; cancelling consumes the system request and
+  leaves the draft unchanged.
+
+  Link, Camera, Photos, Bauhaus, Doodle, Voice, and Suggestions reuse that same
+  single card rather than appending another draft. Link capture uses URL-keyboard
+  input and normalizes values such as `example.com` to HTTPS. Camera writes a
+  `CapturedPhoto`; Photos uses the system picker and imports still images,
+  videos, or Live Photos while preserving the paired Live Photo resources. A
+  failed library import leaves the current input in place and shows a persistent
+  failure notification. Doodle and Bauhaus present native sheets at the large
+  detent and stream non-empty vector/grid changes into the card; clearing the
+  canvas or grid restores the empty text input. Voice writes the completed
+  `AudioRecording`. After a non-text capture completes, the input bar shows a
+  preview rendered from the actual authored payload. Valid Links use a large
+  native rich-link surface; Photo, Video, Live Photo, Doodle, and Bauhaus use a
+  large square visual; Audio uses a wide horizontal waveform. These expanded
+  surfaces occupy only the center column between the leading discard and
+  trailing post buttons, and do not repeat the kind as visible text. An
+  incomplete Link and the remaining non-text kinds keep the compact preview and
+  modality label. Tapping a preview opens the matching detail editor without
+  allowing the card kind to be switched;
+  imported video, Live Photo, and Suggestion details are preview-only, while
+  supported authored formats remain editable.
+
+  The Suggestions action presents Apple's Journaling Suggestions picker. One
+  picker selection becomes one aggregate Suggestion card containing the returned
+  title, date interval, and all resolved top-level elements; it does not fan the
+  elements out into a creation-time chain. The authored payload is stored as JSON
+  rather than in the card body. When source files are locally available, photos,
+  videos, Live Photo components, posters, artwork, and icons are copied into
+  additional suggestion media resources and referenced from that payload.
+  Previews use the first element as the primary subject and summarize remaining
+  elements. The resolver supports Contacts, Event Posters, Generic Media, Live
+  Photos, Locations, Location Groups, Motion Activity, Photos, Podcasts,
+  Reflections, Songs, State of Mind, Videos, Workouts, Workout Details, and
+  Workout Groups; transient SwiftUI decoration values such as suggestion
+  gradients/colors are not persisted.
+
+  When the Settings **Attach Location** preference is enabled, the composer asks
+  for a one-shot coordinate only after the card becomes persistable and attaches
+  it to that unpublished card. Disabling the preference or losing location
+  authorization clears the in-progress coordinate; posting still succeeds
+  without location when no coordinate is available. The saved-card list shows a
+  compact, wide map header whenever the selected vault contains located cards.
+  This header stays zoomed around the most recently created located card and
+  overlays pins for saved cards in that area while the normal card grid remains
+  directly below it. Tapping the header pushes an interactive **Map** screen
+  whose initial camera frames every located card in the selected vault. Nearby
+  or overlapping pins automatically group into a count marker and separate into
+  individual pins as the user zooms in. The up-arrow freezes one save snapshot,
+  converts it into one `VaultContentStore.CardDraft`, and calls
+  `createThread(cards:)` with that single value. This immediately persists one
+  root `CardEdge`, clears the input only after success, refreshes the vault and
+  widget, and scrolls the embedded saved-card list toward the new root. The
+  Photo, Video, and Live Photo write paths generate or carry a bounded
+  thumbnail; Doodle, Bauhaus, and Suggestion retain authored payloads, with
+  Suggestion media copied alongside its JSON when available.
+
+  Successful posting shows a transient **Posted to Journal** notification with
+  success haptics. If posting fails, the unpublished card stays in the input bar
+  and a persistent **Could not post** notification states that the input is still
+  present, with failure haptics. Notifications fade, blur, and scale in place
+  with a slight bounce instead of sliding from an edge. Creation-time chains are
+  intentionally not exposed: each press of the up-arrow posts exactly one new
+  root card. A future continuation flow is planned as a reply to an already
+  saved card rather than accumulating several unpublished cards before posting.
+  Capture demos remain in the dev gallery rather than Settings.
 - **`CaptureGalleryView`** (dev scaffolding, not currently wired into the app
   root) — a `List` with:
   - **Capture**: Text, Photo, Doodle, Bauhaus Grid, Ambient Sound, Suggestions.
@@ -888,10 +935,19 @@ the gallery's **Lab** section).
   the old toolbar reload icon is not shown in the normal list surface. Grid tiles
   are matched transition sources so opening a detail view uses the system zoom
   navigation transition from the tapped card. Link cards
-  use iOS's LinkPresentation preview in both tiles and detail cards, fetching
+  use iOS's LinkPresentation preview in both tiles and detail rows, fetching
   metadata at display time and caching it for the app session. Photo summary
   previews use the saved thumbnail to avoid decoding original-size images during
-  scrolling; detail cards can read the full vault media file. Video previews
+  scrolling. Compact tiles remain on the shared 4:5 `CardSurface`, while the
+  pushed detail view presents authored content without a common card shape,
+  rounded clipping, stroke, or fixed height. Text uses its natural height;
+  Photo, Video, and Live Photo use the persisted pixel dimensions (falling back
+  to decoded media dimensions) and aspect-fit the complete image without crop.
+  When a card has a location, its detail row shows a slender, non-interactive
+  street map centered on the recorded point between the authored content and
+  record metadata. The card kind, created/updated timestamps, and edit/delete
+  controls sit below it. Detail rows can still read the full vault media file and retain
+  detail-only Link and Live Photo interaction. Video previews
   play as muted inline loops when the media file is local, while keeping the app
   audio session mixed with other audio so external music or podcasts continue.
   Doodle and Bauhaus previews decode the authored JSON attachment file and render
@@ -899,34 +955,38 @@ the gallery's **Lab** section).
   shows a modality placeholder; when sync writes the file and bumps the resource
   revision, SwiftData observation re-runs the affected preview load. Saved cards
   can be shared from a grid tile's context menu
-  or a detail card's context menu. The share action opens a preview sheet backed
+  or a detail row's context menu. The share action opens a preview sheet backed
   by a detached share snapshot, renders the actual temporary PNG artifact,
   and, for Doodle or Bauhaus cards with authored replay data, also offers a
   generated mp4 replay before handing the selected file to the system activity
   sheet. Saved cards can be edited from a grid tile's context menu or from each
-  detail card's pencil button. Editing rehydrates the saved card into
+  detail row's pencil button. Editing rehydrates the saved card into
   `CardEditDraftEditor`, requires the full media file for media cards, and saves
   back through `VaultContentStore.updateCard(cardID:with:)`; thumbnails are not
   used as lossy edit sources. Saved cards can also be deleted from a grid tile's
-  context menu or from each detail card's trash button. Deletion is confirmed
+  context menu or from each detail row's trash button. Deletion is confirmed
   first, then writes through `VaultContentStore.deleteCardEdge(edgeID:)` so the
   selected edge, descendant cards, attachments, attachment resources, local media
   files, and CloudKit delete outbox rows stay aligned. Detail deletion dismisses
   back to the list after a successful delete so the user sees the updated model graph.
-- **`SettingsView`** — a theme picker, an **Appearance** picker, a **Location**
-  toggle for automatic location attachment, a **Storage** section with **Cloud
+- **`SettingsView`** — an **Accent Color** picker, an **Appearance** picker, a **Location**
+  toggle for automatic location attachment, an explicit **Quick Capture Vault**
+  picker, a **Storage** section with **Cloud
   Storage** estimates, a **Widgets** section with an **Add Widgets** guide,
   optional Debug-only **Vault Runtime** and Lab links, and About actions.
   Settings is a grouped `Form`, but every cell background opts into the
-  active `MuColor` secondary container because SwiftUI form rows do not inherit
-  the app theme surface automatically. Selecting a theme writes
-  `JournalDefaults.themeID` (animated) and triggers selection haptic feedback.
+  neutral `MuColor` secondary container because SwiftUI form rows do not inherit
+  the app surface automatically. Selecting an accent writes
+  `JournalDefaults.accentColorID` (animated) and triggers selection haptic feedback.
   The Appearance segmented picker writes
   `JournalDefaults.appearancePreferenceID`; **System** follows the device
   setting, while **Light** and **Dark** request a fixed scene color scheme for
-  Journal and update the theme palette immediately. The **Attach Location**
+  Journal and update the neutral palette immediately. The **Attach Location**
   toggle writes `JournalDefaults.shouldAttachLocationToNewCards`; it defaults on,
-  and when disabled new draft cards are saved without location metadata. **Cloud
+  and when disabled new draft cards are saved without location metadata. The
+  Quick Capture selection is environment-scoped App Group state and lists only
+  writable Vaults. Missing, deleted, or read-only selections require an explicit
+  replacement instead of falling back to the last-opened Vault. **Cloud
   Storage** opens a Settings detail screen that estimates Journal's CloudKit
   payload from local vault rows: owned vaults are grouped as data that counts
   toward the user's iCloud quota, participant vaults are grouped as shared data
@@ -942,7 +1002,7 @@ the gallery's **Lab** section).
   `SettingsScreen` as the existing dismissible sheet, including its zoom
   transition from Creation. The sheet uses form presentation sizing so SwiftUI
   chooses a compact settings width on iPad while retaining the platform-native
-  sheet treatment on iPhone. On native macOS, `JournalApp` declares a SwiftUI
+  sheet treatment on iPhone. On native macOS, `TinycurveApp` declares a SwiftUI
   `Settings` scene instead: the application menu and Command-comma open one
   system-managed Settings window, toolbar actions target that same window, and
   the window's standard close control replaces an in-content dismiss button.
@@ -971,15 +1031,18 @@ This is a Tuist project; the `.xcodeproj` is generated. From the repo root:
 ```bash
 tuist install
 tuist generate
-xcodebuild -workspace MuApps.xcworkspace -scheme Journal \
+xcodebuild -workspace MuApps.xcworkspace -scheme Tinycurve \
   -destination 'platform=iOS Simulator,name=iPhone 17' build
-xcodebuild -workspace MuApps.xcworkspace -scheme Journal \
+xcodebuild -workspace MuApps.xcworkspace -scheme Tinycurve \
   -destination 'platform=macOS,arch=arm64' build
 ```
 
 Each capture component also has its own scheme (`CaptureText`, `CapturePhoto`,
 `CaptureDoodle`, `CaptureBauhaus`, `CaptureAudio`, `CaptureSuggestions`,
 `MediaProcessing`, `MuColor`, `MuHaptics`) for building/running it in isolation.
+`JournalIntents`, `JournalIntentsTests`, `JournalAppIntentsExtension`, and
+`JournalShareExtension` are generated as separate schemes for system-capture
+build and test verification.
 
 **Simulator note:** this machine has no iPhone 16 simulator — use **iPhone 17 /
 OS 27.0**.

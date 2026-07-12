@@ -25,23 +25,26 @@ public struct CardSurface<Content: View>: View {
   }
 
   public var body: some View {
-    let shape = RoundedRectangle(cornerRadius: CardMetrics.cornerRadius, style: .continuous)
-
-    shape
-      .fill(.appSecondaryContainer)
-      .aspectRatio(CardMetrics.aspectRatio, contentMode: .fit)
-      .overlay {
-        content
-          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-          .foregroundStyle(.appOnSecondaryContainer)
-      }
-      .clipShape(shape)
-      .overlay {
-        shape.strokeBorder(
-          Color.init(white: 0.5).opacity(0.1),
-          style: .init(lineWidth: 4)
-        )
-      }
+    
+    content
+    
+//    let shape = RoundedRectangle(cornerRadius: CardMetrics.cornerRadius, style: .continuous)
+//
+//    shape
+//      .fill(.appSecondaryContainer)
+//      .aspectRatio(CardMetrics.aspectRatio, contentMode: .fit)
+//      .overlay {
+//        content
+//          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+//          .foregroundStyle(.appOnSecondaryContainer)
+//      }
+//      .clipShape(shape)
+//      .overlay {
+//        shape.strokeBorder(
+//          Color.init(white: 0.5).opacity(0.1),
+//          style: .init(lineWidth: 4)
+//        )
+//      }
   }
 }
 
@@ -55,7 +58,7 @@ public enum CardMetrics {
 }
 
 #Preview {
-  PrimaryContainer(theme: .default) {
+  PrimaryContainer(accentColor: .default) {
     CardSurface {
       Text("The body of a card goes here.")
         .font(.system(size: 28, weight: .bold))

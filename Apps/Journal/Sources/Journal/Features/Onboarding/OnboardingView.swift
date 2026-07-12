@@ -9,21 +9,22 @@ import SwiftUI
 /// First-run (and on-demand) introduction to Journal.
 ///
 /// Four horizontally-paged screens — a welcome, the capture methods, an optional
-/// permission primer, and a theme picker — followed by a single call-to-action.
+/// permission primer, and an accent picker — followed by a single call-to-action.
 /// The view is presentation-agnostic: it reports completion through `onComplete`
 /// and never touches `JournalDefaults.hasCompletedOnboarding` itself. `RootView`
 /// injects a closure that flips that flag (first run); `SettingsView` injects one
 /// that merely dismisses its cover (manual re-showing).
 ///
-/// It wraps its own body in a `PrimaryContainer` keyed to the stored theme so the
+/// It wraps its own body in a `PrimaryContainer` keyed to the stored accent so the
 /// palette resolves whether it is shown inline (already inside `RootView`'s
-/// container) or over the app from a `fullScreenCover` — and so the theme page's
-/// selection re-tints the onboarding live.
+/// container) or over the app from a `fullScreenCover` — and so the accent page's
+/// selection updates interactive chrome live.
 struct OnboardingView: View {
 
   let onComplete: @MainActor @Sendable () -> Void
 
-  @AppStorage(JournalDefaults.themeID) private var themeID: String = Theme.default.id
+  @AppStorage(JournalDefaults.accentColorID)
+  private var accentColorID: String = AccentColor.default.id
   @State private var pageIndex = 0
 
   /// Pages, in order. The index of the last one drives the CTA's "last page"
@@ -33,7 +34,7 @@ struct OnboardingView: View {
   private var isLastPage: Bool { pageIndex == Self.pageCount - 1 }
 
   var body: some View {
-    PrimaryContainer(theme: Theme.with(id: themeID)) {
+    PrimaryContainer(accentColor: AccentColor.with(id: accentColorID)) {
       ZStack {
         Rectangle()
           .fill(.appPrimaryContainer)
@@ -46,7 +47,7 @@ struct OnboardingView: View {
             WelcomePage().tag(0)
             CaptureMethodsPage().tag(1)
             PermissionsPage().tag(2)
-            ThemePage().tag(3)
+            AccentColorPage().tag(3)
           }
           #if os(iOS)
           .tabViewStyle(.page(indexDisplayMode: .always))
@@ -173,34 +174,35 @@ fileprivate struct PermissionsPage: View {
   }
 }
 
-/// Lets the user pick a theme during onboarding, written straight to the same
+/// Lets the user pick an accent during onboarding, written straight to the same
 /// `@AppStorage` key the rest of the app reads, so the choice applies app-wide
-/// (and re-tints this very screen) the moment it's tapped.
-fileprivate struct ThemePage: View {
+/// interactive chrome the moment it is tapped.
+fileprivate struct AccentColorPage: View {
 
-  @AppStorage(JournalDefaults.themeID) private var themeID: String = Theme.default.id
+  @AppStorage(JournalDefaults.accentColorID)
+  private var accentColorID: String = AccentColor.default.id
   @Environment(\.colorScheme) private var colorScheme
 
   private let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
 
   var body: some View {
     OnboardingPage(
-      title: "Make it yours",
-      subtitle: "Pick a color theme. You can change it anytime in Settings."
+      title: "Choose an accent",
+      subtitle: "Journal stays neutral so your content carries the color. The accent guides interaction."
     ) {
       LazyVGrid(columns: columns, spacing: 16) {
-        ForEach(Theme.all) { theme in
-          ThemeTile(
-            theme: theme,
-            isSelected: theme.id == themeID,
+        ForEach(AccentColor.all) { accentColor in
+          AccentColorTile(
+            accentColor: accentColor,
+            isSelected: accentColor.id == AccentColor.with(id: accentColorID).id,
             onSelect: {
-              withAnimation(.smooth) { themeID = theme.id }
+              withAnimation(.smooth) { accentColorID = accentColor.id }
             }
           )
         }
       }
     }
-    .sensoryFeedback(.selection, trigger: themeID)
+    .sensoryFeedback(.selection, trigger: accentColorID)
   }
 }
 
@@ -481,30 +483,28 @@ fileprivate struct LocationPermissionRow: View {
   }
 }
 
-// MARK: - Theme Tile
+// MARK: - Accent Color Tile
 
-fileprivate struct ThemeTile: View {
+/// A neutral tile that previews only the color controlled by the user.
+fileprivate struct AccentColorTile: View {
 
   @Environment(\.colorScheme) private var colorScheme
 
-  let theme: Theme
+  let accentColor: AccentColor
   let isSelected: Bool
   let onSelect: @MainActor @Sendable () -> Void
 
   var body: some View {
     Button(action: onSelect) {
-      let palette = theme.palette(for: colorScheme)
+      let palette = Palette(accentColor: accentColor, colorScheme: colorScheme)
       VStack(spacing: 10) {
         ZStack {
           RoundedRectangle(cornerRadius: 16, style: .continuous)
             .fill(palette.primaryContainer)
 
-          HStack(spacing: 8) {
-            Circle().fill(palette.tint)
-            Circle().fill(palette.secondaryContainer)
-          }
-          .frame(height: 20)
-          .padding(16)
+          Circle()
+            .fill(palette.tint)
+            .frame(width: 28, height: 28)
         }
         .frame(height: 76)
         .overlay {
@@ -515,7 +515,7 @@ fileprivate struct ThemeTile: View {
             )
         }
 
-        Text(theme.name)
+        Text(accentColor.name)
           .font(.subheadline)
           .fontWeight(isSelected ? .semibold : .regular)
           .foregroundStyle(.primary)
@@ -533,14 +533,14 @@ fileprivate struct ThemeTile: View {
 }
 
 #Preview("Capture Methods") {
-  PrimaryContainer(theme: .default) {
+  PrimaryContainer(accentColor: .default) {
     CaptureMethodsPage()
       .background(.appPrimaryContainer)
   }
 }
 
 #Preview("Permission Row") {
-  PrimaryContainer(theme: .default) {
+  PrimaryContainer(accentColor: .default) {
     VStack(spacing: 14) {
       PermissionRow(icon: "camera", title: "Camera", description: "Take a photo to attach to an entry.", state: .notDetermined, onRequest: {})
       PermissionRow(icon: "photo.on.rectangle.angled", title: "Photos", description: "Import photos, Live Photos, and videos from your library.", state: .notDetermined, onRequest: {})

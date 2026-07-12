@@ -3,6 +3,7 @@ import CaptureDoodle
 import JournalVault
 import MuColor
 import SwiftUI
+import UniformTypeIdentifiers
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -178,6 +179,13 @@ private struct CardShareContentView: View {
     switch content {
     case .text(let text):
       CardShareTextContent(text: text)
+    case .file(let displayName, let fileURL, let contentType, let byteSize):
+      CardShareFileContent(
+        displayName: displayName,
+        isLocallyAvailable: fileURL != nil,
+        contentType: contentType,
+        byteSize: byteSize
+      )
     case .photo(let imageData):
       CardShareImageContent(imageData: imageData, fallbackSymbolName: "photo")
     case .audio(let fileURL):
@@ -202,6 +210,64 @@ private struct CardShareTextContent: View {
       .lineLimit(10)
       .minimumScaleFactor(0.62)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+  }
+}
+
+/// Export treatment for arbitrary files that Journal cannot render directly.
+private struct CardShareFileContent: View {
+
+  let displayName: String
+  let isLocallyAvailable: Bool
+  let contentType: String?
+  let byteSize: Int?
+
+  var body: some View {
+    VStack(spacing: 28) {
+      Image(systemName: "doc")
+        .font(.system(size: 112, weight: .regular))
+        .foregroundStyle(.appOnSecondaryContainer.opacity(0.68))
+
+      Text(displayName)
+        .font(.system(size: 52, weight: .bold))
+        .lineLimit(4)
+        .minimumScaleFactor(0.62)
+        .multilineTextAlignment(.center)
+
+      if metadata.isEmpty == false {
+        Text(metadata.joined(separator: " · "))
+          .font(.system(size: 26, weight: .medium))
+          .foregroundStyle(.appOnSecondaryContainer.opacity(0.58))
+          .lineLimit(2)
+          .multilineTextAlignment(.center)
+      }
+
+      if isLocallyAvailable == false {
+        Label("File unavailable", systemImage: "icloud.slash")
+          .font(.system(size: 24, weight: .medium))
+          .foregroundStyle(.appOnSecondaryContainer.opacity(0.5))
+      }
+    }
+    .padding(36)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+  }
+
+  private var metadata: [String] {
+    var values: [String] = []
+
+    if let contentType, contentType.isEmpty == false {
+      values.append(UTType(contentType)?.localizedDescription ?? contentType)
+    }
+
+    if let byteSize {
+      values.append(
+        ByteCountFormatter.string(
+          fromByteCount: Int64(byteSize),
+          countStyle: .file
+        )
+      )
+    }
+
+    return values
   }
 }
 
@@ -371,6 +437,8 @@ private extension JournalVault.Card.Kind {
       return "Text"
     case .link:
       return "Link"
+    case .file:
+      return "File"
     case .photo:
       return "Photo"
     case .video:
@@ -398,6 +466,8 @@ private extension JournalVault.Card.Kind {
       return "text.alignleft"
     case .link:
       return "link"
+    case .file:
+      return "doc"
     case .photo:
       return "photo"
     case .video:

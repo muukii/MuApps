@@ -90,6 +90,9 @@
         }
       }
     },
+    "Accent marks selection, focus, and primary actions. Your content keeps its own color." : {
+
+    },
     "Add Card" : {
       "comment" : "Accessibility label for the Creation composer menu button.",
       "extractionState" : "stale",
@@ -549,6 +552,22 @@
         }
       }
     },
+    "Art" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Art"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アート"
+          }
+        }
+      }
+    },
     "Attach Location" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -872,6 +891,24 @@
         }
       }
     },
+    "Card text" : {
+      "comment" : "Accessibility label for the direct text field in the Creation composer.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Card text"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カードのテキスト"
+          }
+        }
+      }
+    },
     "Change Vault" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -906,6 +943,7 @@
       }
     },
     "Choose a theme" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -920,6 +958,9 @@
           }
         }
       }
+    },
+    "Choose a Vault" : {
+
     },
     "Choose Icon" : {
       "localizations" : {
@@ -1243,6 +1284,23 @@
     "Could Not Manage Collaboration" : {
 
     },
+    "Could not post" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not post"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "投稿できませんでした"
+          }
+        }
+      }
+    },
     "Could not rename vault." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1256,23 +1314,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vault名を変更できませんでした。"
-          }
-        }
-      }
-    },
-    "Could not save" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Could not save"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保存できませんでした"
           }
         }
       }
@@ -1514,19 +1555,53 @@
         }
       }
     },
-    "Discard Drafts?" : {
+    "Discard Card" : {
       "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Discard Drafts?"
+            "value" : "Discard Card"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "下書きを破棄しますか？"
+            "value" : "カードを破棄"
+          }
+        }
+      }
+    },
+    "Discard Card and Change Vault?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Discard Card and Change Vault?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カードを破棄してVaultを変更しますか？"
+          }
+        }
+      }
+    },
+    "Discard Card?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Discard Card?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カードを破棄しますか？"
           }
         }
       }
@@ -1600,6 +1675,7 @@
       }
     },
     "Drafts are kept only in the current composer." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1850,6 +1926,25 @@
         }
       }
     },
+    "Favorite" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Favorite"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "お気に入り"
+          }
+        }
+      }
+    },
+    "Files shared to Journal stay attached to their original card." : {
+
+    },
     "Finish artwork" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2010,6 +2105,22 @@
         }
       }
     },
+    "Inbox" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inbox"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "受信トレイ"
+          }
+        }
+      }
+    },
     "Instructions for adding Tinycurve to the Home Screen, Lock Screen, and StandBy." : {
       "localizations" : {
         "en" : {
@@ -2126,6 +2237,9 @@
           }
         }
       }
+    },
+    "Key accent color" : {
+
     },
     "Lab" : {
       "extractionState" : "stale",
@@ -2499,6 +2613,22 @@
         }
       }
     },
+    "Nature" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nature"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自然"
+          }
+        }
+      }
+    },
     "New Vault" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2529,6 +2659,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "次へ"
+          }
+        }
+      }
+    },
+    "Night" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Night"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "夜"
           }
         }
       }
@@ -2681,6 +2827,22 @@
         }
       }
     },
+    "People" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "People"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "人々"
+          }
+        }
+      }
+    },
     "Photo" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2782,19 +2944,36 @@
         }
       }
     },
-    "Post Thread" : {
+    "Post Card" : {
       "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Post Thread"
+            "value" : "Post Card"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "スレッドを投稿"
+            "value" : "カードを投稿"
+          }
+        }
+      }
+    },
+    "Posted to Journal" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Posted to Journal"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Journalに投稿しました"
           }
         }
       }
@@ -2832,6 +3011,22 @@
         }
       }
     },
+    "Private" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Private"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "非公開"
+          }
+        }
+      }
+    },
     "Quarter Circle" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2848,6 +3043,12 @@
           }
         }
       }
+    },
+    "Quick Capture" : {
+
+    },
+    "Quick Capture Is Not Ready" : {
+
     },
     "Record Again" : {
       "extractionState" : "stale",
@@ -3085,166 +3286,8 @@
         }
       }
     },
-    "Saved to Journal" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Saved to Journal"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Journalに保存しました"
-          }
-        }
-      }
-    },
-    "Art" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Art"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アート"
-          }
-        }
-      }
-    },
-    "Favorite" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Favorite"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "お気に入り"
-          }
-        }
-      }
-    },
-    "Inbox" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Inbox"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "受信トレイ"
-          }
-        }
-      }
-    },
-    "Nature" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nature"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自然"
-          }
-        }
-      }
-    },
-    "Night" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Night"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "夜"
-          }
-        }
-      }
-    },
-    "People" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "People"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "人々"
-          }
-        }
-      }
-    },
-    "Private" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Private"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "非公開"
-          }
-        }
-      }
-    },
-    "Sparkles" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sparkles"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "きらめき"
-          }
-        }
-      }
-    },
-    "Storage box" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Storage box"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "収納ボックス"
-          }
-        }
-      }
+    "Saved locations: %@" : {
+      "comment" : "Accessibility value for the saved-card map; the variable is the number of location pins."
     },
     "Search Icons" : {
       "localizations" : {
@@ -3497,6 +3540,22 @@
         }
       }
     },
+    "Sparkles" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparkles"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "きらめき"
+          }
+        }
+      }
+    },
     "StandBy" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3594,6 +3653,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "保存とiCloud同期"
+          }
+        }
+      }
+    },
+    "Storage box" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Storage box"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "収納ボックス"
           }
         }
       }
@@ -3719,7 +3794,24 @@
         }
       }
     },
+    "The current input has not been posted." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The current input has not been posted."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在の入力内容はまだ投稿されていません。"
+          }
+        }
+      }
+    },
     "The selected palette applies across the entire app, including Light and Dark modes." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3832,6 +3924,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "このカードとつながっているカードを、このVaultから削除します。同期済みのコピーもiCloud経由で削除されます。"
+          }
+        }
+      }
+    },
+    "This card has not been posted." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This card has not been posted."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このカードはまだ投稿されていません。"
           }
         }
       }
@@ -4141,6 +4249,9 @@
         }
       }
     },
+    "Used by the Action Button, Shortcuts, and system sharing. Journal never chooses another vault automatically." : {
+
+    },
     "Variations" : {
       "localizations" : {
         "en" : {
@@ -4448,7 +4559,22 @@
       }
     },
     "Write a card" : {
-
+      "comment" : "Placeholder for the direct text field in the Creation composer.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Write a card"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カードを書く"
+          }
+        }
+      }
     },
     "Write your thoughts..." : {
       "extractionState" : "stale",
@@ -4467,19 +4593,19 @@
         }
       }
     },
-    "Your draft stayed on screen." : {
+    "Your input is still here." : {
       "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Your draft stayed on screen."
+            "value" : "Your input is still here."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "下書きは画面に残っています。"
+            "value" : "入力内容は画面に残っています。"
           }
         }
       }

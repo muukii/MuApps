@@ -1,7 +1,11 @@
 import GaussianLinearGradient
 import JournalVault
+import MapKit
 import MuColor
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Display value consumed by saved vault card components.
 ///
@@ -36,13 +40,16 @@ public struct VaultSavedEntryCardModel: Identifiable, Hashable {
   }
 }
 
-/// Saved media reference needed by saved vault card components.
+/// Saved file-backed attachment values needed by saved vault card components.
 public struct VaultSavedEntryAttachmentModel: Hashable {
   public let kind: JournalVault.Attachment.Kind
   public let fileURL: URL
   public let pairedVideoFileURL: URL?
   public let fileRevision: Int
   public let thumbnail: Data?
+  public let pixelSize: CGSize?
+  public let contentType: String?
+  public let byteSize: Int?
   public let suggestionMediaFileURLsByResourceID: [UUID: URL]
 
   public init(
@@ -51,6 +58,9 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
     pairedVideoFileURL: URL? = nil,
     fileRevision: Int = 0,
     thumbnail: Data?,
+    pixelSize: CGSize? = nil,
+    contentType: String? = nil,
+    byteSize: Int? = nil,
     suggestionMediaFileURLsByResourceID: [UUID: URL] = [:]
   ) {
     self.kind = kind
@@ -58,15 +68,17 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
     self.pairedVideoFileURL = pairedVideoFileURL
     self.fileRevision = fileRevision
     self.thumbnail = thumbnail
+    self.pixelSize = pixelSize
+    self.contentType = contentType
+    self.byteSize = byteSize
     self.suggestionMediaFileURLsByResourceID = suggestionMediaFileURLsByResourceID
   }
 }
 
-/// Saved vault card as it appears in Journal surfaces.
+/// Compact saved vault card used by Journal list surfaces.
 ///
-/// `CardSurface` provides the shared paper chrome while this component owns the
-/// saved-card preview body and timestamp. `SavedListView` stays responsible for
-/// reading vault data, stack affordances, and edit/delete mutations.
+/// `CardSurface` provides the list's 4:5 paper chrome. `SavedListView` stays
+/// responsible for reading vault data, stack affordances, and mutations.
 public struct VaultSavedEntryTile: View {
 
   let entry: VaultSavedEntryCardModel
@@ -82,14 +94,10 @@ public struct VaultSavedEntryTile: View {
 
   public var body: some View {
     CardSurface {
-      VStack(alignment: .leading, spacing: 12) {
-
-        CardPreviewContent(
-          payload: entry.previewPayload,
-          presentation: .savedSummary
-        )
-
-      }
+      CardPreviewContent(
+        payload: entry.previewPayload,
+        presentation: .savedSummary
+      )
       .frame(maxHeight: .infinity)
     }
   }
@@ -129,8 +137,12 @@ private struct VaultSavedEntryTimestampOverlay: View {
   }
 }
 
-/// Full saved vault card shown from the saved-entry detail screen.
-public struct VaultSavedEntryDetailCard: View {
+/// Standalone authored content and its record metadata in the detail screen.
+///
+/// Unlike a compact tile, the detail row has no shared card silhouette. Each
+/// authored format owns its natural height and media aspect ratio; record
+/// metadata and mutation controls remain a separate footer below it.
+public struct VaultSavedEntryDetailRow: View {
 
   let entry: VaultSavedEntryCardModel
   let isEditingDisabled: Bool
@@ -153,114 +165,194 @@ public struct VaultSavedEntryDetailCard: View {
   }
 
   public var body: some View {
-    CardSurface {
-      VStack(alignment: .leading, spacing: 16) {
-        VaultSavedEntryCardHeader(
-          kind: entry.kind,
-          childCount: 0,
-          timestamp: entry.createdAt,
-          isEditingDisabled: isEditingDisabled,
-          isDeletingDisabled: isDeletingDisabled,
-          onEdit: onEdit,
-          onDelete: onDelete
-        )
+    VStack(alignment: .leading, spacing: 16) {
+      VaultSavedEntryDetailContent(
+        kind: entry.kind,
+        payload: entry.previewPayload
+      )
 
-        CardPreviewContent(
-          payload: entry.previewPayload,
-          presentation: .savedDetail
-        )
-
-        Spacer(minLength: 0)
-
-        VaultSavedEntryMetadata(entry: entry)
+      if let location = entry.location {
+        VaultSavedEntryLocationMap(location: location)
+          .frame(maxWidth: 640)
+          .frame(maxWidth: .infinity)
+          .padding(.horizontal, CardMetrics.padding / 2)
       }
+
+      VaultSavedEntryDetailMetadata(
+        kind: entry.kind,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        isEditingDisabled: isEditingDisabled,
+        isDeletingDisabled: isDeletingDisabled,
+        onEdit: onEdit,
+        onDelete: onDelete
+      )
+      .frame(maxWidth: 640, alignment: .leading)
+      .frame(maxWidth: .infinity, alignment: .center)
+      .padding(.horizontal, CardMetrics.padding / 2)
     }
   }
 }
 
-private struct VaultSavedEntryCardHeader: View {
+/// Authored content whose height is independent of compact card geometry.
+///
+/// Minimum heights keep unresolved disk-backed formats legible without imposing
+/// a common aspect ratio once their authored content becomes available.
+private struct VaultSavedEntryDetailContent: View {
 
   let kind: JournalVault.Card.Kind
-  let childCount: Int
-  let timestamp: Date?
-  let isEditingDisabled: Bool
-  let isDeletingDisabled: Bool
-  let onEdit: (@MainActor () -> Void)?
-  let onDelete: (@MainActor () -> Void)?
+  let payload: CardPreviewPayload
 
   var body: some View {
-    HStack(spacing: 8) {
-      Image(systemName: kind.vaultListSymbolName)
-      Text(kind.vaultListDisplayTitle)
-      Spacer(minLength: 0)
-      if childCount > 0 {
+    CardDetailContent(payload: payload)
+      .frame(
+        maxWidth: .infinity,
+        minHeight: minimumHeight,
+        alignment: .center
+      )
+      .foregroundStyle(.appOnPrimaryContainer)
+  }
+
+  private var minimumHeight: CGFloat? {
+    switch kind {
+    case .text:
+      return nil
+    case .link:
+      return 240
+    case .file:
+      return 120
+    case .photo, .video, .livePhoto, .doodle, .bauhaus:
+      return 180
+    case .audio, .suggestion, .unknown:
+      return 120
+    @unknown default:
+      return 120
+    }
+  }
+}
+
+/// A compact geographic context strip for the location attached to a card.
+///
+/// The map is intentionally static so vertical detail scrolling remains the
+/// primary gesture. Its camera keeps enough surrounding streets visible to make
+/// the recorded point recognizable without turning the row into a map screen.
+private struct VaultSavedEntryLocationMap: View {
+
+  let location: JournalVault.Coordinate
+
+  var body: some View {
+    ZStack {
+      Map(
+        initialPosition: .region(region),
+        interactionModes: []
+      )
+      .mapStyle(.standard(elevation: .flat))
+
+      Image(systemName: "mappin")
+        .font(.body.weight(.semibold))
+        .foregroundStyle(.appOnPrimaryContainer)
+        .padding(9)
+        .background(.appPrimaryContainer, in: Circle())
+        .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
+    }
+    .frame(height: 112)
+    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .stroke(.appOnPrimaryContainer.opacity(0.12), lineWidth: 1)
+    }
+    .allowsHitTesting(false)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("Location")
+    .accessibilityValue(formattedCoordinate)
+  }
+
+  private var region: MKCoordinateRegion {
+    MKCoordinateRegion(
+      center: location.clCoordinate,
+      latitudinalMeters: 1_200,
+      longitudinalMeters: 1_200
+    )
+  }
+
+  private var formattedCoordinate: String {
+    "\(location.latitude.formatted(.number.precision(.fractionLength(4)))), \(location.longitude.formatted(.number.precision(.fractionLength(4))))"
+  }
+}
+
+/// Record metadata and mutation controls displayed below authored detail content.
+private struct VaultSavedEntryDetailMetadata: View {
+
+  let kind: JournalVault.Card.Kind
+  let createdAt: Date
+  let updatedAt: Date
+  let isEditingDisabled: Bool
+  let isDeletingDisabled: Bool
+  let onEdit: @MainActor () -> Void
+  let onDelete: @MainActor () -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 8) {
         Label {
-          Text(childCount + 1, format: .number)
+          Text(kind.vaultListDisplayTitle)
         } icon: {
-          Image(systemName: "point.3.connected.trianglepath.dotted")
+          Image(systemName: kind.vaultListSymbolName)
         }
-        .labelStyle(.iconOnly)
-        .accessibilityLabel(
-          String.localizedStringWithFormat(
-            NSLocalizedString("%d cards", comment: "Accessibility label for the number of cards in a saved thread."),
-            childCount + 1
-          )
-        )
-      }
-      if let timestamp {
-        Text(timestamp, format: .dateTime.month().day().hour().minute())
-      }
-      if let onEdit {
+
+        Spacer(minLength: 0)
+
         Button {
           onEdit()
         } label: {
           Image(systemName: "square.and.pencil")
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(isEditingDisabled)
         .accessibilityLabel("Edit Card")
-      }
-      if let onDelete {
+
         Button(role: .destructive) {
           onDelete()
         } label: {
           Image(systemName: "trash")
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.red)
         .disabled(isDeletingDisabled)
         .accessibilityLabel("Delete Card")
       }
-    }
-    .font(.caption.weight(.semibold))
-    .foregroundStyle(.appOnSecondaryContainer.opacity(0.70))
-  }
-}
+      .font(.caption.weight(.semibold))
+      .foregroundStyle(.appOnPrimaryContainer.opacity(0.72))
 
-private struct VaultSavedEntryMetadata: View {
-
-  let entry: VaultSavedEntryCardModel
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
       Label {
-        Text(entry.updatedAt, format: .dateTime.month().day().hour().minute())
+        Text(createdAt, format: .dateTime.month().day().year().hour().minute())
       } icon: {
-        Image(systemName: "clock.arrow.circlepath")
+        Image(systemName: "calendar")
+      }
+      .accessibilityLabel("Created")
+      .accessibilityValue(
+        Text(createdAt, format: .dateTime.month().day().year().hour().minute())
+      )
+
+      if updatedAt != createdAt {
+        Label {
+          Text(updatedAt, format: .dateTime.month().day().year().hour().minute())
+        } icon: {
+          Image(systemName: "clock.arrow.circlepath")
+        }
+        .accessibilityLabel("Updated")
+        .accessibilityValue(
+          Text(updatedAt, format: .dateTime.month().day().year().hour().minute())
+        )
       }
 
-      if let location = entry.location {
-        Label {
-          Text(
-            "\(location.latitude.formatted(.number.precision(.fractionLength(4)))), \(location.longitude.formatted(.number.precision(.fractionLength(4))))"
-          )
-        } icon: {
-          Image(systemName: "location")
-        }
-      }
     }
     .font(.caption)
-    .foregroundStyle(.appOnSecondaryContainer.opacity(0.62))
+    .foregroundStyle(.appOnPrimaryContainer.opacity(0.58))
   }
 }
 
@@ -284,6 +376,9 @@ private extension VaultSavedEntryAttachmentModel {
       pairedVideoFileURL: pairedVideoFileURL,
       fileRevision: fileRevision,
       thumbnailData: thumbnail,
+      pixelSize: pixelSize,
+      contentType: contentType,
+      byteSize: byteSize,
       suggestionMediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID
     )
   }
@@ -297,6 +392,8 @@ public extension JournalVault.Card.Kind {
       "Text"
     case .link:
       "Link"
+    case .file:
+      "File"
     case .photo:
       "Photo"
     case .video:
@@ -324,6 +421,8 @@ public extension JournalVault.Card.Kind {
       "text.alignleft"
     case .link:
       "link"
+    case .file:
+      "doc"
     case .photo:
       "photo"
     case .video:
@@ -347,7 +446,7 @@ public extension JournalVault.Card.Kind {
 }
 
 #Preview("Vault Saved Entry Tiles") {
-  PrimaryContainer(theme: .default) {
+  PrimaryContainer(accentColor: .default) {
     ScrollView {
       VStack(alignment: .leading, spacing: 12) {
         Text(VaultSavedEntryCardPreviewFixtures.day, format: .dateTime.weekday(.abbreviated).month(.wide).day().year())
@@ -375,17 +474,56 @@ public extension JournalVault.Card.Kind {
   }
 }
 
-#Preview("Vault Saved Entry Detail Card") {
-  PrimaryContainer(theme: .default) {
+#Preview("Vault Saved Entry Detail Row") {
+  PrimaryContainer(accentColor: .default) {
     ScrollView {
-      VaultSavedEntryDetailCard(
-        entry: VaultSavedEntryCardPreviewFixtures.examples[1].entry,
+      VaultSavedEntryDetailRow(
+        entry: VaultSavedEntryCardPreviewFixtures.detailEntry,
         isEditingDisabled: false,
         isDeletingDisabled: false,
         onEdit: {},
         onDelete: {}
       )
-      .frame(maxWidth: 520)
+      .frame(maxWidth: 720)
+      .padding(16)
+    }
+    .background(.background)
+  }
+}
+
+#Preview("Vault Saved Entry Detail Media Ratios") {
+  PrimaryContainer(accentColor: .default) {
+    ScrollView {
+      LazyVStack(spacing: 40) {
+        ForEach(VaultSavedEntryCardPreviewFixtures.detailMediaEntries) { entry in
+          VaultSavedEntryDetailRow(
+            entry: entry,
+            isEditingDisabled: false,
+            isDeletingDisabled: false,
+            onEdit: {},
+            onDelete: {}
+          )
+          .frame(maxWidth: 720)
+        }
+      }
+      .padding(16)
+    }
+    .background(.background)
+  }
+}
+
+#Preview("Vault Saved Entry Portrait Video Detail") {
+  PrimaryContainer(accentColor: .default) {
+    ScrollView {
+      VaultSavedEntryDetailRow(
+        entry: VaultSavedEntryCardPreviewFixtures.portraitVideoEntry,
+        isEditingDisabled: false,
+        isDeletingDisabled: false,
+        onEdit: {},
+        onDelete: {}
+      )
+      .frame(maxWidth: 300)
+      .frame(maxWidth: .infinity)
       .padding(16)
     }
     .background(.background)
@@ -408,6 +546,44 @@ private struct VaultSavedEntryCardPreviewExample: Identifiable {
 private enum VaultSavedEntryCardPreviewFixtures {
 
   static let day = Date(timeIntervalSinceReferenceDate: 789_004_800)
+
+  static let detailEntry = entry(
+    kind: .text,
+    body: "Small notes can use the width they need. The detail view drops the paper frame and lets the authored content define its own height.",
+    createdAt: day.addingTimeInterval(-7_200),
+    updatedAt: day.addingTimeInterval(-1_800),
+    location: JournalVault.Coordinate(
+      latitude: 35.6812,
+      longitude: 139.7671
+    )
+  )
+
+  static let landscapePhotoEntry = entry(
+    kind: .photo,
+    body: "",
+    createdAt: day.addingTimeInterval(-10_800),
+    attachment: mediaAttachment(
+      kind: .photo,
+      pixelSize: CGSize(width: 640, height: 360),
+      title: "LANDSCAPE"
+    )
+  )
+
+  static let portraitVideoEntry = entry(
+    kind: .video,
+    body: "",
+    createdAt: day.addingTimeInterval(-14_400),
+    attachment: mediaAttachment(
+      kind: .video,
+      pixelSize: CGSize(width: 270, height: 480),
+      title: "PORTRAIT"
+    )
+  )
+
+  static let detailMediaEntries: [VaultSavedEntryCardModel] = [
+    landscapePhotoEntry,
+    portraitVideoEntry,
+  ]
 
   static let examples: [VaultSavedEntryCardPreviewExample] = [
     VaultSavedEntryCardPreviewExample(
@@ -447,16 +623,83 @@ private enum VaultSavedEntryCardPreviewFixtures {
   private static func entry(
     kind: JournalVault.Card.Kind,
     body: String,
-    createdAt: Date
+    createdAt: Date,
+    updatedAt: Date? = nil,
+    location: JournalVault.Coordinate? = nil,
+    attachment: VaultSavedEntryAttachmentModel? = nil
   ) -> VaultSavedEntryCardModel {
     VaultSavedEntryCardModel(
       id: UUID(),
       kind: kind,
       body: body,
       createdAt: createdAt,
-      updatedAt: createdAt,
-      location: nil,
-      attachment: nil
+      updatedAt: updatedAt ?? createdAt,
+      location: location,
+      attachment: attachment
     )
+  }
+
+  private static func mediaAttachment(
+    kind: JournalVault.Attachment.Kind,
+    pixelSize: CGSize,
+    title: String
+  ) -> VaultSavedEntryAttachmentModel {
+    VaultSavedEntryAttachmentModel(
+      kind: kind,
+      fileURL: URL(fileURLWithPath: "/preview/\(title.lowercased())"),
+      thumbnail: previewImageData(pixelSize: pixelSize, title: title),
+      pixelSize: pixelSize
+    )
+  }
+
+  /// Produces an edge-marked raster whose four corners expose accidental crop.
+  private static func previewImageData(
+    pixelSize: CGSize,
+    title: String
+  ) -> Data? {
+    #if canImport(UIKit)
+    let markerInset = max(8, min(pixelSize.width, pixelSize.height) * 0.04)
+    let renderer = ImageRenderer(
+      content: ZStack {
+        LinearGradient(
+          colors: [.pink, .orange, .blue, .purple],
+          startPoint: .topLeading,
+          endPoint: .bottomTrailing
+        )
+
+        Text(title)
+          .font(
+            .system(
+              size: min(pixelSize.width, pixelSize.height) * 0.09,
+              weight: .black,
+              design: .rounded
+            )
+          )
+          .foregroundStyle(.white)
+
+        VStack {
+          HStack {
+            Text("TL")
+            Spacer()
+            Text("TR")
+          }
+          Spacer()
+          HStack {
+            Text("BL")
+            Spacer()
+            Text("BR")
+          }
+        }
+        .font(.system(size: 22, weight: .black, design: .rounded))
+        .foregroundStyle(.white)
+        .padding(markerInset)
+      }
+      .frame(width: pixelSize.width, height: pixelSize.height)
+    )
+    renderer.scale = 1
+    return renderer.uiImage?.pngData()
+    #else
+    return nil
+    #endif
   }
 }

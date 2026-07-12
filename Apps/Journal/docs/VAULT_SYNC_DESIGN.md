@@ -842,7 +842,7 @@ environment に入れ、`CardEdge` の `@Query` から `Card` / `Attachment` /
   `AttachmentResource` の `CKAsset` upload / download(vault の `media/` に保存、
   file 到着時は `AttachmentResource.localFileRevision` を更新して SwiftData
   observation で UI preview を再読み込み)。
-- `JournalVaultRuntime` — `JournalApp` 起動時に
+- `JournalVaultRuntime` — `TinycurveApp` 起動時に
   App Group layout、catalog store、store registry、`CloudKitVaultSyncEngine` を作る。
   preset vault は自動作成しない。`previewRuntime()` と debug 用 factory は
   `LoggingVaultSyncEngine` を使い、CloudKit に触らず local vault store を検証できる。

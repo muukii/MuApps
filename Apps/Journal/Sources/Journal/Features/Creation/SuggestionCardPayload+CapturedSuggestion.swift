@@ -4,12 +4,12 @@ import UniformTypeIdentifiers
 
 extension SuggestionCardPayload {
 
-  /// Converts one picked suggestion into card-sized payloads.
+  /// Splits one picked suggestion into intentionally separate card payloads.
   ///
-  /// Apple's picker can return one suggestion containing several resolved
-  /// elements. Journal cards stay readable when each top-level element becomes
-  /// its own card; grouped system assets such as Live Photos, Location Groups,
-  /// and Workout Groups remain a single element/card.
+  /// The home composer uses the aggregate initializer below so one selection is
+  /// one post. Import or migration workflows can use this helper when they
+  /// explicitly want every top-level element to become a separate card; grouped
+  /// assets such as Live Photos remain one element/card.
   static func cardPayloads(capturedSuggestion: CapturedSuggestion) -> [SuggestionCardPayload] {
     let payloads = capturedSuggestion.elements.map { capturedElement in
       let element = SuggestionCardElement(capturedElement: capturedElement)
@@ -40,10 +40,9 @@ extension SuggestionCardPayload {
   /// Converts the picker-owned capture value into the vault-owned persistence
   /// snapshot used by suggestion cards.
   ///
-  /// Prefer `cardPayloads(capturedSuggestion:)` for composer insertion so
-  /// multi-element suggestions become multiple readable cards. This initializer
-  /// intentionally keeps the aggregate shape available for decoding/tests and
-  /// for any future surface that wants the original picker grouping.
+  /// The single-card composer uses this aggregate shape so one system picker
+  /// selection stays one post. `cardPayloads(capturedSuggestion:)` remains
+  /// available to importers that intentionally author a multi-card thread.
   init(capturedSuggestion: CapturedSuggestion) {
     let convertedElements = capturedSuggestion.elements.map { SuggestionCardElement(capturedElement: $0) }
     let mediaResources = zip(capturedSuggestion.elements, convertedElements).flatMap { capturedElement, element in

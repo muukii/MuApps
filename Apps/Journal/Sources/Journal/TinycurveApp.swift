@@ -2,17 +2,18 @@ import AppUIComponents
 import CaptureBauhaus
 import CaptureDoodle
 import CloudKit
+import JournalIntents
 import JournalVault
 import MuColor
 import SwiftUI
 
 @main
-struct JournalApp: App {
+struct TinycurveApp: App {
 
   #if os(iOS)
-  @UIApplicationDelegateAdaptor(JournalAppDelegate.self) private var appDelegate
+  @UIApplicationDelegateAdaptor(TinycurveAppDelegate.self) private var appDelegate
   #else
-  @NSApplicationDelegateAdaptor(JournalAppDelegate.self) private var appDelegate
+  @NSApplicationDelegateAdaptor(TinycurveAppDelegate.self) private var appDelegate
   #endif
 
   let vaultRuntime: JournalVaultRuntime
@@ -30,7 +31,7 @@ struct JournalApp: App {
   var body: some Scene {
     WindowGroup {
       #if DEBUG
-      switch JournalDebugLaunchRoute.activeRoute {
+      switch TinycurveDebugLaunchRoute.activeRoute {
       case .bookInputMorphSandbox(let initialState):
         BookInputMorphSandbox(initialState: initialState)
           .preferredColorScheme(.dark)
@@ -51,7 +52,7 @@ struct JournalApp: App {
 
     #if os(macOS)
     Settings {
-      JournalSettingsSceneRoot(vaultRuntime: vaultRuntime)
+      TinycurveSettingsSceneRoot(vaultRuntime: vaultRuntime)
     }
     #endif
   }
@@ -63,18 +64,19 @@ struct JournalApp: App {
 ///
 /// Scenes don't inherit the environment installed below `RootView`, so the
 /// Settings window needs its own root before it can reuse `SettingsScreen`.
-private struct JournalSettingsSceneRoot: View {
+private struct TinycurveSettingsSceneRoot: View {
 
   let vaultRuntime: JournalVaultRuntime
 
-  @AppStorage(JournalDefaults.themeID) private var themeID: String = Theme.default.id
+  @AppStorage(JournalDefaults.accentColorID)
+  private var accentColorID: String = AccentColor.default.id
   @AppStorage(JournalDefaults.appearancePreferenceID)
   private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
 
   var body: some View {
     let appearancePreference = JournalAppearancePreference.with(id: appearancePreferenceID)
 
-    PrimaryContainer(theme: Theme.with(id: themeID)) {
+    PrimaryContainer(accentColor: AccentColor.with(id: accentColorID)) {
       SettingsScreen()
     }
     .environment(vaultRuntime)
@@ -86,7 +88,7 @@ private struct JournalSettingsSceneRoot: View {
 
 #if DEBUG
 /// Launch arguments for opening isolated Journal prototype surfaces.
-private enum JournalDebugLaunchRoute {
+private enum TinycurveDebugLaunchRoute {
 
   /// Debug-only prototype roots supported by Journal launches.
   enum Route {
@@ -128,8 +130,8 @@ private enum JournalDebugLaunchRoute {
 }
 #endif
 
-/// Reads the persisted theme and appearance preference, then applies them to the
-/// whole app. Kept separate from `JournalApp` so the `@AppStorage` reads live in
+/// Reads the persisted accent and appearance preference, then applies them to the
+/// whole app. Kept separate from `TinycurveApp` so the `@AppStorage` reads live in
 /// a `View`, where changes re-render the tree.
 ///
 /// Also the root router: it blocks on loading until initial vault availability
@@ -162,16 +164,20 @@ private struct RootView: View {
     case resolved
   }
 
-  @AppStorage(JournalDefaults.themeID) private var themeID: String = Theme.default.id
+  @AppStorage(JournalDefaults.accentColorID)
+  private var accentColorID: String = AccentColor.default.id
   @AppStorage(JournalDefaults.appearancePreferenceID)
   private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
   @AppStorage(JournalDefaults.hasCompletedOnboarding) private var hasCompletedOnboarding: Bool = false
   @AppStorage(JournalDefaults.hasResolvedInitialVaultAvailability)
   private var hasResolvedInitialVaultAvailability: Bool = false
   @AppStorage(JournalDefaults.lastSelectedVaultID) private var lastSelectedVaultID: String = ""
+  @Environment(\.scenePhase) private var scenePhase
   @State private var notificationCenter = JournalNotificationCenter()
   @State private var vaultRuntime: JournalVaultRuntime
   @State private var initialVaultActivationState: InitialVaultActivationState = .pending
+  @State private var systemCaptureRequest: JournalCaptureRequest?
+  @State private var systemCaptureRoutingError: SystemCaptureRoutingError?
 
   init(vaultRuntime: JournalVaultRuntime) {
     _vaultRuntime = State(initialValue: vaultRuntime)
@@ -180,7 +186,7 @@ private struct RootView: View {
   var body: some View {
     let appearancePreference = JournalAppearancePreference.with(id: appearancePreferenceID)
 
-    PrimaryContainer(theme: Theme.with(id: themeID)) {
+    PrimaryContainer(accentColor: AccentColor.with(id: accentColorID)) {
       JournalNotificationHost(center: notificationCenter) {
         switch rootRoute {
         case .loading:
@@ -189,6 +195,8 @@ private struct RootView: View {
 
         case .home:
           JournalHomeView(
+            systemCaptureRequest: $systemCaptureRequest,
+            onSystemCaptureFailure: presentSystemCaptureFailure,
             onActiveVaultChanged: persistActiveVaultSelection
           )
           .transition(.opacity)
@@ -207,6 +215,22 @@ private struct RootView: View {
     .preferredColorScheme(appearancePreference.colorScheme)
     .task { await startRootRouting() }
     .task { await acceptIncomingCloudKitShares() }
+    .task { await acceptSystemCaptureRequests() }
+    .onChange(of: scenePhase) { _, phase in
+      guard phase == .active else { return }
+      Task { await vaultRuntime.resumeAfterExternalCapture() }
+    }
+    .onChange(of: initialVaultActivationState) { _, state in
+      guard state == .resolved else { return }
+      validateSystemCaptureRequestIfPossible()
+    }
+    .alert(item: $systemCaptureRoutingError) { error in
+      Alert(
+        title: Text("Quick Capture Is Not Ready"),
+        message: Text(error.message),
+        dismissButton: .default(Text("OK"))
+      )
+    }
   }
 
   private func startRootRouting() async {
@@ -276,6 +300,49 @@ private struct RootView: View {
     }
   }
 
+  /// Receives capture requests emitted by `UISceneAppIntent` after iOS opens or
+  /// activates this process. Validation waits for initial vault recovery so a
+  /// cold launch cannot reject a destination that CloudKit is still restoring.
+  private func acceptSystemCaptureRequests() async {
+    for await request in JournalCaptureRequestCenter.shared.requests() {
+      systemCaptureRequest = request
+      validateSystemCaptureRequestIfPossible()
+    }
+  }
+
+  private func validateSystemCaptureRequestIfPossible() {
+    guard initialVaultActivationState == .resolved,
+          let request = systemCaptureRequest else {
+      return
+    }
+
+    guard let vaultID = request.vaultID else {
+      presentSystemCaptureFailure(
+        String(localized: "Choose a Quick Capture Vault in Settings before using this action.")
+      )
+      return
+    }
+
+    guard let descriptor = vaultRuntime.vaults.first(where: { $0.vaultID == vaultID }) else {
+      presentSystemCaptureFailure(
+        String(localized: "The Quick Capture Vault is no longer available. Choose it again in Settings.")
+      )
+      return
+    }
+
+    guard descriptor.permission != .readOnly else {
+      presentSystemCaptureFailure(
+        String(localized: "The Quick Capture Vault is read-only. Choose a vault you can edit in Settings.")
+      )
+      return
+    }
+  }
+
+  private func presentSystemCaptureFailure(_ message: String) {
+    systemCaptureRequest = nil
+    systemCaptureRoutingError = SystemCaptureRoutingError(message: message)
+  }
+
   private func acceptCloudKitShare(_ metadata: CKShare.Metadata) async {
     do {
       try await vaultRuntime.acceptShare(metadata: metadata)
@@ -298,6 +365,12 @@ private struct RootView: View {
   }
 }
 
+/// One user-facing failure while routing a system Quick Capture request.
+private struct SystemCaptureRoutingError: Identifiable {
+  let id = UUID()
+  let message: String
+}
+
 /// Persistent post-onboarding shell.
 ///
 /// Vault management is presented over this view, so changing or deleting the
@@ -305,6 +378,8 @@ private struct RootView: View {
 /// expected to have an active vault; the only normal empty state is `noVault`.
 private struct JournalHomeView: View {
 
+  @Binding private var systemCaptureRequest: JournalCaptureRequest?
+  private let onSystemCaptureFailure: @MainActor @Sendable (String) -> Void
   private let onActiveVaultChanged: @MainActor @Sendable () -> Void
 
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
@@ -319,7 +394,13 @@ private struct JournalHomeView: View {
   #endif
   @State private var vaultSheetDetent: PresentationDetent = .medium
 
-  init(onActiveVaultChanged: @escaping @MainActor @Sendable () -> Void) {
+  init(
+    systemCaptureRequest: Binding<JournalCaptureRequest?>,
+    onSystemCaptureFailure: @escaping @MainActor @Sendable (String) -> Void,
+    onActiveVaultChanged: @escaping @MainActor @Sendable () -> Void
+  ) {
+    _systemCaptureRequest = systemCaptureRequest
+    self.onSystemCaptureFailure = onSystemCaptureFailure
     self.onActiveVaultChanged = onActiveVaultChanged
   }
 
@@ -327,7 +408,10 @@ private struct JournalHomeView: View {
     JournalHomeContent(
       state: contentState,
       initialAvailabilityResolution: vaultRuntime.lastInitialAvailabilityResolution,
+      systemCaptureRequest: $systemCaptureRequest,
       onOpenVaults: presentVaultSelection,
+      onSelectVaultForSystemCapture: selectVaultForSystemCapture,
+      onSystemCaptureFailure: onSystemCaptureFailure,
       onCreateVault: { isVaultCreationPresented = true },
       onRefreshVaults: refreshVaults,
       onRetryVaultActivation: retryVaultActivation,
@@ -432,6 +516,16 @@ private struct JournalHomeView: View {
     }
   }
 
+  private func selectVaultForSystemCapture(_ vaultID: VaultID) async -> Bool {
+    await vaultRuntime.selectVault(vaultID)
+    let didSelect = vaultRuntime.selectedVault?.vaultID == vaultID
+      && vaultRuntime.selectedVaultState == .active
+    if didSelect {
+      onActiveVaultChanged()
+    }
+    return didSelect
+  }
+
   private func activateFirstVaultIfNeeded() async {
     guard vaultRuntime.selectedVaultState != .active,
           let firstVaultID = vaultRuntime.vaults.first?.vaultID else {
@@ -464,7 +558,10 @@ private struct JournalHomeContent: View {
 
   let state: JournalHomeContentState
   let initialAvailabilityResolution: VaultInitialAvailabilityResolution?
+  @Binding var systemCaptureRequest: JournalCaptureRequest?
   let onOpenVaults: @MainActor @Sendable () -> Void
+  let onSelectVaultForSystemCapture: @MainActor @Sendable (VaultID) async -> Bool
+  let onSystemCaptureFailure: @MainActor @Sendable (String) -> Void
   let onCreateVault: @MainActor @Sendable () -> Void
   let onRefreshVaults: @MainActor @Sendable () -> Void
   let onRetryVaultActivation: @MainActor @Sendable () -> Void
@@ -484,7 +581,12 @@ private struct JournalHomeContent: View {
       JournalVaultOpeningView()
 
     case .creation(let vaultID):
-      CreationView(onChangeVault: onOpenVaults)
+      CreationView(
+        systemCaptureRequest: $systemCaptureRequest,
+        onChangeVault: onOpenVaults,
+        onSelectVaultForSystemCapture: onSelectVaultForSystemCapture,
+        onSystemCaptureFailure: onSystemCaptureFailure
+      )
         .id(vaultID)
 
     case .vaultUnavailable(let message):

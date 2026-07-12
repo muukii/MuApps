@@ -7,7 +7,7 @@ import AppKit
 
 public struct Palette: Sendable {
 
-  public static let `default` = Palette(assetNamespace: "Theme/WarmCream", colorScheme: .light)
+  public static let `default` = Palette(accentColor: .default, colorScheme: .light)
 
   // MARK: - Seeds (素の色は 6 つ)
 
@@ -39,25 +39,43 @@ public struct Palette: Sendable {
     self.onSecondaryContainer = onSecondaryContainer
   }
 
-  /// Loads the six seed colors from MuColor's asset catalog.
+  /// Builds Journal's neutral surfaces around one asset-backed key accent.
   ///
-  /// `assetNamespace` is the namespaced asset catalog path shared by one theme,
-  /// such as `Theme/WarmCream`. Each color set stores its light value as Any and
-  /// its dark override as the Dark appearance.
-  init(assetNamespace: String, colorScheme: ColorScheme) {
+  /// White/black surfaces are intentionally independent from the accent. The
+  /// existing tint assets supply appearance-aware accent and on-accent values.
+  public init(accentColor: AccentColor, colorScheme: ColorScheme) {
+    let assetNamespace = "Theme/\(accentColor.assetName)"
+
+    let primaryContainer: Color
+    let onPrimaryContainer: Color
+    let secondaryContainer: Color
+    let onSecondaryContainer: Color
+
+    switch colorScheme {
+    case .light:
+      primaryContainer = .white
+      onPrimaryContainer = .black
+      secondaryContainer = Color(white: 0.96)
+      onSecondaryContainer = .black
+    case .dark:
+      primaryContainer = .black
+      onPrimaryContainer = .white
+      secondaryContainer = Color(white: 0.08)
+      onSecondaryContainer = .white
+    @unknown default:
+      primaryContainer = .white
+      onPrimaryContainer = .black
+      secondaryContainer = Color(white: 0.96)
+      onSecondaryContainer = .black
+    }
+
     self.init(
       tint: Self.color(named: "\(assetNamespace)/Tint", colorScheme: colorScheme),
       onTint: Self.color(named: "\(assetNamespace)/OnTint", colorScheme: colorScheme),
-      primaryContainer: Self.color(named: "\(assetNamespace)/PrimaryContainer", colorScheme: colorScheme),
-      onPrimaryContainer: Self.color(
-        named: "\(assetNamespace)/OnPrimaryContainer",
-        colorScheme: colorScheme
-      ),
-      secondaryContainer: Self.color(named: "\(assetNamespace)/SecondaryContainer", colorScheme: colorScheme),
-      onSecondaryContainer: Self.color(
-        named: "\(assetNamespace)/OnSecondaryContainer",
-        colorScheme: colorScheme
-      )
+      primaryContainer: primaryContainer,
+      onPrimaryContainer: onPrimaryContainer,
+      secondaryContainer: secondaryContainer,
+      onSecondaryContainer: onSecondaryContainer
     )
   }
 
@@ -237,20 +255,20 @@ public struct PrimaryContainer<Content: View>: View {
   @Environment(\.appPalette) private var inheritedPalette
   @Environment(\.colorScheme) private var colorScheme
 
-  private let theme: Theme?
+  private let accentColor: AccentColor?
   private let overridePalette: Palette?
   private let content: Content
 
   /// Root use: resolves the light/dark surface from the current `colorScheme`.
-  public init(theme: Theme, @ViewBuilder content: () -> Content) {
-    self.theme = theme
+  public init(accentColor: AccentColor, @ViewBuilder content: () -> Content) {
+    self.accentColor = accentColor
     self.overridePalette = nil
     self.content = content()
   }
 
   /// Explicit palette, or inherit the active palette when `nil` (nested use).
   public init(palette: Palette? = nil, @ViewBuilder content: () -> Content) {
-    self.theme = nil
+    self.accentColor = nil
     self.overridePalette = palette
     self.content = content()
   }
@@ -265,8 +283,8 @@ public struct PrimaryContainer<Content: View>: View {
   }
 
   private var resolvedPalette: Palette {
-    if let theme {
-      return theme.palette(for: colorScheme)
+    if let accentColor {
+      return Palette(accentColor: accentColor, colorScheme: colorScheme)
     }
     return overridePalette ?? inheritedPalette
   }
@@ -291,10 +309,10 @@ public struct SecondaryContainer: View {
 #Preview {
   ScrollView {
 
-    ForEach(Theme.all) { theme in
-      PrimaryContainer(theme: theme) {
+    ForEach(AccentColor.all) { accentColor in
+      PrimaryContainer(accentColor: accentColor) {
         VStack {
-          Text(theme.name)
+          Text(accentColor.name)
             .padding()
 
           SecondaryContainer {

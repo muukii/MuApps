@@ -15,6 +15,12 @@ let ambientLightInfoPlist: InfoPlist = .extendingDefault(with: [
     "UIInterfaceOrientationLandscapeLeft",
     "UIInterfaceOrientationLandscapeRight",
   ]),
+  "UISupportedInterfaceOrientations~ipad": .array([
+    "UIInterfaceOrientationPortrait",
+    "UIInterfaceOrientationPortraitUpsideDown",
+    "UIInterfaceOrientationLandscapeLeft",
+    "UIInterfaceOrientationLandscapeRight",
+  ]),
   "UIUserInterfaceStyle": "Dark",
 ])
 
@@ -31,7 +37,7 @@ let project = Project(
   targets: [
     .target(
       name: "AmbientLight",
-      destinations: [.iPhone],
+      destinations: .app,
       product: .app,
       bundleId: "app.muukii.ambientlight",
       deploymentTargets: .app,
@@ -43,7 +49,6 @@ let project = Project(
           "ASSETCATALOG_COMPILER_APPICON_NAME": "AmbientLight",
           "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
           "MTL_FAST_MATH": "YES",
-          "TARGETED_DEVICE_FAMILY": "1",
         ]),
         configurations: [
           .debug(name: "Debug"),

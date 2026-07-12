@@ -22,9 +22,10 @@ public final class Card {
   /// `"unknown"`. Read through `kind` unless re-encoding for transport.
   public var kindRawValue: String
 
-  /// Body-backed payload for textual card kinds. `.text` stores written content,
-  /// and `.link` stores the canonical URL string. Media and authored JSON kinds
-  /// keep this empty and point at `Attachment` rows instead.
+  /// Body-backed payload for card metadata. `.text` stores written content,
+  /// `.link` stores the canonical URL string, and `.file` stores the original
+  /// user-facing file name. Other media and authored JSON kinds keep this empty
+  /// and point at `Attachment` rows instead.
   public var body: String
 
   public var createdAt: Date
@@ -77,6 +78,10 @@ extension Card {
 
     /// A web link card. `body` stores the canonical URL string.
     case link
+
+    /// A generic imported file. `body` stores its original display name and a
+    /// `.file` attachment owns the concrete bytes and content-type metadata.
+    case file
 
     /// A still photo card; expects one `.photo` attachment.
     case photo

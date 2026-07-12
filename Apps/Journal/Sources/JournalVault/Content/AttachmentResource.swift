@@ -127,6 +127,9 @@ extension AttachmentResource {
   /// Raw values are stable CloudKit payload values. Additive roles let newer
   /// builds attach richer media without changing the parent `Attachment` shape.
   public enum Role: String, Codable, Sendable, CaseIterable, Hashable {
+    /// Original bytes of a generic imported file.
+    case file
+
     /// Original still image for a photo attachment.
     case originalImage
 

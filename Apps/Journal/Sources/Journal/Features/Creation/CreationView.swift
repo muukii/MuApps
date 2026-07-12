@@ -7,6 +7,7 @@ import CapturePhoto
 import CaptureSuggestions
 import CoreTransferable
 import CoreLocation
+import JournalIntents
 import JournalVault
 import MediaProcessing
 import MuColor
@@ -27,34 +28,46 @@ private let photoLibraryImportLog = Logger(subsystem: "app.muukii.journal", cate
 
 struct CreationView: View {
 
+  @Binding private var systemCaptureRequest: JournalCaptureRequest?
   private let onChangeVault: (@MainActor @Sendable () -> Void)?
+  private let onSelectVaultForSystemCapture: @MainActor @Sendable (VaultID) async -> Bool
+  private let onSystemCaptureFailure: @MainActor @Sendable (String) -> Void
 
   @Environment(JournalNotificationCenter.self) private var notifications
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
 
-  init(onChangeVault: (@MainActor @Sendable () -> Void)? = nil) {
+  init(
+    systemCaptureRequest: Binding<JournalCaptureRequest?> = .constant(nil),
+    onChangeVault: (@MainActor @Sendable () -> Void)? = nil,
+    onSelectVaultForSystemCapture: @escaping @MainActor @Sendable (VaultID) async -> Bool = { _ in false },
+    onSystemCaptureFailure: @escaping @MainActor @Sendable (String) -> Void = { _ in }
+  ) {
+    _systemCaptureRequest = systemCaptureRequest
     self.onChangeVault = onChangeVault
+    self.onSelectVaultForSystemCapture = onSelectVaultForSystemCapture
+    self.onSystemCaptureFailure = onSystemCaptureFailure
   }
 
   @AppStorage(JournalDefaults.shouldAttachLocationToNewCards)
   private var shouldAttachLocationToNewCards: Bool = true
 
-  @State private var draftCards: [ThreadDraftCard] = []
-  @State private var textEditorPresentation: TextEditorPresentation?
+  @State private var composerDraft = ThreadDraftCard()
+  @State private var composerDraftEditorPresentation: ComposerDraftEditorPresentation?
   @State private var linkEditorPresentation: LinkEditorPresentation?
   @State private var photoCapturePresentation: PhotoCapturePresentation?
-  @State private var doodleCanvasPresentation: DoodleCanvasPresentation?
-  @State private var bauhausGridPresentation: BauhausGridPresentation?
   @State private var voiceRecorderPresentation: VoiceRecorderPresentation?
   @State private var quickDoodleCanvasPresentation: DoodleCanvasPresentation?
   @State private var quickBauhausGridPresentation: BauhausGridPresentation?
   @State private var quickDoodleSheetDetent: PresentationDetent = .large
   @State private var quickBauhausSheetDetent: PresentationDetent = .large
-  @State private var scrollTargetID: ThreadDraftCard?
+  @State private var savedCardScrollTargetID: UUID?
   #if os(iOS)
   @State private var isSettingsPresented: Bool = false
   #endif
   @State private var isChangeVaultConfirmationPresented = false
+  @State private var isDiscardComposerDraftConfirmationPresented = false
+  @State private var isSystemCaptureDiscardConfirmationPresented = false
+  @State private var isSuggestionCapturePresented = false
   @State private var isImportingMediaFromLibrary: Bool = false
   @State private var selectedLibraryMediaItem: PhotosPickerItem?
   @State private var isLibraryMediaPickerPresented = false
@@ -66,6 +79,11 @@ struct CreationView: View {
   /// the current coordinate lookup.
   @State private var locationManager = LocationManager()
 
+  /// Identity of the one coordinate lookup currently serving the composer.
+  /// Text changes can arrive faster than Core Location, so they share this
+  /// request instead of continuously superseding one another.
+  @State private var locationRequestID: UUID?
+
   /// Guards the compose surface while a save is in flight, so a card can't be
   /// created twice by a fast double-tap.
   @State private var isSaving: Bool = false
@@ -74,48 +92,17 @@ struct CreationView: View {
 
     NavigationStack {
       CreationContainer(
-        canSave: canSaveDrafts,
-        isSaving: isSaving || isImportingMediaFromLibrary,
-        onComposeText: presentTextCapture,
-        onSave: save
+        draft: composerDraft,
+        isProcessing: isSaving || isImportingMediaFromLibrary,
+        onOpenDraft: presentComposerDraftEditor,
+        onDiscardDraft: requestComposerDraftDiscard,
+        onPost: post
       ) {
-        ZStack {
-          Rectangle()
-            .fill(.background)
-            .ignoresSafeArea(edges: .all)
-
-          ScrollView {
-
-            VStack(spacing: 20) {
-              ForEach(draftCards, id: \.self) { draft in
-                ThreadDraftCardEditor(
-                  card: draft,
-                  isSaving: isSaving,
-                  onOpen: {
-                    openDraft(draft)
-                  }
-                )
-                .journalMatchedTransitionSource(id: draft, in: namespace)
-                .containerRelativeFrame(.horizontal) { length, _ in
-                  length * 0.5
-                }
-                .frame(maxWidth: CreationViewMetrics.maximumDraftCardWidth)
-              }
-
-            }
-            .frame(maxWidth: .infinity)
-            .scrollTargetLayout()
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-          }
-          .scrollPosition(id: $scrollTargetID, anchor: .center)
-          .scrollTargetBehavior(.viewAligned)
-        }
+        SavedListView(scrollTargetID: $savedCardScrollTargetID)
       } menuContent: {
         CreationAddMenuContent(
           isSuggestionCaptureEnabled:
             JournalFeatureFlags.isJournalingSuggestionsCaptureEnabled,
-          onComposeText: presentTextCapture,
           onComposeLink: presentLinkCapture,
           onCapturePhoto: presentPhotoCapture,
           onChooseMediaFromLibrary: presentLibraryMediaPicker,
@@ -125,7 +112,6 @@ struct CreationView: View {
           onChooseSuggestion: finishSuggestionCapture
         )
       }
-      .toolbarTitleDisplayMode(.inlineLarge)
       .toolbar(content: {
         if onChangeVault != nil {
           ToolbarItem(placement: .journalLeadingAction) {
@@ -157,17 +143,6 @@ struct CreationView: View {
         }
 
         ToolbarItem(placement: .journalTrailingAction) {
-          NavigationLink.init {
-            SavedListView()
-              .journalZoomNavigationTransition(sourceID: "list", in: namespace)
-          } label: {
-            Image(systemName: "calendar")
-          }
-          .journalMatchedTransitionSource(id: "list", in: namespace)
-          .keyboardShortcut("l", modifiers: [.command, .shift])
-        }
-
-        ToolbarItem(placement: .journalTrailingAction) {
           #if os(macOS)
           SettingsLink {
             Image(systemName: "gearshape")
@@ -184,35 +159,28 @@ struct CreationView: View {
           #endif
         }
       })
-      .safeAreaInset(edge: .top, content: {
-        DateView()
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(.horizontal)
-      })
     }
-    .sheet(item: $textEditorPresentation) { presentation in
-      ThreadDraftTextEditorSheet(
-        card: presentation.target
-      )
+    .sheet(
+      item: $composerDraftEditorPresentation,
+      onDismiss: restoreEmptyComposerPlaceholderIfNeeded
+    ) { presentation in
+      NavigationStack {
+        ThreadDraftCardDetailEditor(
+          card: presentation.target,
+          isSaving: isSaving
+        )
+      }
       .presentationDetents([.medium, .large])
       .presentationDragIndicator(.visible)
       .presentationBackground(.background)
     }
-    .sheet(item: $linkEditorPresentation) { presentation in
+    .sheet(item: $linkEditorPresentation, onDismiss: restoreEmptyLinkPlaceholderIfNeeded) { presentation in
       ThreadDraftLinkEditorSheet(
         card: presentation.target
       )
       .presentationDetents([.medium, .large])
       .presentationDragIndicator(.visible)
       .presentationBackground(.background)
-    }
-    .journalFullScreenCover(item: $doodleCanvasPresentation) { presentation in
-      ThreadDraftDoodleCanvasCover(
-        card: presentation.target,
-        onChange: { drawing in
-          updateDoodle(drawing, presentation: presentation)
-        }
-      )
     }
     .sheet(item: $quickDoodleCanvasPresentation) { presentation in
       ThreadDraftDoodleCanvasSheet(
@@ -225,17 +193,6 @@ struct CreationView: View {
         [.medium, .large],
         selection: $quickDoodleSheetDetent
       )
-      .presentationDragIndicator(.visible)
-      .presentationBackground(.background)
-    }
-    .sheet(item: $bauhausGridPresentation) { presentation in
-      ThreadDraftBauhausGridSheet(
-        card: presentation.target,
-        onChange: { document in
-          updateBauhaus(document, presentation: presentation)
-        }
-      )
-      .presentationDetents([.medium, .large])
       .presentationDragIndicator(.visible)
       .presentationBackground(.background)
     }
@@ -284,16 +241,44 @@ struct CreationView: View {
     }
     #endif
     .confirmationDialog(
-      "Discard Drafts?",
+      "Discard Card and Change Vault?",
       isPresented: $isChangeVaultConfirmationPresented,
       titleVisibility: .visible
     ) {
       Button("Discard and Change Vault", role: .destructive) {
+        resetComposerDraft()
         onChangeVault?()
       }
       Button("Cancel", role: .cancel) {}
     } message: {
-      Text("Drafts are kept only in the current composer.")
+      Text("The current input has not been posted.")
+    }
+    .confirmationDialog(
+      "Discard Card?",
+      isPresented: $isDiscardComposerDraftConfirmationPresented,
+      titleVisibility: .visible
+    ) {
+      Button("Discard Card", role: .destructive) {
+        resetComposerDraft()
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("This card has not been posted.")
+    }
+    .confirmationDialog(
+      "Discard Card and Start Quick Capture?",
+      isPresented: $isSystemCaptureDiscardConfirmationPresented,
+      titleVisibility: .visible
+    ) {
+      Button("Discard and Continue", role: .destructive) {
+        resetComposerDraft()
+        Task { await continueSystemCaptureAfterDiscard() }
+      }
+      Button("Cancel", role: .cancel) {
+        systemCaptureRequest = nil
+      }
+    } message: {
+      Text("The current input has not been posted.")
     }
     .alert(item: $collaborationError) { error in
       Alert(
@@ -310,8 +295,12 @@ struct CreationView: View {
       photoLibrary: .shared()
     )
     .appNavigationBarStyle()
-    .onAppear {
-      attachLocationToCurrentDraftsIfNeeded()
+    .journalSuggestionCapturePresenter(
+      isPresented: $isSuggestionCapturePresented,
+      onCommit: finishSuggestionCapture
+    )
+    .task(id: systemCaptureRequest?.id) {
+      await routeSystemCaptureRequestIfNeeded()
     }
     .onChange(of: selectedLibraryMediaItem) { _, item in
       guard let item else { return }
@@ -320,10 +309,13 @@ struct CreationView: View {
     }
     .onChange(of: shouldAttachLocationToNewCards) { _, isEnabled in
       if isEnabled {
-        attachLocationToCurrentDraftsIfNeeded()
+        attachLocationToComposerDraftIfNeeded()
       } else {
-        clearLocationFromCurrentDrafts()
+        clearLocationFromComposerDraft()
       }
+    }
+    .onChange(of: composerDraft.text) { _, _ in
+      updateComposerLocationForTextChange()
     }
     .onChange(of: locationManager.authorizationStatus) { _, status in
       // System access can be revoked after a coordinate was attached. Clear
@@ -331,9 +323,9 @@ struct CreationView: View {
       // longer justify.
       switch status {
       case .denied, .restricted:
-        clearLocationFromCurrentDrafts()
+        clearLocationFromComposerDraft()
       case .authorizedWhenInUse, .authorizedAlways:
-        attachLocationToCurrentDraftsIfNeeded()
+        attachLocationToComposerDraftIfNeeded()
       case .notDetermined:
         break
       @unknown default:
@@ -361,94 +353,129 @@ struct CreationView: View {
     return descriptor
   }
 
-  private var canSaveDrafts: Bool {
-    guard draftCards.isEmpty == false else {
-      return false
-    }
-
-    return draftCards.allSatisfy(\.canSave)
-  }
-
   private func requestVaultChange() {
     guard let onChangeVault else { return }
 
-    if draftCards.isEmpty {
+    if composerDraft.isEmptyTextDraft {
       onChangeVault()
     } else {
       isChangeVaultConfirmationPresented = true
     }
   }
 
-  private func presentTextCapture() {
-    if let draft = draftCards.last, draft.isEmptyTextDraft {
-      scrollTargetID = draft
-      attachLocationToCurrentDraftsIfNeeded()
-      presentTextEditor(for: draft)
+  /// Routes one system request without silently replacing unpublished input.
+  /// A cross-vault request remains bound while the parent swaps the active
+  /// `CreationView`; the newly keyed view then presents the requested surface.
+  private func routeSystemCaptureRequestIfNeeded() async {
+    guard let request = systemCaptureRequest,
+          let targetVaultID = request.vaultID else {
       return
     }
 
-    let draft = ThreadDraftCard()
-    draftCards.append(draft)
-    scrollTargetID = draft
-    attachLocationToCurrentDraftsIfNeeded()
-    presentTextEditor(for: draft)
+    if vaultRuntime.selectedVault?.vaultID != targetVaultID {
+      guard composerDraft.isEmptyTextDraft else {
+        isSystemCaptureDiscardConfirmationPresented = true
+        return
+      }
+      await selectVaultForSystemCapture(targetVaultID)
+      return
+    }
+
+    guard composerDraft.isEmptyTextDraft else {
+      isSystemCaptureDiscardConfirmationPresented = true
+      return
+    }
+
+    consumeAndPresentSystemCapture(request)
   }
 
-  private func openDraft(_ draft: ThreadDraftCard) {
-    switch draft.kind {
-    case .photo:
-      photoCapturePresentation = PhotoCapturePresentation(target: draft)
-    case .video, .livePhoto:
-      break
-    case .audio:
-      voiceRecorderPresentation = VoiceRecorderPresentation(target: draft)
-    case .suggestion:
-      break
-    case .doodle:
-      doodleCanvasPresentation = DoodleCanvasPresentation(
-        target: draft,
-        isQuickCapture: false
-      )
-    case .bauhaus:
-      bauhausGridPresentation = BauhausGridPresentation(
-        target: draft,
-        isQuickCapture: false
-      )
-    case .text:
-      presentTextEditor(for: draft)
-    case .link:
-      presentLinkEditor(for: draft)
-    case .unknown:
-      presentTextEditor(for: draft)
+  private func continueSystemCaptureAfterDiscard() async {
+    guard let request = systemCaptureRequest,
+          let targetVaultID = request.vaultID else {
+      return
+    }
+
+    if vaultRuntime.selectedVault?.vaultID != targetVaultID {
+      await selectVaultForSystemCapture(targetVaultID)
+    } else {
+      consumeAndPresentSystemCapture(request)
     }
   }
 
-  private func presentTextEditor(for draft: ThreadDraftCard) {
-    textEditorPresentation = TextEditorPresentation(target: draft)
+  private func selectVaultForSystemCapture(_ vaultID: VaultID) async {
+    guard await onSelectVaultForSystemCapture(vaultID) else {
+      systemCaptureRequest = nil
+      onSystemCaptureFailure(
+        String(localized: "The Quick Capture Vault could not be opened. Try again from Journal Settings.")
+      )
+      return
+    }
+    // Keep the request alive. `JournalHomeContent` keys CreationView by vault,
+    // and the replacement view consumes it after the selection transition.
+  }
+
+  private func consumeAndPresentSystemCapture(_ request: JournalCaptureRequest) {
+    systemCaptureRequest = nil
+
+    switch request.mode {
+    case .text:
+      presentComposerDraftEditor()
+    case .photo:
+      presentPhotoCapture()
+    case .voice:
+      presentVoiceRecorder()
+    case .doodle:
+      presentDoodleCanvas()
+    case .suggestion:
+      guard JournalFeatureFlags.isJournalingSuggestionsCaptureEnabled else {
+        onSystemCaptureFailure(
+          String(localized: "Journaling Suggestions are not available in this build of Journal.")
+        )
+        return
+      }
+      isSuggestionCapturePresented = true
+    }
+  }
+
+  private func presentComposerDraftEditor() {
+    composerDraftEditorPresentation = ComposerDraftEditorPresentation(
+      target: composerDraft
+    )
+  }
+
+  private func requestComposerDraftDiscard() {
+    guard composerDraft.isEmptyTextDraft == false else { return }
+    isDiscardComposerDraftConfirmationPresented = true
+  }
+
+  private func resetComposerDraft() {
+    composerDraft.savingSnapshot().removeTemporaryMediaFiles()
+    composerDraft = ThreadDraftCard()
+    composerDraftEditorPresentation = nil
   }
 
   private func presentLinkCapture() {
-    let draft: ThreadDraftCard
-
-    if let lastDraft = draftCards.last, lastDraft.isEmptyTextDraft {
-      draft = lastDraft
-      draft.kind = .link
-    } else {
-      draft = ThreadDraftCard(kind: .link)
-      draftCards.append(draft)
-    }
-
-    scrollTargetID = draft
-    attachLocationToCurrentDraftsIfNeeded()
-    presentLinkEditor(for: draft)
+    composerDraft.kind = .link
+    linkEditorPresentation = LinkEditorPresentation(target: composerDraft)
   }
 
-  private func presentLinkEditor(for draft: ThreadDraftCard) {
-    linkEditorPresentation = LinkEditorPresentation(target: draft)
+  private func restoreEmptyLinkPlaceholderIfNeeded() {
+    restoreEmptyComposerPlaceholderIfNeeded()
+  }
+
+  /// Returns a cleared non-text editor to the direct text input without
+  /// discarding invalid-but-authored values such as an incomplete URL.
+  private func restoreEmptyComposerPlaceholderIfNeeded() {
+    guard composerDraft.kind != .text,
+          composerDraft.isCurrentKindContentEmpty else {
+      return
+    }
+
+    composerDraft.resetToEmptyTextPlaceholder()
   }
 
   private func presentPhotoCapture() {
-    photoCapturePresentation = PhotoCapturePresentation(target: nil)
+    photoCapturePresentation = PhotoCapturePresentation(target: composerDraft)
   }
 
   private func presentLibraryMediaPicker() {
@@ -468,31 +495,27 @@ struct CreationView: View {
   private func presentDoodleCanvas() {
     quickDoodleSheetDetent = .large
     quickDoodleCanvasPresentation = DoodleCanvasPresentation(
-      target: nil,
-      isQuickCapture: true
+      target: composerDraft
     )
   }
 
   private func presentBauhausGrid() {
     quickBauhausSheetDetent = .large
     quickBauhausGridPresentation = BauhausGridPresentation(
-      target: nil,
-      isQuickCapture: true
+      target: composerDraft
     )
   }
 
   private func presentVoiceRecorder() {
-    voiceRecorderPresentation = VoiceRecorderPresentation(target: nil)
+    voiceRecorderPresentation = VoiceRecorderPresentation(target: composerDraft)
   }
 
   private func finishPhotoCapture(
     _ photo: CapturedPhoto,
-    target: ThreadDraftCard?
+    target: ThreadDraftCard
   ) {
-    let draft = target ?? draftForNewQuickCapture()
-    draft.setPhoto(photo)
-    scrollTargetID = draft
-    attachLocationToCurrentDraftsIfNeeded()
+    target.setPhoto(photo)
+    attachLocationToComposerDraftIfNeeded()
   }
 
   private func importMediaFromLibrary(_ item: PhotosPickerItem) {
@@ -525,18 +548,16 @@ struct CreationView: View {
   }
 
   private func finishLibraryMediaImport(_ media: PhotoLibraryImportedMedia) {
-    let draft = draftForNewQuickCapture()
     switch media {
     case .photo(let photo):
-      draft.setPhoto(photo)
+      composerDraft.setPhoto(photo)
     case .video(let video):
-      draft.setVideo(video)
+      composerDraft.setVideo(video)
     case .livePhoto(let livePhoto):
-      draft.setLivePhoto(livePhoto)
+      composerDraft.setLivePhoto(livePhoto)
     }
 
-    scrollTargetID = draft
-    attachLocationToCurrentDraftsIfNeeded()
+    attachLocationToComposerDraftIfNeeded()
   }
 
   private func updateDoodle(
@@ -548,53 +569,12 @@ struct CreationView: View {
       return
     }
 
-    let draft = presentation.target ?? draftForNewDoodleCapture(presentation)
-    draft.setDoodle(drawing)
-    scrollTargetID = draft
-    attachLocationToCurrentDraftsIfNeeded()
-  }
-
-  private func draftForNewDoodleCapture(
-    _ presentation: DoodleCanvasPresentation
-  ) -> ThreadDraftCard {
-    if let draft = presentation.target {
-      return draft
-    }
-
-    if let draft = draftCards.last, draft.isEmptyTextDraft {
-      presentation.target = draft
-      presentation.reusesPlaceholder = true
-      return draft
-    }
-
-    let draft = ThreadDraftCard()
-    draftCards.append(draft)
-    presentation.target = draft
-    presentation.ownsInsertedDraft = true
-    return draft
+    presentation.target.setDoodle(drawing)
+    attachLocationToComposerDraftIfNeeded()
   }
 
   private func clearDoodle(for presentation: DoodleCanvasPresentation) {
-    guard let draft = presentation.target else {
-      return
-    }
-
-    guard presentation.isQuickCapture else {
-      draft.clearDoodle()
-      return
-    }
-
-    if presentation.ownsInsertedDraft {
-      draftCards.removeAll { $0 == draft }
-      presentation.target = nil
-      presentation.ownsInsertedDraft = false
-    } else if presentation.reusesPlaceholder {
-      draft.resetToEmptyTextPlaceholder()
-      presentation.target = nil
-      presentation.reusesPlaceholder = false
-    } else {
-      draft.clearDoodle()
-    }
+    presentation.target.resetToEmptyTextPlaceholder()
   }
 
   private func updateBauhaus(
@@ -606,115 +586,83 @@ struct CreationView: View {
       return
     }
 
-    let draft = presentation.target ?? draftForNewBauhausCapture(presentation)
-    draft.setBauhaus(document)
-    scrollTargetID = draft
-    attachLocationToCurrentDraftsIfNeeded()
-  }
-
-  private func draftForNewBauhausCapture(
-    _ presentation: BauhausGridPresentation
-  ) -> ThreadDraftCard {
-    if let draft = presentation.target {
-      return draft
-    }
-
-    if let draft = draftCards.last, draft.isEmptyTextDraft {
-      presentation.target = draft
-      presentation.reusesPlaceholder = true
-      return draft
-    }
-
-    let draft = ThreadDraftCard()
-    draftCards.append(draft)
-    presentation.target = draft
-    presentation.ownsInsertedDraft = true
-    return draft
+    presentation.target.setBauhaus(document)
+    attachLocationToComposerDraftIfNeeded()
   }
 
   private func clearBauhaus(for presentation: BauhausGridPresentation) {
-    guard let draft = presentation.target else {
-      return
-    }
-
-    guard presentation.isQuickCapture else {
-      draft.clearBauhaus()
-      return
-    }
-
-    if presentation.ownsInsertedDraft {
-      draftCards.removeAll { $0 == draft }
-      presentation.target = nil
-      presentation.ownsInsertedDraft = false
-    } else if presentation.reusesPlaceholder {
-      draft.resetToEmptyTextPlaceholder()
-      presentation.target = nil
-      presentation.reusesPlaceholder = false
-    } else {
-      draft.clearBauhaus()
-    }
+    presentation.target.resetToEmptyTextPlaceholder()
   }
 
   private func finishVoiceRecording(
     _ recording: AudioRecording,
-    target: ThreadDraftCard?
+    target: ThreadDraftCard
   ) {
-    let draft = target ?? draftForNewQuickCapture()
-    draft.setAudio(recording)
-    scrollTargetID = draft
-    attachLocationToCurrentDraftsIfNeeded()
+    target.setAudio(recording)
+    attachLocationToComposerDraftIfNeeded()
   }
 
   private func finishSuggestionCapture(_ capturedSuggestion: CapturedSuggestion) {
-    var insertedDrafts: [ThreadDraftCard] = []
-    for payload in SuggestionCardPayload.cardPayloads(capturedSuggestion: capturedSuggestion) {
-      let draft = draftForNewQuickCapture()
-      draft.setSuggestion(payload)
-      insertedDrafts.append(draft)
-    }
-    scrollTargetID = insertedDrafts.last
-    attachLocationToCurrentDraftsIfNeeded()
+    composerDraft.setSuggestion(
+      SuggestionCardPayload(capturedSuggestion: capturedSuggestion)
+    )
+    attachLocationToComposerDraftIfNeeded()
   }
 
-  private func draftForNewQuickCapture() -> ThreadDraftCard {
-    if let draft = draftCards.last, draft.isEmptyTextDraft {
-      return draft
+  private func updateComposerLocationForTextChange() {
+    switch composerDraft.kind {
+    case .text, .link:
+      if composerDraft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        composerDraft.location = nil
+      } else {
+        attachLocationToComposerDraftIfNeeded()
+      }
+    case .file, .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus, .unknown:
+      break
+    @unknown default:
+      break
     }
-
-    let draft = ThreadDraftCard()
-    draftCards.append(draft)
-    return draft
   }
 
-  private func attachLocationToCurrentDraftsIfNeeded() {
-    guard shouldAttachLocationToNewCards else {
+  private func attachLocationToComposerDraftIfNeeded() {
+    guard shouldAttachLocationToNewCards,
+          composerDraft.canSave,
+          composerDraft.location == nil,
+          locationRequestID == nil else {
       return
     }
 
-    let targets = draftCards.filter { $0.location == nil }
-    guard targets.isEmpty == false else {
-      return
-    }
+    let requestID = UUID()
+    let target = composerDraft
+    locationRequestID = requestID
 
     Task { @MainActor in
-      guard let location = await locationManager.requestCoordinate() else {
+      let location = await locationManager.requestCoordinate()
+
+      guard locationRequestID == requestID else {
+        return
+      }
+      locationRequestID = nil
+
+      guard let location,
+            shouldAttachLocationToNewCards,
+            composerDraft === target,
+            target.canSave,
+            target.location == nil else {
+        // If posting or discarding replaced the object while Core Location was
+        // resolving, let the new authored card start its own one-shot request.
+        if composerDraft !== target {
+          attachLocationToComposerDraftIfNeeded()
+        }
         return
       }
 
-      guard shouldAttachLocationToNewCards else {
-        return
-      }
-
-      for target in targets where target.location == nil {
-        target.location = location
-      }
+      target.location = location
     }
   }
 
-  private func clearLocationFromCurrentDrafts() {
-    for card in draftCards {
-      card.location = nil
-    }
+  private func clearLocationFromComposerDraft() {
+    composerDraft.location = nil
   }
 
   private func prepareCollaborationShare(_ vaultID: VaultID) async throws -> VaultSharePreparation {
@@ -729,14 +677,12 @@ struct CreationView: View {
     collaborationError = CollaborationErrorMessage(message: error.localizedDescription)
   }
 
-  private func save() {
+  private func post() {
+    guard composerDraft.canSave, isSaving == false else { return }
 
-    let drafts = draftCards.map { $0.savingSnapshot() }
-
-    guard drafts.isEmpty == false, isSaving == false else { return }
-
-    // Read the thread snapshot now so persistence works from the card payloads
-    // the user had authored at the moment they tapped save.
+    // Freeze the authored input before persistence converts or moves media.
+    // A failed post keeps the live composer object untouched for another try.
+    let snapshot = composerDraft.savingSnapshot()
     isSaving = true
 
     Task { @MainActor in
@@ -744,46 +690,29 @@ struct CreationView: View {
 
       do {
         guard let vault = vaultRuntime.selectedVault else {
-          notifications.post(.threadSaveFailed)
+          notifications.post(.cardPostFailed)
           return
         }
 
-        let vaultDrafts = try drafts.map { try $0.vaultDraft() }
-        try vault.createThread(cards: vaultDrafts)
-        await vaultRuntime.refresh()
-        WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
-        draftCards.removeAll()
-        scrollTargetID = nil
-        textEditorPresentation = nil
+        let vaultDraft = try snapshot.vaultDraft()
+        let createdEdges = try vault.createThread(cards: [vaultDraft])
+        composerDraft = ThreadDraftCard()
+        savedCardScrollTargetID = createdEdges.first?.id
+        composerDraftEditorPresentation = nil
         linkEditorPresentation = nil
         photoCapturePresentation = nil
-        doodleCanvasPresentation = nil
-        bauhausGridPresentation = nil
         voiceRecorderPresentation = nil
         quickDoodleCanvasPresentation = nil
         quickBauhausGridPresentation = nil
-        notifications.post(.threadSaved)
+        notifications.post(.cardPosted)
+        await vaultRuntime.refresh()
+        WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
       } catch {
-        // The draft is left on screen so nothing the user typed is lost.
-        notifications.post(.threadSaveFailed)
+        notifications.post(.cardPostFailed)
       }
     }
   }
 
-}
-
-/// Platform-adaptive geometry for the primary creation surface.
-private enum CreationViewMetrics {
-
-  /// Prevents resizable Mac windows from stretching a 4:5 draft into an
-  /// oversized reading surface while preserving the existing iOS geometry.
-  static let maximumDraftCardWidth: CGFloat = {
-    #if os(macOS)
-    640
-    #else
-    .infinity
-    #endif
-  }()
 }
 
 /// Presentation payload for a collaboration management error.
@@ -796,14 +725,14 @@ private struct CollaborationErrorMessage: Identifiable {
   let message: String
 }
 
-/// Presentation payload for one text editor session.
-private struct TextEditorPresentation: Identifiable {
+/// Presentation payload for editing the card currently held by the composer.
+private struct ComposerDraftEditorPresentation: Identifiable {
 
-  /// A stable identity for one editor presentation. Reopening the same card gets
-  /// a fresh value so SwiftUI rebuilds focus and keyboard state cleanly.
+  /// A stable identity for one presentation. Reopening the same card rebuilds
+  /// focus, capture sessions, and editor-local state cleanly.
   let id = UUID()
 
-  /// Draft being edited by the text sheet.
+  /// The one unpublished card owned by the input bar.
   let target: ThreadDraftCard
 }
 
@@ -825,77 +754,28 @@ private struct PhotoCapturePresentation: Identifiable {
   /// a fresh value so SwiftUI rebuilds the camera session cleanly.
   let id = UUID()
 
-  /// Draft to overwrite, or `nil` when the captured photo should create/reuse a
-  /// draft only after the user actually takes a photo.
-  let target: ThreadDraftCard?
+  /// The composer card that receives a successful capture.
+  let target: ThreadDraftCard
 }
 
-/// Presentation state for the doodle canvas.
-///
-/// Doodle capture streams changes while the user draws, so quick creation needs
-/// a mutable presentation object that can remember which draft was resolved after
-/// the first stroke.
-@MainActor
-private final class DoodleCanvasPresentation: Identifiable {
+/// Presentation payload for drawing into the current composer card.
+private struct DoodleCanvasPresentation: Identifiable {
 
   /// A stable identity for one canvas presentation.
   let id = UUID()
 
-  /// Draft currently receiving canvas changes. `nil` until the first non-empty
-  /// drawing when the user starts from the quick Doodle action.
-  var target: ThreadDraftCard?
-
-  /// Whether this presentation came from the composer quick action rather than
-  /// from an existing doodle card.
-  let isQuickCapture: Bool
-
-  /// Whether the quick action appended a new draft that should disappear if the
-  /// canvas is cleared before dismissal.
-  var ownsInsertedDraft: Bool = false
-
-  /// Whether the quick action reused the untouched text placeholder. Clearing
-  /// the canvas should restore that placeholder instead of leaving a blank doodle
-  /// draft.
-  var reusesPlaceholder: Bool = false
-
-  init(target: ThreadDraftCard?, isQuickCapture: Bool) {
-    self.target = target
-    self.isQuickCapture = isQuickCapture
-  }
+  /// The composer card receiving streamed drawing changes.
+  let target: ThreadDraftCard
 }
 
-/// Presentation state for the Bauhaus grid editor.
-///
-/// Bauhaus capture streams changes as cells are filled, so quick creation needs
-/// a mutable presentation object that can remember which draft was resolved
-/// after the first non-empty artwork arrives.
-@MainActor
-private final class BauhausGridPresentation: Identifiable {
+/// Presentation payload for composing Bauhaus art in the current card.
+private struct BauhausGridPresentation: Identifiable {
 
   /// A stable identity for one grid presentation.
   let id = UUID()
 
-  /// Draft currently receiving grid changes. `nil` until the first non-empty
-  /// artwork when the user starts from the quick Bauhaus action.
-  var target: ThreadDraftCard?
-
-  /// Whether this presentation came from the composer quick action rather than
-  /// from an existing Bauhaus card.
-  let isQuickCapture: Bool
-
-  /// Whether the quick action appended a new draft that should disappear if the
-  /// grid is cleared before dismissal.
-  var ownsInsertedDraft: Bool = false
-
-  /// Whether the quick action reused the untouched text placeholder. Clearing
-  /// the grid should restore that placeholder instead of leaving a blank Bauhaus
-  /// draft.
-  var reusesPlaceholder: Bool = false
-
-  init(target: ThreadDraftCard?, isQuickCapture: Bool) {
-    self.target = target
-    self.isQuickCapture = isQuickCapture
-  }
+  /// The composer card receiving streamed grid changes.
+  let target: ThreadDraftCard
 }
 
 /// Presentation payload for one voice recorder session.
@@ -905,57 +785,8 @@ private struct VoiceRecorderPresentation: Identifiable {
   /// a fresh value so SwiftUI rebuilds the recorder session cleanly.
   let id = UUID()
 
-  /// Draft to overwrite, or `nil` when the recording should create/reuse a draft
-  /// only after the user actually finishes recording.
-  let target: ThreadDraftCard?
-}
-
-/// Card-shaped entry point for one draft in the creation thread.
-private struct ThreadDraftCardEditor: View {
-
-  @Bindable var card: ThreadDraftCard
-  let isSaving: Bool
-  let onOpen: @MainActor @Sendable () -> Void
-
-  var body: some View {
-    Button(action: onOpen) {
-      DraftEntrySummaryCard(draft: card)
-    }
-    .buttonStyle(.plain)
-    .disabled(isSaving)
-    .accessibilityLabel("Edit Card")
-  }
-}
-
-/// Card-shaped summary for an unsaved draft.
-///
-/// This view intentionally knows only about `CardEditDraft` and capture payloads.
-/// It does not bridge to legacy saved-entry rendering or any persistence model.
-private struct DraftEntrySummaryCard: View {
-
-  let draft: CardEditDraft
-
-  var body: some View {
-    CardSurface {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack(spacing: 8) {
-          Image(systemName: draft.kind.creationSymbolName)
-          Text(draft.kind.displayTitle)
-          Spacer(minLength: 0)
-        }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.appOnSecondaryContainer.opacity(0.70))
-
-        CardPreviewContent(payload: draft.previewPayload, presentation: .draftSummary)
-
-        Spacer(minLength: 0)
-
-        Text(draft.createdAt, format: .dateTime.hour().minute())
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(.appOnSecondaryContainer.opacity(0.56))
-      }
-    }
-  }
+  /// The composer card that receives a completed recording.
+  let target: ThreadDraftCard
 }
 
 /// Media value produced by one Photos library picker selection.
@@ -1279,7 +1110,6 @@ private extension CMTime {
 private struct CreationAddMenuContent: View {
 
   let isSuggestionCaptureEnabled: Bool
-  let onComposeText: @MainActor @Sendable () -> Void
   let onComposeLink: @MainActor @Sendable () -> Void
   let onCapturePhoto: @MainActor @Sendable () -> Void
   let onChooseMediaFromLibrary: @MainActor @Sendable () -> Void
@@ -1289,10 +1119,6 @@ private struct CreationAddMenuContent: View {
   let onChooseSuggestion: @MainActor @Sendable (CapturedSuggestion) -> Void
 
   var body: some View {
-    Button(action: onComposeText) {
-      Label("Text", systemImage: "text.alignleft")
-    }
-
     Button(action: onComposeLink) {
       Label("Link", systemImage: "link")
     }
@@ -1357,6 +1183,8 @@ extension Card.Kind {
       return "Text"
     case .link:
       return "Link"
+    case .file:
+      return "File"
     case .photo:
       return "Photo"
     case .video:
@@ -1378,31 +1206,4 @@ extension Card.Kind {
     }
   }
 
-  /// SF Symbol representing this card kind in compose and editor chrome.
-  var creationSymbolName: String {
-    switch self {
-    case .text:
-      return "text.alignleft"
-    case .link:
-      return "link"
-    case .photo:
-      return "camera"
-    case .video:
-      return "video"
-    case .livePhoto:
-      return "livephoto"
-    case .audio:
-      return "waveform"
-    case .suggestion:
-      return "sparkles"
-    case .doodle:
-      return "scribble.variable"
-    case .bauhaus:
-      return "square.grid.3x3.square"
-    case .unknown:
-      return "questionmark"
-    @unknown default:
-      return "questionmark"
-    }
-  }
 }
