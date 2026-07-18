@@ -86,16 +86,19 @@ jobs:
           mkdir -p ./build
           requested_app="${{ inputs.app || 'all' }}"
 
+          # Columns: distribution name, project path, scheme, bundle identifier,
+          # IPA filename, and manifest filename. Distribution names and artifact
+          # URLs stay stable even when a project uses a different scheme name.
           {
-            printf 'Verse\tapp.muukii.verse\tVerse.ipa\tVerse-manifest.plist\n'
-            printf 'Journal\tapp.muukii.journal\tJournal.ipa\tJournal-manifest.plist\n'
-            printf 'Tone\tapp.muukii.tone\tTone.ipa\tTone-manifest.plist\n'
-            printf 'PhotosOrganizer\tapp.muukii.PhotosOrganizer\tPhotosOrganizer.ipa\tPhotosOrganizer-manifest.plist\n'
-            printf 'AmbientLight\tapp.muukii.ambientlight\tAmbientLight.ipa\tAmbientLight-manifest.plist\n'
-            printf 'HearAugment\tapp.muukii.hearaugment\tHearAugment.ipa\tHearAugment-manifest.plist\n'
-            printf 'PolyReader\tapp.muukii.polyreader\tPolyReader.ipa\tPolyReader-manifest.plist\n'
-            printf 'VoiceRecorder\tapp.muukii.voicerecorder\tVoiceRecorder.ipa\tVoiceRecorder-manifest.plist\n'
-            printf 'HelloWorld\tapp.muukii.helloworld\tHelloWorld.ipa\tHelloWorld-manifest.plist\n'
+            printf 'Verse\tApps/Verse\tVerse\tapp.muukii.verse\tVerse.ipa\tVerse-manifest.plist\n'
+            printf 'Journal\tApps/Journal\tTinycurve\tapp.muukii.journal\tJournal.ipa\tJournal-manifest.plist\n'
+            printf 'Tone\tApps/Tone\tTone\tapp.muukii.tone\tTone.ipa\tTone-manifest.plist\n'
+            printf 'PhotosOrganizer\tApps/PhotosOrganizer\tPhotosOrganizer\tapp.muukii.PhotosOrganizer\tPhotosOrganizer.ipa\tPhotosOrganizer-manifest.plist\n'
+            printf 'AmbientLight\tApps/AmbientLight\tAmbientLight\tapp.muukii.ambientlight\tAmbientLight.ipa\tAmbientLight-manifest.plist\n'
+            printf 'HearAugment\tApps/HearAugment\tHearAugment\tapp.muukii.hearaugment\tHearAugment.ipa\tHearAugment-manifest.plist\n'
+            printf 'PolyReader\tApps/PolyReader\tPolyReader\tapp.muukii.polyreader\tPolyReader.ipa\tPolyReader-manifest.plist\n'
+            printf 'VoiceRecorder\tApps/VoiceRecorder\tVoiceRecorder\tapp.muukii.voicerecorder\tVoiceRecorder.ipa\tVoiceRecorder-manifest.plist\n'
+            printf 'HelloWorld\tApps/HelloWorld\tHelloWorld\tapp.muukii.helloworld\tHelloWorld.ipa\tHelloWorld-manifest.plist\n'
           } > ./build/all-adhoc-apps.tsv
 
           if [ "$requested_app" = "all" ]; then
@@ -127,14 +130,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          while IFS=$'\t' read -r app_name bundle_identifier ipa_name manifest_name; do
-            echo "::group::Archive ${app_name}"
+          while IFS=$'\t' read -r distribution_name project_path scheme bundle_identifier ipa_name manifest_name; do
+            echo "::group::Archive ${distribution_name}"
             xcodebuild archive \
               -workspace MuApps.xcworkspace \
-              -scheme "$app_name" \
+              -scheme "$scheme" \
               -configuration Release \
               -destination "generic/platform=iOS" \
-              -archivePath "./build/${app_name}.xcarchive" \
+              -archivePath "./build/${distribution_name}.xcarchive" \
               -skipMacroValidation \
               CODE_SIGN_STYLE=Manual \
               CODE_SIGN_IDENTITY="" \
@@ -149,21 +152,21 @@ jobs:
           set -euo pipefail
 
           find_entitlements() {
-            local app_name="$1"
+            local project_path="$1"
             local target_name="$2"
 
-            if [ -f "Apps/${app_name}/Derived/Entitlements/${target_name}.entitlements" ]; then
-              printf '%s\n' "Apps/${app_name}/Derived/Entitlements/${target_name}.entitlements"
+            if [ -f "${project_path}/Derived/Entitlements/${target_name}.entitlements" ]; then
+              printf '%s\n' "${project_path}/Derived/Entitlements/${target_name}.entitlements"
               return
             fi
 
-            if [ -f "Apps/${app_name}/Sources/${target_name}.entitlements" ]; then
-              printf '%s\n' "Apps/${app_name}/Sources/${target_name}.entitlements"
+            if [ -f "${project_path}/Sources/${target_name}.entitlements" ]; then
+              printf '%s\n' "${project_path}/Sources/${target_name}.entitlements"
               return
             fi
 
-            if [ "$target_name" = "Verse" ] && [ -f "Apps/Verse/Sources/YouTubeSubtitle.entitlements" ]; then
-              printf '%s\n' "Apps/Verse/Sources/YouTubeSubtitle.entitlements"
+            if [ "$target_name" = "Verse" ] && [ -f "${project_path}/Sources/YouTubeSubtitle.entitlements" ]; then
+              printf '%s\n' "${project_path}/Sources/YouTubeSubtitle.entitlements"
               return
             fi
 
@@ -201,8 +204,8 @@ jobs:
             fi
           }
 
-          while IFS=$'\t' read -r app_name bundle_identifier ipa_name manifest_name; do
-            app_path="./build/${app_name}.xcarchive/Products/Applications/${app_name}.app"
+          while IFS=$'\t' read -r distribution_name project_path scheme bundle_identifier ipa_name manifest_name; do
+            app_path="./build/${distribution_name}.xcarchive/Products/Applications/${scheme}.app"
 
             if [ ! -d "$app_path" ]; then
               echo "App not found in archive: $app_path"
@@ -214,13 +217,13 @@ jobs:
                 [ -d "$extension_path" ] || continue
 
                 extension_name="$(basename "$extension_path" .appex)"
-                extension_entitlements="$(find_entitlements "$app_name" "$extension_name" || true)"
+                extension_entitlements="$(find_entitlements "$project_path" "$extension_name" || true)"
                 sign_nested_code "$extension_path"
                 sign_product "$extension_path" "$extension_entitlements"
               done
             fi
 
-            app_entitlements="$(find_entitlements "$app_name" "$app_name" || true)"
+            app_entitlements="$(find_entitlements "$project_path" "$scheme" || true)"
             sign_nested_code "$app_path"
             sign_product "$app_path" "$app_entitlements"
           done < ./build/adhoc-apps.tsv
@@ -264,14 +267,14 @@ jobs:
 
           mkdir -p ./build/release
 
-          while IFS=$'\t' read -r app_name bundle_identifier ipa_name manifest_name; do
-            export_path="./build/export/${app_name}"
+          while IFS=$'\t' read -r distribution_name project_path scheme bundle_identifier ipa_name manifest_name; do
+            export_path="./build/export/${distribution_name}"
             rm -rf "$export_path"
             mkdir -p "$export_path"
 
-            echo "::group::Export ${app_name}"
+            echo "::group::Export ${distribution_name}"
             xcodebuild -exportArchive \
-              -archivePath "./build/${app_name}.xcarchive" \
+              -archivePath "./build/${distribution_name}.xcarchive" \
               -exportPath "$export_path" \
               -exportOptionsPlist ./build/ExportOptions.plist \
               -allowProvisioningUpdates \
@@ -283,7 +286,7 @@ jobs:
 
             ipa_path="$(find "$export_path" -maxdepth 1 -name '*.ipa' -print -quit)"
             if [ -z "$ipa_path" ]; then
-              echo "No IPA was exported for ${app_name}"
+              echo "No IPA was exported for ${distribution_name}"
               exit 1
             fi
 
@@ -296,18 +299,18 @@ jobs:
 
           release_base_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
 
-          while IFS=$'\t' read -r app_name bundle_identifier ipa_name manifest_name; do
-            app_path="./build/${app_name}.xcarchive/Products/Applications/${app_name}.app"
+          while IFS=$'\t' read -r distribution_name project_path scheme bundle_identifier ipa_name manifest_name; do
+            app_path="./build/${distribution_name}.xcarchive/Products/Applications/${scheme}.app"
             app_info_plist="${app_path}/Info.plist"
             ipa_url="${release_base_url}/${ipa_name}"
 
             bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_info_plist")"
             bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_info_plist")"
             short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_info_plist" 2>/dev/null || printf '%s' '1.0')"
-            title="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$app_info_plist" 2>/dev/null || printf '%s' "$app_name")"
+            title="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$app_info_plist" 2>/dev/null || printf '%s' "$distribution_name")"
 
             if [ "$bundle_id" != "$bundle_identifier" ]; then
-              echo "Unexpected bundle identifier for ${app_name}: ${bundle_id}"
+              echo "Unexpected bundle identifier for ${distribution_name}: ${bundle_id}"
               exit 1
             fi
 
@@ -366,9 +369,9 @@ jobs:
           Updated in this run:
           EOF
 
-          while IFS=$'\t' read -r app_name bundle_identifier ipa_name manifest_name; do
+          while IFS=$'\t' read -r distribution_name project_path scheme bundle_identifier ipa_name manifest_name; do
             printf -- '- %s: https://github.com/%s/releases/download/%s/%s\n' \
-              "$app_name" \
+              "$distribution_name" \
               "$GITHUB_REPOSITORY" \
               "$RELEASE_TAG" \
               "$manifest_name" >> "$release_notes"
@@ -385,7 +388,7 @@ jobs:
           fi
 
           release_assets=()
-          while IFS=$'\t' read -r app_name bundle_identifier ipa_name manifest_name; do
+          while IFS=$'\t' read -r distribution_name project_path scheme bundle_identifier ipa_name manifest_name; do
             release_assets+=("./build/release/${ipa_name}")
             release_assets+=("./build/release/${manifest_name}")
           done < ./build/adhoc-apps.tsv
