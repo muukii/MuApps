@@ -1,12 +1,12 @@
-import AppUIComponents
 import AVFoundation
+import AppUIComponents
 import CaptureAudio
 import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
 import CaptureSuggestions
-import CoreTransferable
 import CoreLocation
+import CoreTransferable
 import JournalIntents
 import JournalVault
 import MediaProcessing
@@ -16,15 +16,17 @@ import Photos
 import PhotosUI
 import ScrollEdgeEffect
 import SwiftUI
-#if canImport(UIKit)
-import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
 import UniformTypeIdentifiers
 import WidgetKit
 
-private let photoLibraryImportLog = Logger(subsystem: "app.muukii.journal", category: "PhotoLibraryImport")
+#if canImport(UIKit)
+  import UIKit
+#elseif canImport(AppKit)
+  import AppKit
+#endif
+
+private let photoLibraryImportLog = Logger(
+  subsystem: "app.muukii.journal", category: "PhotoLibraryImport")
 
 struct CreationView: View {
 
@@ -39,7 +41,9 @@ struct CreationView: View {
   init(
     systemCaptureRequest: Binding<JournalCaptureRequest?> = .constant(nil),
     onChangeVault: (@MainActor @Sendable () -> Void)? = nil,
-    onSelectVaultForSystemCapture: @escaping @MainActor @Sendable (VaultID) async -> Bool = { _ in false },
+    onSelectVaultForSystemCapture: @escaping @MainActor @Sendable (VaultID) async -> Bool = { _ in
+      false
+    },
     onSystemCaptureFailure: @escaping @MainActor @Sendable (String) -> Void = { _ in }
   ) {
     _systemCaptureRequest = systemCaptureRequest
@@ -62,7 +66,7 @@ struct CreationView: View {
   @State private var quickBauhausSheetDetent: PresentationDetent = .large
   @State private var savedCardScrollTargetID: UUID?
   #if os(iOS)
-  @State private var isSettingsPresented: Bool = false
+    @State private var isSettingsPresented: Bool = false
   #endif
   @State private var isChangeVaultConfirmationPresented = false
   @State private var isDiscardComposerDraftConfirmationPresented = false
@@ -144,18 +148,18 @@ struct CreationView: View {
 
         ToolbarItem(placement: .journalTrailingAction) {
           #if os(macOS)
-          SettingsLink {
-            Image(systemName: "gearshape")
-          }
-          .accessibilityLabel("Settings")
+            SettingsLink {
+              Image(systemName: "gearshape")
+            }
+            .accessibilityLabel("Settings")
           #else
-          Button(action: {
-            isSettingsPresented.toggle()
-          }) {
-            Image(systemName: "gearshape")
-          }
-          .journalMatchedTransitionSource(id: "settings", in: namespace)
-          .keyboardShortcut(",", modifiers: .command)
+            Button(action: {
+              isSettingsPresented.toggle()
+            }) {
+              Image(systemName: "gearshape")
+            }
+            .journalMatchedTransitionSource(id: "settings", in: namespace)
+            .keyboardShortcut(",", modifiers: .command)
           #endif
         }
       })
@@ -165,8 +169,8 @@ struct CreationView: View {
       onDismiss: restoreEmptyComposerPlaceholderIfNeeded
     ) { presentation in
       NavigationStack {
-        ThreadDraftCardDetailEditor(
-          card: presentation.target,
+        ThreadDraftEntryDetailEditor(
+          draft: presentation.target,
           isSaving: isSaving
         )
       }
@@ -174,7 +178,8 @@ struct CreationView: View {
       .presentationDragIndicator(.visible)
       .presentationBackground(.background)
     }
-    .sheet(item: $linkEditorPresentation, onDismiss: restoreEmptyLinkPlaceholderIfNeeded) { presentation in
+    .sheet(item: $linkEditorPresentation, onDismiss: restoreEmptyLinkPlaceholderIfNeeded) {
+      presentation in
       ThreadDraftLinkEditorSheet(
         card: presentation.target
       )
@@ -233,15 +238,15 @@ struct CreationView: View {
       .presentationBackground(.background)
     }
     #if os(iOS)
-    .sheet(isPresented: $isSettingsPresented) {
-      SettingsScreen()
+      .sheet(isPresented: $isSettingsPresented) {
+        SettingsScreen()
         .journalZoomNavigationTransition(sourceID: "settings", in: namespace)
         .presentationSizing(.form)
         .presentationBackground(.background)
-    }
+      }
     #endif
     .confirmationDialog(
-      "Discard Card and Change Vault?",
+      "Discard Entry and Change Vault?",
       isPresented: $isChangeVaultConfirmationPresented,
       titleVisibility: .visible
     ) {
@@ -254,19 +259,19 @@ struct CreationView: View {
       Text("The current input has not been posted.")
     }
     .confirmationDialog(
-      "Discard Card?",
+      "Discard Entry?",
       isPresented: $isDiscardComposerDraftConfirmationPresented,
       titleVisibility: .visible
     ) {
-      Button("Discard Card", role: .destructive) {
+      Button("Discard Entry", role: .destructive) {
         resetComposerDraft()
       }
       Button("Cancel", role: .cancel) {}
     } message: {
-      Text("This card has not been posted.")
+      Text("This entry has not been posted.")
     }
     .confirmationDialog(
-      "Discard Card and Start Quick Capture?",
+      "Discard Entry and Start Quick Capture?",
       isPresented: $isSystemCaptureDiscardConfirmationPresented,
       titleVisibility: .visible
     ) {
@@ -340,13 +345,15 @@ struct CreationView: View {
       return nil
     }
 
-    return vaultRuntime.vaults.first { $0.vaultID == selectedVault.vaultID } ?? selectedVault.descriptor
+    return vaultRuntime.vaults.first { $0.vaultID == selectedVault.vaultID }
+      ?? selectedVault.descriptor
   }
 
   private var selectedCollaborationVault: VaultDescriptor? {
     guard let descriptor = selectedVaultDescriptor,
-          descriptor.ownership == .owned,
-          descriptor.isShared else {
+      descriptor.ownership == .owned,
+      descriptor.isShared
+    else {
       return nil
     }
 
@@ -368,7 +375,8 @@ struct CreationView: View {
   /// `CreationView`; the newly keyed view then presents the requested surface.
   private func routeSystemCaptureRequestIfNeeded() async {
     guard let request = systemCaptureRequest,
-          let targetVaultID = request.vaultID else {
+      let targetVaultID = request.vaultID
+    else {
       return
     }
 
@@ -391,7 +399,8 @@ struct CreationView: View {
 
   private func continueSystemCaptureAfterDiscard() async {
     guard let request = systemCaptureRequest,
-          let targetVaultID = request.vaultID else {
+      let targetVaultID = request.vaultID
+    else {
       return
     }
 
@@ -406,7 +415,9 @@ struct CreationView: View {
     guard await onSelectVaultForSystemCapture(vaultID) else {
       systemCaptureRequest = nil
       onSystemCaptureFailure(
-        String(localized: "The Quick Capture Vault could not be opened. Try again from Journal Settings.")
+        String(
+          localized: "The Quick Capture Vault could not be opened. Try again from Journal Settings."
+        )
       )
       return
     }
@@ -467,7 +478,8 @@ struct CreationView: View {
   /// discarding invalid-but-authored values such as an incomplete URL.
   private func restoreEmptyComposerPlaceholderIfNeeded() {
     guard composerDraft.kind != .text,
-          composerDraft.isCurrentKindContentEmpty else {
+      composerDraft.isCurrentKindContentEmpty
+    else {
       return
     }
 
@@ -626,9 +638,10 @@ struct CreationView: View {
 
   private func attachLocationToComposerDraftIfNeeded() {
     guard shouldAttachLocationToNewCards,
-          composerDraft.canSave,
-          composerDraft.location == nil,
-          locationRequestID == nil else {
+      composerDraft.canSave,
+      composerDraft.location == nil,
+      locationRequestID == nil
+    else {
       return
     }
 
@@ -645,10 +658,11 @@ struct CreationView: View {
       locationRequestID = nil
 
       guard let location,
-            shouldAttachLocationToNewCards,
-            composerDraft === target,
-            target.canSave,
-            target.location == nil else {
+        shouldAttachLocationToNewCards,
+        composerDraft === target,
+        target.canSave,
+        target.location == nil
+      else {
         // If posting or discarding replaced the object while Core Location was
         // resolving, let the new authored card start its own one-shot request.
         if composerDraft !== target {
@@ -945,7 +959,8 @@ private enum PhotoLibraryImport {
     let options = PHAssetResourceRequestOptions()
     options.isNetworkAccessAllowed = true
 
-    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+    try await withCheckedThrowingContinuation {
+      (continuation: CheckedContinuation<Void, any Error>) in
       PHAssetResourceManager.default().writeData(
         for: resource,
         toFile: fileURL,
@@ -1094,14 +1109,14 @@ private enum PhotoLibraryImportError: Error {
   case unsupportedAsset
 }
 
-private extension PHAsset {
-  var pixelSize: CGSize {
+extension PHAsset {
+  fileprivate var pixelSize: CGSize {
     CGSize(width: pixelWidth, height: pixelHeight)
   }
 }
 
-private extension CMTime {
-  var safeSeconds: TimeInterval {
+extension CMTime {
+  fileprivate var safeSeconds: TimeInterval {
     seconds.isFinite ? seconds : 0
   }
 }

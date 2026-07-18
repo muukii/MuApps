@@ -2,10 +2,10 @@ import CaptureDoodle
 import MuColor
 import SwiftUI
 
-/// Dedicated full-screen shell for drawing a doodle card from the composer.
+/// Dedicated full-screen shell for drawing Doodle content from the composer.
 ///
 /// Doodle editing benefits from the whole display: the canvas keeps the journal
-/// card aspect ratio, while the surrounding full-screen presentation gives the
+/// authored Doodle ratio, while the surrounding full-screen presentation gives the
 /// user's finger room to draw without fighting a sheet detent.
 struct ThreadDraftDoodleCanvasCover: View {
 
@@ -35,7 +35,7 @@ struct ThreadDraftDoodleCanvasCover: View {
   }
 }
 
-/// Native sheet shell for drawing a quick doodle card from the composer.
+/// Native sheet shell for drawing quick Doodle content from the composer.
 ///
 /// The sheet keeps quick creation in the same presentation family as Text,
 /// Photo, and Voice while still reusing the full canvas content.

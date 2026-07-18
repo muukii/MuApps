@@ -1,6 +1,6 @@
 # Tinycurve Privacy Policy
 
-Last updated: July 4, 2026
+Last updated: July 13, 2026
 
 Tinycurve is a personal journaling app. It is designed so the developer does not
 run a server for your journal content and does not sell, track, or advertise
@@ -8,9 +8,9 @@ with your data.
 
 ## Data you create
 
-When you create cards, Tinycurve can store the text you type, photos you capture
+When you create entries, Tinycurve can store the text you type, photos you capture
 or choose from Photos, audio recordings, doodles, Bauhaus artwork, timestamps,
-relationships between cards, attachment metadata, and optional location
+relationships between entries, attachment metadata, and optional location
 coordinates.
 
 If you choose a Journaling Suggestion, Apple presents the system picker.
@@ -25,21 +25,21 @@ Tinycurve's app container and App Group container so the app and widget can read
 the same entries.
 
 When iCloud is available, Tinycurve uses Apple's CloudKit private database to
-sync your cards and media across devices signed in to your Apple Account. The
+sync your entries and media across devices signed in to your Apple Account. The
 developer does not receive a copy of your journal content from this sync.
 
 ## Device permissions
 
-Camera access is used only when you open photo capture and take a photo for a
-card.
+Camera access is used only when you open photo capture and take a photo for an
+entry.
 
 Photos access is used through Apple's system picker. Tinycurve receives only the
-photo you choose for a card.
+photo you choose for an entry.
 
-Microphone access is used only when you record an ambient audio card.
+Microphone access is used only when you record ambient audio content.
 
 Location access is optional. When Attach Location is enabled in Settings and iOS
-grants permission, new cards can store the current latitude and longitude.
+grants permission, new entries can store the current latitude and longitude.
 
 Journaling Suggestions access is used only when you open the system picker. The
 raw signals used by iOS to prepare suggestions stay with the system unless you
@@ -51,7 +51,7 @@ When you use a share action, Tinycurve creates the selected image or video expor
 on device and hands that file to the system share sheet. The destination you
 choose controls what happens after that.
 
-The Tinycurve widget reads cards from the vault you choose for that widget.
+The Tinycurve widget reads entries from the vault you choose for that widget.
 Widget content is generated locally by the widget extension.
 
 ## Analytics, ads, and tracking

@@ -16,7 +16,7 @@ is not an App Store Connect text metadata field.
 
 The product language is grounded in:
 
-- `Apps/Journal/Note.md` for the original small-card concept.
+- `Apps/Journal/Note.md` for the current content-first concept.
 - `Apps/Journal/docs/SPECIFICATION.md` for current product behavior.
 - `Apps/Journal/docs/PRIVACY_POLICY.md` for privacy claims.
 

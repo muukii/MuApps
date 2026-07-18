@@ -191,7 +191,8 @@ final class JournalVaultRuntime {
     do {
       try reloadCatalog()
       if let selectedVault,
-         let updated = vaults.first(where: { $0.vaultID == selectedVault.vaultID }) {
+        let updated = vaults.first(where: { $0.vaultID == selectedVault.vaultID })
+      {
         selectedVault.updateDescriptor(updated)
       }
       refreshSelectedVaultPendingMutationCount()
@@ -255,8 +256,9 @@ final class JournalVaultRuntime {
     refreshSelectedVaultPendingMutationCount()
 
     if let vaultID = acceptance.vaultID,
-       let descriptor = vaults.first(where: { $0.vaultID == vaultID }),
-       descriptor.title.isEmpty == false {
+      let descriptor = vaults.first(where: { $0.vaultID == vaultID }),
+      descriptor.title.isEmpty == false
+    {
       lastMessage = "Accepted invite to \(descriptor.title)."
     } else {
       lastMessage = "Accepted vault invite."
@@ -313,7 +315,8 @@ final class JournalVaultRuntime {
       refreshSelectedVaultPendingMutationCount()
 
       guard selectedVault?.vaultID == vaultID,
-            selectedVaultState == .active else {
+        selectedVaultState == .active
+      else {
         lastMessage = selectedVaultState.displayDetail ?? "Created vault could not be opened."
         return nil
       }
@@ -455,32 +458,32 @@ final class JournalVaultRuntime {
   }
 
   #if DEBUG
-  /// Writes one text card into the selected vault.
-  ///
-  /// This is a debug-only probe for the vault runtime milestone: it proves a
-  /// local write reaches `VaultContentStore`, creates `PendingMutation` rows, and
-  /// wakes the sync engine through `VaultStoreRegistry`.
-  func createDebugTextCard() async {
-    guard let vault = selectedVault else {
-      lastMessage = "Open a vault before writing a debug card."
-      return
-    }
+    /// Writes one text card into the selected vault.
+    ///
+    /// This is a debug-only probe for the vault runtime milestone: it proves a
+    /// local write reaches `VaultContentStore`, creates `PendingMutation` rows, and
+    /// wakes the sync engine through `VaultStoreRegistry`.
+    func createDebugTextCard() async {
+      guard let vault = selectedVault else {
+        lastMessage = "Open a vault before writing a debug entry."
+        return
+      }
 
-    do {
-      let timestamp = Date().formatted(date: .abbreviated, time: .standard)
-      try vault.createThread(cards: [
-        VaultContentStore.CardDraft(
-          kind: .text,
-          text: "Vault runtime debug card\n\(timestamp)"
-        )
-      ])
-      await vault.activateForeground()
-      refreshSelectedVaultPendingMutationCount()
-      lastMessage = "Wrote a debug card to \(vault.title)."
-    } catch {
-      lastMessage = error.localizedDescription
+      do {
+        let timestamp = Date().formatted(date: .abbreviated, time: .standard)
+        try vault.createThread(cards: [
+          VaultContentStore.CardDraft(
+            kind: .text,
+            text: "Vault runtime debug entry\n\(timestamp)"
+          )
+        ])
+        await vault.activateForeground()
+        refreshSelectedVaultPendingMutationCount()
+        lastMessage = "Wrote a debug entry to \(vault.title)."
+      } catch {
+        lastMessage = error.localizedDescription
+      }
     }
-  }
   #endif
 
   private func openSelectedVault(_ descriptor: VaultDescriptor) async {
@@ -528,7 +531,8 @@ final class JournalVaultRuntime {
 
   private func refreshSelectedVaultDescriptor() {
     if let selectedVault,
-       let updated = vaults.first(where: { $0.vaultID == selectedVault.vaultID }) {
+      let updated = vaults.first(where: { $0.vaultID == selectedVault.vaultID })
+    {
       selectedVault.updateDescriptor(updated)
     }
   }

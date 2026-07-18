@@ -1,14 +1,15 @@
 import MuColor
 import SwiftUI
+
 #if canImport(UIKit)
-import UIKit
+  import UIKit
 #elseif canImport(AppKit)
-import AppKit
+  import AppKit
 #endif
 
-/// Renders detached card snapshots into shareable raster images.
+/// Renders detached entry snapshots into shareable raster images.
 @MainActor
-enum CardShareImageRenderer {
+enum EntryShareImageRenderer {
 
   /// Default export size in pixels.
   ///
@@ -18,79 +19,80 @@ enum CardShareImageRenderer {
 
   /// Renders a prepared share snapshot into a `UIImage`.
   static func image(
-    for snapshot: CardShareSnapshot,
+    for snapshot: EntryShareSnapshot,
     palette: Palette = .default,
     colorScheme: ColorScheme = .light,
     pixelSize: CGSize = defaultPixelSize,
     scale: CGFloat = 1
   ) -> UIImage? {
     let renderer = ImageRenderer(
-      content: CardShareImageView(snapshot: snapshot, palette: palette)
+      content: EntryShareImageView(snapshot: snapshot, palette: palette)
         .environment(\.colorScheme, colorScheme)
         .frame(width: pixelSize.width, height: pixelSize.height)
     )
     renderer.scale = max(scale, 1)
     renderer.isOpaque = true
     #if canImport(UIKit)
-    return renderer.uiImage
+      return renderer.uiImage
     #else
-    return renderer.nsImage
+      return renderer.nsImage
     #endif
   }
 
   /// Renders the static SwiftUI frame used behind Doodle replay video frames.
   static func doodleVideoBaseImage(
-    for snapshot: CardShareSnapshot,
+    for snapshot: EntryShareSnapshot,
     palette: Palette = .default,
     colorScheme: ColorScheme = .light,
     pixelSize: CGSize = defaultPixelSize,
     scale: CGFloat = 1
   ) -> UIImage? {
     let renderer = ImageRenderer(
-      content: CardShareDoodleVideoBaseFrameView(snapshot: snapshot, palette: palette)
+      content: EntryShareDoodleVideoBaseFrameView(snapshot: snapshot, palette: palette)
         .environment(\.colorScheme, colorScheme)
         .frame(width: pixelSize.width, height: pixelSize.height)
     )
     renderer.scale = max(scale, 1)
     renderer.isOpaque = true
     #if canImport(UIKit)
-    return renderer.uiImage
+      return renderer.uiImage
     #else
-    return renderer.nsImage
+      return renderer.nsImage
     #endif
   }
 
   /// Renders the static SwiftUI frame used behind Bauhaus replay video frames.
   static func bauhausVideoBaseImage(
-    for snapshot: CardShareSnapshot,
+    for snapshot: EntryShareSnapshot,
     palette: Palette = .default,
     colorScheme: ColorScheme = .light,
     pixelSize: CGSize = defaultPixelSize,
     scale: CGFloat = 1
   ) -> UIImage? {
     let renderer = ImageRenderer(
-      content: CardShareBauhausVideoBaseFrameView(snapshot: snapshot, palette: palette)
+      content: EntryShareBauhausVideoBaseFrameView(snapshot: snapshot, palette: palette)
         .environment(\.colorScheme, colorScheme)
         .frame(width: pixelSize.width, height: pixelSize.height)
     )
     renderer.scale = max(scale, 1)
     renderer.isOpaque = true
     #if canImport(UIKit)
-    return renderer.uiImage
+      return renderer.uiImage
     #else
-    return renderer.nsImage
+      return renderer.nsImage
     #endif
   }
 
   /// Writes a PNG export for `snapshot` into a temporary file and returns the URL.
   static func pngFile(
-    for snapshot: CardShareSnapshot,
+    for snapshot: EntryShareSnapshot,
     palette: Palette = .default,
     colorScheme: ColorScheme = .light,
     directory: URL = FileManager.default.temporaryDirectory
   ) throws -> URL {
-    guard let data = image(for: snapshot, palette: palette, colorScheme: colorScheme)?.pngData() else {
-      throw CardShareImageRendererError.renderingFailed
+    guard let data = image(for: snapshot, palette: palette, colorScheme: colorScheme)?.pngData()
+    else {
+      throw EntryShareImageRendererError.renderingFailed
     }
 
     let url = directory.appending(path: "Journal-\(snapshot.id.uuidString).png")
@@ -100,7 +102,7 @@ enum CardShareImageRenderer {
 }
 
 /// Failures produced while creating a share image.
-enum CardShareImageRendererError: Error {
+enum EntryShareImageRendererError: Error {
   /// The SwiftUI image renderer did not produce a raster image.
   case renderingFailed
 }

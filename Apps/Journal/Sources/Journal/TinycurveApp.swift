@@ -11,9 +11,9 @@ import SwiftUI
 struct TinycurveApp: App {
 
   #if os(iOS)
-  @UIApplicationDelegateAdaptor(TinycurveAppDelegate.self) private var appDelegate
+    @UIApplicationDelegateAdaptor(TinycurveAppDelegate.self) private var appDelegate
   #else
-  @NSApplicationDelegateAdaptor(TinycurveAppDelegate.self) private var appDelegate
+    @NSApplicationDelegateAdaptor(TinycurveAppDelegate.self) private var appDelegate
   #endif
 
   let vaultRuntime: JournalVaultRuntime
@@ -31,103 +31,103 @@ struct TinycurveApp: App {
   var body: some Scene {
     WindowGroup {
       #if DEBUG
-      switch TinycurveDebugLaunchRoute.activeRoute {
-      case .bookInputMorphSandbox(let initialState):
-        BookInputMorphSandbox(initialState: initialState)
-          .preferredColorScheme(.dark)
+        switch TinycurveDebugLaunchRoute.activeRoute {
+        case .bookInputMorphSandbox(let initialState):
+          BookInputMorphSandbox(initialState: initialState)
+            .preferredColorScheme(.dark)
 
-      case .bookAttachmentMenuPreview:
-        BookAttachmentMenuPreview(initialMenuState: .expanded)
-          .preferredColorScheme(.dark)
+        case .bookAttachmentMenuPreview:
+          BookAttachmentMenuPreview(initialMenuState: .expanded)
+            .preferredColorScheme(.dark)
 
-      case nil:
+        case nil:
+          RootView(vaultRuntime: vaultRuntime)
+            .task { DoodleHaptics.prepareForDrawing() }
+        }
+      #else
         RootView(vaultRuntime: vaultRuntime)
           .task { DoodleHaptics.prepareForDrawing() }
-      }
-      #else
-      RootView(vaultRuntime: vaultRuntime)
-        .task { DoodleHaptics.prepareForDrawing() }
       #endif
     }
 
     #if os(macOS)
-    Settings {
-      TinycurveSettingsSceneRoot(vaultRuntime: vaultRuntime)
-    }
+      Settings {
+        TinycurveSettingsSceneRoot(vaultRuntime: vaultRuntime)
+      }
     #endif
   }
 }
 
 #if os(macOS)
-/// Supplies the app-scoped runtime and visual preferences to the independent
-/// macOS Settings scene.
-///
-/// Scenes don't inherit the environment installed below `RootView`, so the
-/// Settings window needs its own root before it can reuse `SettingsScreen`.
-private struct TinycurveSettingsSceneRoot: View {
+  /// Supplies the app-scoped runtime and visual preferences to the independent
+  /// macOS Settings scene.
+  ///
+  /// Scenes don't inherit the environment installed below `RootView`, so the
+  /// Settings window needs its own root before it can reuse `SettingsScreen`.
+  private struct TinycurveSettingsSceneRoot: View {
 
-  let vaultRuntime: JournalVaultRuntime
+    let vaultRuntime: JournalVaultRuntime
 
-  @AppStorage(JournalDefaults.accentColorID)
-  private var accentColorID: String = AccentColor.default.id
-  @AppStorage(JournalDefaults.appearancePreferenceID)
-  private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
+    @AppStorage(JournalDefaults.accentColorID)
+    private var accentColorID: String = AccentColor.default.id
+    @AppStorage(JournalDefaults.appearancePreferenceID)
+    private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
 
-  var body: some View {
-    let appearancePreference = JournalAppearancePreference.with(id: appearancePreferenceID)
+    var body: some View {
+      let appearancePreference = JournalAppearancePreference.with(id: appearancePreferenceID)
 
-    PrimaryContainer(accentColor: AccentColor.with(id: accentColorID)) {
-      SettingsScreen()
+      PrimaryContainer(accentColor: AccentColor.with(id: accentColorID)) {
+        SettingsScreen()
+      }
+      .environment(vaultRuntime)
+      .preferredColorScheme(appearancePreference.colorScheme)
+      .frame(minWidth: 520, minHeight: 520)
     }
-    .environment(vaultRuntime)
-    .preferredColorScheme(appearancePreference.colorScheme)
-    .frame(minWidth: 520, minHeight: 520)
   }
-}
 #endif
 
 #if DEBUG
-/// Launch arguments for opening isolated Journal prototype surfaces.
-private enum TinycurveDebugLaunchRoute {
+  /// Launch arguments for opening isolated Journal prototype surfaces.
+  private enum TinycurveDebugLaunchRoute {
 
-  /// Debug-only prototype roots supported by Journal launches.
-  enum Route {
+    /// Debug-only prototype roots supported by Journal launches.
+    enum Route {
 
-    /// Opens the minimal matched-geometry playground based on the Book input sample.
-    case bookInputMorphSandbox(initialState: BookInputMorphSandbox.InitialState)
+      /// Opens the minimal matched-geometry playground based on the Book input sample.
+      case bookInputMorphSandbox(initialState: BookInputMorphSandbox.InitialState)
 
-    /// Opens the fuller Book attachment menu prototype.
-    case bookAttachmentMenuPreview
+      /// Opens the fuller Book attachment menu prototype.
+      case bookAttachmentMenuPreview
+    }
+
+    /// Opens the minimal Book input morph sandbox as the app root.
+    private static let bookInputMorphSandboxArgument = "-BookInputMorphSandbox"
+
+    /// Opens the minimal Book input morph sandbox in its expanded state.
+    private static let bookInputMorphSandboxExpandedArgument = "-BookInputMorphSandboxExpanded"
+
+    /// Opens the Book attachment menu prototype as the app root.
+    private static let bookAttachmentMenuPreviewArgument = "-BookAttachmentMenuPreview"
+
+    /// Prototype route requested by the current debug launch, if any.
+    static var activeRoute: Route? {
+      let arguments = ProcessInfo.processInfo.arguments
+
+      if arguments.contains(bookInputMorphSandboxExpandedArgument) {
+        return .bookInputMorphSandbox(initialState: .expanded)
+      }
+
+      if arguments.contains(bookInputMorphSandboxArgument) {
+        return .bookInputMorphSandbox(initialState: .collapsed)
+      }
+
+      if arguments.contains(bookAttachmentMenuPreviewArgument) {
+        return .bookAttachmentMenuPreview
+      }
+
+      return nil
+    }
   }
-
-  /// Opens the minimal Book input morph sandbox as the app root.
-  private static let bookInputMorphSandboxArgument = "-BookInputMorphSandbox"
-
-  /// Opens the minimal Book input morph sandbox in its expanded state.
-  private static let bookInputMorphSandboxExpandedArgument = "-BookInputMorphSandboxExpanded"
-
-  /// Opens the Book attachment menu prototype as the app root.
-  private static let bookAttachmentMenuPreviewArgument = "-BookAttachmentMenuPreview"
-
-  /// Prototype route requested by the current debug launch, if any.
-  static var activeRoute: Route? {
-    let arguments = ProcessInfo.processInfo.arguments
-
-    if arguments.contains(bookInputMorphSandboxExpandedArgument) {
-      return .bookInputMorphSandbox(initialState: .expanded)
-    }
-
-    if arguments.contains(bookInputMorphSandboxArgument) {
-      return .bookInputMorphSandbox(initialState: .collapsed)
-    }
-
-    if arguments.contains(bookAttachmentMenuPreviewArgument) {
-      return .bookAttachmentMenuPreview
-    }
-
-    return nil
-  }
-}
 #endif
 
 /// Reads the persisted accent and appearance preference, then applies them to the
@@ -168,7 +168,8 @@ private struct RootView: View {
   private var accentColorID: String = AccentColor.default.id
   @AppStorage(JournalDefaults.appearancePreferenceID)
   private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
-  @AppStorage(JournalDefaults.hasCompletedOnboarding) private var hasCompletedOnboarding: Bool = false
+  @AppStorage(JournalDefaults.hasCompletedOnboarding) private var hasCompletedOnboarding: Bool =
+    false
   @AppStorage(JournalDefaults.hasResolvedInitialVaultAvailability)
   private var hasResolvedInitialVaultAvailability: Bool = false
   @AppStorage(JournalDefaults.lastSelectedVaultID) private var lastSelectedVaultID: String = ""
@@ -274,7 +275,8 @@ private struct RootView: View {
 
     let preferredVaultID: VaultID
     if let storedVaultID = VaultID(uuidString: lastSelectedVaultID),
-       vaultRuntime.vaults.contains(where: { $0.vaultID == storedVaultID }) {
+      vaultRuntime.vaults.contains(where: { $0.vaultID == storedVaultID })
+    {
       preferredVaultID = storedVaultID
     } else {
       preferredVaultID = fallbackVaultID
@@ -286,7 +288,8 @@ private struct RootView: View {
 
   private func persistActiveVaultSelection() {
     guard let selectedVault = vaultRuntime.selectedVault,
-          vaultRuntime.selectedVaultState == .active else {
+      vaultRuntime.selectedVaultState == .active
+    else {
       lastSelectedVaultID = ""
       return
     }
@@ -312,7 +315,8 @@ private struct RootView: View {
 
   private func validateSystemCaptureRequestIfPossible() {
     guard initialVaultActivationState == .resolved,
-          let request = systemCaptureRequest else {
+      let request = systemCaptureRequest
+    else {
       return
     }
 
@@ -325,14 +329,17 @@ private struct RootView: View {
 
     guard let descriptor = vaultRuntime.vaults.first(where: { $0.vaultID == vaultID }) else {
       presentSystemCaptureFailure(
-        String(localized: "The Quick Capture Vault is no longer available. Choose it again in Settings.")
+        String(
+          localized: "The Quick Capture Vault is no longer available. Choose it again in Settings.")
       )
       return
     }
 
     guard descriptor.permission != .readOnly else {
       presentSystemCaptureFailure(
-        String(localized: "The Quick Capture Vault is read-only. Choose a vault you can edit in Settings.")
+        String(
+          localized:
+            "The Quick Capture Vault is read-only. Choose a vault you can edit in Settings.")
       )
       return
     }
@@ -349,7 +356,8 @@ private struct RootView: View {
       notificationCenter.post(.vaultInviteAccepted)
 
       if vaultRuntime.selectedVaultState != .active,
-         let firstVaultID = vaultRuntime.vaults.first?.vaultID {
+        let firstVaultID = vaultRuntime.vaults.first?.vaultID
+      {
         await vaultRuntime.selectVault(firstVaultID)
       }
       persistActiveVaultSelection()
@@ -384,13 +392,13 @@ private struct JournalHomeView: View {
 
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
   #if os(macOS)
-  @Environment(\.openSettings) private var openSettings
+    @Environment(\.openSettings) private var openSettings
   #endif
 
   @State private var isVaultSelectionPresented = false
   @State private var isVaultCreationPresented = false
   #if os(iOS)
-  @State private var isSettingsPresented = false
+    @State private var isSettingsPresented = false
   #endif
   @State private var vaultSheetDetent: PresentationDetent = .medium
 
@@ -438,11 +446,11 @@ private struct JournalHomeView: View {
       .presentationBackground(.background)
     }
     #if os(iOS)
-    .sheet(isPresented: $isSettingsPresented) {
-      SettingsScreen()
+      .sheet(isPresented: $isSettingsPresented) {
+        SettingsScreen()
         .presentationSizing(.form)
         .presentationBackground(.background)
-    }
+      }
     #endif
   }
 
@@ -475,9 +483,9 @@ private struct JournalHomeView: View {
   /// sheet used by the existing phone and tablet interface.
   private func presentSettings() {
     #if os(macOS)
-    openSettings()
+      openSettings()
     #else
-    isSettingsPresented = true
+      isSettingsPresented = true
     #endif
   }
 
@@ -518,7 +526,8 @@ private struct JournalHomeView: View {
 
   private func selectVaultForSystemCapture(_ vaultID: VaultID) async -> Bool {
     await vaultRuntime.selectVault(vaultID)
-    let didSelect = vaultRuntime.selectedVault?.vaultID == vaultID
+    let didSelect =
+      vaultRuntime.selectedVault?.vaultID == vaultID
       && vaultRuntime.selectedVaultState == .active
     if didSelect {
       onActiveVaultChanged()
@@ -528,7 +537,8 @@ private struct JournalHomeView: View {
 
   private func activateFirstVaultIfNeeded() async {
     guard vaultRuntime.selectedVaultState != .active,
-          let firstVaultID = vaultRuntime.vaults.first?.vaultID else {
+      let firstVaultID = vaultRuntime.vaults.first?.vaultID
+    else {
       onActiveVaultChanged()
       return
     }
@@ -587,7 +597,7 @@ private struct JournalHomeContent: View {
         onSelectVaultForSystemCapture: onSelectVaultForSystemCapture,
         onSystemCaptureFailure: onSystemCaptureFailure
       )
-        .id(vaultID)
+      .id(vaultID)
 
     case .vaultUnavailable(let message):
       JournalVaultUnavailableView(
@@ -637,7 +647,8 @@ private struct JournalNoVaultContent: View {
   var body: some View {
     VStack(spacing: 18) {
       if let initialAvailabilityResolution,
-         initialAvailabilityResolution.isCloudKitDeferred {
+        initialAvailabilityResolution.isCloudKitDeferred
+      {
         VaultCloudKitDeferredBanner(resolution: initialAvailabilityResolution)
           .padding(.horizontal, 16)
       }
@@ -645,7 +656,7 @@ private struct JournalNoVaultContent: View {
       ContentUnavailableView {
         Label("No Vaults", systemImage: "shippingbox")
       } description: {
-        Text("Create your first vault to start making cards.")
+        Text("Create your first vault to start preserving moments.")
       } actions: {
         Button(action: onCreateVault) {
           Label("New Vault", systemImage: "plus")

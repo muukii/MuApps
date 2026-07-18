@@ -11,7 +11,7 @@ import SwiftUI
 /// Presentation container for the Journal creation surface.
 ///
 /// The container owns the bottom input bar and its standard SwiftUI `Menu`.
-/// The caller continues to own draft mutation, capture presentation, and saving.
+/// The caller continues to own draft mutation, capture style, and saving.
 struct CreationContainer<Content: View, MenuContent: View>: View {
 
   private let draft: ThreadDraftCard
@@ -69,9 +69,9 @@ private enum CreationContainerMetrics {
   /// Keeps the pointer-driven Mac input surface within a readable line length.
   static let maximumComposerWidth: CGFloat = {
     #if os(macOS)
-    720
+      720
     #else
-    .infinity
+      .infinity
     #endif
   }()
 
@@ -81,10 +81,10 @@ private enum CreationContainerMetrics {
   /// Shorter square length that leaves useful content visible in landscape.
   static let compactHeightSquarePreviewDimension: CGFloat = 160
 
-  /// Height for the native rich-link card inside an expanded composer.
+  /// Height for native rich-link content inside an expanded composer.
   static let expandedLinkPreviewHeight: CGFloat = 160
 
-  /// Landscape height for the native rich-link card.
+  /// Landscape height for native rich-link content.
   static let compactHeightLinkPreviewHeight: CGFloat = 112
 
   /// Height for the wide ambient-audio waveform.
@@ -95,14 +95,7 @@ private enum CreationContainerMetrics {
 
 }
 
-/// Geometry of authored content that expands beyond the one-line composer.
-private enum CreationComposerExpandedPreviewLayout: Hashable, Sendable {
-  case square
-  case link
-  case audio
-}
-
-/// Bottom composer bar that owns the visible state of one unpublished card.
+/// Bottom composer bar that owns the visible state of one unpublished entry.
 private struct CreationComposerInputBar<MenuContent: View>: View {
 
   @Bindable var draft: ThreadDraftCard
@@ -129,10 +122,9 @@ private struct CreationComposerInputBar<MenuContent: View>: View {
   }
 
   var body: some View {
-    if let previewLayout = draft.expandedComposerPreviewLayout {
+    if draft.usesExpandedComposerPreview {
       CreationComposerExpandedPreviewInputBar(
         draft: draft,
-        previewLayout: previewLayout,
         isProcessing: isProcessing,
         onOpenDraft: onOpenDraft,
         onDiscardDraft: onDiscardDraft,
@@ -152,7 +144,7 @@ private struct CreationComposerInputBar<MenuContent: View>: View {
   }
 }
 
-/// One-line composer used by text and compact non-media card kinds.
+/// One-line composer used by text and compact non-media content types.
 private struct CreationComposerCompactInputBar<MenuContent: View>: View {
 
   @Bindable var draft: ThreadDraftCard
@@ -210,8 +202,9 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
 /// Expanded composer shared by large visual, link, and audio previews.
 private struct CreationComposerExpandedPreviewInputBar: View {
 
+  @Environment(\.verticalSizeClass) private var verticalSizeClass
+
   let draft: ThreadDraftCard
-  let previewLayout: CreationComposerExpandedPreviewLayout
   let isProcessing: Bool
   let onOpenDraft: @MainActor @Sendable () -> Void
   let onDiscardDraft: @MainActor @Sendable () -> Void
@@ -228,15 +221,14 @@ private struct CreationComposerExpandedPreviewInputBar: View {
       }
 
       Button(action: onOpenDraft) {
-        CreationComposerExpandedPreviewSurface(
-          payload: draft.previewPayload,
-          layout: previewLayout
-        )
+        CreationComposerExpandedPreviewCanvas {
+          expandedContent
+        }
       }
       .buttonStyle(.plain)
       .frame(maxWidth: .infinity)
       .disabled(isProcessing)
-      .accessibilityLabel("Edit Card")
+      .accessibilityLabel("Edit Entry")
       .accessibilityValue(Text(draft.kind.displayTitle))
 
       CreationComposerPostButton(
@@ -248,45 +240,41 @@ private struct CreationComposerExpandedPreviewInputBar: View {
     .padding(6)
     .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 29, style: .continuous))
   }
-}
 
-/// Authored preview surface whose geometry follows the card modality.
-private struct CreationComposerExpandedPreviewSurface: View {
-
-  @Environment(\.verticalSizeClass) private var verticalSizeClass
-
-  let payload: CardPreviewPayload
-  let layout: CreationComposerExpandedPreviewLayout
-
-  var body: some View {
-    switch layout {
-    case .square:
-      CreationComposerExpandedPreviewCanvas {
-        CardPreviewContent(
-          payload: payload,
-          presentation: .draftSummary
-        )
-        .aspectRatio(1, contentMode: .fit)
-        .frame(maxWidth: squarePreviewDimension)
-      }
+  @ViewBuilder
+  private var expandedContent: some View {
+    switch draft.kind {
+    case .photo, .video, .livePhoto, .doodle, .bauhaus:
+      EntryContentView(
+        content: draft.entryContent,
+        style: .composer
+      )
+      .aspectRatio(1, contentMode: .fit)
+      .frame(maxWidth: squarePreviewDimension)
     case .link:
-      CreationComposerExpandedPreviewCanvas {
-        CardPreviewContent(
-          payload: payload,
-          presentation: .draftSummary
-        )
-        .frame(maxWidth: .infinity)
-        .frame(height: linkPreviewHeight)
-      }
+      EntryContentView(
+        content: draft.entryContent,
+        style: .composer
+      )
+      .frame(maxWidth: .infinity)
+      .frame(height: linkPreviewHeight)
     case .audio:
-      CreationComposerExpandedPreviewCanvas {
-        CardPreviewContent(
-          payload: payload,
-          presentation: .draftSummary
-        )
-        .frame(maxWidth: .infinity)
-        .frame(height: audioPreviewHeight)
-      }
+      EntryContentView(
+        content: draft.entryContent,
+        style: .composer
+      )
+      .frame(maxWidth: .infinity)
+      .frame(height: audioPreviewHeight)
+    case .text, .file, .suggestion, .unknown:
+      EntryContentView(
+        content: draft.entryContent,
+        style: .composer
+      )
+    @unknown default:
+      EntryContentView(
+        content: draft.entryContent,
+        style: .composer
+      )
     }
   }
 
@@ -366,7 +354,7 @@ private struct CreationComposerLeadingAction<MenuContent: View>: View {
       }
       .buttonStyle(.plain)
       .disabled(isProcessing)
-      .accessibilityLabel("Add Card")
+      .accessibilityLabel("Add Content")
     } else {
       Button(action: onDiscardDraft) {
         Image(systemName: "xmark")
@@ -376,12 +364,12 @@ private struct CreationComposerLeadingAction<MenuContent: View>: View {
       }
       .buttonStyle(.plain)
       .disabled(isProcessing)
-      .accessibilityLabel("Discard Card")
+      .accessibilityLabel("Discard Entry")
     }
   }
 }
 
-/// Inline text editor or compact preview for the one card being composed.
+/// Inline text editor or compact preview for the entry being composed.
 private struct CreationComposerDraftContent: View {
 
   @Bindable var draft: ThreadDraftCard
@@ -391,19 +379,19 @@ private struct CreationComposerDraftContent: View {
   var body: some View {
     switch draft.kind {
     case .text:
-      TextField("Write a card", text: $draft.text, axis: .vertical)
+      TextField("Write something", text: $draft.text, axis: .vertical)
         .textFieldStyle(.plain)
         .lineLimit(1...5)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .disabled(isProcessing)
-        .accessibilityLabel("Card text")
+        .accessibilityLabel("Entry text")
     case .link, .file, .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus, .unknown:
       Button(action: onOpenDraft) {
         CreationComposerDraftPreview(draft: draft)
       }
       .buttonStyle(.plain)
       .disabled(isProcessing)
-      .accessibilityLabel("Edit Card")
+      .accessibilityLabel("Edit Entry")
       .accessibilityValue(Text(draft.kind.displayTitle))
     @unknown default:
       Button(action: onOpenDraft) {
@@ -411,8 +399,8 @@ private struct CreationComposerDraftContent: View {
       }
       .buttonStyle(.plain)
       .disabled(isProcessing)
-      .accessibilityLabel("Edit Card")
-      .accessibilityValue("Card")
+      .accessibilityLabel("Edit Entry")
+      .accessibilityValue("Entry")
     }
   }
 }
@@ -424,9 +412,9 @@ private struct CreationComposerDraftPreview: View {
 
   var body: some View {
     HStack(spacing: 10) {
-      CardPreviewContent(
-        payload: draft.previewPayload,
-        presentation: .draftSummary
+      EntryContentView(
+        content: draft.entryContent,
+        style: .composer
       )
       .frame(width: 40, height: 40)
       .background(.background.opacity(0.72))
@@ -463,7 +451,7 @@ private struct CreationComposerDraftLabel: View {
   }
 }
 
-/// Posts the current composer card while keeping progress in the same geometry.
+/// Posts the current entry while keeping progress in the same geometry.
 private struct CreationComposerPostButton: View {
 
   @Environment(\.appPalette) private var palette
@@ -492,7 +480,7 @@ private struct CreationComposerPostButton: View {
     }
     .buttonStyle(.plain)
     .disabled(canPost == false || isProcessing)
-    .accessibilityLabel("Post Card")
+    .accessibilityLabel("Post Entry")
     .keyboardShortcut(.return, modifiers: .command)
   }
 
@@ -517,7 +505,7 @@ private struct CreationComposerPostButton: View {
   CreationComposerLinkAndAudioPreviewGallery()
 }
 
-/// Interactive gallery for comparing every composer content presentation.
+/// Interactive gallery for comparing every composer content style.
 ///
 /// The gallery renders the production input bar without opening a vault store.
 /// Each row owns a separate draft so text editing in one example never mutates
@@ -839,15 +827,16 @@ private enum CreationComposerInputBarPreviewFixtures {
   }
 
   static var processing: ThreadDraftCard {
-    ThreadDraftCard(text: "Posting this card…")
+    ThreadDraftCard(text: "Posting this entry…")
   }
 
   private static let previewImageSize = CGSize(width: 4, height: 4)
 
-  private static let previewImageData = Data(
-    base64Encoded:
-      "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAAXNSR0IArs4c6QAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAABKADAAQAAAABAAAABAAAAADmpNw4AAAAGklEQVQIHWMMcNvyX4PhOQMMszDoMqAAwgIAXXQGC8PGsPEAAAAASUVORK5CYII="
-  ) ?? Data()
+  private static let previewImageData =
+    Data(
+      base64Encoded:
+        "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAAXNSR0IArs4c6QAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAABKADAAQAAAABAAAABAAAAADmpNw4AAAAGklEQVQIHWMMcNvyX4PhOQMMszDoMqAAwgIAXXQGC8PGsPEAAAAASUVORK5CYII="
+    ) ?? Data()
 
   private static let missingVideoURL = URL(
     fileURLWithPath: "/__journal_preview__/preview.mp4"
@@ -858,21 +847,19 @@ private enum CreationComposerInputBarPreviewFixtures {
   )
 }
 
-private extension CardEditDraft {
+extension CardEditDraft {
 
-  /// Expanded surface used for the current authored payload, when needed.
-  var expandedComposerPreviewLayout: CreationComposerExpandedPreviewLayout? {
+  /// Whether the current authored content needs more than the one-line composer.
+  fileprivate var usesExpandedComposerPreview: Bool {
     switch kind {
     case .link:
-      return linkURL == nil ? nil : .link
-    case .photo, .video, .livePhoto, .doodle, .bauhaus:
-      return .square
-    case .audio:
-      return .audio
+      return linkURL != nil
+    case .photo, .video, .livePhoto, .audio, .doodle, .bauhaus:
+      return true
     case .text, .file, .suggestion, .unknown:
-      return nil
+      return false
     @unknown default:
-      return nil
+      return false
     }
   }
 }

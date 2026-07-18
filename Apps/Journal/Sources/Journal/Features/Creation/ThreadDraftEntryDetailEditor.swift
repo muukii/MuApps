@@ -3,22 +3,22 @@ import CaptureBauhaus
 import JournalVault
 import SwiftUI
 
-/// Detail editor for one creation draft card.
+/// Detail editor for one unpublished entry.
 ///
-/// The creation input bar owns one unpublished card; this screen owns that
-/// card's kind-specific editing experience. Each capture component stays
+/// The creation input bar owns one draft; this screen owns that content type's
+/// editing experience. Each capture component stays
 /// persistence-agnostic and reports a value, which this app-shell layer converts
 /// into the normalized payload stored on `CardEditDraft`.
-struct ThreadDraftCardDetailEditor: View {
+struct ThreadDraftEntryDetailEditor: View {
 
   @Environment(\.dismiss) private var dismiss
 
-  @Bindable var card: ThreadDraftCard
+  @Bindable var draft: ThreadDraftCard
   let isSaving: Bool
 
   var body: some View {
-    CardEditDraftEditor(
-      draft: card,
+    EntryDraftEditor(
+      draft: draft,
       isSaving: isSaving,
       confirmationTitle: "Done",
       requiresSavableDraft: false,
@@ -30,12 +30,12 @@ struct ThreadDraftCardDetailEditor: View {
   }
 }
 
-/// Shared detail editor for a standalone card draft.
+/// Shared detail editor for a standalone entry draft.
 ///
 /// Creation, saved-entry editing, and previews can all bind to this component
 /// because it only knows about `CardEditDraft`, capture values, and callbacks.
 /// Persistence remains outside the view.
-struct CardEditDraftEditor: View {
+struct EntryDraftEditor: View {
 
   @Bindable var draft: CardEditDraft
   let isSaving: Bool
@@ -63,7 +63,7 @@ struct CardEditDraftEditor: View {
   var body: some View {
     VStack(spacing: 0) {
       if showsKindPicker {
-        CardEditDraftKindPicker(kind: $draft.kind)
+        EntryContentKindPicker(kind: $draft.kind)
           .disabled(isSaving)
           .padding(.horizontal, 16)
           .padding(.vertical, 12)
@@ -71,7 +71,7 @@ struct CardEditDraftEditor: View {
         Divider()
       }
 
-      CardEditDraftKindEditor(draft: draft)
+      EntryContentKindEditor(draft: draft)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     .background(.background)
@@ -90,8 +90,8 @@ struct CardEditDraftEditor: View {
   }
 }
 
-/// Segmented kind switcher for a draft card.
-private struct CardEditDraftKindPicker: View {
+/// Segmented content-type switcher for a draft entry.
+private struct EntryContentKindPicker: View {
 
   @Binding var kind: Card.Kind
 
@@ -109,7 +109,7 @@ private struct CardEditDraftKindPicker: View {
   }
 
   var body: some View {
-    Picker("Card Kind", selection: $kind) {
+    Picker("Content Type", selection: $kind) {
       ForEach(selectableKinds, id: \.self) { kind in
         Text(kind.displayTitle)
           .tag(kind)
@@ -119,8 +119,8 @@ private struct CardEditDraftKindPicker: View {
   }
 }
 
-/// Routes the selected card kind to its concrete editor.
-private struct CardEditDraftKindEditor: View {
+/// Routes the selected persisted kind to its concrete content editor.
+private struct EntryContentKindEditor: View {
 
   @Bindable var draft: CardEditDraft
 
@@ -128,53 +128,37 @@ private struct CardEditDraftKindEditor: View {
     ZStack {
       switch draft.kind {
       case .text:
-        ThreadDraftTextDetailEditor(text: $draft.text)
+        ThreadDraftTextEditorContent(text: $draft.text)
       case .link:
-        ThreadDraftLinkDetailEditor(text: $draft.text)
+        ThreadDraftLinkEditorContent(urlString: $draft.text)
       case .file:
         ContentUnavailableView(
           "File Editing Unavailable",
           systemImage: "doc",
-          description: Text("Files shared to Journal stay attached to their original card.")
+          description: Text("Files shared to Tinycurve stay attached to their original entry.")
         )
       case .photo:
         ThreadDraftPhotoDetailEditor(card: draft)
       case .video, .livePhoto:
-        ThreadDraftImportedMediaDetailEditor(card: draft)
+        EntryContentView(content: draft.entryContent, style: .detail)
+          .padding(16)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       case .audio:
         ThreadDraftAudioDetailEditor(card: draft)
       case .suggestion:
-        ThreadDraftSuggestionDetailEditor(card: draft)
+        EntryContentView(content: draft.entryContent, style: .detail)
+          .padding(16)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       case .doodle:
         ThreadDraftDoodleDetailEditor(card: draft)
       case .bauhaus:
         ThreadDraftBauhausDetailEditor(card: draft)
       case .unknown:
-        ThreadDraftTextDetailEditor(text: $draft.text)
+        ThreadDraftTextEditorContent(text: $draft.text)
       @unknown default:
-        ThreadDraftTextDetailEditor(text: $draft.text)
+        ThreadDraftTextEditorContent(text: $draft.text)
       }
     }
-  }
-}
-
-/// Full-screen text editor for a text draft.
-private struct ThreadDraftTextDetailEditor: View {
-
-  @Binding var text: String
-
-  var body: some View {
-    ThreadDraftTextEditorContent(text: $text)
-  }
-}
-
-/// URL editor for a link draft.
-private struct ThreadDraftLinkDetailEditor: View {
-
-  @Binding var text: String
-
-  var body: some View {
-    ThreadDraftLinkEditorContent(urlString: $text)
   }
 }
 
@@ -190,18 +174,6 @@ private struct ThreadDraftPhotoDetailEditor: View {
   }
 }
 
-/// Read-only detail surface for media imported from Photos.
-private struct ThreadDraftImportedMediaDetailEditor: View {
-
-  @Bindable var card: CardEditDraft
-
-  var body: some View {
-    CardDetailContent(payload: card.previewPayload)
-      .padding(16)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-  }
-}
-
 /// Recorder-backed editor for an ambient audio draft.
 private struct ThreadDraftAudioDetailEditor: View {
 
@@ -211,18 +183,6 @@ private struct ThreadDraftAudioDetailEditor: View {
     ThreadDraftAudioRecorderContent(card: card) { [card] recording in
       card.setAudio(recording)
     }
-  }
-}
-
-/// Read-only detail surface for a selected Journaling Suggestion.
-private struct ThreadDraftSuggestionDetailEditor: View {
-
-  @Bindable var card: CardEditDraft
-
-  var body: some View {
-    CardDetailContent(payload: card.previewPayload)
-      .padding(16)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
   }
 }
 
@@ -288,39 +248,39 @@ extension Card.Kind {
   fileprivate var editorTitle: LocalizedStringResource {
     switch self {
     case .text:
-      return "Text Card"
+      return "Text"
     case .link:
-      return "Link Card"
+      return "Link"
     case .file:
-      return "File Card"
+      return "File"
     case .photo:
-      return "Photo Card"
+      return "Photo"
     case .video:
-      return "Video Card"
+      return "Video"
     case .livePhoto:
-      return "Live Photo Card"
+      return "Live Photo"
     case .audio:
-      return "Audio Card"
+      return "Audio"
     case .suggestion:
-      return "Suggestion Card"
+      return "Suggestion"
     case .doodle:
-      return "Doodle Card"
+      return "Doodle"
     case .bauhaus:
-      return "Bauhaus Card"
+      return "Bauhaus"
     case .unknown:
-      return "Card"
+      return "Entry"
     @unknown default:
-      return "Card"
+      return "Entry"
     }
   }
 }
 
-#Preview("Card Edit Draft Editor") {
+#Preview("Entry Draft Editor") {
   NavigationStack {
-    CardEditDraftEditor(
+    EntryDraftEditor(
       draft: CardEditDraft(
         kind: .text,
-        text: "A shared draft makes creation, editing, and previews speak the same card language."
+        text: "A shared draft keeps creation, editing, and display on the same content model."
       ),
       isSaving: false,
       confirmationTitle: "Save",

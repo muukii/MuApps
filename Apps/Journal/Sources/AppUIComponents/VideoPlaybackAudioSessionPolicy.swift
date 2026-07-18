@@ -2,7 +2,7 @@ import AVFoundation
 
 /// App-wide audio session policy for muted inline video previews.
 ///
-/// Journal treats video cards as silent visual previews. The app configures the
+/// Tinycurve treats authored videos as silent visual previews. The app configures the
 /// process audio session once at launch so those previews mix with music or
 /// podcasts already playing outside the app, instead of toggling the session as
 /// each scrolling cell appears and disappears.
@@ -21,15 +21,17 @@ enum VideoPlaybackAudioSessionPolicy {
     isConfigured = true
 
     #if os(iOS)
-    do {
-      try AVAudioSession.sharedInstance().setCategory(
-        .playback,
-        mode: .moviePlayback,
-        options: [.mixWithOthers]
-      )
-    } catch {
-      print("[VideoPlaybackAudioSessionPolicy] Failed to configure audio session: \(error.localizedDescription)")
-    }
+      do {
+        try AVAudioSession.sharedInstance().setCategory(
+          .playback,
+          mode: .moviePlayback,
+          options: [.mixWithOthers]
+        )
+      } catch {
+        print(
+          "[VideoPlaybackAudioSessionPolicy] Failed to configure audio session: \(error.localizedDescription)"
+        )
+      }
     #endif
   }
 }

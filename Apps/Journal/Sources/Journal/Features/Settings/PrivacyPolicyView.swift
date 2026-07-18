@@ -29,9 +29,9 @@ struct PrivacyPolicyView: View {
 // MARK: - Content
 
 /// Static policy copy shared by the section views on this screen.
-fileprivate enum PrivacyPolicyContent {
+private enum PrivacyPolicyContent {
 
-  static let lastUpdated: LocalizedStringResource = "Last updated: July 4, 2026"
+  static let lastUpdated: LocalizedStringResource = "Last updated: July 13, 2026"
 
   static let introduction: LocalizedStringResource =
     "Tinycurve is a personal journaling app. It is designed so the developer does not run a server for your journal content and does not sell, track, or advertise with your data."
@@ -43,11 +43,13 @@ fileprivate enum PrivacyPolicyContent {
       paragraphs: [
         PrivacyPolicyParagraph(
           id: "content",
-          body: "When you create cards, Tinycurve can store the text you type, photos you capture or choose from Photos, audio recordings, doodles, Bauhaus artwork, timestamps, relationships between cards, attachment metadata, and optional location coordinates."
+          body:
+            "When you create entries, Tinycurve can store the text you type, photos you capture or choose from Photos, audio recordings, doodles, Bauhaus artwork, timestamps, relationships between entries, attachment metadata, and optional location coordinates."
         ),
         PrivacyPolicyParagraph(
           id: "suggestions",
-          body: "If you choose a Journaling Suggestion, Apple presents the system picker. Tinycurve receives only the suggestion content you select, such as a title, date, selected photo or video files, artwork/icon files, media metadata, workout summary, place, motion summary, contact name, or reflection prompt."
+          body:
+            "If you choose a Journaling Suggestion, Apple presents the system picker. Tinycurve receives only the suggestion content you select, such as a title, date, selected photo or video files, artwork/icon files, media metadata, workout summary, place, motion summary, contact name, or reflection prompt."
         ),
       ]
     ),
@@ -57,11 +59,13 @@ fileprivate enum PrivacyPolicyContent {
       paragraphs: [
         PrivacyPolicyParagraph(
           id: "local",
-          body: "Your journal database and attachment files are stored on your device in Tinycurve's app container and App Group container so the app and widget can read the same entries."
+          body:
+            "Your journal database and attachment files are stored on your device in Tinycurve's app container and App Group container so the app and widget can read the same entries."
         ),
         PrivacyPolicyParagraph(
           id: "icloud",
-          body: "When iCloud is available, Tinycurve uses Apple's CloudKit private database to sync your cards and media across devices signed in to your Apple Account. The developer does not receive a copy of your journal content from this sync."
+          body:
+            "When iCloud is available, Tinycurve uses Apple's CloudKit private database to sync your entries and media across devices signed in to your Apple Account. The developer does not receive a copy of your journal content from this sync."
         ),
       ]
     ),
@@ -71,23 +75,27 @@ fileprivate enum PrivacyPolicyContent {
       paragraphs: [
         PrivacyPolicyParagraph(
           id: "camera",
-          body: "Camera access is used only when you open photo capture and take a photo for a card."
+          body:
+            "Camera access is used only when you open photo capture and take a photo for an entry."
         ),
         PrivacyPolicyParagraph(
           id: "photos",
-          body: "Photos access is used through Apple's system picker. Tinycurve receives only the photo you choose for a card."
+          body:
+            "Photos access is used through Apple's system picker. Tinycurve receives only the photo you choose for an entry."
         ),
         PrivacyPolicyParagraph(
           id: "microphone",
-          body: "Microphone access is used only when you record an ambient audio card."
+          body: "Microphone access is used only when you record ambient audio content."
         ),
         PrivacyPolicyParagraph(
           id: "location",
-          body: "Location access is optional. When Attach Location is enabled in Settings and iOS grants permission, new cards can store the current latitude and longitude."
+          body:
+            "Location access is optional. When Attach Location is enabled in Settings and iOS grants permission, new entries can store the current latitude and longitude."
         ),
         PrivacyPolicyParagraph(
           id: "journaling-suggestions",
-          body: "Journaling Suggestions access is used only when you open the system picker. The raw signals used by iOS to prepare suggestions stay with the system unless you select a suggestion."
+          body:
+            "Journaling Suggestions access is used only when you open the system picker. The raw signals used by iOS to prepare suggestions stay with the system unless you select a suggestion."
         ),
       ]
     ),
@@ -97,11 +105,13 @@ fileprivate enum PrivacyPolicyContent {
       paragraphs: [
         PrivacyPolicyParagraph(
           id: "share",
-          body: "When you use a share action, Tinycurve creates the selected image or video export on device and hands that file to the system share sheet. The destination you choose controls what happens after that."
+          body:
+            "When you use a share action, Tinycurve creates the selected image or video export on device and hands that file to the system share sheet. The destination you choose controls what happens after that."
         ),
         PrivacyPolicyParagraph(
           id: "widget",
-          body: "The Tinycurve widget reads cards from the vault you choose for that widget. Widget content is generated locally by the widget extension."
+          body:
+            "The Tinycurve widget reads entries from the vault you choose for that widget. Widget content is generated locally by the widget extension."
         ),
       ]
     ),
@@ -111,8 +121,9 @@ fileprivate enum PrivacyPolicyContent {
       paragraphs: [
         PrivacyPolicyParagraph(
           id: "none",
-          body: "Tinycurve does not include developer-operated analytics, advertising SDKs, third-party trackers, or cross-app tracking."
-        ),
+          body:
+            "Tinycurve does not include developer-operated analytics, advertising SDKs, third-party trackers, or cross-app tracking."
+        )
       ]
     ),
     PrivacyPolicySection(
@@ -121,8 +132,9 @@ fileprivate enum PrivacyPolicyContent {
       paragraphs: [
         PrivacyPolicyParagraph(
           id: "user-control",
-          body: "Journal content remains until you delete it in the app, delete the app's data, or remove it through iCloud behavior controlled by Apple. iCloud sync deletion timing is governed by Apple's CloudKit and iCloud systems."
-        ),
+          body:
+            "Journal content remains until you delete it in the app, delete the app's data, or remove it through iCloud behavior controlled by Apple. iCloud sync deletion timing is governed by Apple's CloudKit and iCloud systems."
+        )
       ]
     ),
     PrivacyPolicySection(
@@ -131,11 +143,13 @@ fileprivate enum PrivacyPolicyContent {
       paragraphs: [
         PrivacyPolicyParagraph(
           id: "contact",
-          body: "For privacy questions, use the developer support contact listed with Tinycurve in the App Store."
+          body:
+            "For privacy questions, use the developer support contact listed with Tinycurve in the App Store."
         ),
         PrivacyPolicyParagraph(
           id: "changes",
-          body: "This policy may be updated as Tinycurve changes. The Last updated date shows when this copy was last revised."
+          body:
+            "This policy may be updated as Tinycurve changes. The Last updated date shows when this copy was last revised."
         ),
       ]
     ),
@@ -143,7 +157,7 @@ fileprivate enum PrivacyPolicyContent {
 }
 
 /// One titled policy section.
-fileprivate struct PrivacyPolicySection: Identifiable {
+private struct PrivacyPolicySection: Identifiable {
 
   let id: String
   let title: LocalizedStringResource
@@ -151,7 +165,7 @@ fileprivate struct PrivacyPolicySection: Identifiable {
 }
 
 /// One paragraph inside a policy section.
-fileprivate struct PrivacyPolicyParagraph: Identifiable {
+private struct PrivacyPolicyParagraph: Identifiable {
 
   let id: String
   let body: LocalizedStringResource
@@ -160,7 +174,7 @@ fileprivate struct PrivacyPolicyParagraph: Identifiable {
 // MARK: - Fileprivate Views
 
 /// Header copy that anchors the policy date and overall stance.
-fileprivate struct PrivacyPolicyHeaderView: View {
+private struct PrivacyPolicyHeaderView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -176,7 +190,7 @@ fileprivate struct PrivacyPolicyHeaderView: View {
 }
 
 /// Renders a single privacy policy section with readable paragraph spacing.
-fileprivate struct PrivacyPolicySectionView: View {
+private struct PrivacyPolicySectionView: View {
 
   let section: PrivacyPolicySection
 

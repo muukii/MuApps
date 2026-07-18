@@ -1,41 +1,44 @@
 @preconcurrency import AVFoundation
 import AVKit
+import AppUIComponents
 import CaptureBauhaus
 import CaptureDoodle
 import Foundation
 import MuColor
 import SwiftUI
+
 #if canImport(UIKit)
-import UIKit
+  import UIKit
 #elseif canImport(AppKit)
-import AppKit
+  import AppKit
 #endif
 
 /// A pre-share review screen for one prepared card snapshot.
 ///
 /// The context menu opens this screen first so the user can inspect the actual
 /// generated PNG or mp4 before the system activity sheet appears.
-struct CardSharePreviewScreen: View {
+struct EntrySharePreviewScreen: View {
 
-  let snapshot: CardShareSnapshot
+  let snapshot: EntryShareSnapshot
   let palette: Palette
 
   @Environment(\.dismiss) private var dismiss
   @Environment(\.colorScheme) private var colorScheme
-  @State private var selectedMode: CardSharePreviewMode
-  @State private var previewArtifacts: [CardSharePreviewRenderRequest: CardSharePreviewArtifactState] = [:]
-  @State private var renderingPreviewRequests: Set<CardSharePreviewRenderRequest> = []
-  @State private var failedPreviewRequests: Set<CardSharePreviewRenderRequest> = []
-  @State private var activityPresentation: CardShareActivityPresentation?
+  @State private var selectedMode: EntrySharePreviewMode
+  @State private var previewArtifacts:
+    [EntrySharePreviewRenderRequest: EntrySharePreviewArtifactState] = [:]
+  @State private var renderingPreviewRequests: Set<EntrySharePreviewRenderRequest> = []
+  @State private var failedPreviewRequests: Set<EntrySharePreviewRenderRequest> = []
+  @State private var activityPresentation: EntryShareActivityPresentation?
   @State private var isPreparingShareItem: Bool = false
   @State private var isShareFailurePresented: Bool = false
 
-  private let videoContent: CardShareVideoContent?
+  private let videoContent: EntryShareVideoContent?
 
-  init(snapshot: CardShareSnapshot, palette: Palette = .default) {
+  init(snapshot: EntryShareSnapshot, palette: Palette = .default) {
     self.snapshot = snapshot
     self.palette = palette
-    self.videoContent = CardShareVideoContent(snapshot: snapshot)
+    self.videoContent = EntryShareVideoContent(snapshot: snapshot)
     _selectedMode = State(initialValue: .image)
   }
 
@@ -51,7 +54,7 @@ struct CardSharePreviewScreen: View {
 
         Divider()
 
-        CardSharePreviewArtifactFrame(state: currentPreviewState)
+        EntrySharePreviewArtifactFrame(state: currentPreviewState)
       }
       .background(.background)
       .navigationTitle("Share Preview")
@@ -66,23 +69,23 @@ struct CardSharePreviewScreen: View {
 
         ToolbarItem(placement: .confirmationAction) {
           #if os(macOS)
-          if let fileURL = currentPreviewState.fileURL {
-            ShareLink(item: fileURL) {
-              Text(selectedMode == .image ? "Share Image" : "Share Video")
+            if let fileURL = currentPreviewState.fileURL {
+              ShareLink(item: fileURL) {
+                Text(selectedMode == .image ? "Share Image" : "Share Video")
+              }
+            } else {
+              Button(selectedMode == .image ? "Share Image" : "Share Video") {}
+                .disabled(true)
             }
-          } else {
-            Button(selectedMode == .image ? "Share Image" : "Share Video") {}
-              .disabled(true)
-          }
           #else
-          switch selectedMode {
-          case .image:
-            Button("Share Image", action: shareImage)
-              .disabled(isShareActionDisabled)
-          case .video:
-            Button("Share Video", action: shareVideo)
-              .disabled(isShareActionDisabled)
-          }
+            switch selectedMode {
+            case .image:
+              Button("Share Image", action: shareImage)
+                .disabled(isShareActionDisabled)
+            case .video:
+              Button("Share Video", action: shareVideo)
+                .disabled(isShareActionDisabled)
+            }
           #endif
         }
       }
@@ -93,13 +96,14 @@ struct CardSharePreviewScreen: View {
         if isPreparingShareItem {
           ProgressView()
             .padding(18)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(
+              .regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
       }
       #if os(iOS)
-      .sheet(item: $activityPresentation) { presentation in
-        ActivityView(activityItems: [presentation.fileURL])
-      }
+        .sheet(item: $activityPresentation) { presentation in
+          ActivityView(activityItems: [presentation.fileURL])
+        }
       #endif
       .alert("Couldn't Share", isPresented: $isShareFailurePresented) {
         Button("OK", role: .cancel) {}
@@ -115,21 +119,21 @@ struct CardSharePreviewScreen: View {
     isPreparingShareItem || previewArtifacts[previewRenderRequest]?.fileURL == nil
   }
 
-  private var previewRenderRequest: CardSharePreviewRenderRequest {
+  private var previewRenderRequest: EntrySharePreviewRenderRequest {
     previewRenderRequest(for: selectedMode)
   }
 
   private func previewRenderRequest(
-    for mode: CardSharePreviewMode
-  ) -> CardSharePreviewRenderRequest {
-    CardSharePreviewRenderRequest(
+    for mode: EntrySharePreviewMode
+  ) -> EntrySharePreviewRenderRequest {
+    EntrySharePreviewRenderRequest(
       snapshotID: snapshot.id,
       mode: mode,
       usesDarkAppearance: colorScheme == .dark
     )
   }
 
-  private var currentPreviewState: CardSharePreviewArtifactState {
+  private var currentPreviewState: EntrySharePreviewArtifactState {
     let request = previewRenderRequest
 
     if let artifact = previewArtifacts[request] {
@@ -157,7 +161,7 @@ struct CardSharePreviewScreen: View {
     .pickerStyle(.segmented)
   }
 
-  private var availableModes: [CardSharePreviewMode] {
+  private var availableModes: [EntrySharePreviewMode] {
     showsModePicker ? [.image, .video] : [.image]
   }
 
@@ -184,13 +188,13 @@ struct CardSharePreviewScreen: View {
   private func presentActivitySheet(for fileURL: URL) {
     isPreparingShareItem = true
     defer { isPreparingShareItem = false }
-    activityPresentation = CardShareActivityPresentation(fileURL: fileURL)
+    activityPresentation = EntryShareActivityPresentation(fileURL: fileURL)
   }
 
   @MainActor
-  private func renderPreview(for request: CardSharePreviewRenderRequest) async {
+  private func renderPreview(for request: EntrySharePreviewRenderRequest) async {
     guard previewArtifacts[request] == nil,
-          renderingPreviewRequests.contains(request) == false
+      renderingPreviewRequests.contains(request) == false
     else {
       return
     }
@@ -202,7 +206,7 @@ struct CardSharePreviewScreen: View {
       let directory = try Self.makePreviewDirectory(for: request)
       switch request.mode {
       case .image:
-        let fileURL = try CardShareImageRenderer.pngFile(
+        let fileURL = try EntryShareImageRenderer.pngFile(
           for: snapshot,
           palette: palette,
           colorScheme: request.colorScheme,
@@ -210,7 +214,7 @@ struct CardSharePreviewScreen: View {
         )
         try Task.checkCancellation()
         guard let image = UIImage(contentsOfFile: fileURL.path(percentEncoded: false)) else {
-          throw CardSharePreviewRenderError.imageLoadFailed
+          throw EntrySharePreviewRenderError.imageLoadFailed
         }
         previewArtifacts[request] = .image(fileURL: fileURL, image: image)
       case .video:
@@ -236,14 +240,14 @@ struct CardSharePreviewScreen: View {
     directory: URL
   ) async throws -> URL {
     guard let videoContent else {
-      throw CardSharePreviewRenderError.missingVideoContent
+      throw EntrySharePreviewRenderError.missingVideoContent
     }
 
     await Task.yield()
 
     switch videoContent {
     case .doodle(let drawing):
-      return try await CardShareVideoRenderer.mp4File(
+      return try await EntryShareVideoRenderer.mp4File(
         for: snapshot,
         drawing: drawing,
         palette: palette,
@@ -251,7 +255,7 @@ struct CardSharePreviewScreen: View {
         directory: directory
       )
     case .bauhaus(let document):
-      return try await CardShareVideoRenderer.mp4File(
+      return try await EntryShareVideoRenderer.mp4File(
         for: snapshot,
         bauhausDocument: document,
         palette: palette,
@@ -262,19 +266,22 @@ struct CardSharePreviewScreen: View {
   }
 
   private static func makePreviewDirectory(
-    for request: CardSharePreviewRenderRequest
+    for request: EntrySharePreviewRenderRequest
   ) throws -> URL {
     let directory = FileManager.default.temporaryDirectory
-      .appending(path: "Journal-SharePreview-\(request.snapshotID.uuidString)-\(request.mode.rawValue)-\(UUID().uuidString)")
+      .appending(
+        path:
+          "Journal-SharePreview-\(request.snapshotID.uuidString)-\(request.mode.rawValue)-\(UUID().uuidString)"
+      )
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     return directory
   }
 }
 
 /// Identity for one asynchronously generated preview artifact.
-private struct CardSharePreviewRenderRequest: Hashable {
+private struct EntrySharePreviewRenderRequest: Hashable {
   let snapshotID: UUID
-  let mode: CardSharePreviewMode
+  let mode: EntrySharePreviewMode
   let usesDarkAppearance: Bool
 
   var colorScheme: ColorScheme {
@@ -283,7 +290,7 @@ private struct CardSharePreviewRenderRequest: Hashable {
 }
 
 /// Loading state for the actual file shown in the preview.
-private enum CardSharePreviewArtifactState {
+private enum EntrySharePreviewArtifactState {
   case idle
   case rendering
   case image(fileURL: URL, image: UIImage)
@@ -301,29 +308,26 @@ private enum CardSharePreviewArtifactState {
 }
 
 /// Failures while preparing the exact preview artifact.
-private enum CardSharePreviewRenderError: Error {
+private enum EntrySharePreviewRenderError: Error {
   case imageLoadFailed
   case missingVideoContent
 }
 
 /// Decoded replay payload that can produce a share video.
-private enum CardShareVideoContent: Sendable {
+private enum EntryShareVideoContent: Sendable {
   case doodle(DoodleDrawing)
   case bauhaus(BauhausGridDocument)
 
-  init?(snapshot: CardShareSnapshot) {
+  init?(snapshot: EntryShareSnapshot) {
     switch snapshot.content {
-    case .doodle(let drawingData, _):
-      guard let drawingData,
-            let drawing = try? JSONDecoder().decode(DoodleDrawing.self, from: drawingData)
-      else {
+    case .doodle(let source):
+      guard let drawing = source.drawing else {
         return nil
       }
       self = .doodle(drawing)
-    case .bauhaus(let documentData, _):
-      guard let documentData,
-            let document = try? JSONDecoder().decode(BauhausGridDocument.self, from: documentData),
-            document.replay?.isEmpty == false
+    case .bauhaus(let source):
+      guard let document = source.document,
+        document.replay?.isEmpty == false
       else {
         return nil
       }
@@ -335,7 +339,7 @@ private enum CardShareVideoContent: Sendable {
 }
 
 /// The share formats the preview screen can render for visual confirmation.
-private enum CardSharePreviewMode: String, Hashable, Identifiable {
+private enum EntrySharePreviewMode: String, Hashable, Identifiable {
   case image
   case video
 
@@ -352,15 +356,15 @@ private enum CardSharePreviewMode: String, Hashable, Identifiable {
 }
 
 /// Presentation payload for a nested system activity sheet.
-private struct CardShareActivityPresentation: Identifiable {
+private struct EntryShareActivityPresentation: Identifiable {
   let id = UUID()
   let fileURL: URL
 }
 
 /// Displays the actual generated share artifact in the preview sheet.
-private struct CardSharePreviewArtifactFrame: View {
+private struct EntrySharePreviewArtifactFrame: View {
 
-  let state: CardSharePreviewArtifactState
+  let state: EntrySharePreviewArtifactState
 
   var body: some View {
     GeometryReader { proxy in
@@ -368,7 +372,7 @@ private struct CardSharePreviewArtifactFrame: View {
 
       ScrollView {
         VStack {
-          CardSharePreviewArtifactContent(state: state)
+          EntrySharePreviewArtifactContent(state: state)
             .frame(width: size.width, height: size.height)
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .shadow(color: .black.opacity(0.16), radius: 22, x: 0, y: 12)
@@ -390,14 +394,14 @@ private struct CardSharePreviewArtifactFrame: View {
   }
 
   private var exportSize: CGSize {
-    CardShareImageRenderer.defaultPixelSize
+    EntryShareImageRenderer.defaultPixelSize
   }
 }
 
 /// Visual body for one preview artifact state.
-private struct CardSharePreviewArtifactContent: View {
+private struct EntrySharePreviewArtifactContent: View {
 
-  let state: CardSharePreviewArtifactState
+  let state: EntrySharePreviewArtifactState
 
   var body: some View {
     ZStack {
@@ -413,7 +417,7 @@ private struct CardSharePreviewArtifactContent: View {
           .interpolation(.high)
           .scaledToFit()
       case .video(let fileURL):
-        CardSharePreviewVideoPlayer(fileURL: fileURL)
+        EntrySharePreviewVideoPlayer(fileURL: fileURL)
       case .failed:
         Image(systemName: "exclamationmark.triangle")
           .font(.system(size: 44, weight: .semibold))
@@ -424,7 +428,7 @@ private struct CardSharePreviewArtifactContent: View {
 }
 
 /// Looped playback for the generated mp4 preview file.
-private struct CardSharePreviewVideoPlayer: View {
+private struct EntrySharePreviewVideoPlayer: View {
 
   let fileURL: URL
 
@@ -469,7 +473,7 @@ private struct CardSharePreviewVideoPlayer: View {
 /// The stored Doodle timeline is the source of truth, but share videos clamp very
 /// long drawings to a compact replay length and stretch very short drawings so
 /// they remain inspectable after export.
-private struct CardShareVideoRecipe: Sendable, Equatable {
+private struct EntryShareVideoRecipe: Sendable, Equatable {
 
   /// Default export frame rate for replay videos.
   static let defaultFrameRate: Int32 = 60
@@ -491,7 +495,7 @@ private struct CardShareVideoRecipe: Sendable, Equatable {
 
   init(
     drawing: DoodleDrawing,
-    pixelSize: CGSize = CardShareImageRenderer.defaultPixelSize,
+    pixelSize: CGSize = EntryShareImageRenderer.defaultPixelSize,
     frameRate: Int32 = defaultFrameRate,
     minimumReplayDuration: TimeInterval = 1.2,
     maximumReplayDuration: TimeInterval = 12,
@@ -534,7 +538,7 @@ private struct CardShareVideoRecipe: Sendable, Equatable {
 }
 
 /// A sendable color representation for Core Graphics mp4 overlay renderers.
-private struct CardShareVideoRGBA: Sendable, Equatable {
+private struct EntryShareVideoRGBA: Sendable, Equatable {
 
   let red: CGFloat
   let green: CGFloat
@@ -549,31 +553,31 @@ private struct CardShareVideoRGBA: Sendable, Equatable {
   @MainActor
   private init(uiColor: UIColor) {
     #if canImport(UIKit)
-    let resolved = uiColor.resolvedColor(with: .current)
-    var red: CGFloat = 0
-    var green: CGFloat = 0
-    var blue: CGFloat = 0
-    var alpha: CGFloat = 0
+      let resolved = uiColor.resolvedColor(with: .current)
+      var red: CGFloat = 0
+      var green: CGFloat = 0
+      var blue: CGFloat = 0
+      var alpha: CGFloat = 0
 
-    if resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
-      self.init(red: red, green: green, blue: blue, alpha: alpha)
-    } else {
-      let components = resolved.cgColor.components ?? [0, 0, 0, 1]
-      self.init(
-        red: components[safe: 0] ?? 0,
-        green: components[safe: 1] ?? components[safe: 0] ?? 0,
-        blue: components[safe: 2] ?? components[safe: 0] ?? 0,
-        alpha: components[safe: 3] ?? 1
-      )
-    }
+      if resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+        self.init(red: red, green: green, blue: blue, alpha: alpha)
+      } else {
+        let components = resolved.cgColor.components ?? [0, 0, 0, 1]
+        self.init(
+          red: components[safe: 0] ?? 0,
+          green: components[safe: 1] ?? components[safe: 0] ?? 0,
+          blue: components[safe: 2] ?? components[safe: 0] ?? 0,
+          alpha: components[safe: 3] ?? 1
+        )
+      }
     #else
-    let resolved = uiColor.usingColorSpace(.deviceRGB) ?? uiColor
-    var red: CGFloat = 0
-    var green: CGFloat = 0
-    var blue: CGFloat = 0
-    var alpha: CGFloat = 0
-    resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-    self.init(red: red, green: green, blue: blue, alpha: alpha)
+      let resolved = uiColor.usingColorSpace(.deviceRGB) ?? uiColor
+      var red: CGFloat = 0
+      var green: CGFloat = 0
+      var blue: CGFloat = 0
+      var alpha: CGFloat = 0
+      resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+      self.init(red: red, green: green, blue: blue, alpha: alpha)
     #endif
   }
 
@@ -598,21 +602,21 @@ private struct CardShareVideoRGBA: Sendable, Equatable {
 ///
 /// `CGImage` is immutable after rendering; this wrapper keeps the sendability
 /// exception local to the video export boundary.
-private struct CardShareVideoBaseFrame: @unchecked Sendable {
+private struct EntryShareVideoBaseFrame: @unchecked Sendable {
   let image: CGImage
 }
 
 /// Complete, sendable input for a background mp4 render.
-private struct CardShareVideoRenderRequest: Sendable {
+private struct EntryShareVideoRenderRequest: Sendable {
   let snapshotID: UUID
-  let baseFrame: CardShareVideoBaseFrame
+  let baseFrame: EntryShareVideoBaseFrame
   let drawing: DoodleDrawing
-  let recipe: CardShareVideoRecipe
-  let inkColor: CardShareVideoRGBA
+  let recipe: EntryShareVideoRecipe
+  let inkColor: EntryShareVideoRGBA
 }
 
 /// Timing and size settings for a Bauhaus share-video render.
-private struct CardShareBauhausVideoRecipe: Sendable, Equatable {
+private struct EntryShareBauhausVideoRecipe: Sendable, Equatable {
 
   let frameRate: Int32
   let pixelSize: CGSize
@@ -620,8 +624,8 @@ private struct CardShareBauhausVideoRecipe: Sendable, Equatable {
 
   init(
     replay: BauhausGridReplay,
-    pixelSize: CGSize = CardShareImageRenderer.defaultPixelSize,
-    frameRate: Int32 = CardShareVideoRecipe.defaultFrameRate
+    pixelSize: CGSize = EntryShareImageRenderer.defaultPixelSize,
+    frameRate: Int32 = EntryShareVideoRecipe.defaultFrameRate
   ) {
     self.frameRate = max(frameRate, 1)
     self.pixelSize = pixelSize
@@ -634,50 +638,50 @@ private struct CardShareBauhausVideoRecipe: Sendable, Equatable {
 }
 
 /// Complete, sendable input for a Bauhaus background mp4 render.
-private struct CardShareBauhausVideoRenderRequest: Sendable {
+private struct EntryShareBauhausVideoRenderRequest: Sendable {
   let snapshotID: UUID
-  let baseFrame: CardShareVideoBaseFrame
+  let baseFrame: EntryShareVideoBaseFrame
   let replay: BauhausGridReplay
-  let recipe: CardShareBauhausVideoRecipe
-  let colors: CardShareBauhausVideoColors
+  let recipe: EntryShareBauhausVideoRecipe
+  let colors: EntryShareBauhausVideoColors
 }
 
 /// Resolved Bauhaus colors for Core Graphics video drawing.
-private struct CardShareBauhausVideoColors: Sendable, Equatable {
-  let swatches: CardShareBauhausVideoSwatchColors
-  let paper: CardShareVideoRGBA
-  let emptyCell: CardShareVideoRGBA
+private struct EntryShareBauhausVideoColors: Sendable, Equatable {
+  let swatches: EntryShareBauhausVideoSwatchColors
+  let paper: EntryShareVideoRGBA
+  let emptyCell: EntryShareVideoRGBA
 
   @MainActor
   init(colors: BauhausResolvedColors) {
-    self.swatches = CardShareBauhausVideoSwatchColors(colors: colors.swatches)
-    self.paper = CardShareVideoRGBA(color: colors.chrome.paper)
-    self.emptyCell = CardShareVideoRGBA(color: colors.chrome.emptyCell)
+    self.swatches = EntryShareBauhausVideoSwatchColors(colors: colors.swatches)
+    self.paper = EntryShareVideoRGBA(color: colors.chrome.paper)
+    self.emptyCell = EntryShareVideoRGBA(color: colors.chrome.emptyCell)
   }
 }
 
 /// Resolved Bauhaus swatch colors for Core Graphics video drawing.
-private struct CardShareBauhausVideoSwatchColors: Sendable, Equatable {
-  let slot1: CardShareVideoRGBA
-  let slot2: CardShareVideoRGBA
-  let slot3: CardShareVideoRGBA
-  let slot4: CardShareVideoRGBA
-  let slot5: CardShareVideoRGBA
-  let slot6: CardShareVideoRGBA
-  let slot7: CardShareVideoRGBA
+private struct EntryShareBauhausVideoSwatchColors: Sendable, Equatable {
+  let slot1: EntryShareVideoRGBA
+  let slot2: EntryShareVideoRGBA
+  let slot3: EntryShareVideoRGBA
+  let slot4: EntryShareVideoRGBA
+  let slot5: EntryShareVideoRGBA
+  let slot6: EntryShareVideoRGBA
+  let slot7: EntryShareVideoRGBA
 
   @MainActor
   init(colors: BauhausSwatchColors) {
-    self.slot1 = CardShareVideoRGBA(color: colors.slot1)
-    self.slot2 = CardShareVideoRGBA(color: colors.slot2)
-    self.slot3 = CardShareVideoRGBA(color: colors.slot3)
-    self.slot4 = CardShareVideoRGBA(color: colors.slot4)
-    self.slot5 = CardShareVideoRGBA(color: colors.slot5)
-    self.slot6 = CardShareVideoRGBA(color: colors.slot6)
-    self.slot7 = CardShareVideoRGBA(color: colors.slot7)
+    self.slot1 = EntryShareVideoRGBA(color: colors.slot1)
+    self.slot2 = EntryShareVideoRGBA(color: colors.slot2)
+    self.slot3 = EntryShareVideoRGBA(color: colors.slot3)
+    self.slot4 = EntryShareVideoRGBA(color: colors.slot4)
+    self.slot5 = EntryShareVideoRGBA(color: colors.slot5)
+    self.slot6 = EntryShareVideoRGBA(color: colors.slot6)
+    self.slot7 = EntryShareVideoRGBA(color: colors.slot7)
   }
 
-  nonisolated func color(for swatch: BauhausSwatch) -> CardShareVideoRGBA {
+  nonisolated func color(for swatch: BauhausSwatch) -> EntryShareVideoRGBA {
     switch swatch {
     case .slot1:
       return slot1
@@ -698,7 +702,7 @@ private struct CardShareBauhausVideoSwatchColors: Sendable, Equatable {
 }
 
 /// A resolved doodle point ready for Core Graphics video drawing.
-private struct CardShareDoodleRenderPoint {
+private struct EntryShareDoodleRenderPoint {
   var location: CGPoint
   var width: CGFloat
   var hasExplicitWidth: Bool
@@ -718,24 +722,26 @@ private struct CardShareDoodleRenderPoint {
   }
 }
 
-private extension DoodleStroke {
+extension DoodleStroke {
 
   /// The stroke polyline truncated at `limit`, with a synthesized endpoint for
   /// the currently revealing segment.
-  nonisolated func visibleSharePoints(upTo limit: TimeInterval?) -> [CardShareDoodleRenderPoint] {
+  fileprivate nonisolated func visibleSharePoints(upTo limit: TimeInterval?)
+    -> [EntryShareDoodleRenderPoint]
+  {
     guard let first = points.first else { return [] }
 
     guard let limit else {
-      return points.map { CardShareDoodleRenderPoint(point: $0, fallbackWidth: width) }
+      return points.map { EntryShareDoodleRenderPoint(point: $0, fallbackWidth: width) }
     }
 
     guard first.time <= limit else { return [] }
 
-    var result = [CardShareDoodleRenderPoint(point: first, fallbackWidth: width)]
+    var result = [EntryShareDoodleRenderPoint(point: first, fallbackWidth: width)]
     for index in 1..<points.count {
       let point = points[index]
       if point.time <= limit {
-        result.append(CardShareDoodleRenderPoint(point: point, fallbackWidth: width))
+        result.append(EntryShareDoodleRenderPoint(point: point, fallbackWidth: width))
         continue
       }
 
@@ -743,31 +749,32 @@ private extension DoodleStroke {
       let span = point.time - previous.time
       let progress = CGFloat(span > 0 ? (limit - previous.time) / span : 1)
         .clamped(to: 0...1)
-      result.append(CardShareDoodleRenderPoint(
-        location: previous.shareLocation.interpolate(to: point.shareLocation, progress: progress),
-        width: CGFloat(previous.resolvedShareWidth(fallback: width))
-          + (CGFloat(point.resolvedShareWidth(fallback: width))
-            - CGFloat(previous.resolvedShareWidth(fallback: width))) * progress,
-        hasExplicitWidth: previous.width != nil || point.width != nil
-      ))
+      result.append(
+        EntryShareDoodleRenderPoint(
+          location: previous.shareLocation.interpolate(to: point.shareLocation, progress: progress),
+          width: CGFloat(previous.resolvedShareWidth(fallback: width))
+            + (CGFloat(point.resolvedShareWidth(fallback: width))
+              - CGFloat(previous.resolvedShareWidth(fallback: width))) * progress,
+          hasExplicitWidth: previous.width != nil || point.width != nil
+        ))
       break
     }
     return result
   }
 }
 
-private extension DoodlePoint {
+extension DoodlePoint {
 
-  nonisolated var shareLocation: CGPoint {
+  fileprivate nonisolated var shareLocation: CGPoint {
     CGPoint(x: x, y: y)
   }
 
-  nonisolated func resolvedShareWidth(fallback: Double) -> Double {
+  fileprivate nonisolated func resolvedShareWidth(fallback: Double) -> Double {
     width ?? fallback
   }
 }
 
-private enum CardShareCGPathFactory {
+private enum EntryShareCGPathFactory {
 
   /// Core Graphics smooth path used by the Doodle video renderer.
   nonisolated static func smoothPath(points: [CGPoint]) -> CGPath {
@@ -793,23 +800,23 @@ private enum CardShareCGPathFactory {
   }
 }
 
-private extension CGPoint {
+extension CGPoint {
 
-  nonisolated func interpolate(to point: CGPoint, progress: CGFloat) -> CGPoint {
+  fileprivate nonisolated func interpolate(to point: CGPoint, progress: CGFloat) -> CGPoint {
     CGPoint(
       x: x + (point.x - x) * progress,
       y: y + (point.y - y) * progress
     )
   }
 
-  nonisolated func distance(to point: CGPoint) -> CGFloat {
+  fileprivate nonisolated func distance(to point: CGPoint) -> CGFloat {
     hypot(x - point.x, y - point.y)
   }
 }
 
-private extension CGRect {
+extension CGRect {
 
-  nonisolated func scaledAboutCenter(by scale: CGFloat) -> CGRect {
+  fileprivate nonisolated func scaledAboutCenter(by scale: CGFloat) -> CGRect {
     insetBy(
       dx: width * (1 - scale) / 2,
       dy: height * (1 - scale) / 2
@@ -817,10 +824,10 @@ private extension CGRect {
   }
 }
 
-private extension Array where Element == CardShareDoodleRenderPoint {
+extension Array where Element == EntryShareDoodleRenderPoint {
 
-  nonisolated func removingNearDuplicates() -> [CardShareDoodleRenderPoint] {
-    var result: [CardShareDoodleRenderPoint] = []
+  fileprivate nonisolated func removingNearDuplicates() -> [EntryShareDoodleRenderPoint] {
+    var result: [EntryShareDoodleRenderPoint] = []
     for point in self {
       guard let previous = result.last else {
         result.append(point)
@@ -835,9 +842,9 @@ private extension Array where Element == CardShareDoodleRenderPoint {
   }
 }
 
-private extension Array {
+extension Array {
 
-  nonisolated subscript(safe index: Int) -> Element? {
+  fileprivate nonisolated subscript(safe index: Int) -> Element? {
     indices.contains(index) ? self[index] : nil
   }
 }
@@ -846,25 +853,24 @@ private extension Array {
 ///
 /// This MainActor boundary resolves UI-owned inputs once: the static SwiftUI
 /// share frame and render colors. The heavy frame loop is handed to
-/// `CardShareVideoRenderWorker`, which composites the moving replay layer and
+/// `EntryShareVideoRenderWorker`, which composites the moving replay layer and
 /// appends frames to `AVAssetWriter` off the main actor.
 @MainActor
-enum CardShareVideoRenderer {
+enum EntryShareVideoRenderer {
 
   /// Writes a replay mp4 for a Doodle snapshot into a temporary file.
   static func mp4File(
-    for snapshot: CardShareSnapshot,
+    for snapshot: EntryShareSnapshot,
     palette: Palette = .default,
     colorScheme: ColorScheme = .light,
-    pixelSize: CGSize = CardShareImageRenderer.defaultPixelSize,
-    frameRate: Int32 = CardShareVideoRecipe.defaultFrameRate,
+    pixelSize: CGSize = EntryShareImageRenderer.defaultPixelSize,
+    frameRate: Int32 = EntryShareVideoRecipe.defaultFrameRate,
     directory: URL = FileManager.default.temporaryDirectory
   ) async throws -> URL {
-    guard case .doodle(let drawingData, _) = snapshot.content,
-      let drawingData,
-      let drawing = try? JSONDecoder().decode(DoodleDrawing.self, from: drawingData)
+    guard case .doodle(let source) = snapshot.content,
+      let drawing = source.drawing
     else {
-      throw CardShareVideoRendererError.missingDoodleDrawing
+      throw EntryShareVideoRendererError.missingDoodleDrawing
     }
 
     return try await mp4File(
@@ -880,38 +886,39 @@ enum CardShareVideoRenderer {
 
   /// Writes a replay mp4 for an already-decoded Doodle drawing.
   static func mp4File(
-    for snapshot: CardShareSnapshot,
+    for snapshot: EntryShareSnapshot,
     drawing: DoodleDrawing,
     palette: Palette = .default,
     colorScheme: ColorScheme = .light,
-    pixelSize: CGSize = CardShareImageRenderer.defaultPixelSize,
-    frameRate: Int32 = CardShareVideoRecipe.defaultFrameRate,
+    pixelSize: CGSize = EntryShareImageRenderer.defaultPixelSize,
+    frameRate: Int32 = EntryShareVideoRecipe.defaultFrameRate,
     directory: URL = FileManager.default.temporaryDirectory
   ) async throws -> URL {
-    guard let baseFrameImage = CardShareImageRenderer.doodleVideoBaseImage(
-      for: snapshot,
-      palette: palette,
-      colorScheme: colorScheme,
-      pixelSize: pixelSize
-    )?.cgImage
+    guard
+      let baseFrameImage = EntryShareImageRenderer.doodleVideoBaseImage(
+        for: snapshot,
+        palette: palette,
+        colorScheme: colorScheme,
+        pixelSize: pixelSize
+      )?.cgImage
     else {
-      throw CardShareVideoRendererError.renderingFailed
+      throw EntryShareVideoRendererError.renderingFailed
     }
 
-    let recipe = CardShareVideoRecipe(
+    let recipe = EntryShareVideoRecipe(
       drawing: drawing,
       pixelSize: pixelSize,
       frameRate: frameRate
     )
-    let request = CardShareVideoRenderRequest(
+    let request = EntryShareVideoRenderRequest(
       snapshotID: snapshot.id,
-      baseFrame: CardShareVideoBaseFrame(image: baseFrameImage),
+      baseFrame: EntryShareVideoBaseFrame(image: baseFrameImage),
       drawing: drawing,
       recipe: recipe,
-      inkColor: CardShareVideoRGBA(color: palette.onSecondaryContainer)
+      inkColor: EntryShareVideoRGBA(color: palette.onSecondaryContainer)
     )
 
-    return try await CardShareVideoRenderWorker().mp4File(
+    return try await EntryShareVideoRenderWorker().mp4File(
       request: request,
       directory: directory
     )
@@ -919,46 +926,47 @@ enum CardShareVideoRenderer {
 
   /// Writes a replay mp4 for an already-decoded Bauhaus document.
   static func mp4File(
-    for snapshot: CardShareSnapshot,
+    for snapshot: EntryShareSnapshot,
     bauhausDocument document: BauhausGridDocument,
     palette: Palette = .default,
     colorScheme: ColorScheme = .light,
-    pixelSize: CGSize = CardShareImageRenderer.defaultPixelSize,
-    frameRate: Int32 = CardShareVideoRecipe.defaultFrameRate,
+    pixelSize: CGSize = EntryShareImageRenderer.defaultPixelSize,
+    frameRate: Int32 = EntryShareVideoRecipe.defaultFrameRate,
     directory: URL = FileManager.default.temporaryDirectory
   ) async throws -> URL {
     guard let replay = document.replay, replay.isEmpty == false else {
-      throw CardShareVideoRendererError.missingBauhausReplay
+      throw EntryShareVideoRendererError.missingBauhausReplay
     }
 
-    guard let baseFrameImage = CardShareImageRenderer.bauhausVideoBaseImage(
-      for: snapshot,
-      palette: palette,
-      colorScheme: colorScheme,
-      pixelSize: pixelSize
-    )?.cgImage
+    guard
+      let baseFrameImage = EntryShareImageRenderer.bauhausVideoBaseImage(
+        for: snapshot,
+        palette: palette,
+        colorScheme: colorScheme,
+        pixelSize: pixelSize
+      )?.cgImage
     else {
-      throw CardShareVideoRendererError.renderingFailed
+      throw EntryShareVideoRendererError.renderingFailed
     }
 
     let playbackReplay = replay.presentationTimeline(
       eventInterval: BauhausGridReplayRecipe.eventInterval
     )
-    let request = CardShareBauhausVideoRenderRequest(
+    let request = EntryShareBauhausVideoRenderRequest(
       snapshotID: snapshot.id,
-      baseFrame: CardShareVideoBaseFrame(image: baseFrameImage),
+      baseFrame: EntryShareVideoBaseFrame(image: baseFrameImage),
       replay: playbackReplay,
-      recipe: CardShareBauhausVideoRecipe(
+      recipe: EntryShareBauhausVideoRecipe(
         replay: playbackReplay,
         pixelSize: pixelSize,
         frameRate: frameRate
       ),
-      colors: CardShareBauhausVideoColors(
+      colors: EntryShareBauhausVideoColors(
         colors: BauhausColorPalette.default.colors(for: colorScheme)
       )
     )
 
-    return try await CardShareVideoRenderWorker().mp4File(
+    return try await EntryShareVideoRenderWorker().mp4File(
       request: request,
       directory: directory
     )
@@ -970,13 +978,13 @@ enum CardShareVideoRenderer {
 /// This actor keeps the expensive frame loop and `AVAssetWriter` work away from
 /// the main actor. The preview and static video chrome stay SwiftUI-native;
 /// export only redraws the moving replay layer for each video frame.
-private actor CardShareVideoRenderWorker {
+private actor EntryShareVideoRenderWorker {
 
   /// Number of generated frames between cooperative scheduler yields.
   private static let cooperativeYieldFrameInterval = 4
 
   func mp4File(
-    request: CardShareVideoRenderRequest,
+    request: EntryShareVideoRenderRequest,
     directory: URL
   ) async throws -> URL {
     let recipe = request.recipe
@@ -996,13 +1004,13 @@ private actor CardShareVideoRenderWorker {
     )
 
     guard writer.canAdd(input) else {
-      throw CardShareVideoRendererError.cannotAddVideoInput
+      throw EntryShareVideoRendererError.cannotAddVideoInput
     }
 
     writer.add(input)
 
     guard writer.startWriting() else {
-      throw CardShareVideoRendererError.startWritingFailed
+      throw EntryShareVideoRendererError.startWritingFailed
     }
     writer.startSession(atSourceTime: .zero)
     var didCompleteWriting = false
@@ -1028,7 +1036,7 @@ private actor CardShareVideoRenderWorker {
       try drawFrame(request: request, sourceTime: sourceTime, into: pixelBuffer)
 
       guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
-        throw CardShareVideoRendererError.appendFailed
+        throw EntryShareVideoRendererError.appendFailed
       }
 
       if (frameIndex + 1).isMultiple(of: Self.cooperativeYieldFrameInterval) {
@@ -1044,11 +1052,12 @@ private actor CardShareVideoRenderWorker {
   }
 
   func mp4File(
-    request: CardShareBauhausVideoRenderRequest,
+    request: EntryShareBauhausVideoRenderRequest,
     directory: URL
   ) async throws -> URL {
     let recipe = request.recipe
-    let outputURL = directory.appending(path: "Journal-\(request.snapshotID.uuidString)-Bauhaus-Replay.mp4")
+    let outputURL = directory.appending(
+      path: "Journal-\(request.snapshotID.uuidString)-Bauhaus-Replay.mp4")
     try? FileManager.default.removeItem(at: outputURL)
 
     let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
@@ -1064,13 +1073,13 @@ private actor CardShareVideoRenderWorker {
     )
 
     guard writer.canAdd(input) else {
-      throw CardShareVideoRendererError.cannotAddVideoInput
+      throw EntryShareVideoRendererError.cannotAddVideoInput
     }
 
     writer.add(input)
 
     guard writer.startWriting() else {
-      throw CardShareVideoRendererError.startWritingFailed
+      throw EntryShareVideoRendererError.startWritingFailed
     }
     writer.startSession(atSourceTime: .zero)
     var didCompleteWriting = false
@@ -1095,7 +1104,7 @@ private actor CardShareVideoRenderWorker {
       try drawFrame(request: request, videoTime: videoTime, into: pixelBuffer)
 
       guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
-        throw CardShareVideoRendererError.appendFailed
+        throw EntryShareVideoRendererError.appendFailed
       }
 
       if (frameIndex + 1).isMultiple(of: Self.cooperativeYieldFrameInterval) {
@@ -1153,14 +1162,14 @@ private actor CardShareVideoRenderWorker {
     }
 
     guard status == kCVReturnSuccess, let pixelBuffer else {
-      throw CardShareVideoRendererError.pixelBufferCreationFailed
+      throw EntryShareVideoRendererError.pixelBufferCreationFailed
     }
 
     return pixelBuffer
   }
 
   private func drawFrame(
-    request: CardShareVideoRenderRequest,
+    request: EntryShareVideoRenderRequest,
     sourceTime: TimeInterval,
     into pixelBuffer: CVPixelBuffer
   ) throws {
@@ -1182,7 +1191,7 @@ private actor CardShareVideoRenderWorker {
           | CGImageAlphaInfo.premultipliedFirst.rawValue
       )
     else {
-      throw CardShareVideoRendererError.bitmapContextCreationFailed
+      throw EntryShareVideoRendererError.bitmapContextCreationFailed
     }
 
     context.clear(CGRect(origin: .zero, size: pixelSize))
@@ -1202,7 +1211,7 @@ private actor CardShareVideoRenderWorker {
   }
 
   private func drawFrame(
-    request: CardShareBauhausVideoRenderRequest,
+    request: EntryShareBauhausVideoRenderRequest,
     videoTime: TimeInterval,
     into pixelBuffer: CVPixelBuffer
   ) throws {
@@ -1224,7 +1233,7 @@ private actor CardShareVideoRenderWorker {
           | CGImageAlphaInfo.premultipliedFirst.rawValue
       )
     else {
-      throw CardShareVideoRendererError.bitmapContextCreationFailed
+      throw EntryShareVideoRendererError.bitmapContextCreationFailed
     }
 
     context.clear(CGRect(origin: .zero, size: pixelSize))
@@ -1259,7 +1268,7 @@ private actor CardShareVideoRenderWorker {
     context.restoreGState()
   }
 
-  /// Content rect that mirrors the media well in `CardShareExportFrame`.
+  /// Content rect that mirrors the media well in `EntryShareExportFrame`.
   private nonisolated static func shareContentRect(in pixelSize: CGSize) -> CGRect {
     let frameRect = CGRect(origin: .zero, size: pixelSize)
     let paperRect = frameRect.insetBy(dx: 72, dy: 72)
@@ -1280,7 +1289,7 @@ private actor CardShareVideoRenderWorker {
   private func drawDoodleFrame(
     drawing: DoodleDrawing,
     sourceTime: TimeInterval,
-    inkColor: CardShareVideoRGBA,
+    inkColor: EntryShareVideoRGBA,
     in rect: CGRect,
     context: CGContext
   ) {
@@ -1330,7 +1339,7 @@ private actor CardShareVideoRenderWorker {
     replay: BauhausGridReplay,
     videoTime: TimeInterval,
     recipe: BauhausGridReplayRecipe,
-    colors: CardShareBauhausVideoColors,
+    colors: EntryShareBauhausVideoColors,
     in rect: CGRect,
     context: CGContext
   ) {
@@ -1376,7 +1385,7 @@ private actor CardShareVideoRenderWorker {
     replayFrame: BauhausGridReplayFrame,
     videoTime: TimeInterval,
     recipe: BauhausGridReplayRecipe,
-    colors: CardShareBauhausVideoColors,
+    colors: EntryShareBauhausVideoColors,
     in rect: CGRect,
     context: CGContext
   ) {
@@ -1423,7 +1432,7 @@ private actor CardShareVideoRenderWorker {
   private func drawStroke(
     _ stroke: DoodleStroke,
     upTo limit: TimeInterval,
-    inkColor: CardShareVideoRGBA,
+    inkColor: EntryShareVideoRGBA,
     context: CGContext
   ) {
     let points = stroke.visibleSharePoints(upTo: limit)
@@ -1434,12 +1443,13 @@ private actor CardShareVideoRenderWorker {
 
     guard points.count > 1 else {
       let radius = first.width / 2
-      context.fillEllipse(in: CGRect(
-        x: first.location.x - radius,
-        y: first.location.y - radius,
-        width: first.width,
-        height: first.width
-      ))
+      context.fillEllipse(
+        in: CGRect(
+          x: first.location.x - radius,
+          y: first.location.y - radius,
+          width: first.width,
+          height: first.width
+        ))
       return
     }
 
@@ -1458,14 +1468,14 @@ private actor CardShareVideoRenderWorker {
       }
     } else {
       context.setLineWidth(CGFloat(stroke.width))
-      context.addPath(CardShareCGPathFactory.smoothPath(points: points.map(\.location)))
+      context.addPath(EntryShareCGPathFactory.smoothPath(points: points.map(\.location)))
       context.strokePath()
     }
   }
 }
 
 /// Failures produced while creating a share video.
-enum CardShareVideoRendererError: Error {
+enum EntryShareVideoRendererError: Error {
   /// The card did not contain decodable `DoodleDrawing` JSON.
   case missingDoodleDrawing
 
@@ -1499,7 +1509,7 @@ enum CardShareVideoRendererError: Error {
 /// `AVAssetWriter` is not `Sendable`, but `finishWriting` invokes a sendable
 /// completion handler. The renderer only reads `status` and `error` after
 /// AVFoundation finishes, so this box keeps that boundary explicit and local.
-private final class CardShareAssetWriterBox: @unchecked Sendable {
+private final class EntryShareAssetWriterBox: @unchecked Sendable {
   nonisolated(unsafe) let writer: AVAssetWriter
 
   nonisolated init(_ writer: AVAssetWriter) {
@@ -1507,25 +1517,26 @@ private final class CardShareAssetWriterBox: @unchecked Sendable {
   }
 }
 
-private extension AVAssetWriter {
+extension AVAssetWriter {
 
-  nonisolated func finishWritingChecked() async throws {
-    let writerBox = CardShareAssetWriterBox(self)
+  fileprivate nonisolated func finishWritingChecked() async throws {
+    let writerBox = EntryShareAssetWriterBox(self)
     try await withCheckedThrowingContinuation { continuation in
       finishWriting {
         if writerBox.writer.status == .completed {
           continuation.resume()
         } else {
-          continuation.resume(throwing: writerBox.writer.error ?? CardShareVideoRendererError.finishFailed)
+          continuation.resume(
+            throwing: writerBox.writer.error ?? EntryShareVideoRendererError.finishFailed)
         }
       }
     }
   }
 }
 
-private extension Comparable {
+extension Comparable {
 
-  nonisolated func clamped(to range: ClosedRange<Self>) -> Self {
+  fileprivate nonisolated func clamped(to range: ClosedRange<Self>) -> Self {
     min(max(self, range.lowerBound), range.upperBound)
   }
 }

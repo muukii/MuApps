@@ -1,9 +1,10 @@
 import AVFoundation
 import SwiftUI
+
 #if canImport(UIKit)
-import UIKit
+  import UIKit
 #elseif canImport(AppKit)
-import AppKit
+  import AppKit
 #endif
 
 /// Configures AVFoundation playback objects for SwiftUI Observation.
@@ -25,7 +26,7 @@ public enum VideoPlaybackObservationConfiguration {
   }
 }
 
-/// A muted, looping video layer for compact card previews.
+/// A muted, looping video layer for authored video content.
 ///
 /// The SwiftUI view owns the playback objects in `@State` and observes their
 /// AVFoundation state directly. The UIKit bridge only exposes an `AVPlayerLayer`
@@ -153,119 +154,119 @@ private struct MutedLoopingVideoPlayback {
 
 /// A minimal UIKit bridge that displays an existing player in an `AVPlayerLayer`.
 #if canImport(UIKit)
-private struct MutedLoopingVideoPlayerLayer: UIViewRepresentable {
+  private struct MutedLoopingVideoPlayerLayer: UIViewRepresentable {
 
-  let player: AVPlayer
-  let videoGravity: AVLayerVideoGravity
+    let player: AVPlayer
+    let videoGravity: AVLayerVideoGravity
 
-  func makeUIView(context: Context) -> MutedLoopingVideoPlayerLayerView {
-    MutedLoopingVideoPlayerLayerView()
+    func makeUIView(context: Context) -> MutedLoopingVideoPlayerLayerView {
+      MutedLoopingVideoPlayerLayerView()
+    }
+
+    func updateUIView(
+      _ uiView: MutedLoopingVideoPlayerLayerView,
+      context: Context
+    ) {
+      uiView.configure(
+        player: player,
+        videoGravity: videoGravity
+      )
+    }
+
+    static func dismantleUIView(
+      _ uiView: MutedLoopingVideoPlayerLayerView,
+      coordinator: ()
+    ) {
+      uiView.removePlayer()
+    }
   }
-
-  func updateUIView(
-    _ uiView: MutedLoopingVideoPlayerLayerView,
-    context: Context
-  ) {
-    uiView.configure(
-      player: player,
-      videoGravity: videoGravity
-    )
-  }
-
-  static func dismantleUIView(
-    _ uiView: MutedLoopingVideoPlayerLayerView,
-    coordinator: ()
-  ) {
-    uiView.removePlayer()
-  }
-}
 #elseif canImport(AppKit)
-/// Native AppKit host for the shared `AVPlayerLayer` playback state.
-private struct MutedLoopingVideoPlayerLayer: NSViewRepresentable {
-  let player: AVPlayer
-  let videoGravity: AVLayerVideoGravity
+  /// Native AppKit host for the shared `AVPlayerLayer` playback state.
+  private struct MutedLoopingVideoPlayerLayer: NSViewRepresentable {
+    let player: AVPlayer
+    let videoGravity: AVLayerVideoGravity
 
-  func makeNSView(context: Context) -> MutedLoopingVideoPlayerLayerView {
-    MutedLoopingVideoPlayerLayerView()
-  }
+    func makeNSView(context: Context) -> MutedLoopingVideoPlayerLayerView {
+      MutedLoopingVideoPlayerLayerView()
+    }
 
-  func updateNSView(
-    _ nsView: MutedLoopingVideoPlayerLayerView,
-    context: Context
-  ) {
-    nsView.configure(player: player, videoGravity: videoGravity)
-  }
+    func updateNSView(
+      _ nsView: MutedLoopingVideoPlayerLayerView,
+      context: Context
+    ) {
+      nsView.configure(player: player, videoGravity: videoGravity)
+    }
 
-  static func dismantleNSView(
-    _ nsView: MutedLoopingVideoPlayerLayerView,
-    coordinator: ()
-  ) {
-    nsView.removePlayer()
-  }
-}
-
-@MainActor
-private final class MutedLoopingVideoPlayerLayerView: NSView {
-  private let playerLayer = AVPlayerLayer()
-
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
-    wantsLayer = true
-    layer?.addSublayer(playerLayer)
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  override func layout() {
-    super.layout()
-    playerLayer.frame = bounds
-  }
-
-  func configure(player: AVPlayer, videoGravity: AVLayerVideoGravity) {
-    playerLayer.videoGravity = videoGravity
-    if playerLayer.player !== player {
-      playerLayer.player = player
+    static func dismantleNSView(
+      _ nsView: MutedLoopingVideoPlayerLayerView,
+      coordinator: ()
+    ) {
+      nsView.removePlayer()
     }
   }
 
-  func removePlayer() {
-    playerLayer.player = nil
+  @MainActor
+  private final class MutedLoopingVideoPlayerLayerView: NSView {
+    private let playerLayer = AVPlayerLayer()
+
+    override init(frame frameRect: NSRect) {
+      super.init(frame: frameRect)
+      wantsLayer = true
+      layer?.addSublayer(playerLayer)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+      fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+      super.layout()
+      playerLayer.frame = bounds
+    }
+
+    func configure(player: AVPlayer, videoGravity: AVLayerVideoGravity) {
+      playerLayer.videoGravity = videoGravity
+      if playerLayer.player !== player {
+        playerLayer.player = player
+      }
+    }
+
+    func removePlayer() {
+      playerLayer.player = nil
+    }
   }
-}
 #endif
 
 #if canImport(UIKit)
-@MainActor
-private final class MutedLoopingVideoPlayerLayerView: UIView {
+  @MainActor
+  private final class MutedLoopingVideoPlayerLayerView: UIView {
 
-  override static var layerClass: AnyClass {
-    AVPlayerLayer.self
-  }
-
-  private var playerLayer: AVPlayerLayer {
-    layer as! AVPlayerLayer
-  }
-
-  func configure(
-    player: AVPlayer,
-    videoGravity: AVLayerVideoGravity
-  ) {
-    playerLayer.videoGravity = videoGravity
-
-    guard playerLayer.player !== player else {
-      return
+    override static var layerClass: AnyClass {
+      AVPlayerLayer.self
     }
 
-    playerLayer.player = player
-  }
+    private var playerLayer: AVPlayerLayer {
+      layer as! AVPlayerLayer
+    }
 
-  func removePlayer() {
-    playerLayer.player = nil
+    func configure(
+      player: AVPlayer,
+      videoGravity: AVLayerVideoGravity
+    ) {
+      playerLayer.videoGravity = videoGravity
+
+      guard playerLayer.player !== player else {
+        return
+      }
+
+      playerLayer.player = player
+    }
+
+    func removePlayer() {
+      playerLayer.player = nil
+    }
   }
-}
 #endif
 
 #Preview("Muted Looping Video Player") {

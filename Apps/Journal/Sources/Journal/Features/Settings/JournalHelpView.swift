@@ -30,7 +30,7 @@ struct JournalHelpView: View {
 // MARK: - Content
 
 /// Static help copy for common Journal data and account questions.
-fileprivate enum JournalHelpContent {
+private enum JournalHelpContent {
 
   static let introduction: LocalizedStringResource =
     "Quick answers for sync, storage, deletion, widgets, and privacy."
@@ -41,12 +41,14 @@ fileprivate enum JournalHelpContent {
         id: "icloud-sync",
         title: "iCloud Sync",
         symbolName: "icloud",
-        summary: "Tinycurve stores vaults locally and syncs them with Apple's CloudKit when iCloud is available.",
+        summary:
+          "Tinycurve stores vaults locally and syncs them with Apple's CloudKit when iCloud is available.",
         points: [
           JournalHelpPoint(
             id: "local-first",
             title: "Local first",
-            body: "Cards and media are saved on this device first, then synced through the vault's CloudKit zone."
+            body:
+              "Entries and media are saved on this device first, then synced through the vault's CloudKit zone."
           ),
           JournalHelpPoint(
             id: "no-developer-server",
@@ -59,22 +61,26 @@ fileprivate enum JournalHelpContent {
         id: "deleting-data",
         title: "Deleting Data",
         symbolName: "trash",
-        summary: "Delete owned vaults from Tinycurve when you want to remove the CloudKit data your Apple Account owns.",
+        summary:
+          "Delete owned vaults from Tinycurve when you want to remove the CloudKit data your Apple Account owns.",
         points: [
           JournalHelpPoint(
             id: "owned-vault",
             title: "Owned vaults",
-            body: "Deleting an owned vault removes its CloudKit zone before local files, so everyone with access loses that vault."
+            body:
+              "Deleting an owned vault removes its CloudKit zone before local files, so everyone with access loses that vault."
           ),
           JournalHelpPoint(
             id: "shared-vault",
             title: "Shared vaults",
-            body: "Deleting a vault shared with you removes it from your account. The owner controls whether the source vault is deleted."
+            body:
+              "Deleting a vault shared with you removes it from your account. The owner controls whether the source vault is deleted."
           ),
           JournalHelpPoint(
             id: "app-delete",
             title: "Deleting the app",
-            body: "Removing Tinycurve from a device removes local files from that device, but it is not the same as deleting CloudKit data."
+            body:
+              "Removing Tinycurve from a device removes local files from that device, but it is not the same as deleting CloudKit data."
           ),
         ]
       ),
@@ -82,17 +88,20 @@ fileprivate enum JournalHelpContent {
         id: "storage",
         title: "Cloud Storage",
         symbolName: "externaldrive.badge.icloud",
-        summary: "The Cloud Storage screen estimates how much Journal payload is stored through CloudKit.",
+        summary:
+          "The Cloud Storage screen estimates how much Journal payload is stored through CloudKit.",
         points: [
           JournalHelpPoint(
             id: "estimate",
             title: "Estimate only",
-            body: "CloudKit does not expose exact iCloud quota usage to apps, so Tinycurve calculates from local vault records and attachment sizes."
+            body:
+              "CloudKit does not expose exact iCloud quota usage to apps, so Tinycurve calculates from local vault records and attachment sizes."
           ),
           JournalHelpPoint(
             id: "quota-owner",
             title: "Storage owner",
-            body: "Owned vaults count toward your iCloud storage. Shared vaults are charged to the originating owner's iCloud storage."
+            body:
+              "Owned vaults count toward your iCloud storage. Shared vaults are charged to the originating owner's iCloud storage."
           ),
         ]
       ),
@@ -100,12 +109,13 @@ fileprivate enum JournalHelpContent {
         id: "widgets",
         title: "Widgets",
         symbolName: "square.grid.2x2",
-        summary: "Widgets read the vault you choose and render the latest card locally.",
+        summary: "Widgets read the vault you choose and render the latest entry locally.",
         points: [
           JournalHelpPoint(
             id: "vault-choice",
             title: "Choose a vault",
-            body: "Edit the widget configuration to choose which vault appears on the Home Screen, Lock Screen, or StandBy."
+            body:
+              "Edit the widget configuration to choose which vault appears on the Home Screen, Lock Screen, or StandBy."
           ),
           JournalHelpPoint(
             id: "local-render",
@@ -123,7 +133,8 @@ fileprivate enum JournalHelpContent {
           JournalHelpPoint(
             id: "permissions",
             title: "Optional permissions",
-            body: "Camera, microphone, Photos, location, and Journaling Suggestions are used only for the cards you choose to create."
+            body:
+              "Camera, microphone, Photos, location, and Journaling Suggestions are used only for the content you choose to create."
           ),
           JournalHelpPoint(
             id: "policy",
@@ -135,26 +146,29 @@ fileprivate enum JournalHelpContent {
     ]
 
     #if DEBUG
-    topics.append(
-      JournalHelpTopic(
-        id: "developer-builds",
-        title: "Developer Builds",
-        symbolName: "hammer",
-        summary: "Debug builds use CloudKit Development. TestFlight and App Store builds use CloudKit Production.",
-        points: [
-          JournalHelpPoint(
-            id: "separate-environments",
-            title: "Separate data",
-            body: "Development and production have separate local vault stores, sync state, and CloudKit records."
-          ),
-          JournalHelpPoint(
-            id: "production-delete",
-            title: "Production deletion",
-            body: "To delete production CloudKit data, run the deletion flow from a production build or CloudKit Console production data."
-          ),
-        ]
+      topics.append(
+        JournalHelpTopic(
+          id: "developer-builds",
+          title: "Developer Builds",
+          symbolName: "hammer",
+          summary:
+            "Debug builds use CloudKit Development. TestFlight and App Store builds use CloudKit Production.",
+          points: [
+            JournalHelpPoint(
+              id: "separate-environments",
+              title: "Separate data",
+              body:
+                "Development and production have separate local vault stores, sync state, and CloudKit records."
+            ),
+            JournalHelpPoint(
+              id: "production-delete",
+              title: "Production deletion",
+              body:
+                "To delete production CloudKit data, run the deletion flow from a production build or CloudKit Console production data."
+            ),
+          ]
+        )
       )
-    )
     #endif
 
     return topics
@@ -162,7 +176,7 @@ fileprivate enum JournalHelpContent {
 }
 
 /// One help topic card shown on the Help screen.
-fileprivate struct JournalHelpTopic: Identifiable {
+private struct JournalHelpTopic: Identifiable {
 
   let id: String
   let title: LocalizedStringResource
@@ -172,7 +186,7 @@ fileprivate struct JournalHelpTopic: Identifiable {
 }
 
 /// A short actionable note inside one help topic.
-fileprivate struct JournalHelpPoint: Identifiable {
+private struct JournalHelpPoint: Identifiable {
 
   let id: String
   let title: LocalizedStringResource
@@ -182,7 +196,7 @@ fileprivate struct JournalHelpPoint: Identifiable {
 // MARK: - Fileprivate Views
 
 /// Header copy for the Help screen.
-fileprivate struct JournalHelpHeroView: View {
+private struct JournalHelpHeroView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -208,7 +222,7 @@ fileprivate struct JournalHelpHeroView: View {
 }
 
 /// A compact card for one support topic.
-fileprivate struct JournalHelpTopicCard: View {
+private struct JournalHelpTopicCard: View {
 
   let topic: JournalHelpTopic
 
@@ -232,7 +246,7 @@ fileprivate struct JournalHelpTopicCard: View {
 }
 
 /// Icon, title, and one-sentence summary for a help topic.
-fileprivate struct JournalHelpTopicHeader: View {
+private struct JournalHelpTopicHeader: View {
 
   let topic: JournalHelpTopic
 
@@ -260,7 +274,7 @@ fileprivate struct JournalHelpTopicHeader: View {
 }
 
 /// One short answer inside a topic card.
-fileprivate struct JournalHelpPointRow: View {
+private struct JournalHelpPointRow: View {
 
   let point: JournalHelpPoint
 

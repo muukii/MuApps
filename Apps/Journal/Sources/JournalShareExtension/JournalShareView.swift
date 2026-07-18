@@ -76,7 +76,7 @@ struct JournalShareView: View {
     } header: {
       Text("Comment")
     } footer: {
-      Text("A comment becomes the first card in the new entry.")
+      Text("A comment becomes the first piece of content in the new entry.")
     }
   }
 

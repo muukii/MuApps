@@ -6,16 +6,17 @@ import JournalVault
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
-#if canImport(UIKit)
-import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
 import WidgetKit
+
+#if canImport(UIKit)
+  import UIKit
+#elseif canImport(AppKit)
+  import AppKit
+#endif
 
 // MARK: - Widget
 
-/// Shows the latest card from one configured Journal vault on Home Screen, Lock
+/// Shows the latest entry from one configured Tinycurve vault on Home Screen, Lock
 /// Screen, and StandBy widget surfaces.
 ///
 /// Each widget instance owns its vault choice through WidgetKit configuration.
@@ -25,14 +26,14 @@ struct LatestNoteWidget: Widget {
 
   private let kind = JournalWidgetKind.latestNote
   #if os(iOS)
-  private let supportedFamilies: [WidgetFamily] = [
-    .systemSmall, .systemMedium, .systemLarge,
-    .accessoryInline, .accessoryCircular, .accessoryRectangular,
-  ]
+    private let supportedFamilies: [WidgetFamily] = [
+      .systemSmall, .systemMedium, .systemLarge,
+      .accessoryInline, .accessoryCircular, .accessoryRectangular,
+    ]
   #else
-  private let supportedFamilies: [WidgetFamily] = [
-    .systemSmall, .systemMedium, .systemLarge,
-  ]
+    private let supportedFamilies: [WidgetFamily] = [
+      .systemSmall, .systemMedium, .systemLarge,
+    ]
   #endif
 
   var body: some WidgetConfiguration {
@@ -45,7 +46,7 @@ struct LatestNoteWidget: Widget {
         .containerBackground(.background, for: .widget)
     }
     .configurationDisplayName("Latest Note")
-    .description("Shows the latest card from the vault you choose.")
+    .description("Shows the latest entry from the vault you choose.")
     .supportedFamilies(supportedFamilies)
   }
 }
@@ -181,11 +182,14 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
     return Timeline(entries: [entry], policy: .after(next))
   }
 
-  private func loadEntry(for configuration: LatestNoteWidgetConfiguration) async -> LatestNoteEntry {
+  private func loadEntry(for configuration: LatestNoteWidgetConfiguration) async -> LatestNoteEntry
+  {
     do {
-      guard let vault = try await JournalWidgetVaultCatalogReader.resolvedVault(
-        for: configuration.vault
-      ) else {
+      guard
+        let vault = try await JournalWidgetVaultCatalogReader.resolvedVault(
+          for: configuration.vault
+        )
+      else {
         return LatestNoteEntry(date: .now, vault: nil, note: nil)
       }
 
@@ -247,9 +251,10 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
       return nil
     }
 
-    guard let attachment = card.attachments
-      .sorted(using: KeyPathComparator(\.createdAt))
-      .first(where: { $0.kind == attachmentKind })
+    guard
+      let attachment = card.attachments
+        .sorted(using: KeyPathComparator(\.createdAt))
+        .first(where: { $0.kind == attachmentKind })
     else {
       return nil
     }
@@ -385,7 +390,8 @@ private enum JournalWidgetVaultCatalogReader {
     guard descriptors.isEmpty == false else { return nil }
 
     if let entity,
-       let descriptor = descriptors.first(where: { $0.vaultID.uuidString == entity.id }) {
+      let descriptor = descriptors.first(where: { $0.vaultID.uuidString == entity.id })
+    {
       return WidgetVaultSnapshot(descriptor: descriptor)
     }
 
@@ -410,25 +416,25 @@ private struct LatestNoteView: View {
 
   var body: some View {
     #if os(iOS)
-    switch family {
-    case .accessoryInline:
-      LatestNoteInlineAccessoryView(entry: entry)
-    case .accessoryCircular:
-      LatestNoteCircularAccessoryView(entry: entry)
-    case .accessoryRectangular:
-      LatestNoteRectangularAccessoryView(entry: entry)
-    default:
-      standardFamilyContent
-    }
+      switch family {
+      case .accessoryInline:
+        LatestNoteInlineAccessoryView(entry: entry)
+      case .accessoryCircular:
+        LatestNoteCircularAccessoryView(entry: entry)
+      case .accessoryRectangular:
+        LatestNoteRectangularAccessoryView(entry: entry)
+      default:
+        standardFamilyContent
+      }
     #else
-    standardFamilyContent
+      standardFamilyContent
     #endif
   }
 
   @ViewBuilder
   private var standardFamilyContent: some View {
     if let note = entry.note {
-      LatestNoteContentCard(
+      LatestEntryContent(
         vault: entry.vault,
         note: note,
         family: family
@@ -457,7 +463,8 @@ private struct LatestNoteInlineAccessoryView: View {
     if let note = entry.note {
       return note.content.accessoryTitle
     }
-    return entry.vault == nil ? String(localized: "No vaults yet") : String(localized: "No notes yet")
+    return entry.vault == nil
+      ? String(localized: "No vaults yet") : String(localized: "No notes yet")
   }
 }
 
@@ -483,7 +490,9 @@ private struct LatestNoteCircularAccessoryView: View {
   }
 
   private var accessibilityTitle: String {
-    entry.note?.content.accessoryTitle ?? (entry.vault == nil ? String(localized: "No vaults yet") : String(localized: "No notes yet"))
+    entry.note?.content.accessoryTitle
+      ?? (entry.vault == nil
+        ? String(localized: "No vaults yet") : String(localized: "No notes yet"))
   }
 }
 
@@ -497,8 +506,8 @@ private struct LatestNoteRectangularAccessoryView: View {
         title: headerTitle,
         icon: entry.vault?.icon ?? .default
       )
-        .font(.caption2.weight(.semibold))
-        .lineLimit(1)
+      .font(.caption2.weight(.semibold))
+      .lineLimit(1)
 
       Text(bodyTitle)
         .font(.caption)
@@ -515,12 +524,14 @@ private struct LatestNoteRectangularAccessoryView: View {
   }
 
   private var bodyTitle: String {
-    entry.note?.content.accessoryTitle ?? (entry.vault == nil ? String(localized: "No vaults yet") : String(localized: "No notes yet"))
+    entry.note?.content.accessoryTitle
+      ?? (entry.vault == nil
+        ? String(localized: "No vaults yet") : String(localized: "No notes yet"))
   }
 
 }
 
-private struct LatestNoteContentCard: View {
+private struct LatestEntryContent: View {
 
   let vault: WidgetVaultSnapshot?
   let note: NoteSnapshot
@@ -532,9 +543,9 @@ private struct LatestNoteContentCard: View {
         title: vault?.title ?? String(localized: "Latest"),
         icon: vault?.icon ?? .default
       )
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
+      .font(.caption2.weight(.semibold))
+      .foregroundStyle(.secondary)
+      .lineLimit(1)
 
       NoteContentView(
         content: note.content,
@@ -632,31 +643,31 @@ private struct WidgetPhotoView: View {
 
   var body: some View {
     #if canImport(UIKit)
-    if let uiImage = imageData.flatMap(UIImage.init(data:)) {
-      WidgetRenderedMediaFrame {
-        Image(uiImage: uiImage)
-          .resizable()
-          .scaledToFill()
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .clipped()
+      if let uiImage = imageData.flatMap(UIImage.init(data:)) {
+        WidgetRenderedMediaFrame {
+          Image(uiImage: uiImage)
+            .resizable()
+            .scaledToFill()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+        }
+        .accessibilityLabel(Text(accessibilityLabel))
+      } else {
+        WidgetMediaLabel(title: fallbackTitle, systemImage: fallbackSystemImage)
       }
-      .accessibilityLabel(Text(accessibilityLabel))
-    } else {
-      WidgetMediaLabel(title: fallbackTitle, systemImage: fallbackSystemImage)
-    }
     #elseif canImport(AppKit)
-    if let nsImage = imageData.flatMap(NSImage.init(data:)) {
-      WidgetRenderedMediaFrame {
-        Image(nsImage: nsImage)
-          .resizable()
-          .scaledToFill()
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .clipped()
+      if let nsImage = imageData.flatMap(NSImage.init(data:)) {
+        WidgetRenderedMediaFrame {
+          Image(nsImage: nsImage)
+            .resizable()
+            .scaledToFill()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+        }
+        .accessibilityLabel(Text(accessibilityLabel))
+      } else {
+        WidgetMediaLabel(title: fallbackTitle, systemImage: fallbackSystemImage)
       }
-      .accessibilityLabel(Text(accessibilityLabel))
-    } else {
-      WidgetMediaLabel(title: fallbackTitle, systemImage: fallbackSystemImage)
-    }
     #endif
   }
 }
@@ -836,7 +847,7 @@ private struct LatestNoteEmptyState: View {
             .font(.title2)
         }
       }
-        .foregroundStyle(.secondary)
+      .foregroundStyle(.secondary)
 
       Text(title)
         .font(.caption)
@@ -847,7 +858,7 @@ private struct LatestNoteEmptyState: View {
   }
 
   private var title: String {
-    vault == nil ? String(localized: "No vaults yet") : String(localized: "No cards yet")
+    vault == nil ? String(localized: "No vaults yet") : String(localized: "No entries yet")
   }
 
 }
@@ -1048,8 +1059,8 @@ extension NoteSnapshot {
   )
 }
 
-private extension DoodleDrawing {
-  static let widgetSample = DoodleDrawing(
+extension DoodleDrawing {
+  fileprivate static let widgetSample = DoodleDrawing(
     strokes: [
       DoodleStroke(
         points: [
@@ -1075,19 +1086,25 @@ private extension DoodleDrawing {
   )
 }
 
-private extension BauhausGridDocument {
-  static let widgetSample = BauhausGridDocument(artwork: .widgetSample)
+extension BauhausGridDocument {
+  fileprivate static let widgetSample = BauhausGridDocument(artwork: .widgetSample)
 }
 
-private extension BauhausGridArtwork {
-  static let widgetSample: BauhausGridArtwork = {
+extension BauhausGridArtwork {
+  fileprivate static let widgetSample: BauhausGridArtwork = {
     var artwork = BauhausGridArtwork()
-    artwork[BauhausGridPosition(row: 0, column: 1)] = BauhausTile(shape: .circle, shapeSwatch: .slot1)
-    artwork[BauhausGridPosition(row: 1, column: 2)] = BauhausTile(shape: .semicircleTrailing, shapeSwatch: .slot5)
-    artwork[BauhausGridPosition(row: 2, column: 0)] = BauhausTile(shape: .triangleBottomTrailing, shapeSwatch: .slot4)
-    artwork[BauhausGridPosition(row: 2, column: 3)] = BauhausTile(shape: .square, shapeSwatch: .slot2)
-    artwork[BauhausGridPosition(row: 3, column: 1)] = BauhausTile(shape: .quarterCircleTopTrailing, shapeSwatch: .slot6)
-    artwork[BauhausGridPosition(row: 4, column: 4)] = BauhausTile(shape: .paddedCircle, shapeSwatch: .slot7)
+    artwork[BauhausGridPosition(row: 0, column: 1)] = BauhausTile(
+      shape: .circle, shapeSwatch: .slot1)
+    artwork[BauhausGridPosition(row: 1, column: 2)] = BauhausTile(
+      shape: .semicircleTrailing, shapeSwatch: .slot5)
+    artwork[BauhausGridPosition(row: 2, column: 0)] = BauhausTile(
+      shape: .triangleBottomTrailing, shapeSwatch: .slot4)
+    artwork[BauhausGridPosition(row: 2, column: 3)] = BauhausTile(
+      shape: .square, shapeSwatch: .slot2)
+    artwork[BauhausGridPosition(row: 3, column: 1)] = BauhausTile(
+      shape: .quarterCircleTopTrailing, shapeSwatch: .slot6)
+    artwork[BauhausGridPosition(row: 4, column: 4)] = BauhausTile(
+      shape: .paddedCircle, shapeSwatch: .slot7)
     return artwork
   }()
 }

@@ -5,11 +5,12 @@ import JournalVault
 import MuColor
 import Observation
 import SwiftUI
+
 #if canImport(UIKit)
-import UIKit
+  import UIKit
 #elseif canImport(AppKit)
-import AppKit
-import SharedWithYou
+  import AppKit
+  import SharedWithYou
 #endif
 
 /// Sheet content for choosing and managing the vault that backs the composer.
@@ -187,7 +188,8 @@ struct VaultSelectionView: View {
     guard selectingVaultID == nil, renamingVaultID == nil, deletingVaultID == nil else { return }
 
     if vaultRuntime.selectedVault?.vaultID == descriptor.vaultID,
-       vaultRuntime.selectedVaultState == .active {
+      vaultRuntime.selectedVaultState == .active
+    {
       onVaultSelected()
       return
     }
@@ -200,7 +202,8 @@ struct VaultSelectionView: View {
       await vaultRuntime.selectVault(descriptor.vaultID)
 
       guard vaultRuntime.selectedVault?.vaultID == descriptor.vaultID,
-            vaultRuntime.selectedVaultState == .active else {
+        vaultRuntime.selectedVaultState == .active
+      else {
         return
       }
 
@@ -219,7 +222,9 @@ struct VaultSelectionView: View {
   }
 
   private func shareVault(_ descriptor: VaultDescriptor) {
-    guard preparingShareVaultID == nil, renamingVaultID == nil, deletingVaultID == nil else { return }
+    guard preparingShareVaultID == nil, renamingVaultID == nil, deletingVaultID == nil else {
+      return
+    }
     preparingShareVaultID = descriptor.vaultID
 
     Task { @MainActor in
@@ -252,9 +257,10 @@ struct VaultSelectionView: View {
 
   private func presentRenameEditor(_ descriptor: VaultDescriptor) {
     guard selectingVaultID == nil,
-          preparingShareVaultID == nil,
-          renamingVaultID == nil,
-          deletingVaultID == nil else {
+      preparingShareVaultID == nil,
+      renamingVaultID == nil,
+      deletingVaultID == nil
+    else {
       return
     }
     renameEditorPresentation = VaultRenameEditorPresentation(descriptor: descriptor)
@@ -278,9 +284,10 @@ struct VaultSelectionView: View {
 
   private func presentIconEditor(_ descriptor: VaultDescriptor) {
     guard selectingVaultID == nil,
-          preparingShareVaultID == nil,
-          renamingVaultID == nil,
-          deletingVaultID == nil else {
+      preparingShareVaultID == nil,
+      renamingVaultID == nil,
+      deletingVaultID == nil
+    else {
       return
     }
     iconEditorPresentation = VaultIconEditorPresentation(descriptor: descriptor)
@@ -343,7 +350,8 @@ private struct VaultSelectionContent: View {
   let deletingVaultID: VaultID?
   let onSelectVault: @MainActor @Sendable (VaultDescriptor) -> Void
   let onShareVault: @MainActor @Sendable (VaultDescriptor) -> Void
-  let onPrepareCollaborationShare: @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
+  let onPrepareCollaborationShare:
+    @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
   let onCollaborationSharingStopped: @MainActor @Sendable (VaultID) async -> Void
   let onCollaborationError: @MainActor @Sendable (any Error) -> Void
   let onRenameVault: @MainActor @Sendable (VaultDescriptor) -> Void
@@ -399,7 +407,8 @@ private struct VaultSelectionList: View {
   let deletingVaultID: VaultID?
   let onSelectVault: @MainActor @Sendable (VaultDescriptor) -> Void
   let onShareVault: @MainActor @Sendable (VaultDescriptor) -> Void
-  let onPrepareCollaborationShare: @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
+  let onPrepareCollaborationShare:
+    @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
   let onCollaborationSharingStopped: @MainActor @Sendable (VaultID) async -> Void
   let onCollaborationError: @MainActor @Sendable (any Error) -> Void
   let onRenameVault: @MainActor @Sendable (VaultDescriptor) -> Void
@@ -409,7 +418,8 @@ private struct VaultSelectionList: View {
   var body: some View {
     List {
       if let initialAvailabilityResolution,
-         initialAvailabilityResolution.isCloudKitDeferred {
+        initialAvailabilityResolution.isCloudKitDeferred
+      {
         Section {
           VaultCloudKitDeferredBanner(resolution: initialAvailabilityResolution)
             .listRowBackground(Rectangle().fill(.appSecondaryContainer))
@@ -502,7 +512,8 @@ private struct VaultSelectionRow: View {
   let canShare: Bool
   let onSelect: @MainActor @Sendable () -> Void
   let onShare: @MainActor @Sendable () -> Void
-  let onPrepareCollaborationShare: @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
+  let onPrepareCollaborationShare:
+    @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
   let onCollaborationSharingStopped: @MainActor @Sendable (VaultID) async -> Void
   let onCollaborationError: @MainActor @Sendable (any Error) -> Void
 
@@ -573,7 +584,8 @@ private struct VaultSelectionRow: View {
 
 private struct VaultSelectionRowPreview: View {
 
-  private let baseVaultID = VaultID(rawValue: UUID(uuidString: "4AA2F163-22C7-41E1-8F92-289EA7EDB6C8")!)
+  private let baseVaultID = VaultID(
+    rawValue: UUID(uuidString: "4AA2F163-22C7-41E1-8F92-289EA7EDB6C8")!)
 
   var body: some View {
     List {
@@ -728,9 +740,15 @@ private struct VaultDeletionConfirmation: Identifiable {
   var message: String {
     switch descriptor.ownership {
     case .owned:
-      String(localized: "This deletes the vault from iCloud for everyone with access. Local cards and media on this device are removed too.")
+      String(
+        localized:
+          "This deletes the vault from iCloud for everyone with access. Local entries and media on this device are removed too."
+      )
     case .participant:
-      String(localized: "This removes the shared vault from your iCloud account and this device. The owner's vault is not deleted.")
+      String(
+        localized:
+          "This removes the shared vault from your iCloud account and this device. The owner's vault is not deleted."
+      )
     }
   }
 
@@ -745,154 +763,155 @@ private struct VaultDeletionConfirmation: Identifiable {
 }
 
 #if canImport(UIKit)
-private struct VaultCloudSharingController: UIViewControllerRepresentable {
+  private struct VaultCloudSharingController: UIViewControllerRepresentable {
 
-  let presentation: VaultCloudSharingPresentation
-  let onDidSave: @MainActor @Sendable () async -> Void
-  let onDidStopSharing: @MainActor @Sendable () async -> Void
-  let onError: @MainActor @Sendable (any Error) -> Void
+    let presentation: VaultCloudSharingPresentation
+    let onDidSave: @MainActor @Sendable () async -> Void
+    let onDidStopSharing: @MainActor @Sendable () async -> Void
+    let onError: @MainActor @Sendable (any Error) -> Void
 
-  func makeUIViewController(context: Context) -> UICloudSharingController {
-    let controller = UICloudSharingController(
-      share: presentation.preparation.share,
-      container: presentation.preparation.container
-    )
-    controller.availablePermissions = [.allowPrivate, .allowReadWrite]
-    controller.delegate = context.coordinator
-    return controller
-  }
-
-  func updateUIViewController(_ controller: UICloudSharingController, context: Context) {}
-
-  func makeCoordinator() -> Coordinator {
-    Coordinator(
-      title: presentation.title,
-      onDidSave: onDidSave,
-      onDidStopSharing: onDidStopSharing,
-      onError: onError
-    )
-  }
-
-  final class Coordinator: NSObject, UICloudSharingControllerDelegate {
-
-    private let title: String
-    private let onDidSave: @MainActor @Sendable () async -> Void
-    private let onDidStopSharing: @MainActor @Sendable () async -> Void
-    private let onError: @MainActor @Sendable (any Error) -> Void
-
-    init(
-      title: String,
-      onDidSave: @escaping @MainActor @Sendable () async -> Void,
-      onDidStopSharing: @escaping @MainActor @Sendable () async -> Void,
-      onError: @escaping @MainActor @Sendable (any Error) -> Void
-    ) {
-      self.title = title
-      self.onDidSave = onDidSave
-      self.onDidStopSharing = onDidStopSharing
-      self.onError = onError
+    func makeUIViewController(context: Context) -> UICloudSharingController {
+      let controller = UICloudSharingController(
+        share: presentation.preparation.share,
+        container: presentation.preparation.container
+      )
+      controller.availablePermissions = [.allowPrivate, .allowReadWrite]
+      controller.delegate = context.coordinator
+      return controller
     }
 
-    func itemTitle(for cloudSharingController: UICloudSharingController) -> String? {
-      title
+    func updateUIViewController(_ controller: UICloudSharingController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+      Coordinator(
+        title: presentation.title,
+        onDidSave: onDidSave,
+        onDidStopSharing: onDidStopSharing,
+        onError: onError
+      )
     }
 
-    func cloudSharingControllerDidSaveShare(_ cloudSharingController: UICloudSharingController) {
-      Task { @MainActor in
-        await onDidSave()
+    final class Coordinator: NSObject, UICloudSharingControllerDelegate {
+
+      private let title: String
+      private let onDidSave: @MainActor @Sendable () async -> Void
+      private let onDidStopSharing: @MainActor @Sendable () async -> Void
+      private let onError: @MainActor @Sendable (any Error) -> Void
+
+      init(
+        title: String,
+        onDidSave: @escaping @MainActor @Sendable () async -> Void,
+        onDidStopSharing: @escaping @MainActor @Sendable () async -> Void,
+        onError: @escaping @MainActor @Sendable (any Error) -> Void
+      ) {
+        self.title = title
+        self.onDidSave = onDidSave
+        self.onDidStopSharing = onDidStopSharing
+        self.onError = onError
+      }
+
+      func itemTitle(for cloudSharingController: UICloudSharingController) -> String? {
+        title
+      }
+
+      func cloudSharingControllerDidSaveShare(_ cloudSharingController: UICloudSharingController) {
+        Task { @MainActor in
+          await onDidSave()
+        }
+      }
+
+      func cloudSharingControllerDidStopSharing(_ cloudSharingController: UICloudSharingController)
+      {
+        Task { @MainActor in
+          await onDidStopSharing()
+        }
+      }
+
+      func cloudSharingController(
+        _ cloudSharingController: UICloudSharingController,
+        failedToSaveShareWithError error: any Error
+      ) {
+        Task { @MainActor in
+          onError(error)
+        }
       }
     }
-
-    func cloudSharingControllerDidStopSharing(_ cloudSharingController: UICloudSharingController) {
-      Task { @MainActor in
-        await onDidStopSharing()
-      }
-    }
-
-    func cloudSharingController(
-      _ cloudSharingController: UICloudSharingController,
-      failedToSaveShareWithError error: any Error
-    ) {
-      Task { @MainActor in
-        onError(error)
-      }
-    }
   }
-}
 #elseif canImport(AppKit)
-/// Native Mac host for the system CloudKit collaboration popover.
-private struct VaultCloudSharingController: NSViewRepresentable {
-  let presentation: VaultCloudSharingPresentation
-  let onDidSave: @MainActor @Sendable () async -> Void
-  let onDidStopSharing: @MainActor @Sendable () async -> Void
-  let onError: @MainActor @Sendable (any Error) -> Void
+  /// Native Mac host for the system CloudKit collaboration popover.
+  private struct VaultCloudSharingController: NSViewRepresentable {
+    let presentation: VaultCloudSharingPresentation
+    let onDidSave: @MainActor @Sendable () async -> Void
+    let onDidStopSharing: @MainActor @Sendable () async -> Void
+    let onError: @MainActor @Sendable (any Error) -> Void
 
-  func makeNSView(context: Context) -> SWCollaborationView {
-    let provider = NSItemProvider()
-    provider.registerCKShare(
-      presentation.preparation.share,
-      container: presentation.preparation.container
-    )
-    let view = SWCollaborationView(itemProvider: provider)
-    view.headerTitle = presentation.title
-    view.cloudSharingServiceDelegate = context.coordinator
-    return view
-  }
-
-  func updateNSView(_ view: SWCollaborationView, context: Context) {
-    view.headerTitle = presentation.title
-    view.cloudSharingServiceDelegate = context.coordinator
-  }
-
-  func makeCoordinator() -> Coordinator {
-    Coordinator(
-      onDidSave: onDidSave,
-      onDidStopSharing: onDidStopSharing,
-      onError: onError
-    )
-  }
-
-  final class Coordinator: NSObject, NSCloudSharingServiceDelegate {
-    private let onDidSave: @MainActor @Sendable () async -> Void
-    private let onDidStopSharing: @MainActor @Sendable () async -> Void
-    private let onError: @MainActor @Sendable (any Error) -> Void
-
-    init(
-      onDidSave: @escaping @MainActor @Sendable () async -> Void,
-      onDidStopSharing: @escaping @MainActor @Sendable () async -> Void,
-      onError: @escaping @MainActor @Sendable (any Error) -> Void
-    ) {
-      self.onDidSave = onDidSave
-      self.onDidStopSharing = onDidStopSharing
-      self.onError = onError
+    func makeNSView(context: Context) -> SWCollaborationView {
+      let provider = NSItemProvider()
+      provider.registerCKShare(
+        presentation.preparation.share,
+        container: presentation.preparation.container
+      )
+      let view = SWCollaborationView(itemProvider: provider)
+      view.headerTitle = presentation.title
+      view.cloudSharingServiceDelegate = context.coordinator
+      return view
     }
 
-    func sharingService(_ sharingService: NSSharingService, didSave share: CKShare) {
-      let onDidSave = onDidSave
-      Task { @MainActor [onDidSave] in
-        await onDidSave()
+    func updateNSView(_ view: SWCollaborationView, context: Context) {
+      view.headerTitle = presentation.title
+      view.cloudSharingServiceDelegate = context.coordinator
+    }
+
+    func makeCoordinator() -> Coordinator {
+      Coordinator(
+        onDidSave: onDidSave,
+        onDidStopSharing: onDidStopSharing,
+        onError: onError
+      )
+    }
+
+    final class Coordinator: NSObject, NSCloudSharingServiceDelegate {
+      private let onDidSave: @MainActor @Sendable () async -> Void
+      private let onDidStopSharing: @MainActor @Sendable () async -> Void
+      private let onError: @MainActor @Sendable (any Error) -> Void
+
+      init(
+        onDidSave: @escaping @MainActor @Sendable () async -> Void,
+        onDidStopSharing: @escaping @MainActor @Sendable () async -> Void,
+        onError: @escaping @MainActor @Sendable (any Error) -> Void
+      ) {
+        self.onDidSave = onDidSave
+        self.onDidStopSharing = onDidStopSharing
+        self.onError = onError
+      }
+
+      func sharingService(_ sharingService: NSSharingService, didSave share: CKShare) {
+        let onDidSave = onDidSave
+        Task { @MainActor [onDidSave] in
+          await onDidSave()
+        }
+      }
+
+      func sharingService(_ sharingService: NSSharingService, didStopSharing share: CKShare) {
+        let onDidStopSharing = onDidStopSharing
+        Task { @MainActor [onDidStopSharing] in
+          await onDidStopSharing()
+        }
+      }
+
+      func sharingService(
+        _ sharingService: NSSharingService,
+        didCompleteForItems items: [Any],
+        error: (any Error)?
+      ) {
+        guard let error else { return }
+        let onError = onError
+        Task { @MainActor [onError, error] in
+          onError(error)
+        }
       }
     }
-
-    func sharingService(_ sharingService: NSSharingService, didStopSharing share: CKShare) {
-      let onDidStopSharing = onDidStopSharing
-      Task { @MainActor [onDidStopSharing] in
-        await onDidStopSharing()
-      }
-    }
-
-    func sharingService(
-      _ sharingService: NSSharingService,
-      didCompleteForItems items: [Any],
-      error: (any Error)?
-    ) {
-      guard let error else { return }
-      let onError = onError
-      Task { @MainActor [onError, error] in
-        onError(error)
-      }
-    }
   }
-}
 #endif
 
 /// Sheet that edits the user-facing title of an existing vault.
@@ -925,7 +944,7 @@ private struct VaultRenameSheet: View {
           TextField("Vault Name", text: $title)
             .textContentType(.name)
             #if os(iOS)
-            .textInputAutocapitalization(.words)
+              .textInputAutocapitalization(.words)
             #endif
             .submitLabel(.done)
             .focused($isTitleFocused)
@@ -1014,7 +1033,7 @@ struct VaultCreationSheet: View {
           TextField("Vault Name", text: $title)
             .textContentType(.name)
             #if os(iOS)
-            .textInputAutocapitalization(.words)
+              .textInputAutocapitalization(.words)
             #endif
             .submitLabel(.done)
             .focused($isTitleFocused)
@@ -1211,8 +1230,8 @@ private struct VaultIconBrowser: View {
         selection: $selection
       )
       #if os(iOS)
-      .presentationDetents([.medium])
-      .presentationDragIndicator(.visible)
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
       #endif
     }
   }
@@ -1372,7 +1391,7 @@ private struct VaultIconOptionButton: View {
             .foregroundStyle(.tint, .background)
             .offset(x: 2, y: 2)
             .accessibilityHidden(true)
-          }
+        }
       }
       .contentShape(Rectangle())
       .accessibilityElement(children: .ignore)
@@ -1529,9 +1548,11 @@ private enum VaultIconSearchNormalizer {
       options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
       locale: locale
     )
-    let kanaNormalized = folded.applyingTransform(.hiraganaToKatakana, reverse: false)
+    let kanaNormalized =
+      folded.applyingTransform(.hiraganaToKatakana, reverse: false)
       ?? folded
-    return kanaNormalized
+    return
+      kanaNormalized
       .replacingOccurrences(of: ".", with: " ")
       .replacingOccurrences(of: "-", with: " ")
       .replacingOccurrences(of: "_", with: " ")
@@ -1580,20 +1601,20 @@ private struct VaultIconSearchModifier: ViewModifier {
 
   func body(content: Content) -> some View {
     #if os(iOS)
-    content.searchable(
-      text: $text,
-      placement: .navigationBarDrawer(displayMode: .always),
-      prompt: "Search Icons"
-    )
+      content.searchable(
+        text: $text,
+        placement: .navigationBarDrawer(displayMode: .always),
+        prompt: "Search Icons"
+      )
     #else
-    content.searchable(text: $text, prompt: "Search Icons")
+      content.searchable(text: $text, prompt: "Search Icons")
     #endif
   }
 }
 
-private extension View {
+extension View {
 
-  func vaultIconSearch(text: Binding<String>) -> some View {
+  fileprivate func vaultIconSearch(text: Binding<String>) -> some View {
     modifier(VaultIconSearchModifier(text: text))
   }
 }
@@ -1664,9 +1685,9 @@ private enum VaultIconPreset {
   ]
 }
 
-private extension VaultIcon {
+extension VaultIcon {
 
-  var emojiValue: String? {
+  fileprivate var emojiValue: String? {
     switch kind {
     case .systemImage:
       nil
@@ -1675,7 +1696,7 @@ private extension VaultIcon {
     }
   }
 
-  var accessibilityLabel: String {
+  fileprivate var accessibilityLabel: String {
     switch kind {
     case .systemImage:
       if let preset = VaultIconPreset.systemImages.first(where: { $0.name == value }) {
@@ -1710,7 +1731,8 @@ private struct VaultSelectionEmptyView: View {
   var body: some View {
     VStack(spacing: 18) {
       if let initialAvailabilityResolution,
-         initialAvailabilityResolution.isCloudKitDeferred {
+        initialAvailabilityResolution.isCloudKitDeferred
+      {
         VaultCloudKitDeferredBanner(resolution: initialAvailabilityResolution)
           .padding(.horizontal, 16)
       }
@@ -1789,16 +1811,16 @@ private struct VaultSelectionErrorView: View {
   }
 }
 
-private extension VaultDescriptor {
+extension VaultDescriptor {
 
-  var canRename: Bool {
+  fileprivate var canRename: Bool {
     permission != .readOnly
   }
 }
 
-private extension VaultOwnership {
+extension VaultOwnership {
 
-  var selectionSubtitle: LocalizedStringResource {
+  fileprivate var selectionSubtitle: LocalizedStringResource {
     switch self {
     case .owned:
       "Owned by you"
@@ -1807,7 +1829,7 @@ private extension VaultOwnership {
     }
   }
 
-  var selectionSystemImage: String {
+  fileprivate var selectionSystemImage: String {
     switch self {
     case .owned:
       "shippingbox"

@@ -1,10 +1,11 @@
-#if DEBUG
-import MuHaptics
-#endif
-import JournalVault
 import JournalIntents
+import JournalVault
 import MuColor
 import SwiftUI
+
+#if DEBUG
+  import MuHaptics
+#endif
 
 /// App-wide `UserDefaults` keys for Journal.
 enum JournalDefaults {
@@ -94,7 +95,7 @@ enum JournalAppearancePreference: String, CaseIterable, Identifiable, Sendable {
 }
 
 struct SettingsScreen: View {
-  
+
   var body: some View {
     NavigationStack {
       SettingsView()
@@ -121,18 +122,18 @@ struct SettingsView: View {
   var body: some View {
     Form {
       #if DEBUG
-      Section {
-        NavigationLink {
-          VaultRuntimeDebugView(runtime: vaultRuntime)
-        } label: {
-          VaultRuntimeSummaryRow(runtime: vaultRuntime)
+        Section {
+          NavigationLink {
+            VaultRuntimeDebugView(runtime: vaultRuntime)
+          } label: {
+            VaultRuntimeSummaryRow(runtime: vaultRuntime)
+          }
+        } header: {
+          Text("Vault Runtime")
+        } footer: {
+          Text("Debug surface for the selected vault instance and explicit sync runtime.")
         }
-      } header: {
-        Text("Vault Runtime")
-      } footer: {
-        Text("Debug surface for the selected vault instance and explicit sync runtime.")
-      }
-      .settingsListRowBackground()
+        .settingsListRowBackground()
       #endif
 
       NavigationLink {
@@ -152,26 +153,26 @@ struct SettingsView: View {
       AppearanceSection(selectionID: $appearancePreferenceID)
       LocationSection(isEnabled: $shouldAttachLocationToNewCards)
       #if os(iOS)
-      QuickCaptureVaultSection()
+        QuickCaptureVaultSection()
       #endif
       CloudStorageEstimateSection(runtime: vaultRuntime)
       WidgetInstructionsSection()
 
       #if DEBUG
-      Section("Lab") {
-        NavigationLink {
-          HapticEditorView()
-        } label: {
-          Label("Haptics", systemImage: "iphone.radiowaves.left.and.right")
-        }
+        Section("Lab") {
+          NavigationLink {
+            HapticEditorView()
+          } label: {
+            Label("Haptics", systemImage: "iphone.radiowaves.left.and.right")
+          }
 
-        NavigationLink {
-          HapticTapSequencerView()
-        } label: {
-          Label("Haptic Doodle", systemImage: "hand.tap")
+          NavigationLink {
+            HapticTapSequencerView()
+          } label: {
+            Label("Haptic Doodle", systemImage: "hand.tap")
+          }
         }
-      }
-      .settingsListRowBackground()
+        .settingsListRowBackground()
       #endif
 
       Section("About") {
@@ -211,7 +212,7 @@ struct SettingsView: View {
 
 /// A form section for choosing whether Journal follows the device appearance or
 /// requests a fixed Light/Dark scheme.
-fileprivate struct AppearanceSection: View {
+private struct AppearanceSection: View {
 
   @Binding var selectionID: String
 
@@ -234,7 +235,7 @@ fileprivate struct AppearanceSection: View {
 }
 
 /// A form section that links to the OS-level widget installation guide.
-fileprivate struct WidgetInstructionsSection: View {
+private struct WidgetInstructionsSection: View {
 
   var body: some View {
     Section {
@@ -253,7 +254,7 @@ fileprivate struct WidgetInstructionsSection: View {
 }
 
 /// A form section for the app-wide location attachment preference.
-fileprivate struct LocationSection: View {
+private struct LocationSection: View {
 
   @Binding var isEnabled: Bool
 
@@ -265,7 +266,9 @@ fileprivate struct LocationSection: View {
     } header: {
       Text("Location")
     } footer: {
-      Text("When enabled, new cards attach your current location automatically if iOS allows Journal to access it.")
+      Text(
+        "When enabled, new entries attach your current location automatically if iOS allows Tinycurve to access it."
+      )
     }
     .settingsListRowBackground()
   }
@@ -277,7 +280,7 @@ fileprivate struct LocationSection: View {
 /// The choice lives in App Group preferences rather than standard app defaults
 /// because each system entry point runs in a separate process. Journal never
 /// substitutes the last-opened vault when this selection is missing or stale.
-fileprivate struct QuickCaptureVaultSection: View {
+private struct QuickCaptureVaultSection: View {
 
   @State private var writableVaults: [JournalWritableVault] = []
   @State private var selectionID = ""
@@ -307,7 +310,9 @@ fileprivate struct QuickCaptureVaultSection: View {
       if let statusMessage {
         Text(statusMessage)
       } else {
-        Text("Used by the Action Button, Shortcuts, and system sharing. Journal never chooses another vault automatically.")
+        Text(
+          "Used by the Action Button, Shortcuts, and system sharing. Journal never chooses another vault automatically."
+        )
       }
     }
     .settingsListRowBackground()
@@ -329,14 +334,18 @@ fileprivate struct QuickCaptureVaultSection: View {
       let storedID = try JournalQuickCapturePreferences().selectedVaultID()
 
       if let storedID,
-         writableVaults.contains(where: { $0.id == storedID }) {
+        writableVaults.contains(where: { $0.id == storedID })
+      {
         selectionID = storedID.uuidString
         statusMessage = nil
       } else {
         selectionID = ""
-        statusMessage = storedID == nil
+        statusMessage =
+          storedID == nil
           ? nil
-          : String(localized: "The previous Quick Capture Vault is no longer writable. Choose another vault.")
+          : String(
+            localized:
+              "The previous Quick Capture Vault is no longer writable. Choose another vault.")
       }
     } catch {
       writableVaults = []
@@ -350,7 +359,8 @@ fileprivate struct QuickCaptureVaultSection: View {
     do {
       let vault = writableVaults.first { $0.id.uuidString == id }
       try JournalQuickCapturePreferences().setSelectedVault(vault)
-      statusMessage = vault == nil
+      statusMessage =
+        vault == nil
         ? String(localized: "Choose a vault before using Quick Capture.")
         : nil
     } catch {
@@ -365,7 +375,7 @@ fileprivate struct QuickCaptureVaultSection: View {
 }
 
 /// A form section that opens Journal's local CloudKit storage estimate.
-fileprivate struct CloudStorageEstimateSection: View {
+private struct CloudStorageEstimateSection: View {
 
   let runtime: JournalVaultRuntime
 
@@ -400,7 +410,7 @@ fileprivate struct CloudStorageEstimateSection: View {
 }
 
 /// User-facing Settings screen for Journal-owned CloudKit payload estimates.
-fileprivate struct CloudStorageEstimateView: View {
+private struct CloudStorageEstimateView: View {
 
   let runtime: JournalVaultRuntime
 
@@ -454,14 +464,14 @@ fileprivate struct CloudStorageEstimateView: View {
 }
 
 /// Loading state for the Cloud Storage estimate screen.
-fileprivate enum CloudStorageEstimateLoadState {
+private enum CloudStorageEstimateLoadState {
   case loading
   case loaded(JournalCloudStorageEstimate)
   case failed(String)
 }
 
 /// Initial loading section for the Cloud Storage estimate screen.
-fileprivate struct CloudStorageEstimateLoadingSection: View {
+private struct CloudStorageEstimateLoadingSection: View {
 
   var body: some View {
     Section {
@@ -476,7 +486,7 @@ fileprivate struct CloudStorageEstimateLoadingSection: View {
 }
 
 /// Error section shown when the local estimate cannot be read.
-fileprivate struct CloudStorageEstimateFailureSection: View {
+private struct CloudStorageEstimateFailureSection: View {
 
   let message: String
 
@@ -496,7 +506,7 @@ fileprivate struct CloudStorageEstimateFailureSection: View {
 }
 
 /// High-level totals for Journal's local CloudKit storage estimate.
-fileprivate struct CloudStorageEstimateSummarySection: View {
+private struct CloudStorageEstimateSummarySection: View {
 
   let estimate: JournalCloudStorageEstimate
 
@@ -523,14 +533,16 @@ fileprivate struct CloudStorageEstimateSummarySection: View {
     } header: {
       Text("Estimate")
     } footer: {
-      Text("CloudKit does not expose exact iCloud usage to apps. This estimate uses Journal rows and attachment byte sizes, excluding CloudKit overhead and other apps.")
+      Text(
+        "CloudKit does not expose exact iCloud usage to apps. This estimate uses Journal rows and attachment byte sizes, excluding CloudKit overhead and other apps."
+      )
     }
     .settingsListRowBackground()
   }
 }
 
 /// App-wide byte totals grouped by payload category and attachment modality.
-fileprivate struct CloudStorageEstimateBreakdownSection: View {
+private struct CloudStorageEstimateBreakdownSection: View {
 
   let estimate: JournalCloudStorageEstimate
 
@@ -573,7 +585,7 @@ fileprivate struct CloudStorageEstimateBreakdownSection: View {
 }
 
 /// Per-vault navigation rows for storage estimate details.
-fileprivate struct CloudStorageEstimateVaultsSection: View {
+private struct CloudStorageEstimateVaultsSection: View {
 
   let estimate: JournalCloudStorageEstimate
 
@@ -599,7 +611,7 @@ fileprivate struct CloudStorageEstimateVaultsSection: View {
 }
 
 /// Compact row for one vault's estimated payload.
-fileprivate struct VaultStorageEstimateRow: View {
+private struct VaultStorageEstimateRow: View {
 
   let vaultEstimate: JournalVaultCloudStorageEstimate
 
@@ -623,7 +635,7 @@ fileprivate struct VaultStorageEstimateRow: View {
   }
 }
 
-fileprivate struct SettingsVaultIconMark: View {
+private struct SettingsVaultIconMark: View {
 
   let icon: VaultIcon
 
@@ -648,7 +660,7 @@ fileprivate struct SettingsVaultIconMark: View {
 }
 
 /// Detail screen for one vault's CloudKit payload estimate.
-fileprivate struct VaultCloudStorageEstimateDetailView: View {
+private struct VaultCloudStorageEstimateDetailView: View {
 
   let vaultEstimate: JournalVaultCloudStorageEstimate
 
@@ -721,7 +733,7 @@ fileprivate struct VaultCloudStorageEstimateDetailView: View {
 }
 
 /// Shared row style for a storage byte total.
-fileprivate struct StorageBreakdownRow: View {
+private struct StorageBreakdownRow: View {
 
   let title: LocalizedStringResource
   let systemImage: String
@@ -752,19 +764,19 @@ fileprivate struct StorageBreakdownRow: View {
   }
 }
 
-fileprivate extension VaultDescriptor {
+extension VaultDescriptor {
 
   /// User-facing title for Settings, with a fallback for remotely discovered
   /// vaults whose `VaultInfo` title has not arrived yet.
-  var storageDisplayTitle: String {
+  fileprivate var storageDisplayTitle: String {
     title.isEmpty ? String(localized: "Untitled Vault") : title
   }
 }
 
-fileprivate extension VaultOwnership {
+extension VaultOwnership {
 
   /// User-facing ownership label for storage surfaces.
-  var storageTitle: LocalizedStringResource {
+  fileprivate var storageTitle: LocalizedStringResource {
     switch self {
     case .owned:
       "Owned by You"
@@ -774,7 +786,7 @@ fileprivate extension VaultOwnership {
   }
 
   /// SF Symbol that communicates who owns the storage quota.
-  var storageSystemImage: String {
+  fileprivate var storageSystemImage: String {
     switch self {
     case .owned:
       "icloud"
@@ -784,7 +796,7 @@ fileprivate extension VaultOwnership {
   }
 
   /// Explains which iCloud account is charged for this vault's CloudKit data.
-  var storageQuotaNote: LocalizedStringResource {
+  fileprivate var storageQuotaNote: LocalizedStringResource {
     switch self {
     case .owned:
       "Owned vault records are stored in your private CloudKit database and count toward your iCloud storage."
@@ -794,10 +806,10 @@ fileprivate extension VaultOwnership {
   }
 }
 
-fileprivate extension JournalVault.Attachment.Kind {
+extension JournalVault.Attachment.Kind {
 
   /// User-facing modality label for storage breakdowns.
-  var storageTitle: LocalizedStringResource {
+  fileprivate var storageTitle: LocalizedStringResource {
     switch self {
     case .photo:
       "Photos"
@@ -821,7 +833,7 @@ fileprivate extension JournalVault.Attachment.Kind {
   }
 
   /// SF Symbol for storage breakdown rows.
-  var storageSystemImage: String {
+  fileprivate var storageSystemImage: String {
     switch self {
     case .photo:
       "photo"
@@ -845,178 +857,179 @@ fileprivate extension JournalVault.Attachment.Kind {
   }
 }
 
-fileprivate extension Int {
+extension Int {
 
   /// Localized file-size string for storage totals.
-  var storageByteCountText: String {
+  fileprivate var storageByteCountText: String {
     ByteCountFormatter.string(fromByteCount: Int64(self), countStyle: .file)
   }
 }
 
-fileprivate extension View {
+extension View {
 
   /// Gives `Form` rows the same themed surface as Journal's custom list cells.
   ///
   /// SwiftUI's grouped `Form` row background does not inherit the app palette
   /// automatically, so each Settings row/section opts into the theme explicitly.
-  func settingsListRowBackground() -> some View {
+  fileprivate func settingsListRowBackground() -> some View {
     listRowBackground(Rectangle().fill(.appSecondaryContainer))
   }
 }
 
 #if DEBUG
-/// Compact Settings row for the target vault runtime.
-fileprivate struct VaultRuntimeSummaryRow: View {
+  /// Compact Settings row for the target vault runtime.
+  private struct VaultRuntimeSummaryRow: View {
 
-  let runtime: JournalVaultRuntime
+    let runtime: JournalVaultRuntime
 
-  var body: some View {
-    HStack(spacing: 12) {
-      Image(systemName: "shippingbox")
-        .font(.title3)
-        .foregroundStyle(iconStyle)
-        .frame(width: 28)
+    var body: some View {
+      HStack(spacing: 12) {
+        Image(systemName: "shippingbox")
+          .font(.title3)
+          .foregroundStyle(iconStyle)
+          .frame(width: 28)
 
-      VStack(alignment: .leading, spacing: 2) {
-        Text("Vault Runtime")
-          .foregroundStyle(.primary)
-        Text(detailText)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-
-      Spacer(minLength: 0)
-    }
-  }
-
-  private var detailText: String {
-    if let vault = runtime.selectedVault {
-      return "\(vault.title) • \(runtime.selectedVaultState.displayTitle)"
-    }
-    return runtime.state.displayTitle
-  }
-
-  private var iconStyle: AnyShapeStyle {
-    switch runtime.state {
-    case .starting:
-      AnyShapeStyle(.secondary)
-    case .ready:
-      AnyShapeStyle(.green)
-    case .failed:
-      AnyShapeStyle(.red)
-    }
-  }
-}
-
-/// Debug screen for checking that `JournalVault` is alive inside the app shell.
-fileprivate struct VaultRuntimeDebugView: View {
-
-  let runtime: JournalVaultRuntime
-
-  var body: some View {
-    Form {
-      Section {
-        LabeledContent("Runtime", value: runtime.state.displayTitle)
-        if let detail = runtime.state.displayDetail {
-          LabeledContent("Runtime Error", value: detail)
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Vault Runtime")
+            .foregroundStyle(.primary)
+          Text(detailText)
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
-        if let resolution = runtime.lastInitialAvailabilityResolution {
-          LabeledContent("Initial Availability", value: resolution.displayTitle)
-          if let detail = resolution.displayDetail {
-            LabeledContent("Availability Detail", value: detail)
+
+        Spacer(minLength: 0)
+      }
+    }
+
+    private var detailText: String {
+      if let vault = runtime.selectedVault {
+        return "\(vault.title) • \(runtime.selectedVaultState.displayTitle)"
+      }
+      return runtime.state.displayTitle
+    }
+
+    private var iconStyle: AnyShapeStyle {
+      switch runtime.state {
+      case .starting:
+        AnyShapeStyle(.secondary)
+      case .ready:
+        AnyShapeStyle(.green)
+      case .failed:
+        AnyShapeStyle(.red)
+      }
+    }
+  }
+
+  /// Debug screen for checking that `JournalVault` is alive inside the app shell.
+  private struct VaultRuntimeDebugView: View {
+
+    let runtime: JournalVaultRuntime
+
+    var body: some View {
+      Form {
+        Section {
+          LabeledContent("Runtime", value: runtime.state.displayTitle)
+          if let detail = runtime.state.displayDetail {
+            LabeledContent("Runtime Error", value: detail)
           }
+          if let resolution = runtime.lastInitialAvailabilityResolution {
+            LabeledContent("Initial Availability", value: resolution.displayTitle)
+            if let detail = resolution.displayDetail {
+              LabeledContent("Availability Detail", value: detail)
+            }
+          }
+          LabeledContent("Selected Vault", value: runtime.selectedVaultState.displayTitle)
+          if let detail = runtime.selectedVaultState.displayDetail {
+            LabeledContent("Selected Vault Error", value: detail)
+          }
+          LabeledContent("Vault Count", value: runtime.vaults.count.formatted())
+          if let pending = runtime.selectedVault?.pendingMutationCount {
+            LabeledContent("Selected Outbox", value: pending.formatted())
+          }
+          if let lastRefreshedAt = runtime.lastRefreshedAt {
+            LabeledContent(
+              "Refreshed",
+              value: lastRefreshedAt.formatted(date: .omitted, time: .standard)
+            )
+          }
+          if let lastMessage = runtime.lastMessage {
+            LabeledContent("Message", value: lastMessage)
+          }
+        } header: {
+          Text("Status")
         }
-        LabeledContent("Selected Vault", value: runtime.selectedVaultState.displayTitle)
-        if let detail = runtime.selectedVaultState.displayDetail {
-          LabeledContent("Selected Vault Error", value: detail)
-        }
-        LabeledContent("Vault Count", value: runtime.vaults.count.formatted())
-        if let pending = runtime.selectedVault?.pendingMutationCount {
-          LabeledContent("Selected Outbox", value: pending.formatted())
-        }
-        if let lastRefreshedAt = runtime.lastRefreshedAt {
-          LabeledContent(
-            "Refreshed",
-            value: lastRefreshedAt.formatted(date: .omitted, time: .standard)
-          )
-        }
-        if let lastMessage = runtime.lastMessage {
-          LabeledContent("Message", value: lastMessage)
-        }
-      } header: {
-        Text("Status")
-      }
-      .settingsListRowBackground()
+        .settingsListRowBackground()
 
-      Section {
-        ForEach(runtime.vaults, id: \.vaultID) { vault in
-          Button {
-            Task { await runtime.selectVault(vault.vaultID) }
-          } label: {
-            HStack {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(vault.title)
-                  .foregroundStyle(.primary)
-                Text(vault.ownership.displayTitle)
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-              }
+        Section {
+          ForEach(runtime.vaults, id: \.vaultID) { vault in
+            Button {
+              Task { await runtime.selectVault(vault.vaultID) }
+            } label: {
+              HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(vault.title)
+                    .foregroundStyle(.primary)
+                  Text(vault.ownership.displayTitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
 
-              Spacer(minLength: 0)
+                Spacer(minLength: 0)
 
-              if runtime.selectedVault?.vaultID == vault.vaultID {
-                Image(systemName: "checkmark")
-                  .foregroundStyle(.tint)
+                if runtime.selectedVault?.vaultID == vault.vaultID {
+                  Image(systemName: "checkmark")
+                    .foregroundStyle(.tint)
+                }
               }
             }
           }
+        } header: {
+          Text("Vaults")
         }
-      } header: {
-        Text("Vaults")
+        .settingsListRowBackground()
+
+        Section {
+          Button {
+            Task { await runtime.refresh() }
+          } label: {
+            Label("Refresh", systemImage: "arrow.clockwise")
+          }
+
+          Button {
+            Task { await runtime.createDebugTextCard() }
+          } label: {
+            Label("Write Debug Entry", systemImage: "square.and.pencil")
+          }
+        } header: {
+          Text("Actions")
+        } footer: {
+          Text(
+            "Debug writes go through the selected vault instance and wake the configured sync engine."
+          )
+        }
+        .settingsListRowBackground()
       }
-      .settingsListRowBackground()
-
-      Section {
-        Button {
-          Task { await runtime.refresh() }
-        } label: {
-          Label("Refresh", systemImage: "arrow.clockwise")
-        }
-
-        Button {
-          Task { await runtime.createDebugTextCard() }
-        } label: {
-          Label("Write Debug Card", systemImage: "square.and.pencil")
-        }
-      } header: {
-        Text("Actions")
-      } footer: {
-        Text("Debug writes go through the selected vault instance and wake the configured sync engine.")
-      }
-      .settingsListRowBackground()
-    }
-    .scrollContentBackground(.hidden)
-    .background(.background)
-    .navigationTitle("Vault Runtime")
-    .journalInlineNavigationTitle()
-    .task { await runtime.refresh() }
-  }
-}
-
-private extension VaultOwnership {
-
-  /// Developer-facing ownership label for the vault runtime debug UI.
-  var displayTitle: String {
-    switch self {
-    case .owned:
-      "Owned"
-    case .participant:
-      "Participant"
+      .scrollContentBackground(.hidden)
+      .background(.background)
+      .navigationTitle("Vault Runtime")
+      .journalInlineNavigationTitle()
+      .task { await runtime.refresh() }
     }
   }
-}
+
+  extension VaultOwnership {
+
+    /// Developer-facing ownership label for the vault runtime debug UI.
+    fileprivate var displayTitle: String {
+      switch self {
+      case .owned:
+        "Owned"
+      case .participant:
+        "Participant"
+      }
+    }
+  }
 #endif
-
 
 // MARK: - Previews
 

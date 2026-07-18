@@ -1,4 +1,5 @@
 import AppUIComponents
+import CaptureAudio
 import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
@@ -7,30 +8,30 @@ import MediaProcessing
 
 extension CardEditDraft {
 
-  /// Display payload for read-only card previews.
+  /// Authored-content projection for read-only display and export styles.
   ///
   /// `CardEditDraft` remains app state owned by the creation/editing feature.
   /// `AppUIComponents` receives only this value projection, so the UI module
   /// does not depend back on the app target.
   @MainActor
-  var previewPayload: CardPreviewPayload {
+  var entryContent: EntryContent {
     switch kind {
     case .text:
       return .text(text)
     case .link:
       return .link(text)
     case .file:
-      return .file(CardPreviewFilePayload(displayName: text))
+      return .file(FileContentSource(displayName: text))
     case .photo:
       return .photo(
-        CardPreviewPhotoPayload(
+        PhotoContentSource(
           imageData: photo?.imageData,
           pixelSize: photo?.pixelSize
         )
       )
     case .video:
       return .video(
-        CardPreviewVideoPayload(
+        VideoContentSource(
           fileURL: video?.fileURL,
           thumbnailData: video?.thumbnailData,
           pixelSize: video?.pixelSize
@@ -38,7 +39,7 @@ extension CardEditDraft {
       )
     case .livePhoto:
       return .livePhoto(
-        CardPreviewLivePhotoPayload(
+        LivePhotoContentSource(
           stillImageData: livePhoto?.stillImageData,
           pairedVideoFileURL: livePhoto?.pairedVideoFileURL,
           thumbnailData: livePhoto?.thumbnailData,
@@ -46,18 +47,18 @@ extension CardEditDraft {
         )
       )
     case .audio:
-      return .audio
+      return .audio(AudioContentSource(fileURL: audio?.fileURL))
     case .suggestion:
       return .suggestion(
-        CardPreviewSuggestionPayload(
+        SuggestionContentSource(
           suggestion: suggestion,
           mediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID
         )
       )
     case .doodle:
-      return .doodle(CardPreviewDoodlePayload(drawing: doodle))
+      return .doodle(DoodleContentSource(drawing: doodle))
     case .bauhaus:
-      return .bauhaus(CardPreviewBauhausPayload(document: bauhaus))
+      return .bauhaus(BauhausContentSource(document: bauhaus))
     case .unknown:
       return .unknown
     @unknown default:

@@ -28,10 +28,10 @@ struct WidgetInstructionsView: View {
 // MARK: - Content
 
 /// Static copy for the widget installation guide.
-fileprivate enum WidgetInstructionContent {
+private enum WidgetInstructionContent {
 
   static let introduction: LocalizedStringResource =
-    "Add Tinycurve widgets for a quick view of the latest card in a vault you choose."
+    "Add Tinycurve widgets for a quick view of the latest entry in a vault you choose."
 
   static let instructions: [WidgetInstruction] = [
     WidgetInstruction(
@@ -59,7 +59,7 @@ fileprivate enum WidgetInstructionContent {
 }
 
 /// One OS surface where Tinycurve's widget can be added.
-fileprivate struct WidgetInstruction: Identifiable {
+private struct WidgetInstruction: Identifiable {
 
   let id: String
   let eyebrow: LocalizedStringResource
@@ -71,7 +71,7 @@ fileprivate struct WidgetInstruction: Identifiable {
 // MARK: - Fileprivate Views
 
 /// Header card with a compact illustration of the widget family.
-fileprivate struct WidgetInstructionsHeroView: View {
+private struct WidgetInstructionsHeroView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
@@ -98,7 +98,7 @@ fileprivate struct WidgetInstructionsHeroView: View {
 
 /// Decorative preview of the Home Screen and widget shapes, using the active
 /// MuColor palette instead of fixed illustration colors.
-fileprivate struct WidgetHeroIllustration: View {
+private struct WidgetHeroIllustration: View {
 
   @Environment(\.appPalette) private var palette
 
@@ -127,7 +127,7 @@ fileprivate struct WidgetHeroIllustration: View {
 }
 
 /// Small and medium widget previews arranged like a Home Screen row.
-fileprivate struct WidgetPreviewStrip: View {
+private struct WidgetPreviewStrip: View {
 
   @Environment(\.appPalette) private var palette
 
@@ -171,7 +171,7 @@ fileprivate struct WidgetPreviewStrip: View {
 }
 
 /// Large widget preview used to suggest the actual latest-note content.
-fileprivate struct WidgetPreviewTile: View {
+private struct WidgetPreviewTile: View {
 
   @Environment(\.appPalette) private var palette
 
@@ -210,7 +210,7 @@ fileprivate struct WidgetPreviewTile: View {
 }
 
 /// One instruction card for adding the widget on a specific system surface.
-fileprivate struct WidgetInstructionCard: View {
+private struct WidgetInstructionCard: View {
 
   let instruction: WidgetInstruction
 

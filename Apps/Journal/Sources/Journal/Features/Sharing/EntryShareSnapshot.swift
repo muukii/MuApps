@@ -1,4 +1,6 @@
+import AppUIComponents
 import CaptureBauhaus
+import CaptureDoodle
 import Foundation
 import JournalVault
 
@@ -7,17 +9,17 @@ import JournalVault
 /// `SavedListView` builds this from its live vault entry projection so the
 /// sharing layer does not need access to private saved-list types or live
 /// SwiftData models.
-struct CardShareSource: Sendable, Equatable {
+struct EntryShareSource: Sendable, Equatable {
   let id: UUID
   let kind: JournalVault.Card.Kind
   let body: String
   let createdAt: Date
   let location: JournalVault.Coordinate?
-  let attachment: CardShareAttachmentSource?
+  let attachment: EntryShareAttachmentSource?
 }
 
 /// File-backed attachment values used by the share/export boundary.
-struct CardShareAttachmentSource: Sendable, Equatable {
+struct EntryShareAttachmentSource: Sendable, Equatable {
   let kind: JournalVault.Attachment.Kind
   let fileURL: URL
   let thumbnail: Data?
@@ -30,22 +32,40 @@ struct CardShareAttachmentSource: Sendable, Equatable {
 /// Sharing should not hold a live SwiftData model while rendering images or
 /// videos. This snapshot reads the saved entry once, resolves its primary
 /// attachment, and carries only value data into the export layer.
-struct CardShareSnapshot: Identifiable, Sendable, Equatable {
+struct EntryShareSnapshot: Identifiable, Sendable, Equatable {
 
-  /// Stable card identity, reused for temporary export file names.
+  /// Stable entry identity, reused for temporary export file names.
   var id: UUID
 
-  /// The persisted card modality that determines how `content` should render.
+  /// The persisted modality that determines how `content` should render.
   var kind: JournalVault.Card.Kind
 
-  /// User-facing creation date shown on exported cards.
+  /// User-facing creation date shown in exported entries.
   var createdAt: Date
 
-  /// Value payload used by image and video exporters.
-  var content: CardShareContent
+  /// Shared authored-content value used by app, detail, and export styles.
+  var content: EntryContent
 
-  /// Coordinate attached to the card, when the user opted in.
+  /// Coordinate attached to the entry, when the user opted in.
   var location: JournalVault.Coordinate?
+
+  /// Creates a detached snapshot from already-resolved content.
+  ///
+  /// This initializer keeps previews and renderer tests independent from the
+  /// vault's file-backed attachment resolution path.
+  init(
+    id: UUID,
+    kind: JournalVault.Card.Kind,
+    createdAt: Date,
+    content: EntryContent,
+    location: JournalVault.Coordinate?
+  ) {
+    self.id = id
+    self.kind = kind
+    self.createdAt = createdAt
+    self.content = content
+    self.location = location
+  }
 
   /// Builds a snapshot from saved vault-entry values.
   ///
@@ -53,7 +73,7 @@ struct CardShareSnapshot: Identifiable, Sendable, Equatable {
   /// present. Missing files degrade to mirrored thumbnails or placeholders
   /// instead of failing, because sharing should still work for partially
   /// available CloudKit rows.
-  init(source: CardShareSource) {
+  init(source: EntryShareSource) {
     let body = source.body.trimmingCharacters(in: .whitespacesAndNewlines)
 
     self.id = source.id
@@ -70,8 +90,8 @@ struct CardShareSnapshot: Identifiable, Sendable, Equatable {
   private static func makeContent(
     kind: JournalVault.Card.Kind,
     body: String,
-    attachment: CardShareAttachmentSource?
-  ) -> CardShareContent {
+    attachment: EntryShareAttachmentSource?
+  ) -> EntryContent {
     switch kind {
     case .text, .link:
       return .text(body)
@@ -79,31 +99,49 @@ struct CardShareSnapshot: Identifiable, Sendable, Equatable {
       let fileAttachment = attachment?.kind == .file ? attachment : nil
       let availableFileURL = fileURL(for: fileAttachment)
       return .file(
-        displayName: fileDisplayName(
-          body: body,
-          fileURL: availableFileURL ?? fileAttachment?.fileURL
-        ),
-        fileURL: availableFileURL,
-        contentType: fileAttachment?.contentType,
-        byteSize: fileAttachment?.byteSize
+        FileContentSource(
+          displayName: fileDisplayName(
+            body: body,
+            fileURL: availableFileURL ?? fileAttachment?.fileURL
+          ),
+          fileURL: availableFileURL,
+          contentType: fileAttachment?.contentType,
+          byteSize: fileAttachment?.byteSize
+        )
       )
     case .suggestion:
       return .text(SuggestionShareTextFormatter.text(from: fileData(for: attachment)))
     case .photo, .livePhoto:
-      return .photo(imageData: fileData(for: attachment) ?? attachment?.thumbnail)
+      return .photo(
+        PhotoContentSource(
+          imageData: fileData(for: attachment) ?? attachment?.thumbnail
+        )
+      )
     case .video:
-      return .photo(imageData: attachment?.thumbnail)
+      return .photo(PhotoContentSource(imageData: attachment?.thumbnail))
     case .audio:
-      return .audio(fileURL: fileURL(for: attachment))
+      return .audio(AudioContentSource(fileURL: fileURL(for: attachment)))
     case .doodle:
+      let drawingData = fileData(for: attachment)
+      let drawing = drawingData.flatMap {
+        try? JSONDecoder().decode(DoodleDrawing.self, from: $0)
+      }
       return .doodle(
-        drawingData: fileData(for: attachment),
-        thumbnailData: attachment?.thumbnail
+        DoodleContentSource(
+          drawing: drawing,
+          thumbnailData: attachment?.thumbnail
+        )
       )
     case .bauhaus:
+      let documentData = fileData(for: attachment)
+      let document = documentData.flatMap {
+        try? JSONDecoder().decode(BauhausGridDocument.self, from: $0)
+      }
       return .bauhaus(
-        documentData: fileData(for: attachment),
-        thumbnailData: attachment?.thumbnail
+        BauhausContentSource(
+          document: document,
+          thumbnailData: attachment?.thumbnail
+        )
       )
     case .unknown:
       return .text(body)
@@ -112,12 +150,12 @@ struct CardShareSnapshot: Identifiable, Sendable, Equatable {
     }
   }
 
-  private static func fileData(for attachment: CardShareAttachmentSource?) -> Data? {
+  private static func fileData(for attachment: EntryShareAttachmentSource?) -> Data? {
     guard let url = fileURL(for: attachment) else { return nil }
     return try? Data(contentsOf: url)
   }
 
-  private static func fileURL(for attachment: CardShareAttachmentSource?) -> URL? {
+  private static func fileURL(for attachment: EntryShareAttachmentSource?) -> URL? {
     guard let attachment else { return nil }
     guard FileManager.default.fileExists(atPath: attachment.fileURL.path) else {
       return nil
@@ -142,7 +180,8 @@ private enum SuggestionShareTextFormatter {
 
   static func text(from data: Data?) -> String {
     guard let data,
-          let suggestion = SuggestionCardPayload.decode(from: data) else {
+      let suggestion = SuggestionCardPayload.decode(from: data)
+    else {
       return String(localized: "Journaling Suggestion")
     }
 
@@ -159,9 +198,9 @@ private enum SuggestionShareTextFormatter {
   }
 }
 
-private extension SuggestionCardElement {
+extension SuggestionCardElement {
 
-  var shareSummary: String {
+  fileprivate var shareSummary: String {
     switch self {
     case .contact(_, let name, _):
       return name
@@ -201,7 +240,9 @@ private extension SuggestionCardElement {
     case .song(_, let title, let artist, let album, _, _):
       return joined([title, artist, album]) ?? String(localized: "Song")
     case .stateOfMind(_, let value, _):
-      return String(localized: "State of Mind \(value.valence.formatted(.number.precision(.fractionLength(2))))")
+      return String(
+        localized: "State of Mind \(value.valence.formatted(.number.precision(.fractionLength(2))))"
+      )
     case .video(_, _, let date):
       if let date {
         return date.formatted(date: .abbreviated, time: .shortened)
@@ -229,9 +270,9 @@ private extension SuggestionCardElement {
   }
 }
 
-private extension SuggestionCardWorkout {
+extension SuggestionCardWorkout {
 
-  var shareSummary: String? {
+  fileprivate var shareSummary: String? {
     let values = [
       details?.localizedName,
       details?.activeEnergyKilocalories.map { "\(Int($0)) kcal" },
@@ -252,9 +293,9 @@ private extension SuggestionCardWorkout {
   }
 }
 
-private extension TimeInterval {
+extension TimeInterval {
 
-  var formattedDuration: String {
+  fileprivate var formattedDuration: String {
     let minutes = Int((self / 60).rounded())
     if minutes < 60 {
       return "\(minutes) min"
@@ -264,40 +305,4 @@ private extension TimeInterval {
     let remainingMinutes = minutes % 60
     return remainingMinutes == 0 ? "\(hours) hr" : "\(hours) hr \(remainingMinutes) min"
   }
-}
-
-/// The mutually-exclusive share payload extracted from a `Card`.
-///
-/// Doodle carries both the encoded vector drawing and its mirrored thumbnail:
-/// still-image and replay-video export can decode the vector timeline, while the
-/// thumbnail remains a fallback when the full attachment file is unavailable.
-enum CardShareContent: Sendable, Equatable {
-  /// A written note.
-  case text(String)
-
-  /// A generic file card. The export renders its display name and persisted
-  /// metadata; `fileURL` records whether the primary resource is locally
-  /// available without asking the renderer to decode arbitrary bytes.
-  case file(
-    displayName: String,
-    fileURL: URL?,
-    contentType: String?,
-    byteSize: Int?
-  )
-
-  /// A photo card, preferring full-size media bytes and falling back to the
-  /// mirrored thumbnail when the full file is unavailable.
-  case photo(imageData: Data?)
-
-  /// An audio card, represented by its media file URL.
-  case audio(fileURL: URL?)
-
-  /// A doodle card with optional encoded `DoodleDrawing` JSON and thumbnail
-  /// fallback.
-  case doodle(drawingData: Data?, thumbnailData: Data?)
-
-  /// A Bauhaus card with optional encoded `BauhausGridDocument` JSON and
-  /// thumbnail fallback. Older final-only `BauhausGridArtwork` JSON decodes
-  /// through the document's compatibility path.
-  case bauhaus(documentData: Data?, thumbnailData: Data?)
 }

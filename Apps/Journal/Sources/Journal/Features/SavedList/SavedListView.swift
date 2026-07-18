@@ -1,5 +1,6 @@
-import AppUIComponents
 import AVFoundation
+import Algorithms
+import AppUIComponents
 import CaptureAudio
 import CaptureBauhaus
 import CaptureDoodle
@@ -9,13 +10,13 @@ import MapKit
 import MuColor
 import SwiftData
 import SwiftUI
-#if canImport(UIKit)
-import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
 import WidgetKit
-import Algorithms
+
+#if canImport(UIKit)
+  import UIKit
+#elseif canImport(AppKit)
+  import AppKit
+#endif
 
 /// Vault-backed entries list.
 ///
@@ -41,7 +42,7 @@ struct SavedListView: View {
           vault: vault,
           scrollTargetID: $scrollTargetID
         )
-          .modelContainer(vault.contentStore.container)
+        .modelContainer(vault.contentStore.container)
       } else {
         ContentUnavailableView("Vault Not Ready", systemImage: "externaldrive")
       }
@@ -74,22 +75,29 @@ private struct VaultSavedListContentView: View {
   )
   private var edges: [JournalVault.CardEdge]
 
-  @State private var sharePreviewPresentation: CardSharePreviewPresentation?
+  @State private var sharePreviewPresentation: EntrySharePreviewPresentation?
   @State private var editPresentation: VaultSavedEntryEditPresentation?
   @State private var isEditDraftLoading = false
   @State private var isSavingEdit = false
   @State private var isDeletingEntry = false
   @State private var editErrorMessage: String?
   @State private var deleteErrorMessage: String?
-  @State private var areStacksExpanded = false
-  @Namespace private var stackExpansionNamespace
   @Namespace private var navigationTransitionNamespace
 
   var body: some View {
+    let entries = entries
+    let edgeIDs = Set(entries.map(\.edgeID))
     let columns = SavedListGrid.columns(for: horizontalSizeClass)
     let isMutationDisabled = isEditDraftLoading || isSavingEdit || isDeletingEntry
-    let visibleSections = visibleDaySections
-    let locationPins = savedLocationPins
+    let visibleSections = VaultSavedDaySection.sections(
+      for: entries.sortedForVaultList(),
+      calendar: calendar
+    )
+    let childEntriesByParentID = Self.childEntriesByParentID(
+      for: entries,
+      edgeIDs: edgeIDs
+    )
+    let locationPins = Self.savedLocationPins(for: entries)
 
     ScrollViewReader { proxy in
       ScrollView {
@@ -106,10 +114,8 @@ private struct VaultSavedListContentView: View {
               section: section,
               columns: columns,
               childEntriesByParentID: childEntriesByParentID,
-              areStacksExpanded: areStacksExpanded,
               isEditingDisabled: isMutationDisabled,
               isDeletingDisabled: isMutationDisabled,
-              stackExpansionNamespace: stackExpansionNamespace,
               transitionNamespace: navigationTransitionNamespace,
               onShare: presentSharePreview,
               onEdit: presentEditDraft,
@@ -123,39 +129,25 @@ private struct VaultSavedListContentView: View {
       .scrollDismissesKeyboard(.interactively)
       .scrollBounceBehavior(.always, axes: .vertical)
       .onChange(of: scrollTargetID, initial: true) { _, _ in
-        scrollToPendingCard(using: proxy)
+        scrollToPendingEntry(using: proxy, availableEdgeIDs: edgeIDs)
       }
       .onChange(of: edgeIDs) { _, _ in
-        scrollToPendingCard(using: proxy)
+        scrollToPendingEntry(using: proxy, availableEdgeIDs: edgeIDs)
       }
     }
     .overlay {
-      if sections.isEmpty {
-        ContentUnavailableView("No Cards", systemImage: "book.closed")
+      if visibleSections.isEmpty {
+        ContentUnavailableView("No Entries", systemImage: "book.closed")
           .allowsHitTesting(false)
       }
     }
     .scrollContentBackground(.hidden)
     .background(.background)
-    .toolbar {
-      if hasStackedEntries {
-        ToolbarItem(placement: .journalTrailingAction) {
-          Button {
-            withAnimation(.smooth) {
-              areStacksExpanded.toggle()
-            }
-          } label: {
-            Image(systemName: areStacksExpanded ? "square.stack.3d.up" : "square.grid.2x2")
-          }
-          .accessibilityLabel(areStacksExpanded ? "Collapse Stacks" : "Expand Stacks")
-        }
-      }
-    }
     .refreshable {
       await vaultRuntime.refresh()
     }
     .sheet(item: $sharePreviewPresentation) { presentation in
-      CardSharePreviewScreen(
+      EntrySharePreviewScreen(
         snapshot: presentation.snapshot,
         palette: presentation.palette
       )
@@ -173,14 +165,14 @@ private struct VaultSavedListContentView: View {
       )
       .presentationBackground(.background)
     }
-    .alert("Could Not Edit Card", isPresented: editErrorPresentation) {
+    .alert("Could Not Edit Entry", isPresented: editErrorPresentation) {
       Button("OK", role: .cancel) {}
     } message: {
       if let editErrorMessage {
         Text(editErrorMessage)
       }
     }
-    .alert("Could Not Delete Card", isPresented: deleteErrorPresentation) {
+    .alert("Could Not Delete Entry", isPresented: deleteErrorPresentation) {
       Button("OK", role: .cancel) {}
     } message: {
       if let deleteErrorMessage {
@@ -189,11 +181,11 @@ private struct VaultSavedListContentView: View {
     }
   }
 
-  private var sections: [VaultSavedDaySection] {
-    VaultSavedDaySection.sections(for: rootEntries, calendar: calendar)
-  }
-
-  private var childEntriesByParentID: [UUID: [VaultSavedEntry]] {
+  /// Groups child placements once for the current query snapshot.
+  private static func childEntriesByParentID(
+    for entries: [VaultSavedEntry],
+    edgeIDs: Set<UUID>
+  ) -> [UUID: [VaultSavedEntry]] {
     entries
       .filter { entry in
         entry.parentEdgeID.map(edgeIDs.contains) ?? false
@@ -212,16 +204,14 @@ private struct VaultSavedListContentView: View {
     }
   }
 
-  private var edgeIDs: Set<UUID> {
-    Set(edges.map(\.id))
-  }
-
   /// Location annotations for every unique saved card in the selected vault.
   ///
   /// Location belongs to the authored card rather than its placement edge, so
   /// the stable card id owns the pin. The dictionary also prevents a transient
   /// duplicate placement during graph repair from drawing the same card twice.
-  private var savedLocationPins: [VaultSavedLocationPin] {
+  private static func savedLocationPins(
+    for entries: [VaultSavedEntry]
+  ) -> [VaultSavedLocationPin] {
     var pinsByCardID: [UUID: VaultSavedLocationPin] = [:]
 
     for entry in entries {
@@ -244,8 +234,11 @@ private struct VaultSavedListContentView: View {
   /// Scrolls after the posted edge has reached this view's live SwiftData query.
   /// Keeping the request pending until then avoids racing persistence with the
   /// lazy grid's view construction.
-  private func scrollToPendingCard(using proxy: ScrollViewProxy) {
-    guard let targetID = scrollTargetID, edgeIDs.contains(targetID) else {
+  private func scrollToPendingEntry(
+    using proxy: ScrollViewProxy,
+    availableEdgeIDs: Set<UUID>
+  ) {
+    guard let targetID = scrollTargetID, availableEdgeIDs.contains(targetID) else {
       return
     }
 
@@ -253,46 +246,6 @@ private struct VaultSavedListContentView: View {
       proxy.scrollTo(targetID, anchor: .top)
     }
     scrollTargetID = nil
-  }
-
-  private var rootEntries: [VaultSavedEntry] {
-    entries
-      .filter { entry in
-        entry.parentEdgeID.map(edgeIDs.contains) != true
-      }
-      .sortedForVaultList()
-  }
-
-  private var hasStackedEntries: Bool {
-    childEntriesByParentID.values.contains { $0.isEmpty == false }
-  }
-
-  private var visibleDaySections: [VaultSavedDaySection] {
-    guard areStacksExpanded else {
-      return sections
-    }
-
-    return VaultSavedDaySection.sections(
-      for: expandedEntries(),
-      calendar: calendar
-    )
-  }
-
-  private func expandedEntries() -> [VaultSavedEntry] {
-    var result: [VaultSavedEntry] = []
-
-    func appendSubtree(startingAt entry: VaultSavedEntry) {
-      result.append(entry)
-      for child in childEntriesByParentID[entry.edgeID] ?? [] {
-        appendSubtree(startingAt: child)
-      }
-    }
-
-    for root in sections.flatMap(\.entries) {
-      appendSubtree(startingAt: root)
-    }
-
-    return result
   }
 
   private var editErrorPresentation: Binding<Bool> {
@@ -337,8 +290,8 @@ private struct VaultSavedListContentView: View {
   }
 
   private func presentSharePreview(for entry: VaultSavedEntry) {
-    sharePreviewPresentation = CardSharePreviewPresentation(
-      snapshot: CardShareSnapshot(source: entry.shareSource),
+    sharePreviewPresentation = EntrySharePreviewPresentation(
+      snapshot: EntryShareSnapshot(source: entry.shareSource),
       palette: palette
     )
   }
@@ -408,9 +361,9 @@ private struct VaultSavedEntryEditPresentation: Identifiable {
 }
 
 /// One presentation of the generated share-preview sheet.
-private struct CardSharePreviewPresentation: Identifiable {
+private struct EntrySharePreviewPresentation: Identifiable {
   let id = UUID()
-  let snapshot: CardShareSnapshot
+  let snapshot: EntryShareSnapshot
   let palette: Palette
 }
 
@@ -577,8 +530,9 @@ extension VaultSavedEntry {
 
   private func mediaFileURL(matching kind: JournalVault.Attachment.Kind) throws -> URL {
     guard attachment?.kind == kind,
-          let fileURL = attachment?.fileURL,
-          FileManager.default.fileExists(atPath: fileURL.path) else {
+      let fileURL = attachment?.fileURL,
+      FileManager.default.fileExists(atPath: fileURL.path)
+    else {
       throw VaultSavedEntryEditDraftError.mediaUnavailable
     }
     return fileURL
@@ -592,7 +546,9 @@ extension VaultSavedEntry {
     return resource.fileURL
   }
 
-  private func mediaResource(matching role: JournalVault.AttachmentResource.Role) throws -> VaultSavedAttachmentResource {
+  private func mediaResource(matching role: JournalVault.AttachmentResource.Role) throws
+    -> VaultSavedAttachmentResource
+  {
     guard let resource = attachment?.resources.first(where: { $0.role == role }) else {
       throw VaultSavedEntryEditDraftError.mediaUnavailable
     }
@@ -620,11 +576,13 @@ extension VaultSavedEntry {
   ) -> [UUID: URL] {
     guard let attachment else { return [:] }
 
-    let resourcesByID = Dictionary(uniqueKeysWithValues: attachment.resources.map { ($0.id, $0.fileURL) })
+    let resourcesByID = Dictionary(
+      uniqueKeysWithValues: attachment.resources.map { ($0.id, $0.fileURL) })
     return suggestion.mediaResources.reduce(into: [UUID: URL]()) { result, media in
       guard let resourceID = media.resourceID,
-            let fileURL = resourcesByID[resourceID],
-            FileManager.default.fileExists(atPath: fileURL.path) else {
+        let fileURL = resourcesByID[resourceID],
+        FileManager.default.fileExists(atPath: fileURL.path)
+      else {
         return
       }
       result[resourceID] = fileURL
@@ -653,7 +611,8 @@ private struct VaultSavedAttachment {
       }
       .map { VaultSavedAttachmentResource(resource: $0, store: store) }
 
-    guard let primaryResource = resources.first(where: { $0.id == attachment.primaryResourceID }) else {
+    guard let primaryResource = resources.first(where: { $0.id == attachment.primaryResourceID })
+    else {
       return nil
     }
 
@@ -718,13 +677,13 @@ private enum VaultSavedEntryEditDraftError: LocalizedError {
     case .vaultUnavailable:
       return String(localized: "The selected vault is not available.")
     case .mediaUnavailable:
-      return String(localized: "This card's media file is not available on this device yet.")
+      return String(localized: "This entry's media file is not available on this device yet.")
     case .mediaDecodeFailed:
-      return String(localized: "This card's media file could not be read for editing.")
+      return String(localized: "This entry's media file could not be read for editing.")
     case .mediaCopyFailed:
-      return String(localized: "This card's media file could not be prepared for editing.")
+      return String(localized: "This entry's media file could not be prepared for editing.")
     case .unsupportedKind:
-      return String(localized: "This card type is not editable yet.")
+      return String(localized: "This content type is not editable yet.")
     }
   }
 }
@@ -755,7 +714,8 @@ private enum VaultSavedEntryEditMediaPreparer {
       throw VaultSavedEntryEditDraftError.mediaUnavailable
     }
 
-    let pathExtension = sourceURL.pathExtension.isEmpty ? fallbackPathExtension : sourceURL.pathExtension
+    let pathExtension =
+      sourceURL.pathExtension.isEmpty ? fallbackPathExtension : sourceURL.pathExtension
     let destinationURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("journal-vault-edit-media-\(UUID().uuidString)")
       .appendingPathExtension(pathExtension)
@@ -834,7 +794,7 @@ private let savedLocationsMapCornerRadius: CGFloat = 22
 
 /// Modal editor for an existing vault card.
 ///
-/// The sheet owns cancellation chrome while `CardEditDraftEditor` owns the
+/// The sheet owns cancellation chrome while `EntryDraftEditor` owns the
 /// card-specific editing controls. Saving is lifted to `SavedListView` so the
 /// selected vault, reload, and outbox refresh all happen at the screen boundary.
 private struct VaultSavedEntryEditSheet: View {
@@ -846,7 +806,7 @@ private struct VaultSavedEntryEditSheet: View {
 
   var body: some View {
     NavigationStack {
-      CardEditDraftEditor(
+      EntryDraftEditor(
         draft: draft,
         isSaving: isSaving,
         confirmationTitle: "Save",
@@ -890,7 +850,8 @@ private struct VaultSavedLocationsMapNavigationHeader: View {
     .accessibilityValue(
       Text(
         "Saved locations: \(pins.count)",
-        comment: "Accessibility value for the saved-card map; the variable is the number of location pins."
+        comment:
+          "Accessibility value for the saved-entry map; the variable is the number of location pins."
       )
     )
   }
@@ -908,7 +869,7 @@ private struct VaultSavedLocationsMapHeader: View {
         interactionModes: []
       ) {
         ForEach(pins.dropFirst()) { pin in
-          Annotation("Saved Card", coordinate: pin.coordinate.clCoordinate) {
+          Annotation("Saved Entry", coordinate: pin.coordinate.clCoordinate) {
             VaultSavedLocationPinMarker(pin: pin, markerSize: 24)
           }
           .annotationTitles(.hidden)
@@ -964,15 +925,15 @@ private struct VaultSavedLocationsMapView: View {
 }
 
 #if canImport(UIKit)
-/// Platform representable protocol used by the clustered map on iOS.
-private typealias VaultSavedLocationsMapRepresentable = UIViewRepresentable
-/// Platform color consumed by MapKit annotation views on iOS.
-private typealias VaultSavedLocationsMapPlatformColor = UIColor
+  /// Platform representable protocol used by the clustered map on iOS.
+  private typealias VaultSavedLocationsMapRepresentable = UIViewRepresentable
+  /// Platform color consumed by MapKit annotation views on iOS.
+  private typealias VaultSavedLocationsMapPlatformColor = UIColor
 #else
-/// Platform representable protocol used by the clustered map on macOS.
-private typealias VaultSavedLocationsMapRepresentable = NSViewRepresentable
-/// Platform color consumed by MapKit annotation views on macOS.
-private typealias VaultSavedLocationsMapPlatformColor = NSColor
+  /// Platform representable protocol used by the clustered map on macOS.
+  private typealias VaultSavedLocationsMapRepresentable = NSViewRepresentable
+  /// Platform color consumed by MapKit annotation views on macOS.
+  private typealias VaultSavedLocationsMapPlatformColor = NSColor
 #endif
 
 /// Native MapKit bridge that enables automatic annotation clustering.
@@ -987,35 +948,35 @@ private struct VaultSavedLocationsClusterMap: VaultSavedLocationsMapRepresentabl
   }
 
   #if canImport(UIKit)
-  func makeUIView(context: Context) -> MKMapView {
-    makeMapView(context: context)
-  }
+    func makeUIView(context: Context) -> MKMapView {
+      makeMapView(context: context)
+    }
 
-  func updateUIView(_ mapView: MKMapView, context: Context) {
-    update(mapView, context: context)
-  }
+    func updateUIView(_ mapView: MKMapView, context: Context) {
+      update(mapView, context: context)
+    }
 
-  static func dismantleUIView(
-    _ mapView: MKMapView,
-    coordinator: VaultSavedLocationsMapCoordinator
-  ) {
-    mapView.delegate = nil
-  }
+    static func dismantleUIView(
+      _ mapView: MKMapView,
+      coordinator: VaultSavedLocationsMapCoordinator
+    ) {
+      mapView.delegate = nil
+    }
   #else
-  func makeNSView(context: Context) -> MKMapView {
-    makeMapView(context: context)
-  }
+    func makeNSView(context: Context) -> MKMapView {
+      makeMapView(context: context)
+    }
 
-  func updateNSView(_ mapView: MKMapView, context: Context) {
-    update(mapView, context: context)
-  }
+    func updateNSView(_ mapView: MKMapView, context: Context) {
+      update(mapView, context: context)
+    }
 
-  static func dismantleNSView(
-    _ mapView: MKMapView,
-    coordinator: VaultSavedLocationsMapCoordinator
-  ) {
-    mapView.delegate = nil
-  }
+    static func dismantleNSView(
+      _ mapView: MKMapView,
+      coordinator: VaultSavedLocationsMapCoordinator
+    ) {
+      mapView.delegate = nil
+    }
   #endif
 
   private func makeMapView(context: Context) -> MKMapView {
@@ -1036,9 +997,9 @@ private struct VaultSavedLocationsClusterMap: VaultSavedLocationsMapRepresentabl
 
   private func platformColor(_ color: Color) -> VaultSavedLocationsMapPlatformColor {
     #if canImport(UIKit)
-    UIColor(color)
+      UIColor(color)
     #else
-    NSColor(color)
+      NSColor(color)
     #endif
   }
 }
@@ -1058,11 +1019,11 @@ private final class VaultSavedLocationsMapCoordinator: NSObject, MKMapViewDelega
 
   override init() {
     #if canImport(UIKit)
-    markerColor = .systemBlue
-    glyphColor = .white
+      markerColor = .systemBlue
+      glyphColor = .white
     #else
-    markerColor = .controlAccentColor
-    glyphColor = .white
+      markerColor = .controlAccentColor
+      glyphColor = .white
     #endif
     super.init()
   }
@@ -1123,10 +1084,12 @@ private final class VaultSavedLocationsMapCoordinator: NSObject, MKMapViewDelega
     guard annotation is MKUserLocation == false else { return nil }
 
     if let cluster = annotation as? MKClusterAnnotation {
-      guard let view = mapView.dequeueReusableAnnotationView(
-        withIdentifier: MKMapViewDefaultClusterAnnotationViewReuseIdentifier,
-        for: cluster
-      ) as? VaultSavedLocationClusterAnnotationView else {
+      guard
+        let view = mapView.dequeueReusableAnnotationView(
+          withIdentifier: MKMapViewDefaultClusterAnnotationViewReuseIdentifier,
+          for: cluster
+        ) as? VaultSavedLocationClusterAnnotationView
+      else {
         return nil
       }
       configure(view, for: cluster)
@@ -1134,10 +1097,11 @@ private final class VaultSavedLocationsMapCoordinator: NSObject, MKMapViewDelega
     }
 
     guard let point = annotation as? VaultSavedLocationMapPoint,
-          let view = mapView.dequeueReusableAnnotationView(
-            withIdentifier: Self.pinReuseIdentifier,
-            for: point
-          ) as? VaultSavedLocationMarkerAnnotationView else {
+      let view = mapView.dequeueReusableAnnotationView(
+        withIdentifier: Self.pinReuseIdentifier,
+        for: point
+      ) as? VaultSavedLocationMarkerAnnotationView
+    else {
       return nil
     }
     configure(view, for: point)
@@ -1159,7 +1123,7 @@ private final class VaultSavedLocationsMapCoordinator: NSObject, MKMapViewDelega
       view.glyphImage = nil
       view.glyphText = cluster.memberAnnotations.count.formatted()
       setAccessibilityLabel(
-        String(localized: "Saved cards: \(cluster.memberAnnotations.count)"),
+        String(localized: "Saved entries: \(cluster.memberAnnotations.count)"),
         on: view
       )
     } else {
@@ -1167,14 +1131,14 @@ private final class VaultSavedLocationsMapCoordinator: NSObject, MKMapViewDelega
       view.displayPriority = .defaultHigh
       view.glyphText = nil
       #if canImport(UIKit)
-      view.glyphImage = UIImage(systemName: "mappin")
+        view.glyphImage = UIImage(systemName: "mappin")
       #else
-      view.glyphImage = NSImage(
-        systemSymbolName: "mappin",
-        accessibilityDescription: String(localized: "Saved Card")
-      )
+        view.glyphImage = NSImage(
+          systemSymbolName: "mappin",
+          accessibilityDescription: String(localized: "Saved Entry")
+        )
       #endif
-      setAccessibilityLabel(String(localized: "Saved Card"), on: view)
+      setAccessibilityLabel(String(localized: "Saved Entry"), on: view)
     }
   }
 
@@ -1204,19 +1168,19 @@ private final class VaultSavedLocationsMapCoordinator: NSObject, MKMapViewDelega
     }
 
     #if canImport(UIKit)
-    let edgePadding = UIEdgeInsets(
-      top: Self.overviewEdgePadding,
-      left: Self.overviewEdgePadding,
-      bottom: Self.overviewEdgePadding,
-      right: Self.overviewEdgePadding
-    )
+      let edgePadding = UIEdgeInsets(
+        top: Self.overviewEdgePadding,
+        left: Self.overviewEdgePadding,
+        bottom: Self.overviewEdgePadding,
+        right: Self.overviewEdgePadding
+      )
     #else
-    let edgePadding = NSEdgeInsets(
-      top: Self.overviewEdgePadding,
-      left: Self.overviewEdgePadding,
-      bottom: Self.overviewEdgePadding,
-      right: Self.overviewEdgePadding
-    )
+      let edgePadding = NSEdgeInsets(
+        top: Self.overviewEdgePadding,
+        left: Self.overviewEdgePadding,
+        bottom: Self.overviewEdgePadding,
+        right: Self.overviewEdgePadding
+      )
     #endif
     mapView.setVisibleMapRect(
       mapRect,
@@ -1230,9 +1194,9 @@ private final class VaultSavedLocationsMapCoordinator: NSObject, MKMapViewDelega
     on view: MKAnnotationView
   ) {
     #if canImport(UIKit)
-    view.accessibilityLabel = label
+      view.accessibilityLabel = label
     #else
-    view.setAccessibilityLabel(label)
+      view.setAccessibilityLabel(label)
     #endif
   }
 }
@@ -1252,11 +1216,12 @@ private nonisolated final class VaultSavedLocationMapPoint: MKPointAnnotation {
 
   func update(from pin: VaultSavedLocationPin) {
     if coordinate.latitude != pin.coordinate.latitude
-      || coordinate.longitude != pin.coordinate.longitude {
+      || coordinate.longitude != pin.coordinate.longitude
+    {
       coordinate = pin.coordinate.clCoordinate
     }
     createdAt = pin.createdAt
-    title = String(localized: "Saved Card")
+    title = String(localized: "Saved Entry")
   }
 }
 
@@ -1293,12 +1258,12 @@ private final class VaultSavedLocationClusterAnnotationView: MKMarkerAnnotationV
     glyphImage = nil
     if let cluster = annotation as? MKClusterAnnotation {
       let memberCount = cluster.memberAnnotations.count
-      let accessibilityLabel = String(localized: "Saved cards: \(memberCount)")
+      let accessibilityLabel = String(localized: "Saved entries: \(memberCount)")
       glyphText = memberCount.formatted()
       #if canImport(UIKit)
-      self.accessibilityLabel = accessibilityLabel
+        self.accessibilityLabel = accessibilityLabel
       #else
-      setAccessibilityLabel(accessibilityLabel)
+        setAccessibilityLabel(accessibilityLabel)
       #endif
     }
   }
@@ -1327,7 +1292,7 @@ private struct VaultSavedLocationPinMarker: View {
           .stroke(.white.opacity(0.88), lineWidth: 1.5)
       }
       .shadow(color: .black.opacity(0.22), radius: 3, y: 1)
-      .accessibilityLabel("Saved Card")
+      .accessibilityLabel("Saved Entry")
       .accessibilityValue(
         Text(pin.createdAt, format: .dateTime.year().month().day().hour().minute())
       )
@@ -1371,7 +1336,8 @@ private enum VaultSavedLocationsMapCamera {
       let pointRect = MKMapRect(x: point.x, y: point.y, width: 1, height: 1)
       mapRect = mapRect.union(pointRect)
     }
-    let minimumSpan = minimumOverviewSpanMeters
+    let minimumSpan =
+      minimumOverviewSpanMeters
       * MKMapPointsPerMeterAtLatitude(firstPin.coordinate.latitude)
     let width = max(pinRect.width * overviewPaddingScale, minimumSpan)
     let height = max(pinRect.height * overviewPaddingScale, minimumSpan)
@@ -1395,10 +1361,8 @@ private struct VaultSavedDaySectionView: View {
   let section: VaultSavedDaySection
   let columns: [GridItem]
   let childEntriesByParentID: [UUID: [VaultSavedEntry]]
-  let areStacksExpanded: Bool
   let isEditingDisabled: Bool
   let isDeletingDisabled: Bool
-  let stackExpansionNamespace: Namespace.ID
   let transitionNamespace: Namespace.ID
   let onShare: @MainActor (VaultSavedEntry) -> Void
   let onEdit: @MainActor (VaultSavedEntry) -> Void
@@ -1412,28 +1376,20 @@ private struct VaultSavedDaySectionView: View {
 
       LazyVGrid(columns: columns, spacing: cardSpacing) {
         ForEach(section.entries) { entry in
-          let subtree = subtreeEntries(startingAt: entry)
-          let childEntries = Array(subtree.dropFirst())
-
           NavigationLink {
-            VaultSavedEntryDetailView(
-              entries: subtree,
-              rootTitle: entry.kind.vaultListDisplayTitle,
+            VaultSavedEntryDetailDestination(
+              root: entry,
+              childEntriesByParentID: childEntriesByParentID,
               isEditingDisabled: isEditingDisabled,
               isDeletingDisabled: isDeletingDisabled,
+              transitionNamespace: transitionNamespace,
               onShare: onShare,
               onEdit: onEdit,
               onDelete: onDelete
             )
-            .journalZoomNavigationTransition(sourceID: entry.edgeID, in: transitionNamespace)
           } label: {
-            VaultSavedEntryStackTile(
-              entry: entry,
-              childEntries: childEntries,
-              isExpanded: areStacksExpanded,
-              stackNamespace: stackExpansionNamespace,
-              transitionNamespace: transitionNamespace
-            )
+            VaultSavedEntryGridCell(content: entry.entryModel.content)
+              .journalMatchedTransitionSource(id: entry.edgeID, in: transitionNamespace)
           }
           .buttonStyle(.plain)
           .id(entry.edgeID)
@@ -1462,12 +1418,12 @@ private struct VaultSavedDaySectionView: View {
       }
     }
     .confirmationDialog(
-      "Delete Card",
+      "Delete Entry",
       isPresented: deleteConfirmationPresentation,
       titleVisibility: .visible,
       presenting: deleteCandidate
     ) { entry in
-      Button("Delete Card", role: .destructive) {
+      Button("Delete Entry", role: .destructive) {
         deleteCandidate = nil
         Task { @MainActor in
           _ = await onDelete(entry)
@@ -1477,7 +1433,9 @@ private struct VaultSavedDaySectionView: View {
         deleteCandidate = nil
       }
     } message: { _ in
-      Text("This card and any connected cards will be removed from this vault. Synced copies are deleted through iCloud.")
+      Text(
+        "This entry and its connected entries will be removed from this vault. Synced copies are deleted through iCloud."
+      )
     }
   }
 
@@ -1490,18 +1448,57 @@ private struct VaultSavedDaySectionView: View {
       }
     }
   }
+}
 
-  private func subtreeEntries(startingAt root: VaultSavedEntry) -> [VaultSavedEntry] {
-    var result = [root]
+/// Lazily resolves the relationship-backed rows for an opened grid entry.
+///
+/// Keeping traversal behind the navigation destination prevents every lazy grid
+/// cell from rebuilding its descendant list during ordinary layout. The visited
+/// set also makes the display boundary safe while sync repair is resolving a
+/// malformed parent cycle.
+private struct VaultSavedEntryDetailDestination: View {
 
-    func appendChildren(of parentID: UUID) {
-      for child in childEntriesByParentID[parentID] ?? [] {
-        result.append(child)
-        appendChildren(of: child.edgeID)
+  let root: VaultSavedEntry
+  let childEntriesByParentID: [UUID: [VaultSavedEntry]]
+  let isEditingDisabled: Bool
+  let isDeletingDisabled: Bool
+  let transitionNamespace: Namespace.ID
+  let onShare: @MainActor (VaultSavedEntry) -> Void
+  let onEdit: @MainActor (VaultSavedEntry) -> Void
+  let onDelete: @MainActor (VaultSavedEntry) async -> Bool
+
+  var body: some View {
+    VaultSavedEntryDetailView(
+      entries: subtreeEntries,
+      rootTitle: root.kind.vaultListDisplayTitle,
+      isEditingDisabled: isEditingDisabled,
+      isDeletingDisabled: isDeletingDisabled,
+      onShare: onShare,
+      onEdit: onEdit,
+      onDelete: onDelete
+    )
+    .journalZoomNavigationTransition(
+      sourceID: root.edgeID,
+      in: transitionNamespace
+    )
+  }
+
+  private var subtreeEntries: [VaultSavedEntry] {
+    var result: [VaultSavedEntry] = []
+    var visitedEdgeIDs: Set<UUID> = []
+
+    func appendSubtree(startingAt entry: VaultSavedEntry) {
+      guard visitedEdgeIDs.insert(entry.edgeID).inserted else {
+        return
+      }
+
+      result.append(entry)
+      for child in childEntriesByParentID[entry.edgeID] ?? [] {
+        appendSubtree(startingAt: child)
       }
     }
 
-    appendChildren(of: root.edgeID)
+    appendSubtree(startingAt: root)
     return result
   }
 }
@@ -1515,38 +1512,6 @@ private struct VaultSavedDayHeader: View {
       .font(.headline)
       .foregroundStyle(.appOnPrimaryContainer.opacity(0.72))
       .accessibilityAddTraits(.isHeader)
-  }
-}
-
-private struct VaultSavedEntryStackTile: View {
-
-  let entry: VaultSavedEntry
-  let childEntries: [VaultSavedEntry]
-  let isExpanded: Bool
-  let stackNamespace: Namespace.ID
-  let transitionNamespace: Namespace.ID
-
-  var body: some View {
-    ZStack {
-      if isExpanded == false {
-        ForEach(childEntries.prefix(2).indexed(), id: \.element.edgeID) { index, child in
-          VaultSavedEntryTile(entry: child.cardModel, childCount: 0)
-            .matchedGeometryEffect(id: child.edgeID, in: stackNamespace)
-            .scaleEffect(1 - CGFloat(index + 1) * 0.035)
-            .offset(x: CGFloat(index + 1) * 4, y: CGFloat(index + 1) * 6)
-            .opacity(0.72 - CGFloat(index) * 0.18)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        }
-      }
-
-      VaultSavedEntryTile(
-        entry: entry.cardModel,
-        childCount: childEntries.count
-      )
-      .matchedGeometryEffect(id: entry.edgeID, in: stackNamespace)
-      .journalMatchedTransitionSource(id: entry.edgeID, in: transitionNamespace)
-    }
   }
 }
 
@@ -1568,7 +1533,7 @@ private struct VaultSavedEntryDetailView: View {
       LazyVStack(alignment: .center, spacing: 40) {
         ForEach(entries) { entry in
           VaultSavedEntryDetailRow(
-            entry: entry.cardModel,
+            entry: entry.entryModel,
             isEditingDisabled: isEditingDisabled || entry.kind == .file,
             isDeletingDisabled: isDeletingDisabled,
             onEdit: {
@@ -1609,12 +1574,12 @@ private struct VaultSavedEntryDetailView: View {
     .navigationTitle(rootTitle)
     .journalInlineNavigationTitle()
     .confirmationDialog(
-      "Delete Card",
+      "Delete Entry",
       isPresented: deleteConfirmationPresentation,
       titleVisibility: .visible,
       presenting: deleteCandidate
     ) { entry in
-      Button("Delete Card", role: .destructive) {
+      Button("Delete Entry", role: .destructive) {
         deleteCandidate = nil
         Task { @MainActor in
           let didDelete = await onDelete(entry)
@@ -1627,7 +1592,9 @@ private struct VaultSavedEntryDetailView: View {
         deleteCandidate = nil
       }
     } message: { _ in
-      Text("This card and any connected cards will be removed from this vault. Synced copies are deleted through iCloud.")
+      Text(
+        "This entry and its connected entries will be removed from this vault. Synced copies are deleted through iCloud."
+      )
     }
   }
 
@@ -1642,14 +1609,14 @@ private struct VaultSavedEntryDetailView: View {
   }
 }
 
-private extension VaultSavedEntry {
+extension VaultSavedEntry {
 
   /// Detached values handed to the share/export feature.
   ///
   /// The share sheet renders temporary files from this value copy, so it never
   /// holds a live SwiftData model or reaches back into the selected vault.
-  var shareSource: CardShareSource {
-    CardShareSource(
+  fileprivate var shareSource: EntryShareSource {
+    EntryShareSource(
       id: edgeID,
       kind: kind,
       body: body,
@@ -1663,23 +1630,23 @@ private extension VaultSavedEntry {
   ///
   /// The saved-list feature owns live vault models and mutation callbacks; the
   /// UI component module receives only the stable values it needs to render a card.
-  var cardModel: VaultSavedEntryCardModel {
-    VaultSavedEntryCardModel(
+  fileprivate var entryModel: VaultSavedEntryModel {
+    VaultSavedEntryModel(
       id: edgeID,
       kind: kind,
       body: body,
       createdAt: createdAt,
       updatedAt: updatedAt,
       location: location,
-      attachment: attachment?.cardModel
+      attachment: attachment?.entryModel
     )
   }
 }
 
-private extension VaultSavedAttachment {
+extension VaultSavedAttachment {
 
-  var shareSource: CardShareAttachmentSource {
-    CardShareAttachmentSource(
+  fileprivate var shareSource: EntryShareAttachmentSource {
+    EntryShareAttachmentSource(
       kind: kind,
       fileURL: fileURL,
       thumbnail: thumbnail,
@@ -1688,7 +1655,7 @@ private extension VaultSavedAttachment {
     )
   }
 
-  var cardModel: VaultSavedEntryAttachmentModel {
+  fileprivate var entryModel: VaultSavedEntryAttachmentModel {
     VaultSavedEntryAttachmentModel(
       kind: kind,
       fileURL: fileURL,
@@ -1725,9 +1692,9 @@ private extension VaultSavedAttachment {
 
 // MARK: - Sorting
 
-private extension Array where Element == VaultSavedEntry {
+extension Array where Element == VaultSavedEntry {
 
-  func sortedForVaultList() -> [VaultSavedEntry] {
+  fileprivate func sortedForVaultList() -> [VaultSavedEntry] {
     sorted { lhs, rhs in
       if lhs.createdAt != rhs.createdAt {
         return lhs.createdAt > rhs.createdAt
@@ -1736,7 +1703,7 @@ private extension Array where Element == VaultSavedEntry {
     }
   }
 
-  func sortedForVaultListSiblings() -> [VaultSavedEntry] {
+  fileprivate func sortedForVaultListSiblings() -> [VaultSavedEntry] {
     sorted { lhs, rhs in
       if lhs.sortIndex != rhs.sortIndex {
         return lhs.sortIndex < rhs.sortIndex
@@ -1749,10 +1716,10 @@ private extension Array where Element == VaultSavedEntry {
   }
 }
 
-private extension UIImage {
+extension UIImage {
 
   /// Pixel dimensions for persistence metadata derived from reloaded image data.
-  var pixelSize: CGSize {
+  fileprivate var pixelSize: CGSize {
     CGSize(width: size.width * scale, height: size.height * scale)
   }
 }

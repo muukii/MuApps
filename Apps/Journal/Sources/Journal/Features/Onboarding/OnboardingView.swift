@@ -1,5 +1,5 @@
-import AppUIComponents
 import AVFoundation
+import AppUIComponents
 import CaptureAudio
 import CoreLocation
 import MuColor
@@ -50,8 +50,8 @@ struct OnboardingView: View {
             AccentColorPage().tag(3)
           }
           #if os(iOS)
-          .tabViewStyle(.page(indexDisplayMode: .always))
-          .indexViewStyle(.page(backgroundDisplayMode: .interactive))
+            .tabViewStyle(.page(indexDisplayMode: .always))
+            .indexViewStyle(.page(backgroundDisplayMode: .interactive))
           #endif
 
           ctaBar
@@ -99,33 +99,32 @@ struct OnboardingView: View {
 
 // MARK: - Pages
 
-/// The hero. A single decorative card states the core idea — everything you
-/// record is kept as one card — over a short welcome.
-fileprivate struct WelcomePage: View {
+/// The hero introduces authored content without imposing one shared container.
+private struct WelcomePage: View {
 
   var body: some View {
     VStack(spacing: 36) {
       Spacer(minLength: 0)
 
-      CardSurface {
-        VStack(alignment: .leading, spacing: 12) {
-          Text("Today")
-            .font(.headline)
-            .foregroundStyle(.secondary)
-          Text("Every little thing\nbecomes a card.")
-            .font(.system(size: 26, weight: .bold))
-        }
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Today")
+          .font(.headline)
+          .foregroundStyle(.secondary)
+        Text("Words, photos, and sounds\neach keep their own shape.")
+          .font(.system(size: 26, weight: .bold))
       }
       .frame(maxWidth: 230)
 
       VStack(spacing: 10) {
-        Text("Welcome to Journal")
+        Text("Welcome to Tinycurve")
           .font(.largeTitle.bold())
           .multilineTextAlignment(.center)
-        Text("Capture text, links, photos, doodles, and sound — each kept as a simple card that syncs across your devices.")
-          .font(.body)
-          .foregroundStyle(.secondary)
-          .multilineTextAlignment(.center)
+        Text(
+          "Capture text, links, photos, doodles, and sound — each preserved in the form that fits it best and synced across your devices."
+        )
+        .font(.body)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
       }
 
       Spacer(minLength: 0)
@@ -138,12 +137,12 @@ fileprivate struct WelcomePage: View {
 
 /// Introduces the six capture modalities the app offers, each as an icon + name +
 /// one-line summary.
-fileprivate struct CaptureMethodsPage: View {
+private struct CaptureMethodsPage: View {
 
   var body: some View {
     OnboardingPage(
       title: "Many ways to capture",
-      subtitle: "Each thing you record becomes one card."
+      subtitle: "Each thing you record keeps the form that fits it."
     ) {
       VStack(spacing: 16) {
         ForEach(CaptureMethod.all) { method in
@@ -157,12 +156,13 @@ fileprivate struct CaptureMethodsPage: View {
 /// Primes the system permissions the app can use. Everything here is
 /// optional: each row requests its own permission on demand and reflects the live
 /// status, but the user can advance without granting anything.
-fileprivate struct PermissionsPage: View {
+private struct PermissionsPage: View {
 
   var body: some View {
     OnboardingPage(
       title: "A few permissions",
-      subtitle: "All optional — grant only what you want to use. You can change these anytime in the Settings app."
+      subtitle:
+        "All optional — grant only what you want to use. You can change these anytime in the Settings app."
     ) {
       VStack(spacing: 14) {
         CameraPermissionRow()
@@ -177,7 +177,7 @@ fileprivate struct PermissionsPage: View {
 /// Lets the user pick an accent during onboarding, written straight to the same
 /// `@AppStorage` key the rest of the app reads, so the choice applies app-wide
 /// interactive chrome the moment it is tapped.
-fileprivate struct AccentColorPage: View {
+private struct AccentColorPage: View {
 
   @AppStorage(JournalDefaults.accentColorID)
   private var accentColorID: String = AccentColor.default.id
@@ -188,7 +188,8 @@ fileprivate struct AccentColorPage: View {
   var body: some View {
     OnboardingPage(
       title: "Choose an accent",
-      subtitle: "Journal stays neutral so your content carries the color. The accent guides interaction."
+      subtitle:
+        "Journal stays neutral so your content carries the color. The accent guides interaction."
     ) {
       LazyVGrid(columns: columns, spacing: 16) {
         ForEach(AccentColor.all) { accentColor in
@@ -211,7 +212,7 @@ fileprivate struct AccentColorPage: View {
 /// Shared layout for the non-hero pages: a left-aligned title/subtitle header
 /// above scrollable content, with consistent insets. Extracted because three
 /// pages genuinely share this shape; the welcome page deliberately doesn't use it.
-fileprivate struct OnboardingPage<Content: View>: View {
+private struct OnboardingPage<Content: View>: View {
 
   let title: LocalizedStringResource
   let subtitle: LocalizedStringResource
@@ -251,11 +252,18 @@ private struct CaptureMethod: Identifiable {
 
   static var all: [CaptureMethod] {
     var methods: [CaptureMethod] = [
-      .init(id: "text", icon: "text.alignleft", name: "Text", summary: "Jot down what's on your mind."),
-      .init(id: "link", icon: "link", name: "Link", summary: "Save a web page with a native preview."),
-      .init(id: "photo", icon: "camera", name: "Photo", summary: "Capture a moment with the camera."),
-      .init(id: "doodle", icon: "scribble.variable", name: "Doodle", summary: "Sketch a quick ink drawing."),
-      .init(id: "audio", icon: "waveform", name: "Ambient Sound", summary: "Record the sound around you."),
+      .init(
+        id: "text", icon: "text.alignleft", name: "Text", summary: "Jot down what's on your mind."),
+      .init(
+        id: "link", icon: "link", name: "Link", summary: "Save a web page with a native preview."),
+      .init(
+        id: "photo", icon: "camera", name: "Photo", summary: "Capture a moment with the camera."),
+      .init(
+        id: "doodle", icon: "scribble.variable", name: "Doodle",
+        summary: "Sketch a quick ink drawing."),
+      .init(
+        id: "audio", icon: "waveform", name: "Ambient Sound",
+        summary: "Record the sound around you."),
     ]
 
     if JournalFeatureFlags.isJournalingSuggestionsCaptureEnabled {
@@ -273,7 +281,7 @@ private struct CaptureMethod: Identifiable {
   }
 }
 
-fileprivate struct CaptureMethodRow: View {
+private struct CaptureMethodRow: View {
 
   let method: CaptureMethod
 
@@ -314,7 +322,7 @@ private enum PermissionState {
 /// The presentation of a single permission. Owns no system state — each concrete
 /// permission wrapper maps its platform status into `state` and supplies the
 /// request action.
-fileprivate struct PermissionRow: View {
+private struct PermissionRow: View {
 
   let icon: String
   let title: LocalizedStringResource
@@ -367,7 +375,7 @@ fileprivate struct PermissionRow: View {
   }
 }
 
-fileprivate struct CameraPermissionRow: View {
+private struct CameraPermissionRow: View {
 
   @State private var status = AVCaptureDevice.authorizationStatus(for: .video)
 
@@ -398,7 +406,7 @@ fileprivate struct CameraPermissionRow: View {
   }
 }
 
-fileprivate struct PhotoLibraryPermissionRow: View {
+private struct PhotoLibraryPermissionRow: View {
 
   @State private var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
 
@@ -429,7 +437,7 @@ fileprivate struct PhotoLibraryPermissionRow: View {
   }
 }
 
-fileprivate struct MicrophonePermissionRow: View {
+private struct MicrophonePermissionRow: View {
 
   @State private var permission = AmbientAudioRecorder.permission
 
@@ -460,7 +468,7 @@ fileprivate struct MicrophonePermissionRow: View {
   }
 }
 
-fileprivate struct LocationPermissionRow: View {
+private struct LocationPermissionRow: View {
 
   @State private var manager = LocationManager()
 
@@ -486,7 +494,7 @@ fileprivate struct LocationPermissionRow: View {
 // MARK: - Accent Color Tile
 
 /// A neutral tile that previews only the color controlled by the user.
-fileprivate struct AccentColorTile: View {
+private struct AccentColorTile: View {
 
   @Environment(\.colorScheme) private var colorScheme
 
@@ -542,10 +550,19 @@ fileprivate struct AccentColorTile: View {
 #Preview("Permission Row") {
   PrimaryContainer(accentColor: .default) {
     VStack(spacing: 14) {
-      PermissionRow(icon: "camera", title: "Camera", description: "Take a photo to attach to an entry.", state: .notDetermined, onRequest: {})
-      PermissionRow(icon: "photo.on.rectangle.angled", title: "Photos", description: "Import photos, Live Photos, and videos from your library.", state: .notDetermined, onRequest: {})
-      PermissionRow(icon: "waveform", title: "Microphone", description: "Record the sound around you.", state: .granted, onRequest: {})
-      PermissionRow(icon: "location", title: "Location", description: "Attach where you are to an entry.", state: .denied, onRequest: {})
+      PermissionRow(
+        icon: "camera", title: "Camera", description: "Take a photo to attach to an entry.",
+        state: .notDetermined, onRequest: {})
+      PermissionRow(
+        icon: "photo.on.rectangle.angled", title: "Photos",
+        description: "Import photos, Live Photos, and videos from your library.",
+        state: .notDetermined, onRequest: {})
+      PermissionRow(
+        icon: "waveform", title: "Microphone", description: "Record the sound around you.",
+        state: .granted, onRequest: {})
+      PermissionRow(
+        icon: "location", title: "Location", description: "Attach where you are to an entry.",
+        state: .denied, onRequest: {})
     }
     .padding(28)
     .background(.appPrimaryContainer)

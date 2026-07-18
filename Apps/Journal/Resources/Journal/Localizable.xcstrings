@@ -842,6 +842,7 @@
       }
     },
     "Capture text, links, photos, doodles, and sound — each kept as a simple card that syncs across your devices." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -856,6 +857,9 @@
           }
         }
       }
+    },
+    "Capture text, links, photos, doodles, and sound — each preserved in the form that fits it best and synced across your devices." : {
+
     },
     "Card" : {
       "extractionState" : "stale",
@@ -1354,6 +1358,7 @@
       }
     },
     "Create your first vault to start making cards." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1368,6 +1373,9 @@
           }
         }
       }
+    },
+    "Create your first vault to start preserving moments." : {
+
     },
     "Dark" : {
       "extractionState" : "stale",
@@ -1894,6 +1902,7 @@
       }
     },
     "Every little thing\nbecomes a card." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1942,7 +1951,7 @@
         }
       }
     },
-    "Files shared to Journal stay attached to their original card." : {
+    "Files shared to Tinycurve stay attached to their original entry." : {
 
     },
     "Finish artwork" : {
@@ -3287,7 +3296,7 @@
       }
     },
     "Saved locations: %@" : {
-      "comment" : "Accessibility value for the saved-card map; the variable is the number of location pins."
+      "comment" : "Accessibility value for the saved-entry map; the variable is the number of location pins."
     },
     "Search Icons" : {
       "localizations" : {
@@ -3913,6 +3922,7 @@
       }
     },
     "This card and any connected cards will be removed from this vault. Synced copies are deleted through iCloud." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3929,6 +3939,7 @@
       }
     },
     "This card has not been posted." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4029,6 +4040,12 @@
         }
       }
     },
+    "This entry and its connected entries will be removed from this vault. Synced copies are deleted through iCloud." : {
+
+    },
+    "This entry has not been posted." : {
+
+    },
     "This policy may be updated as Tinycurve changes. The Last updated date shows when this copy was last revised." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4079,6 +4096,9 @@
           }
         }
       }
+    },
+    "Tinycurve" : {
+
     },
     "Tinycurve does not include developer-operated analytics, advertising SDKs, third-party trackers, or cross-app tracking." : {
       "extractionState" : "stale",
@@ -4457,6 +4477,7 @@
       }
     },
     "Welcome to Journal" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4472,10 +4493,14 @@
         }
       }
     },
+    "Welcome to Tinycurve" : {
+
+    },
     "What's on your mind?" : {
 
     },
     "When enabled, new cards attach your current location automatically if iOS allows Journal to access it." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4490,6 +4515,9 @@
           }
         }
       }
+    },
+    "When enabled, new entries attach your current location automatically if iOS allows Tinycurve to access it." : {
+
     },
     "When iCloud is available, Tinycurve uses Apple's CloudKit private database to sync your cards and media across devices signed in to your Apple Account. The developer does not receive a copy of your journal content from this sync." : {
       "extractionState" : "stale",
@@ -4557,6 +4585,9 @@
           }
         }
       }
+    },
+    "Words, photos, and sounds\neach keep their own shape." : {
+
     },
     "Write a card" : {
       "comment" : "Placeholder for the direct text field in the Creation composer.",

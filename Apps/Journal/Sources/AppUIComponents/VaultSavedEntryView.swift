@@ -1,18 +1,18 @@
-import GaussianLinearGradient
 import JournalVault
 import MapKit
 import MuColor
 import SwiftUI
+
 #if canImport(UIKit)
-import UIKit
+  import UIKit
 #endif
 
-/// Display value consumed by saved vault card components.
+/// Display value consumed by saved-entry components.
 ///
 /// This is intentionally smaller than the vault store row graph. Feature code
 /// owns persistence, editing, deletion, and tree traversal; `AppUIComponents`
-/// only needs the stable values required to draw a saved card.
-public struct VaultSavedEntryCardModel: Identifiable, Hashable {
+/// only needs the stable values required to draw saved authored content.
+public struct VaultSavedEntryModel: Identifiable, Hashable {
   public let id: UUID
   public let kind: JournalVault.Card.Kind
   public let body: String
@@ -38,9 +38,18 @@ public struct VaultSavedEntryCardModel: Identifiable, Hashable {
     self.location = location
     self.attachment = attachment
   }
+
+  /// Authored content projected away from the persistence row graph.
+  public var content: EntryContent {
+    EntryContent(
+      kind: kind,
+      body: body,
+      attachment: attachment?.contentAttachment
+    )
+  }
 }
 
-/// Saved file-backed attachment values needed by saved vault card components.
+/// Saved file-backed attachment values needed by saved-entry components.
 public struct VaultSavedEntryAttachmentModel: Hashable {
   public let kind: JournalVault.Attachment.Kind
   public let fileURL: URL
@@ -75,65 +84,36 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
   }
 }
 
-/// Compact saved vault card used by Journal list surfaces.
+/// A finite placement boundary for authored content in the saved-entry grid.
 ///
-/// `CardSurface` provides the list's 4:5 paper chrome. `SavedListView` stays
-/// responsible for reading vault data, stack affordances, and mutations.
-public struct VaultSavedEntryTile: View {
+/// The transparent square owns only grid geometry. Content still owns its
+/// typography and media treatment through `.savedGrid`; the centered overlay
+/// prevents asynchronous media decoding from changing row height, while the
+/// outer boundary keeps every content type inside its column.
+public struct VaultSavedEntryGridCell: View {
 
-  let entry: VaultSavedEntryCardModel
-  let childCount: Int
+  private let content: EntryContent
 
-  public init(
-    entry: VaultSavedEntryCardModel,
-    childCount: Int
-  ) {
-    self.entry = entry
-    self.childCount = childCount
+  public init(content: EntryContent) {
+    self.content = content
   }
 
   public var body: some View {
-    CardSurface {
-      CardPreviewContent(
-        payload: entry.previewPayload,
-        presentation: .savedSummary
-      )
-      .frame(maxHeight: .infinity)
-    }
-  }
-}
-
-/// Bottom timestamp treatment for saved-entry tiles.
-///
-/// The material is drawn as its own full-width layer and alpha-masked with a
-/// Gaussian ramp. That keeps the card content layout stable while making the
-/// blur fade feel closer to a variable blur.
-private struct VaultSavedEntryTimestampOverlay: View {
-
-  let createdAt: Date
-
-  var body: some View {
-    ZStack(alignment: .bottom) {
-      Rectangle()
-        .fill(.thinMaterial)
-        .frame(height: 72)
-        .mask {
-          GaussianLinearGradient(
-            colors: [.clear, .black],
-            startPoint: .top,
-            endPoint: .bottom,
-            standardDeviation: 0.18
-          )
-        }
-
-      Text(createdAt, format: .dateTime.hour().minute())
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(.appOnSecondaryContainer.opacity(0.56))
-        .padding(CardMetrics.padding)
-        .frame(maxWidth: .infinity)
-    }
-    .frame(maxWidth: .infinity)
-    .allowsHitTesting(false)
+    Color.clear
+      .aspectRatio(1, contentMode: .fit)
+      .overlay {
+        EntryContentView(
+          content: content,
+          style: .savedGrid
+        )
+        .frame(
+          maxWidth: .infinity,
+          maxHeight: .infinity,
+          alignment: .center
+        )
+      }
+      .clipped()
+      .contentShape(Rectangle())
   }
 }
 
@@ -144,14 +124,14 @@ private struct VaultSavedEntryTimestampOverlay: View {
 /// metadata and mutation controls remain a separate footer below it.
 public struct VaultSavedEntryDetailRow: View {
 
-  let entry: VaultSavedEntryCardModel
+  let entry: VaultSavedEntryModel
   let isEditingDisabled: Bool
   let isDeletingDisabled: Bool
   let onEdit: @MainActor () -> Void
   let onDelete: @MainActor () -> Void
 
   public init(
-    entry: VaultSavedEntryCardModel,
+    entry: VaultSavedEntryModel,
     isEditingDisabled: Bool,
     isDeletingDisabled: Bool,
     onEdit: @escaping @MainActor () -> Void,
@@ -166,16 +146,15 @@ public struct VaultSavedEntryDetailRow: View {
 
   public var body: some View {
     VStack(alignment: .leading, spacing: 16) {
-      VaultSavedEntryDetailContent(
-        kind: entry.kind,
-        payload: entry.previewPayload
-      )
+      EntryContentView(content: entry.content, style: .detail)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .foregroundStyle(.appOnPrimaryContainer)
 
       if let location = entry.location {
         VaultSavedEntryLocationMap(location: location)
           .frame(maxWidth: 640)
           .frame(maxWidth: .infinity)
-          .padding(.horizontal, CardMetrics.padding / 2)
+          .padding(.horizontal, 8)
       }
 
       VaultSavedEntryDetailMetadata(
@@ -189,44 +168,7 @@ public struct VaultSavedEntryDetailRow: View {
       )
       .frame(maxWidth: 640, alignment: .leading)
       .frame(maxWidth: .infinity, alignment: .center)
-      .padding(.horizontal, CardMetrics.padding / 2)
-    }
-  }
-}
-
-/// Authored content whose height is independent of compact card geometry.
-///
-/// Minimum heights keep unresolved disk-backed formats legible without imposing
-/// a common aspect ratio once their authored content becomes available.
-private struct VaultSavedEntryDetailContent: View {
-
-  let kind: JournalVault.Card.Kind
-  let payload: CardPreviewPayload
-
-  var body: some View {
-    CardDetailContent(payload: payload)
-      .frame(
-        maxWidth: .infinity,
-        minHeight: minimumHeight,
-        alignment: .center
-      )
-      .foregroundStyle(.appOnPrimaryContainer)
-  }
-
-  private var minimumHeight: CGFloat? {
-    switch kind {
-    case .text:
-      return nil
-    case .link:
-      return 240
-    case .file:
-      return 120
-    case .photo, .video, .livePhoto, .doodle, .bauhaus:
-      return 180
-    case .audio, .suggestion, .unknown:
-      return 120
-    @unknown default:
-      return 120
+      .padding(.horizontal, 8)
     }
   }
 }
@@ -311,7 +253,7 @@ private struct VaultSavedEntryDetailMetadata: View {
         }
         .buttonStyle(.plain)
         .disabled(isEditingDisabled)
-        .accessibilityLabel("Edit Card")
+        .accessibilityLabel("Edit Entry")
 
         Button(role: .destructive) {
           onDelete()
@@ -323,7 +265,7 @@ private struct VaultSavedEntryDetailMetadata: View {
         .buttonStyle(.plain)
         .foregroundStyle(.red)
         .disabled(isDeletingDisabled)
-        .accessibilityLabel("Delete Card")
+        .accessibilityLabel("Delete Entry")
       }
       .font(.caption.weight(.semibold))
       .foregroundStyle(.appOnPrimaryContainer.opacity(0.72))
@@ -356,21 +298,10 @@ private struct VaultSavedEntryDetailMetadata: View {
   }
 }
 
-private extension VaultSavedEntryCardModel {
+extension VaultSavedEntryAttachmentModel {
 
-  var previewPayload: CardPreviewPayload {
-    CardPreviewPayload(
-      kind: kind,
-      body: body,
-      attachment: attachment?.previewAttachment
-    )
-  }
-}
-
-private extension VaultSavedEntryAttachmentModel {
-
-  var previewAttachment: CardPreviewAttachment {
-    CardPreviewAttachment(
+  fileprivate var contentAttachment: EntryContentAttachment {
+    EntryContentAttachment(
       kind: kind,
       fileURL: fileURL,
       pairedVideoFileURL: pairedVideoFileURL,
@@ -384,9 +315,9 @@ private extension VaultSavedEntryAttachmentModel {
   }
 }
 
-public extension JournalVault.Card.Kind {
+extension JournalVault.Card.Kind {
 
-  var vaultListDisplayTitle: LocalizedStringResource {
+  public var vaultListDisplayTitle: LocalizedStringResource {
     switch self {
     case .text:
       "Text"
@@ -409,13 +340,13 @@ public extension JournalVault.Card.Kind {
     case .bauhaus:
       "Bauhaus"
     case .unknown:
-      "Card"
+      "Entry"
     @unknown default:
-      "Card"
+      "Entry"
     }
   }
 
-  var vaultListSymbolName: String {
+  public var vaultListSymbolName: String {
     switch self {
     case .text:
       "text.alignleft"
@@ -449,9 +380,12 @@ public extension JournalVault.Card.Kind {
   PrimaryContainer(accentColor: .default) {
     ScrollView {
       VStack(alignment: .leading, spacing: 12) {
-        Text(VaultSavedEntryCardPreviewFixtures.day, format: .dateTime.weekday(.abbreviated).month(.wide).day().year())
-          .font(.headline)
-          .foregroundStyle(.appOnPrimaryContainer.opacity(0.72))
+        Text(
+          VaultSavedEntryPreviewFixtures.day,
+          format: .dateTime.weekday(.abbreviated).month(.wide).day().year()
+        )
+        .font(.headline)
+        .foregroundStyle(.appOnPrimaryContainer.opacity(0.72))
 
         LazyVGrid(
           columns: [
@@ -460,11 +394,8 @@ public extension JournalVault.Card.Kind {
           ],
           spacing: 16
         ) {
-          ForEach(VaultSavedEntryCardPreviewFixtures.examples) { example in
-            VaultSavedEntryTile(
-              entry: example.entry,
-              childCount: example.childCount
-            )
+          ForEach(VaultSavedEntryPreviewFixtures.examples) { example in
+            VaultSavedEntryGridCell(content: example.entry.content)
           }
         }
       }
@@ -478,7 +409,7 @@ public extension JournalVault.Card.Kind {
   PrimaryContainer(accentColor: .default) {
     ScrollView {
       VaultSavedEntryDetailRow(
-        entry: VaultSavedEntryCardPreviewFixtures.detailEntry,
+        entry: VaultSavedEntryPreviewFixtures.detailEntry,
         isEditingDisabled: false,
         isDeletingDisabled: false,
         onEdit: {},
@@ -495,7 +426,7 @@ public extension JournalVault.Card.Kind {
   PrimaryContainer(accentColor: .default) {
     ScrollView {
       LazyVStack(spacing: 40) {
-        ForEach(VaultSavedEntryCardPreviewFixtures.detailMediaEntries) { entry in
+        ForEach(VaultSavedEntryPreviewFixtures.detailMediaEntries) { entry in
           VaultSavedEntryDetailRow(
             entry: entry,
             isEditingDisabled: false,
@@ -516,7 +447,7 @@ public extension JournalVault.Card.Kind {
   PrimaryContainer(accentColor: .default) {
     ScrollView {
       VaultSavedEntryDetailRow(
-        entry: VaultSavedEntryCardPreviewFixtures.portraitVideoEntry,
+        entry: VaultSavedEntryPreviewFixtures.portraitVideoEntry,
         isEditingDisabled: false,
         isDeletingDisabled: false,
         onEdit: {},
@@ -530,26 +461,26 @@ public extension JournalVault.Card.Kind {
   }
 }
 
-/// Preview-only example for one saved-card tile.
+/// Preview-only example for one saved-entry grid cell.
 ///
 /// The production list derives this value shape from live SwiftData models.
 /// Keeping the fixture at the display-model boundary lets the Preview render
-/// the real card components without opening a vault store.
-private struct VaultSavedEntryCardPreviewExample: Identifiable {
+/// the real saved-entry components without opening a vault store.
+private struct VaultSavedEntryPreviewExample: Identifiable {
   var id: UUID { entry.id }
 
-  let entry: VaultSavedEntryCardModel
-  let childCount: Int
+  let entry: VaultSavedEntryModel
 }
 
 @MainActor
-private enum VaultSavedEntryCardPreviewFixtures {
+private enum VaultSavedEntryPreviewFixtures {
 
   static let day = Date(timeIntervalSinceReferenceDate: 789_004_800)
 
   static let detailEntry = entry(
     kind: .text,
-    body: "Small notes can use the width they need. The detail view drops the paper frame and lets the authored content define its own height.",
+    body:
+      "Small notes can use the width they need. The detail view drops the paper frame and lets the authored content define its own height.",
     createdAt: day.addingTimeInterval(-7_200),
     updatedAt: day.addingTimeInterval(-1_800),
     location: JournalVault.Coordinate(
@@ -580,43 +511,48 @@ private enum VaultSavedEntryCardPreviewFixtures {
     )
   )
 
-  static let detailMediaEntries: [VaultSavedEntryCardModel] = [
+  static let squarePhotoEntry = entry(
+    kind: .photo,
+    body: "",
+    createdAt: day.addingTimeInterval(-12_600),
+    attachment: mediaAttachment(
+      kind: .photo,
+      pixelSize: CGSize(width: 360, height: 360),
+      title: "SQUARE"
+    )
+  )
+
+  static let detailMediaEntries: [VaultSavedEntryModel] = [
     landscapePhotoEntry,
     portraitVideoEntry,
   ]
 
-  static let examples: [VaultSavedEntryCardPreviewExample] = [
-    VaultSavedEntryCardPreviewExample(
+  static let examples: [VaultSavedEntryPreviewExample] = [
+    VaultSavedEntryPreviewExample(
       entry: entry(
         kind: .text,
-        body: "Small notes should still read like the same card in the real list.",
+        body: "Small notes should keep their own shape in the real list.",
         createdAt: day.addingTimeInterval(-120)
-      ),
-      childCount: 0
+      )
     ),
-    VaultSavedEntryCardPreviewExample(
+    VaultSavedEntryPreviewExample(
+      entry: squarePhotoEntry
+    ),
+    VaultSavedEntryPreviewExample(
       entry: entry(
         kind: .link,
         body: "https://www.apple.com",
         createdAt: day.addingTimeInterval(-460)
-      ),
-      childCount: 2
+      )
     ),
-    VaultSavedEntryCardPreviewExample(
-      entry: entry(
-        kind: .photo,
-        body: "",
-        createdAt: day.addingTimeInterval(-1_200)
-      ),
-      childCount: 0
-    ),
-    VaultSavedEntryCardPreviewExample(
+    VaultSavedEntryPreviewExample(entry: landscapePhotoEntry),
+    VaultSavedEntryPreviewExample(entry: portraitVideoEntry),
+    VaultSavedEntryPreviewExample(
       entry: entry(
         kind: .audio,
         body: "",
         createdAt: day.addingTimeInterval(-1_680)
-      ),
-      childCount: 1
+      )
     ),
   ]
 
@@ -627,8 +563,8 @@ private enum VaultSavedEntryCardPreviewFixtures {
     updatedAt: Date? = nil,
     location: JournalVault.Coordinate? = nil,
     attachment: VaultSavedEntryAttachmentModel? = nil
-  ) -> VaultSavedEntryCardModel {
-    VaultSavedEntryCardModel(
+  ) -> VaultSavedEntryModel {
+    VaultSavedEntryModel(
       id: UUID(),
       kind: kind,
       body: body,
@@ -658,48 +594,48 @@ private enum VaultSavedEntryCardPreviewFixtures {
     title: String
   ) -> Data? {
     #if canImport(UIKit)
-    let markerInset = max(8, min(pixelSize.width, pixelSize.height) * 0.04)
-    let renderer = ImageRenderer(
-      content: ZStack {
-        LinearGradient(
-          colors: [.pink, .orange, .blue, .purple],
-          startPoint: .topLeading,
-          endPoint: .bottomTrailing
-        )
-
-        Text(title)
-          .font(
-            .system(
-              size: min(pixelSize.width, pixelSize.height) * 0.09,
-              weight: .black,
-              design: .rounded
-            )
+      let markerInset = max(8, min(pixelSize.width, pixelSize.height) * 0.04)
+      let renderer = ImageRenderer(
+        content: ZStack {
+          LinearGradient(
+            colors: [.pink, .orange, .blue, .purple],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
           )
-          .foregroundStyle(.white)
 
-        VStack {
-          HStack {
-            Text("TL")
+          Text(title)
+            .font(
+              .system(
+                size: min(pixelSize.width, pixelSize.height) * 0.09,
+                weight: .black,
+                design: .rounded
+              )
+            )
+            .foregroundStyle(.white)
+
+          VStack {
+            HStack {
+              Text("TL")
+              Spacer()
+              Text("TR")
+            }
             Spacer()
-            Text("TR")
+            HStack {
+              Text("BL")
+              Spacer()
+              Text("BR")
+            }
           }
-          Spacer()
-          HStack {
-            Text("BL")
-            Spacer()
-            Text("BR")
-          }
+          .font(.system(size: 22, weight: .black, design: .rounded))
+          .foregroundStyle(.white)
+          .padding(markerInset)
         }
-        .font(.system(size: 22, weight: .black, design: .rounded))
-        .foregroundStyle(.white)
-        .padding(markerInset)
-      }
-      .frame(width: pixelSize.width, height: pixelSize.height)
-    )
-    renderer.scale = 1
-    return renderer.uiImage?.pngData()
+        .frame(width: pixelSize.width, height: pixelSize.height)
+      )
+      renderer.scale = 1
+      return renderer.uiImage?.pngData()
     #else
-    return nil
+      return nil
     #endif
   }
 }
