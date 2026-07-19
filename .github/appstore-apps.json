@@ -10,7 +10,7 @@
     },
     {
       "name": "Journal",
-      "scheme": "Journal",
+      "scheme": "Tinycurve",
       "project_path": "Apps/Journal/Project.swift",
       "xcode_version": "26.4",
       "macos_runner": "macos-26",
