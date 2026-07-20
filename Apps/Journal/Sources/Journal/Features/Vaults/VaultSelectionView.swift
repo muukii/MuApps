@@ -421,7 +421,7 @@ private struct VaultSelectionList: View {
         initialAvailabilityResolution.isCloudKitDeferred
       {
         Section {
-          VaultCloudKitDeferredBanner(resolution: initialAvailabilityResolution)
+          VaultCloudKitDeferredNotice(resolution: initialAvailabilityResolution)
             .listRowBackground(Rectangle().fill(.appSecondaryContainer))
         }
       }
@@ -1758,7 +1758,22 @@ private struct VaultSelectionEmptyView: View {
   }
 }
 
+/// A standalone notice shown when launch can continue while iCloud recovery waits.
 struct VaultCloudKitDeferredBanner: View {
+
+  let resolution: VaultInitialAvailabilityResolution
+
+  var body: some View {
+    VaultCloudKitDeferredNotice(resolution: resolution)
+      .background(
+        .secondary.opacity(0.08),
+        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+      )
+  }
+}
+
+/// Surface-free deferred-recovery content for containers such as a `List` row.
+struct VaultCloudKitDeferredNotice: View {
 
   let resolution: VaultInitialAvailabilityResolution
 
@@ -1786,8 +1801,27 @@ struct VaultCloudKitDeferredBanner: View {
     }
     .padding(12)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
   }
+}
+
+#Preview("iCloud Recovery Deferred", traits: .sizeThatFitsLayout) {
+  PrimaryContainer(accentColor: .default) {
+    List {
+      Section {
+        VaultCloudKitDeferredNotice(
+          resolution: .resolvedWithDeferredCloudKit(
+            "iCloud account status is temporarily unavailable."
+          )
+        )
+        .listRowBackground(Rectangle().fill(.appSecondaryContainer))
+      }
+    }
+    .journalInsetGroupedListStyle()
+    .scrollContentBackground(.hidden)
+    .background(.background)
+  }
+  .frame(width: 320, height: 140)
+  .preferredColorScheme(.dark)
 }
 
 private struct VaultSelectionErrorView: View {

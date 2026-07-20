@@ -702,8 +702,10 @@ the gallery's **Lab** section).
   **No Vaults** state. That state omits Creation, Entries, and Save actions; it
   offers **New Vault**, **Refresh**, and Settings directly. When initial iCloud
   recovery was deferred, No Vaults and the Vault sheet show a compact diagnostic
-  banner, while Settings' debug-only **Vault Runtime** screen shows the last
-  availability resolution. Root also owns the
+  notice. No Vaults gives it a standalone banner surface; the Vault sheet uses
+  the existing List row surface without nesting another rounded background.
+  Settings' debug-only **Vault Runtime** screen shows the last availability
+  resolution. Root also owns the
   scene-local `JournalNotificationCenter` and wraps the app content in
   `JournalNotificationHost`, which injects that model through the SwiftUI
   environment and overlays app-wide bottom capsule notifications above the
