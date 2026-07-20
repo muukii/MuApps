@@ -944,11 +944,15 @@ the gallery's **Lab** section).
   are matched transition sources so opening a detail view uses the system zoom
   navigation transition from the tapped entry. Link content uses iOS's
   LinkPresentation preview in both list and detail styles, fetching
-  metadata at display time and caching it for the app session. The saved-grid
-  Link style owns a finite height; native metadata updates invalidate intrinsic
-  layout only when the metadata object actually changes. Other media placeholders
-  and loading states also keep finite aspect-ratio geometry instead of requesting
-  an unbounded grid-row height. Photo summary
+  metadata at display time and caching it in a dedicated device-local SwiftData
+  store under the app's Caches directory for up to seven days. The cache is not
+  synced or backed up, is bounded to 200 entries / 50 MiB, and may be purged by
+  the operating system. Cache access is serialized synchronously on MainActor;
+  only remote metadata fetching remains asynchronous.
+  The saved-grid Link style owns a finite height; native metadata updates
+  invalidate intrinsic layout only when the metadata object actually changes.
+  Other media placeholders and loading states also keep finite aspect-ratio
+  geometry instead of requesting an unbounded grid-row height. Photo summary
   previews use the saved thumbnail to avoid decoding original-size images during
   scrolling. The pushed detail view presents authored content without a common
   shape, rounded clipping, stroke, or fixed height. Text uses its natural height;

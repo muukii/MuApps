@@ -10,8 +10,8 @@ import SwiftUI
 /// SwiftUI wrapper around iOS's native rich link preview.
 ///
 /// `LPLinkView` owns the visual treatment. This view only fetches and caches
-/// `LPLinkMetadata` for the current app session, then falls back to a small URL
-/// placeholder when metadata is unavailable.
+/// `LPLinkMetadata` locally, then falls back to a small URL placeholder when
+/// metadata is unavailable.
 public struct JournalLinkPreview: View {
 
   let url: URL
@@ -50,7 +50,7 @@ public struct JournalLinkPreview: View {
 
   @MainActor
   private func loadMetadata() async {
-    if let cachedMetadata = LinkPreviewMetadataCache.metadata(for: url) {
+    if let cachedMetadata = LinkPreviewMetadataCacheStorage.shared.metadata(for: url) {
       metadata = cachedMetadata
       fetchState = .loaded
       return
@@ -63,9 +63,9 @@ public struct JournalLinkPreview: View {
 
     do {
       let fetchedMetadata = try await provider.startFetchingMetadata(for: url)
-      LinkPreviewMetadataCache.store(fetchedMetadata, for: url)
       metadata = fetchedMetadata
       fetchState = .loaded
+      LinkPreviewMetadataCacheStorage.shared.store(fetchedMetadata, for: url)
     } catch is CancellationError {
       provider.cancel()
     } catch {
@@ -79,20 +79,6 @@ private enum LinkPreviewFetchState: Hashable {
   case loading
   case loaded
   case failed
-}
-
-@MainActor
-private enum LinkPreviewMetadataCache {
-
-  private static var metadataByURL: [URL: LPLinkMetadata] = [:]
-
-  static func metadata(for url: URL) -> LPLinkMetadata? {
-    metadataByURL[url]
-  }
-
-  static func store(_ metadata: LPLinkMetadata, for url: URL) {
-    metadataByURL[url] = metadata
-  }
 }
 
 #if canImport(UIKit)

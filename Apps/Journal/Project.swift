@@ -506,6 +506,7 @@ let project = Project(
         .sdk(name: "LinkPresentation", type: .framework),
         .sdk(name: "MapKit", type: .framework),
         .sdk(name: "SharedWithYou", type: .framework),
+        .sdk(name: "SwiftData", type: .framework),
         .external(name: "SwiftUIIntrospect"),
         .target(name: "CaptureBauhaus"),
         .target(name: "CaptureDoodle"),
