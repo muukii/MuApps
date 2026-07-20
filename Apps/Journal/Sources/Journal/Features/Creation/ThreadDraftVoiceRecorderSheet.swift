@@ -24,7 +24,7 @@ struct ThreadDraftVoiceRecorderSheet: View {
         dismiss()
       }
       .navigationTitle("Voice Record")
-      .journalInlineNavigationTitle()
+      .appInlineNavigationTitle()
     }
   }
 }

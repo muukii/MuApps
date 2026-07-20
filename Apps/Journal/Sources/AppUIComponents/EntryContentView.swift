@@ -38,7 +38,6 @@ public struct EntryContentView: View {
       .frame(minHeight: style.text.minimumHeight)
     case .link(let urlString):
       LinkContentView(urlString: urlString, style: style.link)
-        .frame(minHeight: style.link.minimumHeight)
     case .file(let file):
       FileContentView(file: file, style: style.file)
         .frame(minHeight: style.file.minimumHeight)
@@ -539,17 +538,6 @@ private struct LinkContentView: View {
       self.preset = preset
     }
 
-    var previewHeight: CGFloat? {
-      switch preset {
-      case .savedGrid:
-        return 112
-      case .detail:
-        return 240
-      case .composer, .share:
-        return nil
-      }
-    }
-
     var allowsInteraction: Bool {
       preset == .detail
     }
@@ -559,10 +547,6 @@ private struct LinkContentView: View {
         preset,
         emptyTitle: preset == .composer ? "Link" : "Empty link"
       )
-    }
-
-    var minimumHeight: CGFloat? {
-      previewHeight
     }
   }
 
@@ -574,7 +558,7 @@ private struct LinkContentView: View {
       JournalLinkPreview(
         url: linkURL.url,
       )
-      .frame(height: style.previewHeight)
+      //      .frame(height: style.previewHeight)
       .allowsHitTesting(style.allowsInteraction)
     } else {
       TextContentView(
@@ -1561,28 +1545,40 @@ extension SuggestionCardElement {
     -> URL?
   {
     let fileURL: URL?
-    switch (kind, self) {
-    case (.contactPhoto, .contact(_, _, let photoURL)):
+    // Keep the payload pattern at the top level. Xcode Preview's design-time
+    // rewriter can otherwise turn a nested tuple pattern into an expression.
+    switch self {
+    case .contact(_, _, let photoURL) where kind == .contactPhoto:
       fileURL = photoURL
-    case (.eventPosterImage, .eventPoster(_, _, let imageURL, _, _, _, _)):
+    case .eventPoster(_, _, let imageURL, _, _, _, _)
+      where kind == .eventPosterImage:
       fileURL = imageURL
-    case (.genericMediaAppIcon, .genericMedia(_, _, _, _, _, let appIconURL)):
+    case .genericMedia(_, _, _, _, _, let appIconURL)
+      where kind == .genericMediaAppIcon:
       fileURL = appIconURL
-    case (.livePhotoImage, .livePhoto(_, let imageURL, _, _)):
+    case .livePhoto(_, let imageURL, _, _)
+      where kind == .livePhotoImage:
       fileURL = imageURL
-    case (.motionIcon, .motion(_, _, _, let iconURL, _)):
+    case .motion(_, _, _, let iconURL, _)
+      where kind == .motionIcon:
       fileURL = iconURL
-    case (.photoImage, .photo(_, let imageURL, _)):
+    case .photo(_, let imageURL, _)
+      where kind == .photoImage:
       fileURL = imageURL
-    case (.podcastArtwork, .podcast(_, _, _, let artworkURL, _)):
+    case .podcast(_, _, _, let artworkURL, _)
+      where kind == .podcastArtwork:
       fileURL = artworkURL
-    case (.songArtwork, .song(_, _, _, _, let artworkURL, _)):
+    case .song(_, _, _, _, let artworkURL, _)
+      where kind == .songArtwork:
       fileURL = artworkURL
-    case (.stateOfMindIcon, .stateOfMind(_, _, let iconURL)):
+    case .stateOfMind(_, _, let iconURL)
+      where kind == .stateOfMindIcon:
       fileURL = iconURL
-    case (.workoutIcon, .workout(_, let workout)):
+    case .workout(_, let workout)
+      where kind == .workoutIcon:
       fileURL = workout.iconURL
-    case (.workoutGroupIcon, .workoutGroup(_, let group)):
+    case .workoutGroup(_, let group)
+      where kind == .workoutGroupIcon:
       fileURL = group.iconURL
     default:
       fileURL = nil
@@ -1768,17 +1764,19 @@ private struct PhotoContentView: View {
 
   @ViewBuilder
   var body: some View {
-    if style.preset == .share {
+    switch style.preset {
+    case .composer, .savedGrid, .detail:
+      content
+        .task(id: imageLoadID) {
+          await refreshImages()
+        }
+
+    case .share:
       SynchronousImageContentView(
         imageData: photo.imageData ?? photo.thumbnailData,
         fallbackSystemImage: "photo"
       )
       .contentMediaWell(isEnabled: true)
-    } else {
-      content
-        .task(id: imageLoadID) {
-          await refreshImages()
-        }
     }
   }
 
@@ -1787,10 +1785,7 @@ private struct PhotoContentView: View {
     if let image {
       Image(uiImage: image)
         .resizable()
-        .aspectRatio(
-          displayAspectRatio(for: image),
-          contentMode: style.contentMode
-        )
+        .aspectRatio(contentMode: .fill)
     } else {
       ContentMediaPlaceholder(
         systemImage: "photo",
@@ -1896,7 +1891,7 @@ private struct VideoContentView: View {
       case .composer:
         return .fill
       case .savedGrid, .detail, .share:
-        return .fit
+        return .fill
       }
     }
 
@@ -1905,7 +1900,7 @@ private struct VideoContentView: View {
       case .composer, .share:
         return .resizeAspectFill
       case .savedGrid, .detail:
-        return .resizeAspect
+        return .resizeAspectFill
       }
     }
 
@@ -1947,39 +1942,30 @@ private struct VideoContentView: View {
 
   private func playableVideo(_ fileURL: URL) -> some View {
 
-    sizedPlayableVideo {
-      ZStack {
-        Color.black.opacity(0.08)
+    ZStack {
+      Color.black.opacity(0.08)
 
-        MutedLoopingVideoPlayer(
-          fileURL: fileURL,
-          videoGravity: style.videoGravity,
-          onReadyForPlayback: {
-            withAnimation(.easeInOut(duration: 0.18)) {
-              readyFileURL = fileURL
-            }
+      MutedLoopingVideoPlayer(
+        fileURL: fileURL,
+        videoGravity: .resizeAspectFill,
+        onReadyForPlayback: {
+          withAnimation(.easeInOut(duration: 0.18)) {
+            readyFileURL = fileURL
           }
-        )
-
-        if let thumbnailImage {
-          Image(uiImage: thumbnailImage)
-            .resizable()
-            .aspectRatio(contentMode: style.contentMode)
-            .opacity(readyFileURL == fileURL ? 0 : 1)
         }
+      )
+
+      if let thumbnailImage {
+        Image(uiImage: thumbnailImage)
+          .resizable()
+          .aspectRatio(contentMode: style.contentMode)
+          .opacity(readyFileURL == fileURL ? 0 : 1)
       }
     }
+
     .overlay(alignment: .bottomTrailing) {
       ContentMediaBadge(systemImage: "speaker.slash.fill")
     }
-  }
-
-  @ViewBuilder
-  private func sizedPlayableVideo<Content: View>(
-    @ViewBuilder content: () -> Content
-  ) -> some View {
-    content()
-      .aspectRatio(displayAspectRatio, contentMode: .fit)
   }
 
   private func posterOnly(_ image: UIImage) -> some View {
@@ -2036,14 +2022,6 @@ private struct VideoContentView: View {
     )
   }
 
-  private var displayAspectRatio: CGFloat {
-    let decodedAspectRatio = thumbnailImage?.contentAspectRatio ?? 16 / 9
-    guard style.isDetail else {
-      return decodedAspectRatio
-    }
-
-    return video.displayAspectRatio ?? decodedAspectRatio
-  }
 }
 
 private struct LivePhotoContentView: View {

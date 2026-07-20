@@ -780,7 +780,10 @@ the gallery's **Lab** section).
   `.tabViewStyle(.page)`) plus a fixed **Get Started** / **Next** call-to-action
   and a **Skip** affordance on every page but the last:
   1. **Welcome** — a content-first statement ("Words, photos, and sounds each
-     keep their own shape") over a short welcome blurb.
+     keep their own shape") over a short welcome blurb. When the page first
+     appears, a `TextRenderer` reveals that statement glyph by glyph from
+     leading to trailing, resolving blur and a small downward offset into the
+     authored layout. Reduce Motion presents the completed statement immediately.
   2. **Capture methods** — Text, Link, Photo, Doodle, and Ambient Sound as icon
      + name + one-line summary. iPhone and iPad builds also show Suggestions;
      native macOS omits it because the system framework is unavailable.

@@ -23,7 +23,7 @@ struct ThreadDraftDoodleCanvasCover: View {
     NavigationStack {
       ThreadDraftDoodleCanvasContent(card: card, onChange: onChange)
         .navigationTitle("Doodle")
-        .journalInlineNavigationTitle()
+        .appInlineNavigationTitle()
         .toolbar {
           ToolbarItem(placement: .confirmationAction) {
             Button("Done") {
@@ -53,7 +53,7 @@ struct ThreadDraftDoodleCanvasSheet: View {
     NavigationStack {
       ThreadDraftDoodleCanvasContent(card: card, onChange: onChange)
         .navigationTitle("Doodle")
-        .journalInlineNavigationTitle()
+        .appInlineNavigationTitle()
     }
   }
 }

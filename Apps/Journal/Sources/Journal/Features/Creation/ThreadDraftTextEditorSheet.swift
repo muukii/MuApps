@@ -18,7 +18,7 @@ struct ThreadDraftTextEditorSheet: View {
     NavigationStack {
       ThreadDraftTextEditorContent(text: $card.text)
         .navigationTitle("Text")
-        .journalInlineNavigationTitle()
+        .appInlineNavigationTitle()
     }
   }
 }
@@ -67,7 +67,7 @@ struct ThreadDraftLinkEditorSheet: View {
     NavigationStack {
       ThreadDraftLinkEditorContent(urlString: $card.text)
         .navigationTitle("Link")
-        .journalInlineNavigationTitle()
+        .appInlineNavigationTitle()
     }
   }
 }

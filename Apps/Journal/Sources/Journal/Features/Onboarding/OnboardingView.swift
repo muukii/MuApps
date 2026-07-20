@@ -112,6 +112,7 @@ private struct WelcomePage: View {
           .foregroundStyle(.secondary)
         Text("Words, photos, and sounds\neach keep their own shape.")
           .font(.system(size: 26, weight: .bold))
+          .tinycurveTextAppearance()
       }
       .frame(maxWidth: 230)
 

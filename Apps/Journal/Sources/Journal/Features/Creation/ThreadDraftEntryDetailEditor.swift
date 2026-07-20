@@ -76,7 +76,7 @@ struct EntryDraftEditor: View {
     }
     .background(.background)
     .navigationTitle(draft.kind.editorTitle)
-    .journalInlineNavigationTitle()
+    .appInlineNavigationTitle()
     .toolbar {
       ToolbarItem(placement: .confirmationAction) {
         Button {

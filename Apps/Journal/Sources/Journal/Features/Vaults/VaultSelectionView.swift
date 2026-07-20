@@ -491,7 +491,7 @@ private struct VaultSelectionList: View {
         }
       }
     }
-    .journalInsetGroupedListStyle()
+    .appInsetGroupedListStyle()
     .scrollContentBackground(.hidden)
     .background(.background)
   }
@@ -627,7 +627,7 @@ private struct VaultSelectionRowPreview: View {
         )
       }
     }
-    .journalInsetGroupedListStyle()
+    .appInsetGroupedListStyle()
     .scrollContentBackground(.hidden)
     .background(.background)
   }
@@ -958,7 +958,7 @@ private struct VaultRenameSheet: View {
         }
       }
       .navigationTitle("Rename Vault")
-      .journalInlineNavigationTitle()
+      .appInlineNavigationTitle()
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancel") {
@@ -1049,7 +1049,7 @@ struct VaultCreationSheet: View {
         VaultIconPickerSection(selection: $selectedIcon)
       }
       .navigationTitle("New Vault")
-      .journalInlineNavigationTitle()
+      .appInlineNavigationTitle()
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancel") {
@@ -1145,7 +1145,7 @@ private struct VaultIconEditorSheet: View {
         VaultIconPickerSection(selection: $selectedIcon)
       }
       .navigationTitle("Vault Icon")
-      .journalInlineNavigationTitle()
+      .appInlineNavigationTitle()
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancel") {
@@ -1222,7 +1222,7 @@ private struct VaultIconBrowser: View {
       }
     }
     .navigationTitle("Icon")
-    .journalInlineNavigationTitle()
+    .appInlineNavigationTitle()
     .vaultIconSearch(text: $model.query)
     .sheet(item: $presentedFamily) { family in
       VaultEmojiVariationPicker(
@@ -1341,7 +1341,7 @@ private struct VaultEmojiVariationPicker: View {
         .padding(12)
       }
       .navigationTitle("Variations")
-      .journalInlineNavigationTitle()
+      .appInlineNavigationTitle()
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancel") {
@@ -1816,7 +1816,7 @@ struct VaultCloudKitDeferredNotice: View {
         .listRowBackground(Rectangle().fill(.appSecondaryContainer))
       }
     }
-    .journalInsetGroupedListStyle()
+    .appInsetGroupedListStyle()
     .scrollContentBackground(.hidden)
     .background(.background)
   }

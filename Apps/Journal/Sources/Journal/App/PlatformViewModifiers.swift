@@ -4,7 +4,7 @@ extension View {
   /// Uses iOS's inline navigation title while preserving the native macOS
   /// toolbar/title presentation, where this UIKit-specific mode is unavailable.
   @ViewBuilder
-  func journalInlineNavigationTitle() -> some View {
+  func appInlineNavigationTitle() -> some View {
     #if os(iOS)
     navigationBarTitleDisplayMode(.inline)
     #else
@@ -13,7 +13,7 @@ extension View {
   }
 
   /// Uses a full-screen modal on iOS and a native resizable sheet on macOS.
-  func journalFullScreenCover<Content: View>(
+  func appFullScreenCover<Content: View>(
     isPresented: Binding<Bool>,
     @ViewBuilder content: @escaping () -> Content
   ) -> some View {
@@ -24,8 +24,8 @@ extension View {
     #endif
   }
 
-  /// Identifiable-item variant of Journal's platform-adaptive modal.
-  func journalFullScreenCover<Item: Identifiable, Content: View>(
+  /// Identifiable-item variant of the app's platform-adaptive modal.
+  func appFullScreenCover<Item: Identifiable, Content: View>(
     item: Binding<Item?>,
     @ViewBuilder content: @escaping (Item) -> Content
   ) -> some View {
@@ -37,7 +37,7 @@ extension View {
   }
 
   /// Keeps iOS's zoom navigation transition and uses native macOS navigation.
-  func journalZoomNavigationTransition<ID: Hashable>(
+  func appZoomNavigationTransition<ID: Hashable>(
     sourceID: ID,
     in namespace: Namespace.ID
   ) -> some View {
@@ -49,7 +49,7 @@ extension View {
   }
 
   /// Marks the iOS zoom source without imposing a UIKit transition on macOS.
-  func journalMatchedTransitionSource<ID: Hashable>(
+  func appMatchedTransitionSource<ID: Hashable>(
     id: ID,
     in namespace: Namespace.ID
   ) -> some View {
@@ -61,18 +61,47 @@ extension View {
   }
 
   /// Uses the closest native grouped list treatment on each platform.
-  func journalInsetGroupedListStyle() -> some View {
+  func appInsetGroupedListStyle() -> some View {
     #if os(iOS)
     listStyle(.insetGrouped)
     #else
     listStyle(.inset)
     #endif
   }
+
+  /// Applies the platform-native presentation contract for the Vault picker.
+  ///
+  /// iPhone and iPad use interactive sheet detents. On macOS, SwiftUI's
+  /// automatic presentation sizing fits vertically to the content, which can
+  /// collapse a `List`, so the picker instead uses a bounded form-sized sheet.
+  func appVaultSelectionPresentation(
+    selection: Binding<PresentationDetent>
+  ) -> some View {
+    #if os(iOS)
+      presentationDetents(
+        [.medium, .large],
+        selection: selection
+      )
+      .presentationDragIndicator(.visible)
+      .presentationBackground(.background)
+    #else
+      presentationSizing(.form)
+        .frame(
+          minWidth: 480,
+          idealWidth: 560,
+          maxWidth: 640,
+          minHeight: 360,
+          idealHeight: 440,
+          maxHeight: 600
+        )
+        .presentationBackground(.background)
+    #endif
+  }
 }
 
 extension ToolbarItemPlacement {
   /// Trailing navigation action on iOS and the primary window action on macOS.
-  static var journalTrailingAction: ToolbarItemPlacement {
+  static var appTrailingAction: ToolbarItemPlacement {
     #if os(iOS)
     .topBarTrailing
     #else
@@ -81,7 +110,7 @@ extension ToolbarItemPlacement {
   }
 
   /// Leading navigation action on iOS and cancellation position on macOS.
-  static var journalLeadingAction: ToolbarItemPlacement {
+  static var appLeadingAction: ToolbarItemPlacement {
     #if os(iOS)
     .navigationBarLeading
     #else

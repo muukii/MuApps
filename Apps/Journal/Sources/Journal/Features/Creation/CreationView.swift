@@ -118,7 +118,7 @@ struct CreationView: View {
       }
       .toolbar(content: {
         if onChangeVault != nil {
-          ToolbarItem(placement: .journalLeadingAction) {
+          ToolbarItem(placement: .appLeadingAction) {
             Button {
               requestVaultChange()
             } label: {
@@ -133,7 +133,7 @@ struct CreationView: View {
         }
 
         if let collaborationVault = selectedCollaborationVault {
-          ToolbarItem(placement: .journalTrailingAction) {
+          ToolbarItem(placement: .appTrailingAction) {
             VaultCollaborationControl(
               vaultID: collaborationVault.vaultID,
               title: collaborationVault.title,
@@ -146,7 +146,7 @@ struct CreationView: View {
           }
         }
 
-        ToolbarItem(placement: .journalTrailingAction) {
+        ToolbarItem(placement: .appTrailingAction) {
           #if os(macOS)
             SettingsLink {
               Image(systemName: "gearshape")
@@ -158,7 +158,7 @@ struct CreationView: View {
             }) {
               Image(systemName: "gearshape")
             }
-            .journalMatchedTransitionSource(id: "settings", in: namespace)
+            .appMatchedTransitionSource(id: "settings", in: namespace)
             .keyboardShortcut(",", modifiers: .command)
           #endif
         }
@@ -240,7 +240,7 @@ struct CreationView: View {
     #if os(iOS)
       .sheet(isPresented: $isSettingsPresented) {
         SettingsScreen()
-        .journalZoomNavigationTransition(sourceID: "settings", in: namespace)
+        .appZoomNavigationTransition(sourceID: "settings", in: namespace)
         .presentationSizing(.form)
         .presentationBackground(.background)
       }

@@ -47,6 +47,9 @@ struct TinycurveApp: App {
     WindowGroup {
       #if DEBUG
         switch TinycurveDebugLaunchRoute.activeRoute {
+        case .textAnimationSandbox:
+          TinycurveTextAnimationSandbox()
+
         case .bookInputMorphSandbox(let initialState):
           BookInputMorphSandbox(initialState: initialState)
             .preferredColorScheme(.dark)
@@ -114,6 +117,9 @@ struct TinycurveApp: App {
     /// Debug-only prototype roots supported by Journal launches.
     enum Route {
 
+      /// Opens the isolated TextRenderer appearance-animation stage.
+      case textAnimationSandbox
+
       /// Opens the minimal matched-geometry playground based on the Book input sample.
       case bookInputMorphSandbox(initialState: BookInputMorphSandbox.InitialState)
 
@@ -124,6 +130,9 @@ struct TinycurveApp: App {
     /// Opens the minimal Book input morph sandbox as the app root.
     private static let bookInputMorphSandboxArgument = "-BookInputMorphSandbox"
 
+    /// Opens the isolated TextRenderer appearance-animation stage as the app root.
+    private static let textAnimationSandboxArgument = "-TextAnimationSandbox"
+
     /// Opens the minimal Book input morph sandbox in its expanded state.
     private static let bookInputMorphSandboxExpandedArgument = "-BookInputMorphSandboxExpanded"
 
@@ -133,6 +142,10 @@ struct TinycurveApp: App {
     /// Prototype route requested by the current debug launch, if any.
     static var activeRoute: Route? {
       let arguments = ProcessInfo.processInfo.arguments
+
+      if arguments.contains(textAnimationSandboxArgument) {
+        return .textAnimationSandbox
+      }
 
       if arguments.contains(bookInputMorphSandboxExpandedArgument) {
         return .bookInputMorphSandbox(initialState: .expanded)
@@ -245,7 +258,7 @@ private struct RootView: View {
     .task { await acceptSystemCaptureRequests() }
     .onChange(of: scenePhase) { _, phase in
       guard phase == .active else { return }
-      Task { await vaultRuntime.resumeAfterExternalCapture() }
+      Task { await resumeAfterSceneActivation() }
     }
     .onChange(of: initialVaultActivationState) { _, state in
       guard state == .resolved else { return }
@@ -270,6 +283,34 @@ private struct RootView: View {
       await activateInitialVaultIfPossible()
     }
 
+    // Keep recovery on every launch, but on returning launches the root route is
+    // already resolved before this network-dependent operation begins.
+    await resolveVaultAvailabilityAndActivate()
+  }
+
+  /// Rechecks CloudKit after returning from Settings when launch began without
+  /// an available iCloud account or deferred account status.
+  ///
+  /// This is shared by Simulator and device builds. Returning to the app after
+  /// a Simulator iCloud sign-in therefore performs the same vault discovery and
+  /// foreground activation as a launch that began with iCloud available.
+  private func resumeAfterSceneActivation() async {
+    if let resolution = vaultRuntime.lastInitialAvailabilityResolution {
+      switch resolution {
+      case .resolvedWithCloudKit:
+        break
+
+      case .resolvedWithoutICloud, .resolvedWithDeferredCloudKit, .unresolved:
+        await resolveVaultAvailabilityAndActivate()
+      }
+    }
+
+    await vaultRuntime.resumeAfterExternalCapture()
+  }
+
+  /// Applies a CloudKit availability resolution to app routing and activates
+  /// the selected vault after the catalog has been refreshed.
+  private func resolveVaultAvailabilityAndActivate() async {
     let resolution = await vaultRuntime.resolveInitialVaultAvailability()
 
     if vaultRuntime.vaults.isEmpty == false {
@@ -466,12 +507,7 @@ private struct JournalHomeView: View {
         onClose: { isVaultSelectionPresented = false },
         onActiveVaultChanged: activeVaultChangedInsidePicker
       )
-      .presentationDetents(
-        [.medium, .large],
-        selection: $vaultSheetDetent
-      )
-      .presentationDragIndicator(.visible)
-      .presentationBackground(.background)
+      .appVaultSelectionPresentation(selection: $vaultSheetDetent)
     }
     .sheet(isPresented: $isVaultCreationPresented) {
       VaultCreationSheet(
@@ -661,7 +697,7 @@ private struct JournalNoVaultView: View {
         onRefreshVaults: onRefreshVaults
       )
       .toolbar {
-        ToolbarItem(placement: .journalTrailingAction) {
+        ToolbarItem(placement: .appTrailingAction) {
           Button(action: onOpenSettings) {
             Image(systemName: "gearshape")
           }
@@ -746,7 +782,7 @@ private struct JournalVaultUnavailableView: View {
       }
       .background(.background)
       .toolbar {
-        ToolbarItem(placement: .journalTrailingAction) {
+        ToolbarItem(placement: .appTrailingAction) {
           Button(action: onOpenSettings) {
             Image(systemName: "gearshape")
           }

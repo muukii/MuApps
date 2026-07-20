@@ -28,7 +28,7 @@ struct AccentColorSelectionView: View {
       }
     }
     .navigationTitle("Accent Color")
-    .journalInlineNavigationTitle()
+    .appInlineNavigationTitle()
     .sensoryFeedback(.selection, trigger: accentColorID)
   }
 }

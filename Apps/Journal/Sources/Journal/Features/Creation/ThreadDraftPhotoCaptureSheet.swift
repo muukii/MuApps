@@ -28,7 +28,7 @@ struct ThreadDraftPhotoCaptureSheet: View {
         dismiss()
       }
       .navigationTitle("Photo")
-      .journalInlineNavigationTitle()
+      .appInlineNavigationTitle()
     }
   }
 }

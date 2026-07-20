@@ -199,10 +199,10 @@ struct SettingsView: View {
     .scrollContentBackground(.hidden)
     .background(.background)
     .navigationTitle("Settings")
-    .journalInlineNavigationTitle()
+    .appInlineNavigationTitle()
     .sensoryFeedback(.selection, trigger: appearancePreferenceID)
     .sensoryFeedback(.selection, trigger: shouldAttachLocationToNewCards)
-    .journalFullScreenCover(isPresented: $isShowingOnboarding) {
+    .appFullScreenCover(isPresented: $isShowingOnboarding) {
       OnboardingView(onComplete: { isShowingOnboarding = false })
     }
   }
@@ -434,9 +434,9 @@ private struct CloudStorageEstimateView: View {
     .scrollContentBackground(.hidden)
     .background(.background)
     .navigationTitle("Cloud Storage")
-    .journalInlineNavigationTitle()
+    .appInlineNavigationTitle()
     .toolbar {
-      ToolbarItem(placement: .journalTrailingAction) {
+      ToolbarItem(placement: .appTrailingAction) {
         Button {
           Task { await refresh() }
         } label: {
@@ -728,7 +728,7 @@ private struct VaultCloudStorageEstimateDetailView: View {
     .scrollContentBackground(.hidden)
     .background(.background)
     .navigationTitle(vaultEstimate.descriptor.storageDisplayTitle)
-    .journalInlineNavigationTitle()
+    .appInlineNavigationTitle()
   }
 }
 
@@ -1012,7 +1012,7 @@ extension View {
       .scrollContentBackground(.hidden)
       .background(.background)
       .navigationTitle("Vault Runtime")
-      .journalInlineNavigationTitle()
+      .appInlineNavigationTitle()
       .task { await runtime.refresh() }
     }
   }

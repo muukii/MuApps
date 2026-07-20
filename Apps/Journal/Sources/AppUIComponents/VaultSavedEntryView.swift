@@ -1,3 +1,4 @@
+import CaptureBauhaus
 import JournalVault
 import MapKit
 import MuColor
@@ -86,7 +87,7 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
 
 /// A finite placement boundary for authored content in the saved-entry grid.
 ///
-/// The transparent square owns only grid geometry. Content still owns its
+/// The transparent tile owns only its 4:5 grid geometry. Content still owns its
 /// typography and media treatment through `.savedGrid`; the centered overlay
 /// prevents asynchronous media decoding from changing row height, while the
 /// outer boundary keeps every content type inside its column.
@@ -100,7 +101,13 @@ public struct VaultSavedEntryGridCell: View {
 
   public var body: some View {
     Color.clear
-      .aspectRatio(1, contentMode: .fit)
+      .aspectRatio(
+        .init(
+          width: 4,
+          height: 5
+        ),
+        contentMode: .fit
+      )
       .overlay {
         EntryContentView(
           content: content,
@@ -112,8 +119,8 @@ public struct VaultSavedEntryGridCell: View {
           alignment: .center
         )
       }
-      .clipped()
-      .contentShape(Rectangle())
+      .contentShape(.rect)
+      .clipShape(.rect(cornerRadius: 24))
   }
 }
 
@@ -405,6 +412,17 @@ extension JournalVault.Card.Kind {
   }
 }
 
+#Preview("Vault Saved Entry Bauhaus Tile") {
+  PrimaryContainer(accentColor: .default) {
+    VaultSavedEntryGridCell(
+      content: VaultSavedEntryPreviewFixtures.bauhausContent
+    )
+    .frame(width: 240)
+    .padding(16)
+    .background(.background)
+  }
+}
+
 #Preview("Vault Saved Entry Detail Row") {
   PrimaryContainer(accentColor: .default) {
     ScrollView {
@@ -521,6 +539,53 @@ private enum VaultSavedEntryPreviewFixtures {
       title: "SQUARE"
     )
   )
+
+  /// Authored vector artwork rendered through the real saved-grid content path.
+  static let bauhausContent: EntryContent = {
+    var artwork = BauhausGridArtwork()
+
+    artwork[BauhausGridPosition(row: 0, column: 0)] = BauhausTile(
+      shape: .circle,
+      shapeSwatch: .slot1,
+      backgroundSwatch: .slot3
+    )
+    artwork[BauhausGridPosition(row: 0, column: 4)] = BauhausTile(
+      shape: .square,
+      shapeSwatch: .slot6,
+      backgroundSwatch: .slot2
+    )
+    artwork[BauhausGridPosition(row: 1, column: 1)] = BauhausTile(
+      shape: .triangleBottomTrailing,
+      shapeSwatch: .slot5,
+      backgroundSwatch: .slot3
+    )
+    artwork[BauhausGridPosition(row: 2, column: 2)] = BauhausTile(
+      shape: .paddedCircle,
+      shapeSwatch: .slot2,
+      backgroundSwatch: .slot7
+    )
+    artwork[BauhausGridPosition(row: 3, column: 3)] = BauhausTile(
+      shape: .quarterCircleTopLeading,
+      shapeSwatch: .slot4,
+      backgroundSwatch: .slot5
+    )
+    artwork[BauhausGridPosition(row: 4, column: 0)] = BauhausTile(
+      shape: .semicircleFlatTrailing,
+      shapeSwatch: .slot7,
+      backgroundSwatch: .slot3
+    )
+    artwork[BauhausGridPosition(row: 4, column: 4)] = BauhausTile(
+      shape: .triangleTopLeading,
+      shapeSwatch: .slot1,
+      backgroundSwatch: .slot6
+    )
+
+    return .bauhaus(
+      BauhausContentSource(
+        document: BauhausGridDocument(artwork: artwork)
+      )
+    )
+  }()
 
   static let detailMediaEntries: [VaultSavedEntryModel] = [
     landscapePhotoEntry,

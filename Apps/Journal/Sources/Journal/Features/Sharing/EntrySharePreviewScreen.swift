@@ -58,7 +58,7 @@ struct EntrySharePreviewScreen: View {
       }
       .background(.background)
       .navigationTitle("Share Preview")
-      .journalInlineNavigationTitle()
+      .appInlineNavigationTitle()
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Done") {

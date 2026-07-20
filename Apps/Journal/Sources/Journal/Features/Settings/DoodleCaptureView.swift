@@ -29,9 +29,9 @@ struct DoodleCaptureView: View {
       }
     }
     .navigationTitle("Doodle")
-    .journalInlineNavigationTitle()
+    .appInlineNavigationTitle()
     .toolbar {
-      ToolbarItem(placement: .journalTrailingAction) {
+      ToolbarItem(placement: .appTrailingAction) {
         Menu {
           Picker("Accent Color", selection: $accentColorID) {
             ForEach(AccentColor.all) { accentColor in

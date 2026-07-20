@@ -834,7 +834,7 @@ private struct VaultSavedLocationsMapNavigationHeader: View {
   var body: some View {
     NavigationLink {
       VaultSavedLocationsMapView(pins: pins)
-        .journalZoomNavigationTransition(
+        .appZoomNavigationTransition(
           sourceID: VaultSavedLocationsMapTransition.id,
           in: transitionNamespace
         )
@@ -842,7 +842,7 @@ private struct VaultSavedLocationsMapNavigationHeader: View {
       VaultSavedLocationsMapHeader(pins: pins)
     }
     .buttonStyle(.plain)
-    .journalMatchedTransitionSource(
+    .appMatchedTransitionSource(
       id: VaultSavedLocationsMapTransition.id,
       in: transitionNamespace
     )
@@ -920,7 +920,7 @@ private struct VaultSavedLocationsMapView: View {
       glyphColor: palette.onTint
     )
     .navigationTitle("Map")
-    .journalInlineNavigationTitle()
+    .appInlineNavigationTitle()
   }
 }
 
@@ -1389,7 +1389,7 @@ private struct VaultSavedDaySectionView: View {
             )
           } label: {
             VaultSavedEntryGridCell(content: entry.entryModel.content)
-              .journalMatchedTransitionSource(id: entry.edgeID, in: transitionNamespace)
+              .appMatchedTransitionSource(id: entry.edgeID, in: transitionNamespace)
           }
           .buttonStyle(.plain)
           .id(entry.edgeID)
@@ -1477,7 +1477,7 @@ private struct VaultSavedEntryDetailDestination: View {
       onEdit: onEdit,
       onDelete: onDelete
     )
-    .journalZoomNavigationTransition(
+    .appZoomNavigationTransition(
       sourceID: root.edgeID,
       in: transitionNamespace
     )
@@ -1572,7 +1572,7 @@ private struct VaultSavedEntryDetailView: View {
     }
     .background(.background)
     .navigationTitle(rootTitle)
-    .journalInlineNavigationTitle()
+    .appInlineNavigationTitle()
     .confirmationDialog(
       "Delete Entry",
       isPresented: deleteConfirmationPresentation,
