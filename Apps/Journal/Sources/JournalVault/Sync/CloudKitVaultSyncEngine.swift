@@ -67,9 +67,14 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
 
     // Reseed the engines' pending sets from each vault's durable outbox. This
     // recovers work enqueued right before a crash and survives engine state
-    // resets; re-adding an already pending change is a no-op.
+    // resets; re-adding an already pending change is a no-op. Startup only
+    // stages this durable work so local launch routing never waits for a send.
     for descriptor in descriptors.values {
-      await seedPendingChanges(for: descriptor, unstagingAll: true)
+      await seedPendingChanges(
+        for: descriptor,
+        unstagingAll: true,
+        shouldSendImmediately: false
+      )
     }
     await resetEnginesIfPreReleaseRefetchRequested()
 
@@ -132,7 +137,11 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     // The vault may have been written by an App Intent or Share extension. Such
     // writes cannot reach this process's local-mutation AsyncStream, so seed the
     // durable outbox before asking CKSyncEngine to fetch and send.
-    await seedPendingChanges(for: descriptor, unstagingAll: false)
+    await seedPendingChanges(
+      for: descriptor,
+      unstagingAll: false,
+      shouldSendImmediately: false
+    )
     scheduleForegroundSync(for: descriptor)
   }
 
@@ -510,7 +519,15 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
   }
 
   /// Turns the vault's `PendingMutation` rows into engine pending changes.
-  private func seedPendingChanges(for descriptor: VaultDescriptor, unstagingAll: Bool) async {
+  ///
+  /// Startup and foreground activation stage work without awaiting CloudKit;
+  /// their owned foreground task performs the send. Mutation and explicit
+  /// operations may still request an immediate send after staging.
+  private func seedPendingChanges(
+    for descriptor: VaultDescriptor,
+    unstagingAll: Bool,
+    shouldSendImmediately: Bool = true
+  ) async {
     guard let engine = engines[databaseScope(for: descriptor)] else { return }
     do {
       let database = try syncDatabase(for: descriptor)
@@ -529,7 +546,9 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
           }
         }
       )
-      await sendSeededPendingChanges(engine: engine, vaultID: descriptor.vaultID)
+      if shouldSendImmediately {
+        await sendSeededPendingChanges(engine: engine, vaultID: descriptor.vaultID)
+      }
     } catch {
       log.error(
         "seed pending changes failed \(descriptor.vaultID.uuidString, privacy: .public): \(error)"
@@ -892,7 +911,11 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     await refreshDescriptors()
 
     for descriptor in descriptors.values {
-      await seedPendingChanges(for: descriptor, unstagingAll: true)
+      await seedPendingChanges(
+        for: descriptor,
+        unstagingAll: true,
+        shouldSendImmediately: false
+      )
     }
 
     log.info("reset CKSyncEngine state for pre-release vault store recovery")

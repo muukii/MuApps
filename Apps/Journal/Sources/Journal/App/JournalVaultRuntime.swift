@@ -142,8 +142,40 @@ final class JournalVaultRuntime {
     )
   }
 
-  /// Starts the runtime service. Product UI opens a vault only after the user
-  /// picks one.
+  /// Restores the local state needed for the first frame of a returning launch.
+  ///
+  /// This opens only the App Group catalog and the preferred local vault store.
+  /// It deliberately does not start the sync engine or perform any CloudKit
+  /// operation; `startRootRouting()` begins those tasks after the Window exists.
+  func restoreCachedLaunchState(preferredVaultID: VaultID?) {
+    do {
+      try reloadCatalog()
+
+      let descriptor = preferredVaultID
+        .flatMap { vaultID in
+          vaults.first(where: { $0.vaultID == vaultID })
+        } ?? vaults.first
+
+      guard let descriptor else {
+        selectedVault = nil
+        selectedVaultState = .inactive
+        lastMessage = "Restored empty local vault catalog."
+        return
+      }
+
+      let instance = try instanceRegistry.instance(for: descriptor)
+      selectedVault = instance
+      selectedVaultState = .active
+      refreshSelectedVaultPendingMutationCount()
+      lastMessage = "Restored local vault state."
+    } catch {
+      selectedVault = nil
+      selectedVaultState = .failed(error.localizedDescription)
+      lastMessage = error.localizedDescription
+    }
+  }
+
+  /// Starts the sync service after any cached local launch state is restored.
   func start() async {
     guard didStart == false else { return }
     didStart = true

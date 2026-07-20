@@ -2,6 +2,7 @@ import AppUIComponents
 import CaptureBauhaus
 import CaptureDoodle
 import CloudKit
+import Foundation
 import JournalIntents
 import JournalVault
 import MuColor
@@ -17,12 +18,26 @@ struct TinycurveApp: App {
   #endif
 
   let vaultRuntime: JournalVaultRuntime
+  private let hasCachedInitialVaultAvailability: Bool
 
   init() {
     VideoPlaybackObservationConfiguration.configure()
 
+    let defaults = UserDefaults.standard
+    let hasCachedInitialVaultAvailability = defaults.bool(
+      forKey: JournalDefaults.hasResolvedInitialVaultAvailability
+    )
+
     do {
-      vaultRuntime = try JournalVaultRuntime.appGroupCloudKitRuntime()
+      let vaultRuntime = try JournalVaultRuntime.appGroupCloudKitRuntime()
+      if hasCachedInitialVaultAvailability {
+        let preferredVaultID = defaults.string(forKey: JournalDefaults.lastSelectedVaultID)
+          .flatMap { VaultID(uuidString: $0) }
+        vaultRuntime.restoreCachedLaunchState(preferredVaultID: preferredVaultID)
+      }
+
+      self.vaultRuntime = vaultRuntime
+      self.hasCachedInitialVaultAvailability = hasCachedInitialVaultAvailability
     } catch {
       fatalError("Failed to create Journal vault runtime: \(error)")
     }
@@ -41,11 +56,17 @@ struct TinycurveApp: App {
             .preferredColorScheme(.dark)
 
         case nil:
-          RootView(vaultRuntime: vaultRuntime)
+          RootView(
+            vaultRuntime: vaultRuntime,
+            hasCachedInitialVaultAvailability: hasCachedInitialVaultAvailability
+          )
             .task { DoodleHaptics.prepareForDrawing() }
         }
       #else
-        RootView(vaultRuntime: vaultRuntime)
+        RootView(
+          vaultRuntime: vaultRuntime,
+          hasCachedInitialVaultAvailability: hasCachedInitialVaultAvailability
+        )
           .task { DoodleHaptics.prepareForDrawing() }
       #endif
     }
@@ -134,14 +155,13 @@ struct TinycurveApp: App {
 /// whole app. Kept separate from `TinycurveApp` so the `@AppStorage` reads live in
 /// a `View`, where changes re-render the tree.
 ///
-/// Also the root router: it blocks on loading until initial vault availability
-/// and automatic vault activation are resolved, then enters onboarding or the
-/// persistent Journal home.
+/// Also the root router: a fresh install blocks on initial vault discovery, while
+/// later launches restore the local vault first and reconcile CloudKit afterward.
 private struct RootView: View {
 
   /// Top-level app routes derived from persisted bootstrap state and the vault runtime.
   private enum RootRoute: Equatable {
-    /// The app is checking whether vault storage and CloudKit recovery are available.
+    /// A fresh install is checking whether CloudKit has existing vaults to recover.
     case loading
 
     /// The user has completed onboarding and enters the persistent Journal home.
@@ -180,8 +200,14 @@ private struct RootView: View {
   @State private var systemCaptureRequest: JournalCaptureRequest?
   @State private var systemCaptureRoutingError: SystemCaptureRoutingError?
 
-  init(vaultRuntime: JournalVaultRuntime) {
+  init(
+    vaultRuntime: JournalVaultRuntime,
+    hasCachedInitialVaultAvailability: Bool
+  ) {
     _vaultRuntime = State(initialValue: vaultRuntime)
+    _initialVaultActivationState = State(
+      initialValue: hasCachedInitialVaultAvailability ? .resolved : .pending
+    )
   }
 
   var body: some View {
@@ -235,6 +261,15 @@ private struct RootView: View {
   }
 
   private func startRootRouting() async {
+    await vaultRuntime.start()
+
+    // The environment-scoped resolution is the durable boundary between a
+    // first install, which must discover remote vaults before onboarding, and a
+    // returning launch, which can trust its local catalog immediately.
+    if hasResolvedInitialVaultAvailability {
+      await activateInitialVaultIfPossible()
+    }
+
     let resolution = await vaultRuntime.resolveInitialVaultAvailability()
 
     if vaultRuntime.vaults.isEmpty == false {
@@ -723,7 +758,10 @@ private struct JournalVaultUnavailableView: View {
 }
 
 #Preview {
-  RootView(vaultRuntime: .previewRuntime())
+  RootView(
+    vaultRuntime: .previewRuntime(),
+    hasCachedInitialVaultAvailability: false
+  )
 }
 
 private struct RootLoadingView: View {
