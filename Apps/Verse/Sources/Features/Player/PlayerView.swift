@@ -106,6 +106,8 @@ struct PlayerView: View {
         VStack {
           VideoPlayerSection(
             controller: controller,
+            importedMediaKind: videoItem.importedMediaKind,
+            title: videoItem.title,
             maxWidth: playerContentMaxWidth
           )
             .compositingGroup()
@@ -237,6 +239,12 @@ struct PlayerView: View {
         // Update model's cues when subtitles change
         model.cues = newCues ?? []
       }
+    } else if let loadErrorMessage = model.loadErrorMessage {
+      ContentUnavailableView(
+        "Media Unavailable",
+        systemImage: "exclamationmark.triangle",
+        description: Text(loadErrorMessage)
+      )
     } else {
       ProgressView()
         .onAppear {
@@ -261,6 +269,7 @@ struct PlayerView: View {
 
         SubtitleManagementView(
           videoID: videoID,
+          hasYouTubeSource: videoItem.isYouTubeSource,
           subtitles: currentSubtitles,
           localFileURL: model.localFileURL,
           playbackSource: model.playbackSource,
@@ -283,7 +292,7 @@ struct PlayerView: View {
           isTranscribing: isTranscribing
         )
 
-        if FeatureFlags.shared.isDownloadFeatureEnabled {
+        if videoItem.isYouTubeSource && FeatureFlags.shared.isDownloadFeatureEnabled {
           DownloadButton(
             state: downloadButtonState,
             onTap: { showDownloadView = true }
@@ -587,6 +596,8 @@ extension PlayerView {
 
   struct VideoPlayerSection: View {
     let controller: PlayerController
+    let importedMediaKind: ImportedMediaKind?
+    let title: String?
     let maxWidth: CGFloat?
 
     var body: some View {
@@ -595,7 +606,11 @@ extension PlayerView {
         case .youtube(let controller):
           YouTubeVideoPlayer(controller: controller)
         case .local(let controller):
-          LocalVideoPlayer(controller: controller)
+          if importedMediaKind == .audio {
+            AudioPlayerArtwork(title: title)
+          } else {
+            LocalVideoPlayer(controller: controller)
+          }
         }
       }
       .aspectRatio(16 / 9, contentMode: .fit)
@@ -605,6 +620,42 @@ extension PlayerView {
       .frame(maxWidth: .infinity)
       .padding(.horizontal, 16)
       .padding(.top, 16)
+    }
+  }
+
+  /// Artwork displayed while an imported audio file uses the shared playback controls.
+  private struct AudioPlayerArtwork: View {
+    let title: String?
+
+    var body: some View {
+      ZStack {
+        LinearGradient(
+          colors: [
+            Color.accentColor.opacity(0.45),
+            Color.appPlayerBackground,
+          ],
+          startPoint: .topLeading,
+          endPoint: .bottomTrailing
+        )
+
+        VStack(spacing: 12) {
+          Image(systemName: "waveform.circle.fill")
+            .font(.system(size: 64))
+            .foregroundStyle(.white)
+            .symbolRenderingMode(.hierarchical)
+
+          if let title {
+            Text(title)
+              .font(.headline)
+              .foregroundStyle(.white)
+              .lineLimit(2)
+              .multilineTextAlignment(.center)
+              .padding(.horizontal, 24)
+          }
+        }
+      }
+      .accessibilityElement(children: .combine)
+      .accessibilityLabel(title.map { "Audio: \($0)" } ?? "Imported audio")
     }
   }
 

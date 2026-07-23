@@ -231,6 +231,9 @@ final class PlayerModel {
   /// The player controller (YouTube or local)
   private(set) var controller: PlayerController?
 
+  /// A user-facing reason why the selected media could not be loaded.
+  private(set) var loadErrorMessage: String?
+
   /// Task for tracking playback time
   private var trackingTask: Task<Void, Never>?
 
@@ -425,11 +428,21 @@ final class PlayerModel {
   /// Loads the video and initializes the appropriate controller
   func loadVideo(videoItem: VideoItem) {
     // Prevent multiple loads
-    guard controller == nil else { return }
+    guard controller == nil, loadErrorMessage == nil else { return }
 
-    // Check if video is downloaded
-    if videoItem.isDownloaded,
+    if videoItem.source == .importedFile {
+      guard let fileURL = videoItem.downloadedFileURL,
+            FileManager.default.fileExists(atPath: fileURL.path) else {
+        loadErrorMessage = "The imported file is no longer available."
+        return
+      }
+
+      localFileURL = fileURL
+      controller = .local(LocalVideoPlayerController(url: fileURL))
+      playbackSource = .local
+    } else if videoItem.isDownloaded,
        let fileURL = videoItem.downloadedFileURL {
+      // Use a downloaded YouTube file for local playback when available.
       // Store local file URL for later switching
       localFileURL = fileURL
       // Use local file playback by default when available

@@ -16,7 +16,8 @@ struct VideoItemCell: View {
 
   /// Download progress from DownloadManager
   private var downloadProgress: DownloadProgress? {
-    downloadManager?.downloadProgress(for: video.videoID)
+    guard video.isYouTubeSource else { return nil }
+    return downloadManager?.downloadProgress(for: video.videoID)
   }
 
   /// Playback progress (0.0 to 1.0) for progress bar display
@@ -89,7 +90,7 @@ struct VideoItemCell: View {
         .frame(width: thumbnailSize.width, height: thumbnailSize.height)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .overlay {
-          Image(systemName: "play.rectangle")
+          Image(systemName: placeholderSystemImage)
             .foregroundStyle(.white)
             .font(.title)
         }
@@ -149,7 +150,7 @@ struct VideoItemCell: View {
           .background(Circle().fill(.white).padding(2))
           .padding(4)
       }
-    } else if video.isDownloaded {
+    } else if video.isYouTubeSource && video.isDownloaded {
       Image(systemName: "checkmark.circle.fill")
         .font(.system(size: 20))
         .foregroundStyle(.white)
@@ -187,6 +188,15 @@ struct VideoItemCell: View {
   }
 
   // MARK: - Helpers
+
+  private var placeholderSystemImage: String {
+    switch video.importedMediaKind {
+    case .audio:
+      return "waveform"
+    case .video, .none:
+      return "play.rectangle"
+    }
+  }
 
   private func formatDate(_ date: Date) -> String {
     let formatter = RelativeDateTimeFormatter()

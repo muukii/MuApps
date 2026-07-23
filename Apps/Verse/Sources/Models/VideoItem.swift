@@ -2,6 +2,23 @@ import Foundation
 import SwiftData
 import TypedIdentifier
 
+// MARK: - Video Item Source
+
+/// Identifies where a `VideoItem` obtains its playable media.
+///
+/// Existing records have no stored source value and are interpreted as YouTube
+/// items to preserve compatibility with the original model.
+nonisolated enum VideoItemSource: String, Codable, Sendable {
+  case youtube
+  case importedFile
+}
+
+/// Describes the primary presentation of a file imported from Files.
+nonisolated enum ImportedMediaKind: String, Codable, Sendable {
+  case audio
+  case video
+}
+
 // MARK: - Video Item
 
 @Model
@@ -30,6 +47,41 @@ final class VideoItem: TypedIdentifiable {
   var thumbnailURL: String?
   var timestamp: Date
 
+  /// Persisted raw value for `source`.
+  ///
+  /// This remains optional so records created before local-file import was
+  /// introduced migrate as YouTube items without a data rewrite.
+  internal var _sourceRawValue: String?
+
+  /// Persisted raw value for `importedMediaKind`.
+  internal var _importedMediaKindRawValue: String?
+
+  /// The service that provides this item's playable media.
+  var source: VideoItemSource {
+    get {
+      _sourceRawValue
+        .flatMap(VideoItemSource.init(rawValue:))
+        ?? .youtube
+    }
+    set {
+      _sourceRawValue = newValue.rawValue
+    }
+  }
+
+  /// The presentation kind of an imported file, or `nil` for YouTube items.
+  var importedMediaKind: ImportedMediaKind? {
+    get {
+      _importedMediaKindRawValue.flatMap(ImportedMediaKind.init(rawValue:))
+    }
+    set {
+      _importedMediaKindRawValue = newValue?.rawValue
+    }
+  }
+
+  var isYouTubeSource: Bool {
+    source == .youtube
+  }
+
   /// Lexicographic order key for manual sorting in history list.
   /// nil means the item needs to be initialized with a sort order.
   var sortOrder: String?
@@ -38,7 +90,7 @@ final class VideoItem: TypedIdentifiable {
   var transcriptData: Data?
   var transcriptLanguage: String?
 
-  // Downloaded file (relative path from Documents directory)
+  // Managed media file (relative path from Documents directory)
   var downloadedFileName: String?
 
   // MARK: - Playback Resume
@@ -77,8 +129,13 @@ final class VideoItem: TypedIdentifiable {
     downloadState != nil
   }
 
-  /// Whether the video has been downloaded
+  /// Whether a YouTube video has been downloaded for local playback.
   var isDownloaded: Bool {
+    isYouTubeSource && hasLocalFile
+  }
+
+  /// Whether this item has media stored in the app's Documents directory.
+  var hasLocalFile: Bool {
     downloadedFileName != nil
   }
 
@@ -109,7 +166,9 @@ final class VideoItem: TypedIdentifiable {
     url: String,
     title: String? = nil,
     author: String? = nil,
-    thumbnailURL: String? = nil
+    thumbnailURL: String? = nil,
+    source: VideoItemSource = .youtube,
+    importedMediaKind: ImportedMediaKind? = nil
   ) {
     self.id = UUID()
     self._videoID = videoID.rawValue  // Store as primitive String
@@ -118,5 +177,7 @@ final class VideoItem: TypedIdentifiable {
     self.author = author
     self.thumbnailURL = thumbnailURL
     self.timestamp = Date()
+    self._sourceRawValue = source.rawValue
+    self._importedMediaKindRawValue = importedMediaKind?.rawValue
   }
 }

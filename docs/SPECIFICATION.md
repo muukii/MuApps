@@ -112,7 +112,7 @@ Safari Reactor is an iPhone/iPad container app for a Safari Web Extension that e
 
 ## Overview
 
-Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that lets users watch YouTube videos with synced subtitles, navigation tools, and on-device language assistance.
+Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that lets users play YouTube videos or imported audio and video files with synced subtitles, navigation tools, and on-device language assistance.
 
 ### Target Users
 - Language learners (English, Japanese, and other subtitle languages)
@@ -127,6 +127,11 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Play YouTube videos by URL (watch, youtu.be, shorts, etc.)
 - In-app YouTube browser with "Open with Subtitles" action
 - Deep link and Shortcuts support for opening YouTube URLs
+- Import one audio or video file at a time from Files
+  - Validate that the selected file contains playable audio or video
+  - Copy the imported file into app-managed Documents storage for persistent access
+  - Add the imported file to history and open it in the local player
+  - Show dedicated waveform artwork for audio-only files
 - Local playback when a video has been downloaded (feature-flagged)
 - Downloaded local videos continue audio playback when the app moves to the background or the screen is locked
 
@@ -211,7 +216,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 
 #### 4.1 Watch History
 - Auto-saved on open
-- Deduplicated by video ID (most recent kept)
+- YouTube entries are deduplicated by video ID (most recent kept); each imported file creates a separate entry
 - No item limit
 - Local storage (SwiftData)
 - List display: thumbnail, title, author (when available), relative time
@@ -266,7 +271,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Empty state with "Try Demo Video"
 - History list with thumbnails, metadata, and playback progress bars
 - Toolbar: Sort menu (Manual/Last Played/Date Added), Edit (for reordering in Manual mode only), Settings
-- Bottom bar: Paste URL, Browse YouTube
+- Bottom bar: Add Media menu (Paste YouTube URL / Import Audio or Video), Browse YouTube
 - Navigation uses a single stack on all devices; selecting a history item pushes the player (no split view / detail pane)
 - Edit mode: drag handles for reordering history items (Manual sort mode only)
 - Context menu: Add to Playlist
@@ -282,7 +287,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - "Open with Subtitles" overlay on watch/shorts pages
 
 ### Player (PlayerView)
-- Video player at top (YouTube or Local)
+- Video player at top (YouTube or imported/downloaded local video); imported audio shows waveform artwork
 - Collapsible player area
 - Subtitle list with tracking toggle
 - Playback controls: scrubber, speed, seek, loop, A-B setup
@@ -315,7 +320,8 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 ## Data and Storage
 - SwiftData local storage only (no cloud sync)
 - Cached subtitles stored in history items
-- Downloaded videos stored in Documents
+- Downloaded videos and imported audio/video files stored in Documents
+- Imported Files URLs are used only while copying; persistent playback uses the app-managed copy
 - Subtitle import/export via Files
 
 ## Limitations

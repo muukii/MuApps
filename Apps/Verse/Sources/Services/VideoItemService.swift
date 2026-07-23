@@ -5,8 +5,10 @@
 //  Created by Claude on 2025/12/06.
 //
 
+import AVFoundation
 import Foundation
 import SwiftData
+import TypedIdentifier
 
 /// Service for managing video items and their associated resources.
 /// Centralizes operations on VideoItem to ensure proper cleanup of files and data.
@@ -67,6 +69,55 @@ final class VideoItemService {
 
     try modelContext.save()
     try checkAndRebalanceIfNeeded()
+  }
+
+  // MARK: - Import Media
+
+  /// Imports a playable audio or video file into the app's managed storage.
+  ///
+  /// The picker URL is security-scoped and may become unavailable after the
+  /// import callback returns, so this method copies the file into Documents
+  /// before creating its history record.
+  /// - Parameter sourceURL: A security-scoped URL returned by `fileImporter`.
+  /// - Returns: The stable identifier of the inserted history item.
+  func importMedia(from sourceURL: URL) async throws -> VideoItem.TypedID {
+    guard sourceURL.startAccessingSecurityScopedResource() else {
+      throw VideoItemError.fileAccessDenied
+    }
+    defer { sourceURL.stopAccessingSecurityScopedResource() }
+
+    let preparedMedia = try await Task.detached(priority: .userInitiated) {
+      try await Self.prepareImportedMedia(from: sourceURL)
+    }.value
+    let item = VideoItem(
+      videoID: YouTubeContentID(rawValue: "local-\(UUID().uuidString)"),
+      url: preparedMedia.storedFileName,
+      title: sourceURL.deletingPathExtension().lastPathComponent,
+      source: .importedFile,
+      importedMediaKind: preparedMedia.kind
+    )
+    item.downloadedFileName = preparedMedia.storedFileName
+    item.duration = preparedMedia.duration
+    var didInsertItem = false
+
+    do {
+      item.sortOrder = try sortOrderForNewHistoryItem()
+      modelContext.insert(item)
+      didInsertItem = true
+      try modelContext.save()
+    } catch {
+      if didInsertItem {
+        modelContext.delete(item)
+      }
+      try? FileManager.default.removeItem(at: preparedMedia.storedFileURL)
+      throw error
+    }
+
+    // Rebalancing is an ordering maintenance operation. The imported item and
+    // its file are already committed, so a failure here must not report the
+    // otherwise successful import as failed.
+    try? checkAndRebalanceIfNeeded()
+    return item.typedID
   }
 
   // MARK: - Delete History Item
@@ -375,17 +426,91 @@ final class VideoItemService {
 
     try modelContext.save()
   }
+
+  /// Returns a key that inserts a new history item at the top of manual order.
+  private func sortOrderForNewHistoryItem() throws -> String {
+    let descriptor = FetchDescriptor<VideoItem>(
+      sortBy: [SortDescriptor(\.sortOrder)]
+    )
+    let firstKey = try modelContext.fetch(descriptor)
+      .compactMap(\.sortOrder)
+      .first
+
+    return firstKey.map(LexoRank.before) ?? LexoRank.initial()
+  }
+
+  /// Validates and copies a security-scoped media file without occupying the
+  /// main actor while potentially large file data is transferred.
+  private nonisolated static func prepareImportedMedia(
+    from sourceURL: URL
+  ) async throws -> PreparedImportedMedia {
+    let asset = AVURLAsset(url: sourceURL)
+    let tracks = try await asset.load(.tracks)
+    let isPlayable = try await asset.load(.isPlayable)
+    let hasVideo = tracks.contains { $0.mediaType == .video }
+    let hasAudio = tracks.contains { $0.mediaType == .audio }
+
+    guard isPlayable, hasVideo || hasAudio else {
+      throw VideoItemError.unsupportedMedia
+    }
+
+    let kind: ImportedMediaKind = hasVideo ? .video : .audio
+    let duration = try? await asset.load(.duration)
+    let durationSeconds = duration.flatMap { duration -> Double? in
+      let seconds = duration.seconds
+      return seconds.isFinite && seconds > 0 ? seconds : nil
+    }
+
+    let pathExtension = sourceURL.pathExtension
+    let storedFileName = [
+      UUID().uuidString,
+      pathExtension.isEmpty ? nil : pathExtension,
+    ]
+    .compactMap { $0 }
+    .joined(separator: ".")
+    let storedFileURL = URL.documentsDirectory.appendingPathComponent(storedFileName)
+
+    do {
+      try FileManager.default.copyItem(at: sourceURL, to: storedFileURL)
+    } catch {
+      throw VideoItemError.fileCopyFailed(error)
+    }
+
+    return PreparedImportedMedia(
+      storedFileName: storedFileName,
+      storedFileURL: storedFileURL,
+      kind: kind,
+      duration: durationSeconds
+    )
+  }
+}
+
+/// Validated metadata for a file copied into Verse-managed storage.
+private nonisolated struct PreparedImportedMedia: Sendable {
+  let storedFileName: String
+  let storedFileURL: URL
+  let kind: ImportedMediaKind
+  let duration: Double?
 }
 
 // MARK: - Error
 
-enum VideoItemError: LocalizedError {
+nonisolated enum VideoItemError: LocalizedError {
   case itemNotFound
+  case fileAccessDenied
+  case unsupportedMedia
+  case fileCopyFailed(any Error)
 
   var errorDescription: String? {
     switch self {
     case .itemNotFound:
       return "Video history item not found"
+    case .fileAccessDenied:
+      return "Verse could not access the selected file."
+    case .unsupportedMedia:
+      return "The selected file does not contain audio or video that Verse can play."
+    case .fileCopyFailed(let error):
+      return "Verse could not copy the selected file: \(error.localizedDescription)"
     }
   }
 }

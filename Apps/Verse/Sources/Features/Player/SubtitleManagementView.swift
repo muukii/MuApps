@@ -12,6 +12,7 @@ import UniformTypeIdentifiers
 /// View for managing subtitles and playback options
 struct SubtitleManagementView: View {
   let videoID: YouTubeContentID
+  let hasYouTubeSource: Bool
   let subtitles: Subtitle?
   let localFileURL: URL?
   let playbackSource: PlaybackSource
@@ -34,38 +35,42 @@ struct SubtitleManagementView: View {
   var body: some View {
     Menu {
       // MARK: - Share
-      Section {
-        if let youtubeURL = URL(string: "https://www.youtube.com/watch?v=\(videoID)") {
-          ShareLink(item: youtubeURL) {
-            Label("Share YouTube URL", systemImage: "square.and.arrow.up")
+      if hasYouTubeSource {
+        Section {
+          if let youtubeURL = URL(string: "https://www.youtube.com/watch?v=\(videoID)") {
+            ShareLink(item: youtubeURL) {
+              Label("Share YouTube URL", systemImage: "square.and.arrow.up")
+            }
           }
         }
       }
 
       // MARK: - Playback Source (only if local file exists)
       if localFileURL != nil {
-        Section("Playback Source") {
-          Button {
-            onPlaybackSourceChange(.youtube)
-          } label: {
-            Label(
-              "YouTube",
-              systemImage: playbackSource == .youtube ? "checkmark" : "play.rectangle"
-            )
-          }
+        if hasYouTubeSource {
+          Section("Playback Source") {
+            Button {
+              onPlaybackSourceChange(.youtube)
+            } label: {
+              Label(
+                "YouTube",
+                systemImage: playbackSource == .youtube ? "checkmark" : "play.rectangle"
+              )
+            }
 
-          Button {
-            onPlaybackSourceChange(.local)
-          } label: {
-            Label(
-              "Local File",
-              systemImage: playbackSource == .local ? "checkmark" : "internaldrive"
-            )
+            Button {
+              onPlaybackSourceChange(.local)
+            } label: {
+              Label(
+                "Local File",
+                systemImage: playbackSource == .local ? "checkmark" : "internaldrive"
+              )
+            }
           }
         }
 
         // MARK: - Local Video Management
-        Section("Local Video") {
+        Section(hasYouTubeSource ? "Local Video" : "Imported File") {
           // Transcribe audio to subtitles
           Button {
             onTranscribe?()
@@ -74,10 +79,12 @@ struct SubtitleManagementView: View {
           }
           .disabled(isTranscribing)
 
-          Button(role: .destructive) {
-            showDeleteConfirmation = true
-          } label: {
-            Label("Delete Local Video", systemImage: "trash")
+          if hasYouTubeSource {
+            Button(role: .destructive) {
+              showDeleteConfirmation = true
+            } label: {
+              Label("Delete Local Video", systemImage: "trash")
+            }
           }
         }
       }
@@ -149,7 +156,7 @@ struct SubtitleManagementView: View {
     ]
   }
 
-  private func handleImport(_ result: Result<[URL], Error>) {
+  private func handleImport(_ result: Result<[URL], any Error>) {
     switch result {
     case .success(let urls):
       guard let url = urls.first else { return }
@@ -313,6 +320,7 @@ struct SubtitleDocument: FileDocument {
 #Preview {
   SubtitleManagementView(
     videoID: "test123",
+    hasYouTubeSource: true,
     subtitles: nil,
     localFileURL: nil,
     playbackSource: .youtube,

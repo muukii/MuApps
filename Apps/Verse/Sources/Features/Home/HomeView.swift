@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 import AppIntents
 import TypedIdentifier
+import UniformTypeIdentifiers
 
 enum HistorySortOption: String, CaseIterable, Identifiable {
   case manual = "Manual"
@@ -37,6 +38,9 @@ struct HomeView: View {
   @State private var showWebView: Bool = false
   @State private var showSettings: Bool = false
   @State private var showURLInput: Bool = false
+  @State private var showMediaImporter: Bool = false
+  @State private var isImportingMedia: Bool = false
+  @State private var importErrorMessage: String?
   @State private var videoToAddToPlaylist: VideoItem?
   private let deepLinkManager = DeepLinkManager.shared
   @AppStorage("historySortOption") private var sortOption: HistorySortOption = .manual
@@ -127,6 +131,23 @@ struct HomeView: View {
         loadURL(urlText)
       }
     }
+    .fileImporter(
+      isPresented: $showMediaImporter,
+      allowedContentTypes: [.audio, .movie, .video]
+    ) { result in
+      handleMediaImport(result)
+    }
+    .alert(
+      "Couldn’t Import File",
+      isPresented: Binding(
+        get: { importErrorMessage != nil },
+        set: { if !$0 { importErrorMessage = nil } }
+      )
+    ) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(importErrorMessage ?? "An unknown error occurred.")
+    }
     .sheet(item: $videoToAddToPlaylist) { video in
       AddToPlaylistSheet(video: video)
     }
@@ -175,7 +196,7 @@ struct HomeView: View {
       ContentUnavailableView {
         Label("Verse", systemImage: "captions.bubble.fill")
       } description: {
-        Text("Watch YouTube videos with synced subtitles.\nPaste a URL or browse YouTube to get started.")
+        Text("Watch YouTube videos or files with synced subtitles.\nAdd a URL, import audio or video, or browse YouTube to get started.")
       } actions: {
         Button {
           loadDemoVideo()
@@ -289,13 +310,32 @@ struct HomeView: View {
     VStack(spacing: 0) {
       Divider()
       HStack(spacing: 12) {
-        Button {
-          showURLInput = true
+        Menu {
+          Button {
+            showURLInput = true
+          } label: {
+            Label("Paste YouTube URL", systemImage: "link")
+          }
+
+          Button {
+            showMediaImporter = true
+          } label: {
+            Label("Import Audio or Video", systemImage: "folder")
+          }
         } label: {
-          Label("Paste URL", systemImage: "link")
+          if isImportingMedia {
+            HStack {
+              ProgressView()
+              Text("Importing...")
+            }
             .frame(maxWidth: .infinity)
+          } else {
+            Label("Add Media", systemImage: "plus")
+              .frame(maxWidth: .infinity)
+          }
         }
         .buttonStyle(.borderedProminent)
+        .disabled(isImportingMedia)
 
         Button {
           showWebView = true
@@ -356,6 +396,26 @@ struct HomeView: View {
           selectedVideoItemID = item.typedID
         }
       }
+    }
+  }
+
+  private func handleMediaImport(_ result: Result<URL, any Error>) {
+    switch result {
+    case .success(let sourceURL):
+      isImportingMedia = true
+
+      Task {
+        defer { isImportingMedia = false }
+
+        do {
+          selectedVideoItemID = try await historyService.importMedia(from: sourceURL)
+        } catch {
+          importErrorMessage = error.localizedDescription
+        }
+      }
+
+    case .failure(let error):
+      importErrorMessage = error.localizedDescription
     }
   }
 }
