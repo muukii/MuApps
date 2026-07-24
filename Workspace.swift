@@ -3,6 +3,7 @@ import ProjectDescription
 let workspace = Workspace(
   name: "MuApps",
   projects: [
+    "Apps/BrightroomVideo",
     "Apps/Verse",
     "Apps/CodexPet",
     "Apps/ColorPlayground",

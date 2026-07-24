@@ -43,6 +43,9 @@ let packageSettings = PackageSettings(
 let package = Package(
   name: "MuApps",
   dependencies: [
+    // Image and video feature-graph rendering
+    .package(path: "../submodules/Brightroom"),
+
     // YouTube related
     .package(url: "https://github.com/alexeichhorn/YouTubeKit", from: "0.4.8"),
     .package(url: "https://github.com/apple/swift-algorithms", from: "1.2.1"),
