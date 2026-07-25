@@ -104,7 +104,7 @@ private struct FargOnboardingHero: View {
       Image("logo-large")
         .resizable()
         .scaledToFit()
-        .frame(width: 218, height: 146)
+        .frame(width: 160)
         .accessibilityHidden(true)
 
       VStack(spacing: 12) {
