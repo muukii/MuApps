@@ -208,9 +208,9 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
       )
     }
 
-    currentTrack.preferredTransform = preferredTransform
-    previousTrack.preferredTransform = preferredTransform
-    nextTrack.preferredTransform = preferredTransform
+    // The custom compositor owns spatial orientation for all three raw source
+    // buffers. Keep the temporal tracks at identity so the prepared asset does
+    // not carry a second display-transform owner beside its video composition.
 
     try Task.checkCancellation()
     try await Self.copyAudioTracks(
@@ -235,7 +235,7 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
       settings: settings,
       quality: quality,
       allowsRealtimeFrameDropping: allowsRealtimeFrameDropping,
-      sourceTransform: geometry.normalizedTransform,
+      sourceTransform: geometry.coreImageTransform,
       renderSize: geometry.renderSize,
       ciContext: ciContext,
       postProcessor: postProcessor
@@ -334,10 +334,16 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
     }
   }
 
-  private static func resolveGeometry(
+  /// Resolves an AVFoundation track transform for Core Image rendering.
+  ///
+  /// Track transforms use an upper-left origin, while `CIImage` affine
+  /// transforms use a lower-left origin. Converting both the source and
+  /// destination coordinate spaces prevents 90-degree portrait transforms from
+  /// becoming a visually inverted rotation.
+  static func resolveGeometry(
     naturalSize: CGSize,
     preferredTransform: CGAffineTransform
-  ) throws -> (renderSize: CGSize, normalizedTransform: CGAffineTransform) {
+  ) throws -> (renderSize: CGSize, coreImageTransform: CGAffineTransform) {
     let sourceRect = CGRect(origin: .zero, size: naturalSize)
     let transformedRect = sourceRect.applying(preferredTransform)
     let renderSize = CGSize(
@@ -353,13 +359,34 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
       throw MotionBlurError.invalidFrameSize(renderSize)
     }
 
-    let normalizedTransform = preferredTransform.concatenating(
+    let normalizedAVFoundationTransform = preferredTransform.concatenating(
       CGAffineTransform(
         translationX: -transformedRect.minX,
         y: -transformedRect.minY
       )
     )
-    return (renderSize, normalizedTransform)
+    let sourceCoordinateFlip = CGAffineTransform(
+      a: 1,
+      b: 0,
+      c: 0,
+      d: -1,
+      tx: 0,
+      ty: naturalSize.height
+    )
+    let destinationCoordinateFlip = CGAffineTransform(
+      a: 1,
+      b: 0,
+      c: 0,
+      d: -1,
+      tx: 0,
+      ty: renderSize.height
+    )
+    let coreImageTransform =
+      sourceCoordinateFlip
+      .concatenating(normalizedAVFoundationTransform)
+      .concatenating(destinationCoordinateFlip)
+
+    return (renderSize, coreImageTransform)
   }
 
   private static func makeInstructions(

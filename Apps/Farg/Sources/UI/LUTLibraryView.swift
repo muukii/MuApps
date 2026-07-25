@@ -407,7 +407,6 @@ private struct FargSettingsList: View {
       ImportedLUTCollectionSection(
         luts: library.importedLUTs,
         previewSource: previewSource,
-        previewSourceLabel: previewSamples.selectedSample.label,
         library: library,
         onDelete: onDeleteLUT
       )
@@ -418,7 +417,6 @@ private struct FargSettingsList: View {
         syncProgress: library.linkedFolderSyncProgress,
         isRefreshing: library.isRefreshingLinkedFolders,
         previewSource: previewSource,
-        previewSourceLabel: previewSamples.selectedSample.label,
         library: library,
         onUnlink: onUnlinkFolder
       )
@@ -459,6 +457,7 @@ private struct PreviewSamplesSection: View {
       )
       .aspectRatio(16 / 10, contentMode: .fit)
       .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+      .padding(8)
       .accessibilityLabel("Preview source \(selectedSample.label)")
 
       Picker(
@@ -517,7 +516,6 @@ fileprivate struct LinkedLUTFoldersSection: View {
   let syncProgress: [String: LUTFolderSyncProgress]
   let isRefreshing: Bool
   let previewSource: LUTPreviewSourceImage?
-  let previewSourceLabel: String
   let library: LUTLibrary
   let onUnlink: @MainActor @Sendable (String) -> Void
 
@@ -541,7 +539,6 @@ fileprivate struct LinkedLUTFoldersSection: View {
             syncProgress: syncProgress[collection.id],
             errorMessage: errors[collection.id],
             previewSource: previewSource,
-            previewSourceLabel: previewSourceLabel,
             library: library
           )
           .swipeActions {
@@ -582,7 +579,6 @@ fileprivate struct LinkedLUTFolderDisclosure: View {
   let syncProgress: LUTFolderSyncProgress?
   let errorMessage: String?
   let previewSource: LUTPreviewSourceImage?
-  let previewSourceLabel: String
   let library: LUTLibrary
 
   var body: some View {
@@ -595,7 +591,6 @@ fileprivate struct LinkedLUTFolderDisclosure: View {
           luts: luts,
           folders: folders,
           previewSource: previewSource,
-          previewSourceLabel: previewSourceLabel,
           library: library
         )
       }
@@ -664,7 +659,6 @@ fileprivate struct LUTFolderContents: View {
   let luts: [LUT]
   let folders: [LUTFolderNode]
   let previewSource: LUTPreviewSourceImage?
-  let previewSourceLabel: String
   let library: LUTLibrary
 
   var body: some View {
@@ -672,7 +666,6 @@ fileprivate struct LUTFolderContents: View {
       LUTLibraryRow(
         lut: lut,
         previewSource: previewSource,
-        previewSourceLabel: previewSourceLabel,
         library: library
       )
     }
@@ -683,7 +676,6 @@ fileprivate struct LUTFolderContents: View {
         luts: folder.luts,
         folders: folder.folders,
         previewSource: previewSource,
-        previewSourceLabel: previewSourceLabel,
         library: library
       )
     }
@@ -697,7 +689,6 @@ fileprivate struct LUTSubfolderDisclosure: View {
   let luts: [LUT]
   let folders: [LUTFolderNode]
   let previewSource: LUTPreviewSourceImage?
-  let previewSourceLabel: String
   let library: LUTLibrary
 
   var body: some View {
@@ -706,7 +697,6 @@ fileprivate struct LUTSubfolderDisclosure: View {
         luts: luts,
         folders: folders,
         previewSource: previewSource,
-        previewSourceLabel: previewSourceLabel,
         library: library
       )
     } label: {
@@ -720,7 +710,6 @@ fileprivate struct ImportedLUTCollectionSection: View {
 
   let luts: [LUT]
   let previewSource: LUTPreviewSourceImage?
-  let previewSourceLabel: String
   let library: LUTLibrary
   let onDelete: @MainActor @Sendable (LUT) -> Void
 
@@ -734,7 +723,6 @@ fileprivate struct ImportedLUTCollectionSection: View {
           LUTLibraryRow(
             lut: lut,
             previewSource: previewSource,
-            previewSourceLabel: previewSourceLabel,
             library: library
           )
           .swipeActions {
@@ -763,7 +751,6 @@ fileprivate struct LUTLibraryRow: View {
 
   let lut: LUT
   let previewSource: LUTPreviewSourceImage?
-  let previewSourceLabel: String
   let library: LUTLibrary
 
   var body: some View {
@@ -780,12 +767,14 @@ fileprivate struct LUTLibraryRow: View {
         Spacer()
       }
 
-      LUTPreviewComparisonView(
+      LUTPreviewImageView(
         source: previewSource,
-        sourceLabel: previewSourceLabel,
         lut: lut,
         library: library
       )
+      .aspectRatio(16 / 10, contentMode: .fit)
+      .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+      .accessibilityLabel("\(lut.name) applied preview")
     }
     .padding(.vertical, 4)
     .accessibilityElement(children: .contain)

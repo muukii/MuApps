@@ -72,10 +72,11 @@ dedicated Färg icon and supports portrait orientation only.
   resolution and restores the picker without discarding the current Photos
   selection. The editor opens in a full-screen cover only after at least one
   selected movie is ready.
-- `EditorView` exists only for a nonempty video collection. Its close action
-  asks whether to discard the current video selection and adjustments; choosing
-  **Discard Edits** returns to the inline media picker. Removing the last video
-  also returns to the picker instead of displaying an empty editor state.
+- `EditorView` exists only for a nonempty video collection. Its close control
+  opens a contextual menu anchored to that control; choosing its destructive
+  **Discard Edits** action returns to the inline media picker. Dismissing the
+  menu keeps editing. Removing the last video also returns to the picker
+  instead of displaying an empty editor state.
 - Adding videos to an existing collection uses the trailing **Add Videos** cell
   in the filmstrip. It offers Photos and Files, keeps the current preview
   available, and reports each selected clip's queued or loading state in its
@@ -96,9 +97,9 @@ dedicated Färg icon and supports portrait orientation only.
   stage instead of enlarging the player layer beyond the movie.
 - Preview audio mixes with music, podcasts, or other audio already playing
   outside Färg instead of interrupting it.
-- The editor navigation bar places its close action and **Settings** at the
-  leading edge, and **Export** at the trailing edge. Export remains disabled
-  while an additional video selection is loading.
+- The editor navigation bar places its close menu and **Settings** at the
+  leading edge as separate Liquid Glass groups, and **Export** at the trailing
+  edge. Export remains disabled while an additional video selection is loading.
 - A collection containing one video uses the same editing model and layout as
   a larger batch.
 - The editing surface uses neutral dark chrome in both system appearances so
@@ -171,9 +172,9 @@ dedicated Färg icon and supports portrait orientation only.
   normalized to a bounded JPEG, and given a required user-authored label such
   as a camera or Log profile.
 - The active Settings sample is applied to every LUT under identical input
-  conditions. Each LUT row shows the labeled source and rendered result side by
-  side. Custom sample labels can be renamed and their app-owned copies can be
-  deleted without changing the LUT library.
+  conditions. Each LUT row shows only the rendered result at the same aspect
+  ratio as the source preview. Custom sample labels can be renamed and their
+  app-owned copies can be deleted without changing the LUT library.
 
 ## Optical Flow motion blur
 
@@ -203,7 +204,7 @@ dedicated Färg icon and supports portrait orientation only.
 - VideoToolbox accepts raw source frames up to 4096×2160 on iOS. Inputs above
   that limit fail with an explicit message instead of being downscaled
   implicitly.
-- LUT still thumbnails remain single-frame comparisons and do not attempt to
+- LUT still thumbnails remain single-frame previews and do not attempt to
   display motion blur.
 
 ## Export

@@ -65,17 +65,50 @@ nonisolated enum VideoPickerImport {
       + fileURLs.map(VideoSelection.file)
 
     return selections.map { selection in
-      VideoClip {
-        let (source, displayName) = try await open(selection)
-        try await validateVideoAsset(source.asset)
-        let colorInfo = await VideoColorInfo.resolve(from: source.asset)
-        try Task.checkCancellation()
+      let selectionID = UUID()
+      let logContext: VideoImportLogContext = {
+        switch selection {
+        case .photo:
+          return .photos(selectionID: selectionID)
+        case .file(let url):
+          return .files(selectionID: selectionID, url: url)
+        }
+      }()
+      VideoImportDiagnostics.selectionQueued(logContext)
 
-        return VideoClip.Content(
-          source: source,
-          displayName: displayName,
-          colorInfo: colorInfo
-        )
+      return VideoClip(id: selectionID) {
+        do {
+          let (source, displayName) = try await open(
+            selection,
+            logContext: logContext
+          )
+          let videoTrackCount = try await validateVideoAsset(
+            source.asset,
+            logContext: logContext
+          )
+          let colorInfo = await VideoColorInfo.resolve(from: source.asset)
+          try Task.checkCancellation()
+          VideoImportDiagnostics.sourcePrepared(
+            logContext,
+            videoTrackCount: videoTrackCount
+          )
+
+          return VideoClip.Content(
+            source: source,
+            displayName: displayName,
+            colorInfo: colorInfo
+          )
+        } catch is CancellationError {
+          VideoImportDiagnostics.sourcePreparationCancelled(logContext)
+          throw CancellationError()
+        } catch {
+          VideoImportDiagnostics.log(
+            error: error,
+            stage: "prepareSource",
+            context: logContext
+          )
+          throw error
+        }
       }
     }
   }
@@ -115,7 +148,8 @@ nonisolated enum VideoPickerImport {
   }
 
   private static func open(
-    _ selection: VideoSelection
+    _ selection: VideoSelection,
+    logContext: VideoImportLogContext
   ) async throws -> (source: VideoSource, displayName: String) {
     switch selection {
     case .photo(let item):
@@ -142,7 +176,10 @@ nonisolated enum VideoPickerImport {
 
     case .file(let url):
       return (
-        try VideoSource(securityScopedURL: url),
+        try VideoSource(
+          securityScopedURL: url,
+          logContext: logContext
+        ),
         url.deletingPathExtension().lastPathComponent
       )
     }
@@ -166,12 +203,47 @@ nonisolated enum VideoPickerImport {
     }
   }
 
-  private static func validateVideoAsset(_ asset: AVAsset) async throws {
-    async let isPlayable = asset.load(.isPlayable)
-    async let videoTracks = asset.loadTracks(withMediaType: .video)
-    guard try await isPlayable, try await videoTracks.isEmpty == false else {
+  private static func validateVideoAsset(
+    _ asset: AVAsset,
+    logContext: VideoImportLogContext
+  ) async throws -> Int {
+    VideoImportDiagnostics.assetValidationStarted(logContext)
+
+    async let isPlayable: Bool = {
+      do {
+        return try await asset.load(.isPlayable)
+      } catch {
+        VideoImportDiagnostics.log(
+          error: error,
+          stage: "loadIsPlayable",
+          context: logContext
+        )
+        throw error
+      }
+    }()
+    async let videoTracks: [AVAssetTrack] = {
+      do {
+        return try await asset.loadTracks(withMediaType: .video)
+      } catch {
+        VideoImportDiagnostics.log(
+          error: error,
+          stage: "loadVideoTracks",
+          context: logContext
+        )
+        throw error
+      }
+    }()
+
+    let validation = try await (isPlayable, videoTracks)
+    guard validation.0, validation.1.isEmpty == false else {
+      VideoImportDiagnostics.assetValidationRejected(
+        logContext,
+        isPlayable: validation.0,
+        videoTrackCount: validation.1.count
+      )
       throw VideoImportError.unsupportedVideo
     }
+    return validation.1.count
   }
 
   private static func photoDisplayName(_ asset: PHAsset) -> String {

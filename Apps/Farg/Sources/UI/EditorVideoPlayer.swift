@@ -54,7 +54,7 @@ struct EditorVideoPlayer: View {
             ZStack {
               PlayerLayerSurface(player: model.player)
                 .frame(width: fittedSize.width, height: fittedSize.height)
-                .clipShape(.rect(cornerRadius: 16))
+                .clipShape(.rect(cornerRadius: 8))
                 .accessibilityHidden(true)
             }
             .frame(height: playerBounds.height)

@@ -5,13 +5,13 @@
 import AVFoundation
 import Photos
 import PhotosUI
-import ScrollEdgeEffect
 import SwiftUI
 import UniformTypeIdentifiers
 
 /// Selects the previewed clip while making the shared edit scope explicit.
 struct VideoBatchStripView: View {
 
+  let contentPadding: CGFloat
   let clips: [VideoClip]
   let selectedClipID: VideoClip.ID?
   @Binding var pickerItems: [PhotosPickerItem]
@@ -25,8 +25,10 @@ struct VideoBatchStripView: View {
         clips: clips,
         selectedClipID: selectedClipID
       )
+      .padding(.horizontal, contentPadding)
 
       VideoBatchFilmstrip(
+        contentPadding: contentPadding,
         clips: clips,
         selectedClipID: selectedClipID,
         pickerItems: $pickerItems,
@@ -69,6 +71,7 @@ private struct VideoBatchHeader: View {
 /// A thumbnail rail whose stable clip identity survives selection and removal.
 private struct VideoBatchFilmstrip: View {
 
+  let contentPadding: CGFloat
   let clips: [VideoClip]
   let selectedClipID: VideoClip.ID?
   @Binding var pickerItems: [PhotosPickerItem]
@@ -99,7 +102,7 @@ private struct VideoBatchFilmstrip: View {
         }
         .padding(.horizontal, 1)
       }
-      .scrollEdgeEffect(edges: .horizontal)
+      .contentMargins(.horizontal, contentPadding, for: .scrollContent)
       .onAppear {
         if let selectedClipID {
           proxy.scrollTo(selectedClipID, anchor: .center)

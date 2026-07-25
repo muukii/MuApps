@@ -45,8 +45,14 @@ nonisolated struct VideoSource: Identifiable, Equatable, Sendable {
   }
 
   /// Opens one user-selected Files URL in place for the current edit session.
-  init(securityScopedURL: URL) throws {
-    let access = try SecurityScopedFileAccess(url: securityScopedURL)
+  init(
+    securityScopedURL: URL,
+    logContext: VideoImportLogContext
+  ) throws {
+    let access = try SecurityScopedFileAccess(
+      url: securityScopedURL,
+      logContext: logContext
+    )
     self.id = UUID()
     self.origin = .securityScopedFile(securityScopedURL)
     self.asset = AVURLAsset(url: securityScopedURL)
@@ -184,16 +190,31 @@ final class VideoClip: Identifiable {
 private nonisolated final class SecurityScopedFileAccess: @unchecked Sendable {
 
   let url: URL
+  let logContext: VideoImportLogContext
 
-  init(url: URL) throws {
+  init(
+    url: URL,
+    logContext: VideoImportLogContext
+  ) throws {
     guard url.startAccessingSecurityScopedResource() else {
-      throw VideoSourceAccessError.accessDenied(fileName: url.lastPathComponent)
+      let error = VideoSourceAccessError.accessDenied(
+        fileName: url.lastPathComponent
+      )
+      VideoImportDiagnostics.log(
+        error: error,
+        stage: "startSecurityScope",
+        context: logContext
+      )
+      throw error
     }
     self.url = url
+    self.logContext = logContext
+    VideoImportDiagnostics.securityScopeStarted(logContext)
   }
 
   deinit {
     url.stopAccessingSecurityScopedResource()
+    VideoImportDiagnostics.securityScopeEnded(logContext)
   }
 }
 

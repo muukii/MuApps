@@ -20,7 +20,6 @@ struct EditorView: View {
   @State private var pickerItems: [PhotosPickerItem] = []
   @State private var exportBatch: VideoExportBatch?
   @State private var errorMessage: String?
-  @State private var isDiscardConfirmationPresented = false
   @State private var videoLoadRequestID: UUID?
   @State private var videoLoadTask: Task<Void, Never>?
 
@@ -48,7 +47,7 @@ struct EditorView: View {
           editState.hasVideos
           && editState.isPreparingClips == false
           && preview.renderState == .ready,
-        onRequestDiscard: { isDiscardConfirmationPresented = true },
+        onDiscard: onFinishEditing,
         onShowSettings: onShowSettings,
         onExport: startExport
       )
@@ -106,18 +105,6 @@ struct EditorView: View {
       Button("OK", role: .cancel) {}
     } message: { message in
       Text(message)
-    }
-    .confirmationDialog(
-      "Discard edits?",
-      isPresented: $isDiscardConfirmationPresented,
-      titleVisibility: .visible
-    ) {
-      Button("Discard Edits", role: .destructive) {
-        onFinishEditing()
-      }
-      Button("Keep Editing", role: .cancel) {}
-    } message: {
-      Text("Your video selection and LUT adjustments will be lost.")
     }
     .onDisappear(perform: viewDidDisappear)
   }
@@ -447,6 +434,7 @@ private struct EditorControlPanelBody: View {
   var body: some View {
     ScrollView {
       EditorSharedControls(
+        contentPadding: contentPadding,
         clips: clips,
         selectedClipID: selectedClipID,
         hdrVideoCount: hdrVideoCount,
@@ -460,7 +448,7 @@ private struct EditorControlPanelBody: View {
         onRemoveClip: onRemoveClip,
         onPickFileURLs: onPickFileURLs
       )
-      .padding(contentPadding)
+      .padding(.vertical, contentPadding)
     }
     .scrollBounceBehavior(.basedOnSize)
   }
@@ -468,6 +456,7 @@ private struct EditorControlPanelBody: View {
   /// Orders the shared decisions and summarizes the toolbar export action.
   fileprivate struct EditorSharedControls: View {
 
+    let contentPadding: CGFloat
     let clips: [VideoClip]
     let selectedClipID: VideoClip.ID?
     let hdrVideoCount: Int
@@ -484,6 +473,7 @@ private struct EditorControlPanelBody: View {
     var body: some View {
       VStack(alignment: .leading, spacing: 18) {
         VideoBatchStripView(
+          contentPadding: contentPadding,
           clips: clips,
           selectedClipID: selectedClipID,
           pickerItems: $pickerItems,
@@ -493,17 +483,20 @@ private struct EditorControlPanelBody: View {
         )
 
         EditorLookControls(
+          contentPadding: contentPadding,
           library: library,
           lutPreviewSource: lutPreviewSource,
           selectedLUT: $selectedLUT
         )
 
         EditorMotionBlurControls(settings: $motionBlur)
+          .padding(.horizontal, contentPadding)
 
         EditorExportSummary(
           videoCount: clips.count,
           hdrVideoCount: hdrVideoCount
         )
+        .padding(.horizontal, contentPadding)
       }
     }
   }
@@ -511,6 +504,7 @@ private struct EditorControlPanelBody: View {
   /// Names the shared look and exposes the library's quick selector.
   fileprivate struct EditorLookControls: View {
 
+    let contentPadding: CGFloat
     let library: LUTLibrary
     let lutPreviewSource: LUTPreviewSourceImage?
     @Binding var selectedLUT: LUT?
@@ -525,8 +519,10 @@ private struct EditorControlPanelBody: View {
         }
         .font(.caption)
         .foregroundStyle(EditorPalette.primary)
+        .padding(.horizontal, contentPadding)
 
         LUTStripView(
+          contentPadding: contentPadding,
           library: library,
           source: lutPreviewSource,
           selected: $selectedLUT
@@ -673,32 +669,37 @@ extension ShapeStyle where Self == Color {
 private struct EditorToolbarContent: ToolbarContent {
 
   let canExport: Bool
-  /// Asks the owning editor to confirm that its transient work should be discarded.
-  let onRequestDiscard: @MainActor @Sendable () -> Void
+  /// Finishes the editor after the user selects the destructive discard action.
+  let onDiscard: @MainActor @Sendable () -> Void
   let onShowSettings: @MainActor @Sendable () -> Void
   let onExport: @MainActor @Sendable () -> Void
 
   var body: some ToolbarContent {
-    ToolbarItemGroup(placement: .topBarLeading) {
-      Button(action: onRequestDiscard) {
+    ToolbarItem(placement: .topBarLeading) {
+      Menu {
+        Button("Discard Edits", role: .destructive, action: onDiscard)
+      } label: {
         Image(systemName: "xmark")
-          .foregroundStyle(EditorPalette.primary)
       }
       .accessibilityLabel("Close Editor")
+      .accessibilityIdentifier("discard-editor-edits")
+    }
+    
+    ToolbarSpacer(.fixed, placement: .topBarLeading)
 
+    ToolbarItem(placement: .topBarLeading) {
       Button(action: onShowSettings) {
         Image(systemName: "gearshape")
-          .foregroundStyle(EditorPalette.primary)
       }
       .accessibilityLabel("Settings")
     }
 
     ToolbarItem(placement: .topBarTrailing) {
-      Button("Export", action: onExport)
-        .fontWeight(.semibold)
-        .foregroundStyle(EditorPalette.primary)
-        .disabled(canExport == false)
-        .accessibilityIdentifier("export-videos")
+      Button(action: onExport, label: {         
+        Image(systemName: "square.and.arrow.up")
+      })
+      .disabled(canExport == false)
+      .accessibilityIdentifier("export-videos")
     }
   }
 }

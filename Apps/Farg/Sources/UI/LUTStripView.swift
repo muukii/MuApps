@@ -3,7 +3,6 @@
 //
 
 import SwiftUI
-import ScrollEdgeEffect
 
 /// A horizontal LUT selector rendered from the latest stopped source frame.
 ///
@@ -11,6 +10,7 @@ import ScrollEdgeEffect
 /// selector useful without evaluating every LUT for every playback frame.
 struct LUTStripView: View {
 
+  let contentPadding: CGFloat
   let library: LUTLibrary
   let source: LUTPreviewSourceImage?
   @Binding var selected: LUT?
@@ -46,7 +46,7 @@ struct LUTStripView: View {
           }
         }
       }
-      .scrollEdgeEffect(edges: .horizontal)
+      .contentMargins(.horizontal, contentPadding, for: .scrollContent)
       .onAppear {
         proxy.scrollTo(selectedItemID, anchor: .center)
       }
@@ -88,7 +88,7 @@ private enum LUTStripItemID: Hashable {
 }
 
 private struct OriginalCell: View {
-  
+
   let title: String
   let subtitle: String?
   let source: LUTPreviewSourceImage?
@@ -165,7 +165,7 @@ private struct LUTPreviewCell: View {
               source: source,
               lut: lut,
               library: library
-            )          
+            )
           }
           .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
           .overlay {
@@ -213,6 +213,7 @@ private struct LUTPreviewCell: View {
   let source = LUTPreviewSampleLibrary.makePreviewSource()
 
   LUTStripView(
+    contentPadding: 16,
     library: library,
     source: source,
     selected: $selected

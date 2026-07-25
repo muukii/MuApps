@@ -3,6 +3,8 @@
 このディレクトリには、Verse の App Store Connect に登録するメタデータを管理しています。
 Tinycurve のメタデータは
 [`Apps/Journal/metadata/`](../Apps/Journal/metadata/) に分離しています。
+Färg のメタデータは
+[`Apps/Farg/metadata/`](../Apps/Farg/metadata/) に分離しています。
 
 ## 📁 構造
 
