@@ -20,14 +20,22 @@ dedicated Färg icon and supports portrait orientation only.
 
 ## Onboarding
 
-- On first launch, Färg shows one introductory screen before constructing the
-  media-selection home. It introduces LUT-based single and batch editing and
-  explains why Photos access is useful. The Färg large logo is the screen's
-  hero image.
-- **Allow Photos Access** requests Photo Library read/write authorization.
-  Full and Limited access both allow onboarding to complete. The system result
-  is not treated as a requirement to enter the app.
-- The single onboarding action is a compact, centered 240 by 44 point Liquid
+- On first launch, Färg first introduces LUT-based single and batch editing
+  with its large logo and a compact **Start** Liquid Glass capsule. This stage
+  does not request system access.
+- The welcome stage summarizes the complete workflow: applying user LUTs to one
+  clip or a batch; opening videos from Photos, Files, or an external volume;
+  continued-processing background export when system scheduling is available;
+  Optical Flow motion blur on supported devices for adding smoother motion
+  trails to footage captured without an ND filter; and a single-video Shortcuts
+  action that applies a selected LUT and passes its rendered movie to the next
+  workflow action.
+- The second screen prepares the person for Photos access and explains its
+  copy-free video selection and export benefits. **Allow Photos Access** then
+  requests Photo Library read/write authorization. Full and Limited access both
+  allow onboarding to complete; the system result is not a requirement to
+  enter the app.
+- Each stage's primary action is a compact, centered 240 by 44 point Liquid
   Glass capsule rather than a full-width bottom command bar.
 - Dismissing the system request with **Don't Allow** still enters the app. The
   Files picker remains fully usable, and selecting a Photos video later

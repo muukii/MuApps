@@ -13,15 +13,19 @@ struct FargOnboardingView: View {
 
   let onComplete: @MainActor @Sendable () -> Void
 
+  @State private var step: FargOnboardingStep = .start
   @State private var authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
   @State private var isRequestingPhotoAccess = false
 
   var body: some View {
     FargOnboardingContent(
+      step: step,
       photoAccessState: PhotoLibraryAccessState(authorizationStatus),
       isRequestingPhotoAccess: isRequestingPhotoAccess,
+      onStart: { step = .photoAccess },
       onContinue: continueFromOnboarding
     )
+    .animation(.smooth, value: step)
   }
 
   private func continueFromOnboarding() {
@@ -41,8 +45,14 @@ struct FargOnboardingView: View {
   }
 }
 
+/// Identifies the two decisions a person makes during first launch.
+private enum FargOnboardingStep: Equatable {
+  case start
+  case photoAccess
+}
+
 /// A small presentation model that removes PhotoKit-specific cases from leaf views.
-private enum PhotoLibraryAccessState {
+private enum PhotoLibraryAccessState: Equatable {
   case notDetermined
   case granted
   case denied
@@ -64,8 +74,10 @@ private enum PhotoLibraryAccessState {
 /// Composes the onboarding regions from preview-friendly display values.
 private struct FargOnboardingContent: View {
 
+  let step: FargOnboardingStep
   let photoAccessState: PhotoLibraryAccessState
   let isRequestingPhotoAccess: Bool
+  let onStart: @MainActor @Sendable () -> Void
   let onContinue: @MainActor @Sendable () -> Void
 
   var body: some View {
@@ -75,102 +87,198 @@ private struct FargOnboardingContent: View {
         .ignoresSafeArea()
 
       ScrollView {
-        VStack(spacing: 40) {
-          Spacer(minLength: 24)
-
-          FargOnboardingHero()
-
-          PhotoLibraryPermissionCard(state: photoAccessState)
+        switch step {
+        case .start:
+          FargOnboardingWelcomeScreen()
+            .transition(.opacity)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 32)
+        case .photoAccess:
+          FargOnboardingPhotoAccessScreen(state: photoAccessState)
+            .transition(.opacity)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 32)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 32)
       }
     }
     .safeAreaInset(edge: .bottom, spacing: 0) {
-      FargOnboardingActions(
-        photoAccessState: photoAccessState,
-        isRequestingPhotoAccess: isRequestingPhotoAccess,
-        onContinue: onContinue
-      )
+      switch step {
+      case .start:
+        FargOnboardingActions(
+          step: step,
+          photoAccessState: .notDetermined,
+          isRequestingPhotoAccess: false,
+          onAction: onStart
+        )
+      case .photoAccess:
+        FargOnboardingActions(
+          step: step,
+          photoAccessState: photoAccessState,
+          isRequestingPhotoAccess: isRequestingPhotoAccess,
+          onAction: onContinue
+        )
+      }
     }
   }
 }
 
-/// Presents the app's color-editing purpose before asking for system access.
-private struct FargOnboardingHero: View {
+/// Introduces the editing experience before the person is asked for system access.
+private struct FargOnboardingWelcomeScreen: View {
 
   var body: some View {
     VStack(spacing: 24) {
+      Spacer(minLength: 24)
+
       Image("logo-large")
         .resizable()
         .scaledToFit()
         .frame(width: 160)
         .accessibilityHidden(true)
 
-      VStack(spacing: 12) {
-        Text("Welcome to Färg")
-          .font(.largeTitle.bold())
+      VStack(spacing: 8) {
+        Text("Your LUTs, on every video")
+          .font(.title.bold())
 
-        Text("Apply your LUTs to one video or a whole batch, then export each finished movie.")
+        Text("Build a faster path from footage to share.")
           .font(.body)
           .foregroundStyle(.secondary)
           .multilineTextAlignment(.center)
       }
+
+      VStack(spacing: 14) {
+        FargOnboardingFeatureRow(
+          systemImage: "rectangle.stack.fill",
+          title: "One clip or a whole batch",
+          description: "Apply your own LUT consistently across every video."
+        )
+
+        FargOnboardingFeatureRow(
+          systemImage: "externaldrive.fill",
+          title: "Photos, Files, and external drives",
+          description: "Work from your library or connected storage without an extra copy."
+        )
+
+        FargOnboardingFeatureRow(
+          systemImage: "clock.fill",
+          title: "Exports that keep moving",
+          description: "When background processing is available, keep exporting after you leave."
+        )
+
+        FargOnboardingFeatureRow(
+          systemImage: "wind",
+          title: "Optical Flow motion blur",
+          description:
+            "Add smoother motion trails to footage shot without an ND filter on supported iPhones."
+        )
+
+        FargOnboardingFeatureRow(
+          systemImage: "command",
+          title: "From capture to share, with Shortcuts",
+          description:
+            "Apply a selected LUT to one video, then pass the result to your next action."
+        )
+      }
+
+      Spacer(minLength: 24)
     }
     .frame(maxWidth: 520)
   }
 }
 
-/// Explains why PhotoKit read/write access is useful and reflects its current state.
-private struct PhotoLibraryPermissionCard: View {
+/// Summarizes one production capability without turning the welcome into prose.
+private struct FargOnboardingFeatureRow: View {
 
-  let state: PhotoLibraryAccessState
+  let systemImage: String
+  let title: LocalizedStringResource
+  let description: LocalizedStringResource
 
   var body: some View {
-    HStack(alignment: .top, spacing: 16) {
-      Image(systemName: "photo.on.rectangle.angled")
-        .font(.title2)
+    HStack(alignment: .top, spacing: 14) {
+      Image(systemName: systemImage)
+        .font(.headline)
         .foregroundStyle(.tint)
-        .frame(width: 48, height: 48)
-        .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        .frame(width: 38, height: 38)
+        .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
         .accessibilityHidden(true)
 
-      VStack(alignment: .leading, spacing: 6) {
-        Text("Photos Access")
-          .font(.headline)
+      VStack(alignment: .leading, spacing: 3) {
+        Text(title)
+          .font(.subheadline.weight(.semibold))
 
-        Text(permissionDescription)
-          .font(.subheadline)
+        Text(description)
+          .font(.caption)
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
       }
 
       Spacer(minLength: 0)
-
-      switch state {
-      case .notDetermined:
-        EmptyView()
-      case .granted:
-        Image(systemName: "checkmark.circle.fill")
-          .font(.title2)
-          .foregroundStyle(.green)
-          .accessibilityLabel("Photos access granted")
-      case .denied:
-        Image(systemName: "exclamationmark.circle.fill")
-          .font(.title2)
-          .foregroundStyle(.secondary)
-          .accessibilityLabel("Photos access not granted")
-      }
     }
-    .padding(20)
-    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+}
+
+/// Prepares a person for the optional PhotoKit read/write authorization request.
+private struct FargOnboardingPhotoAccessScreen: View {
+
+  let state: PhotoLibraryAccessState
+
+  var body: some View {
+    VStack(spacing: 28) {
+      Spacer(minLength: 72)
+
+      Image(systemName: accessSymbol)
+        .font(.system(size: 64, weight: .medium))
+        .foregroundStyle(accessColor)
+        .frame(width: 132, height: 132)
+        .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 32))
+        .accessibilityHidden(true)
+
+      VStack(spacing: 12) {
+        Text("Choose your videos")
+          .font(.largeTitle.bold())
+          .multilineTextAlignment(.center)
+
+        Text(permissionDescription)
+          .font(.body)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .frame(maxWidth: 420)
+
+      Spacer(minLength: 32)
+    }
     .frame(maxWidth: 520)
+  }
+
+  private var accessSymbol: String {
+    switch state {
+    case .notDetermined:
+      "photo.on.rectangle.angled"
+    case .granted:
+      "checkmark.circle.fill"
+    case .denied:
+      "exclamationmark.circle.fill"
+    }
+  }
+
+  private var accessColor: Color {
+    switch state {
+    case .notDetermined:
+      .accentColor
+    case .granted:
+      .green
+    case .denied:
+      .secondary
+    }
   }
 
   private var permissionDescription: LocalizedStringResource {
     switch state {
-    case .notDetermined, .granted:
-      "Choose videos without making an extra copy, then save finished movies to Photos."
+    case .notDetermined:
+      "Photos access lets Färg choose videos without an extra copy and save finished movies back to your library."
+    case .granted:
+      "Photos access is ready. Choose videos without an extra copy and save finished movies back to your library."
     case .denied:
       "Photos access is off. You can still open videos from Files and change access later in the Settings app."
     }
@@ -185,13 +293,14 @@ private struct FargOnboardingActions: View {
   private static let primaryActionLabelWidth: CGFloat = 216
   private static let primaryActionLabelHeight: CGFloat = 30
 
+  let step: FargOnboardingStep
   let photoAccessState: PhotoLibraryAccessState
   let isRequestingPhotoAccess: Bool
-  let onContinue: @MainActor @Sendable () -> Void
+  let onAction: @MainActor @Sendable () -> Void
 
   var body: some View {
     VStack {
-      Button(action: onContinue) {
+      Button(action: onAction) {
         HStack(spacing: 10) {
           if isRequestingPhotoAccess {
             ProgressView()
@@ -207,7 +316,7 @@ private struct FargOnboardingActions: View {
       .buttonStyle(.glassProminent)
       .controlSize(.regular)
       .disabled(isRequestingPhotoAccess)
-      .accessibilityIdentifier("onboarding-continue")
+      .accessibilityIdentifier(accessibilityIdentifier)
     }
     .frame(maxWidth: .infinity)
     .padding(.top, 12)
@@ -215,19 +324,59 @@ private struct FargOnboardingActions: View {
   }
 
   private var primaryActionTitle: LocalizedStringResource {
-    switch photoAccessState {
-    case .notDetermined:
-      "Allow Photos Access"
-    case .granted, .denied:
-      "Get Started"
+    switch step {
+    case .start:
+      "Start"
+    case .photoAccess:
+      switch photoAccessState {
+      case .notDetermined:
+        "Allow Photos Access"
+      case .granted, .denied:
+        "Get Started"
+      }
+    }
+  }
+
+  private var accessibilityIdentifier: String {
+    switch step {
+    case .start:
+      "onboarding-start"
+    case .photoAccess:
+      "onboarding-continue"
     }
   }
 }
 
-#Preview {
-  FargOnboardingContent(
-    photoAccessState: .notDetermined,
-    isRequestingPhotoAccess: false,
-    onContinue: {}
-  )
+/// Owns simulated state so Xcode Preview can replay the complete onboarding flow.
+private struct FargOnboardingPreviewHost: View {
+
+  @State private var step: FargOnboardingStep = .start
+  @State private var photoAccessState: PhotoLibraryAccessState = .notDetermined
+
+  var body: some View {
+    FargOnboardingContent(
+      step: step,
+      photoAccessState: photoAccessState,
+      isRequestingPhotoAccess: false,
+      onStart: { step = .photoAccess },
+      onContinue: continuePreview
+    )
+    .animation(.smooth, value: step)
+    .animation(.smooth, value: photoAccessState)
+  }
+
+  /// Simulates authorization, then resets after completion so the flow is replayable.
+  private func continuePreview() {
+    switch photoAccessState {
+    case .notDetermined:
+      photoAccessState = .granted
+    case .granted, .denied:
+      step = .start
+      photoAccessState = .notDetermined
+    }
+  }
+}
+
+#Preview("Onboarding flow") {
+  FargOnboardingPreviewHost()
 }
