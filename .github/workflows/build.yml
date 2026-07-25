@@ -25,6 +25,7 @@ jobs:
           - Tone
           - PhotosOrganizer
           - AmbientLight
+          - Farg
           - HearAugment
           - PolyReader
           - VoiceRecorder

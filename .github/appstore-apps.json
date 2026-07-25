@@ -29,6 +29,14 @@
       "project_path": "Apps/AmbientLight/Project.swift",
       "xcode_version": "26.4",
       "macos_runner": "macos-26"
+    },
+    {
+      "name": "Färg",
+      "scheme": "Farg",
+      "project_path": "Apps/Farg/Project.swift",
+      "xcode_version": "26.4",
+      "macos_runner": "macos-26",
+      "deploy_on_main": true
     }
   ]
 }

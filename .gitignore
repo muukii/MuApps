@@ -102,3 +102,4 @@ Apps/*/Derived/
 # Cloudflare Wrangler local cache
 .wrangler/
 implementation-notes.md
+.tmp/

@@ -17,6 +17,7 @@ on:
           - Journal
           - Tone
           - AmbientLight
+          - Färg
           - all
 
 permissions:
@@ -118,6 +119,7 @@ jobs:
     uses: ./.github/workflows/reusable-ios-appstoreconnect.yml
     with:
       scheme: ${{ matrix.scheme }}
+      project-path: ${{ matrix.project_path }}
       xcode-version: ${{ matrix.xcode_version }}
       macos-runner: ${{ matrix.macos_runner }}
     secrets:

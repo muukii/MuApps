@@ -19,6 +19,7 @@ on:
           - Tone
           - PhotosOrganizer
           - AmbientLight
+          - Färg
           - HearAugment
           - PolyReader
           - VoiceRecorder
@@ -95,6 +96,7 @@ jobs:
             printf 'Tone\tApps/Tone\tTone\tapp.muukii.tone\tTone.ipa\tTone-manifest.plist\n'
             printf 'PhotosOrganizer\tApps/PhotosOrganizer\tPhotosOrganizer\tapp.muukii.PhotosOrganizer\tPhotosOrganizer.ipa\tPhotosOrganizer-manifest.plist\n'
             printf 'AmbientLight\tApps/AmbientLight\tAmbientLight\tapp.muukii.ambientlight\tAmbientLight.ipa\tAmbientLight-manifest.plist\n'
+            printf 'Färg\tApps/Farg\tFarg\tapp.muukii.farg\tFarg.ipa\tFarg-manifest.plist\n'
             printf 'HearAugment\tApps/HearAugment\tHearAugment\tapp.muukii.hearaugment\tHearAugment.ipa\tHearAugment-manifest.plist\n'
             printf 'PolyReader\tApps/PolyReader\tPolyReader\tapp.muukii.polyreader\tPolyReader.ipa\tPolyReader-manifest.plist\n'
             printf 'VoiceRecorder\tApps/VoiceRecorder\tVoiceRecorder\tapp.muukii.voicerecorder\tVoiceRecorder.ipa\tVoiceRecorder-manifest.plist\n'

@@ -7,6 +7,10 @@ on:
         description: 'Xcode scheme name'
         required: true
         type: string
+      project-path:
+        description: 'Path to the app Project.swift manifest'
+        required: true
+        type: string
       configuration:
         description: 'Build configuration'
         required: false
@@ -95,26 +99,33 @@ jobs:
       - name: Ad hoc sign archived products before export
         env:
           APP_NAME: ${{ inputs.scheme }}
+          PROJECT_PATH: ${{ inputs.project-path }}
           PROVIDED_ENTITLEMENTS_PATH: ${{ inputs.entitlements-path }}
         run: |
           set -euo pipefail
 
+          if [ ! -f "$PROJECT_PATH" ]; then
+            echo "Project manifest not found: $PROJECT_PATH"
+            exit 1
+          fi
+          project_root="$(dirname "$PROJECT_PATH")"
+
           find_entitlements() {
-            local app_name="$1"
+            local project_root="$1"
             local target_name="$2"
 
-            if [ -n "$PROVIDED_ENTITLEMENTS_PATH" ] && [ "$target_name" = "$app_name" ]; then
+            if [ -n "$PROVIDED_ENTITLEMENTS_PATH" ] && [ "$target_name" = "$APP_NAME" ]; then
               printf '%s\n' "$PROVIDED_ENTITLEMENTS_PATH"
               return
             fi
 
-            if [ -f "Apps/${app_name}/Derived/Entitlements/${target_name}.entitlements" ]; then
-              printf '%s\n' "Apps/${app_name}/Derived/Entitlements/${target_name}.entitlements"
+            if [ -f "${project_root}/Derived/Entitlements/${target_name}.entitlements" ]; then
+              printf '%s\n' "${project_root}/Derived/Entitlements/${target_name}.entitlements"
               return
             fi
 
-            if [ -f "Apps/${app_name}/Sources/${target_name}.entitlements" ]; then
-              printf '%s\n' "Apps/${app_name}/Sources/${target_name}.entitlements"
+            if [ -f "${project_root}/Sources/${target_name}.entitlements" ]; then
+              printf '%s\n' "${project_root}/Sources/${target_name}.entitlements"
               return
             fi
 
@@ -169,13 +180,13 @@ jobs:
               [ -d "$extension_path" ] || continue
 
               extension_name="$(basename "$extension_path" .appex)"
-              extension_entitlements="$(find_entitlements "$APP_NAME" "$extension_name" || true)"
+              extension_entitlements="$(find_entitlements "$project_root" "$extension_name" || true)"
               sign_nested_code "$extension_path"
               sign_product "$extension_path" "$extension_entitlements"
             done
           fi
 
-          app_entitlements="$(find_entitlements "$APP_NAME" "$APP_NAME" || true)"
+          app_entitlements="$(find_entitlements "$project_root" "$APP_NAME" || true)"
           sign_nested_code "$app_path"
           sign_product "$app_path" "$app_entitlements"
 
