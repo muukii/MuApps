@@ -112,8 +112,8 @@ nonisolated struct ParametricVideoExporter: VideoExporting {
     var didCompleteWriting = false
     defer {
       if didCompleteWriting == false {
-        reader.cancelReading()
-        writer.cancelWriting()
+        cancellationHandle.cancelReading()
+        cancellationHandle.cancelWritingAfterTransfersStopped()
         try? FileManager.default.removeItem(at: outputURL)
       }
     }
@@ -207,16 +207,24 @@ nonisolated struct ParametricVideoExporter: VideoExporting {
             }
           }
 
-          var videoTimeline: AssetSampleTimeline?
-          for try await timeline in group {
-            if let timeline {
-              videoTimeline = timeline
+          do {
+            var videoTimeline: AssetSampleTimeline?
+            for try await timeline in group {
+              if let timeline {
+                videoTimeline = timeline
+              }
             }
+            guard let videoTimeline else {
+              throw VideoExportError.failed("Video transfer ended without a result.")
+            }
+            return videoTimeline
+          } catch {
+            // A failed child does not make a sibling blocked in provider.next()
+            // return. Stop the shared reader before the task-group scope drains.
+            group.cancelAll()
+            cancellationHandle.cancelReading()
+            throw error
           }
-          guard let videoTimeline else {
-            throw VideoExportError.failed("Video transfer ended without a result.")
-          }
-          return videoTimeline
         }
 
         try videoTimeline.validateVideoCoverage(
@@ -225,7 +233,7 @@ nonisolated struct ParametricVideoExporter: VideoExporting {
         )
         cancellationHandle.markTransfersFinished()
       } catch {
-        reader.cancelReading()
+        cancellationHandle.cancelReading()
         try Task.checkCancellation()
         throw error
       }
@@ -357,9 +365,9 @@ private nonisolated struct SourceVideoEncoding {
 
 /// A single reader-provider to writer-receiver stream.
 ///
-/// The modern provider/receiver APIs serialize backpressure in `append(_:)`.
-/// Each instance is moved into exactly one child task; this unchecked boundary
-/// only bridges the Objective-C reference types that do not declare Sendable.
+/// Each instance is moved into exactly one child task. Writer backpressure is
+/// retried between cancellation checkpoints, and this unchecked boundary only
+/// bridges the Objective-C reference types that do not declare Sendable.
 private nonisolated struct AssetSampleTransfer: @unchecked Sendable {
   let provider:
     AVAssetReaderOutput.Provider<
@@ -372,10 +380,18 @@ private nonisolated struct AssetSampleTransfer: @unchecked Sendable {
   ) async throws -> AssetSampleTimeline {
     defer { receiver.finish() }
 
+    let appender = AssetWriterBackpressureAppender()
     var timeline = AssetSampleTimeline()
-    while let sampleBuffer = try await provider.next() {
+    while true {
       try Task.checkCancellation()
-      try await receiver.append(sampleBuffer)
+      guard let sampleBuffer = try await provider.next() else {
+        break
+      }
+      try Task.checkCancellation()
+      try await appender.append {
+        try receiver.appendImmediately(sampleBuffer)
+      }
+      try Task.checkCancellation()
       timeline.record(
         presentationTime: sampleBuffer.presentationTimeStamp,
         duration: sampleBuffer.duration
@@ -384,7 +400,41 @@ private nonisolated struct AssetSampleTransfer: @unchecked Sendable {
         onSample(sampleBuffer.presentationTimeStamp)
       }
     }
+    try Task.checkCancellation()
     return timeline
+  }
+}
+
+/// Applies writer backpressure without leaving a framework append suspended.
+///
+/// A suspended `SampleBufferReceiver.append(_:)` is not documented to resume
+/// for Swift task cancellation. Using the nonblocking API keeps cancellation
+/// checkpoints between attempts, while the short sleep avoids a busy loop.
+nonisolated struct AssetWriterBackpressureAppender: Sendable {
+  private let waitForRetry: @Sendable () async throws -> Void
+
+  init(retryDelay: Duration = .milliseconds(1)) {
+    self.waitForRetry = {
+      try await Task.sleep(for: retryDelay)
+    }
+  }
+
+  init(
+    waitForRetry: @escaping @Sendable () async throws -> Void
+  ) {
+    self.waitForRetry = waitForRetry
+  }
+
+  func append(
+    _ appendImmediately: () throws -> Bool
+  ) async throws {
+    while true {
+      try Task.checkCancellation()
+      if try appendImmediately() {
+        return
+      }
+      try await waitForRetry()
+    }
   }
 }
 
@@ -506,13 +556,15 @@ private nonisolated struct AssetSampleTimeline: Sendable {
 /// Sendable cancellation access to an in-flight reader and writer.
 ///
 /// Writer cancellation is deferred until every input transfer has finished, so
-/// it never races an in-flight `append(_:)`. The cancelled state is sticky to
-/// cover cancellation between transfer completion and `finishWriting()`.
+/// it never races an in-flight append operation. The cancelled state is sticky
+/// to cover cancellation between transfer completion and `finishWriting()`.
 private nonisolated final class AssetExportCancellationHandle: @unchecked Sendable {
   private let lock = NSLock()
   private let reader: AVAssetReader
   private let writer: AVAssetWriter
   private var isCancelled = false
+  private var didCancelReader = false
+  private var didCancelWriter = false
   private var didFinishTransfers = false
 
   init(
@@ -526,7 +578,36 @@ private nonisolated final class AssetExportCancellationHandle: @unchecked Sendab
   func markTransfersFinished() {
     lock.lock()
     didFinishTransfers = true
-    let shouldCancelWriter = isCancelled
+    let shouldCancelWriter = isCancelled && didCancelWriter == false
+    if shouldCancelWriter {
+      didCancelWriter = true
+    }
+    lock.unlock()
+
+    if shouldCancelWriter {
+      writer.cancelWriting()
+    }
+  }
+
+  /// Stops provider reads once, including when sibling transfer failure races
+  /// explicit task cancellation.
+  func cancelReading() {
+    lock.lock()
+    let shouldCancelReader = didCancelReader == false
+    didCancelReader = true
+    lock.unlock()
+
+    if shouldCancelReader {
+      reader.cancelReading()
+    }
+  }
+
+  /// Cancels the writer once the caller has established that no transfer can
+  /// still invoke an append operation.
+  func cancelWritingAfterTransfersStopped() {
+    lock.lock()
+    let shouldCancelWriter = didCancelWriter == false
+    didCancelWriter = true
     lock.unlock()
 
     if shouldCancelWriter {
@@ -537,11 +618,18 @@ private nonisolated final class AssetExportCancellationHandle: @unchecked Sendab
   func cancel() {
     lock.lock()
     isCancelled = true
-    let canCancelWriter = didFinishTransfers
+    let shouldCancelReader = didCancelReader == false
+    didCancelReader = true
+    let shouldCancelWriter = didFinishTransfers && didCancelWriter == false
+    if shouldCancelWriter {
+      didCancelWriter = true
+    }
     lock.unlock()
 
-    reader.cancelReading()
-    if canCancelWriter {
+    if shouldCancelReader {
+      reader.cancelReading()
+    }
+    if shouldCancelWriter {
       writer.cancelWriting()
     }
   }

@@ -25,9 +25,6 @@ struct FargApp: App {
     AVPlayer.isObservationEnabled = true
 
     VideoPlaybackAudioSessionPolicy.configureForMixedPlayback()
-
-    // Register the iOS 26 continued-processing task handler before any submit.
-    BackgroundExportCoordinator.shared.registerHandler()
   }
 
   var body: some Scene {

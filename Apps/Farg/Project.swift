@@ -4,7 +4,7 @@ import ProjectDescriptionHelpers
 /// Property-list values owned by the Färg application target.
 let appInfoPlist: InfoPlist = .extendingDefault(with: [
   "BGTaskSchedulerPermittedIdentifiers": .array([
-    "app.muukii.farg.export",
+    "app.muukii.farg.export.*",
   ]),
   "CFBundleDisplayName": "Färg",
   "CFBundleName": "Färg",
@@ -103,6 +103,26 @@ let project = Project(
         ]
       )
     ),
+    .target(
+      name: "FargTests",
+      destinations: [.iPhone],
+      product: .unitTests,
+      bundleId: "app.muukii.farg.Tests",
+      deploymentTargets: .app,
+      infoPlist: .default,
+      buildableFolders: ["Tests/FargTests"],
+      dependencies: [
+        .target(name: "Farg"),
+        .target(name: "FargMotionBlur"),
+        .external(name: "BrightroomParametric"),
+      ],
+      settings: .settings(
+        configurations: [
+          .debug(name: "Debug"),
+          .release(name: "Release"),
+        ]
+      )
+    ),
   ],
   schemes: [
     .scheme(
@@ -112,6 +132,17 @@ let project = Project(
       testAction: .targets([
         .testableTarget(
           target: "FargMotionBlurTests",
+          parallelization: .swiftTestingOnly
+        ),
+      ])
+    ),
+    .scheme(
+      name: "FargTests",
+      shared: true,
+      buildAction: .buildAction(targets: ["FargTests"]),
+      testAction: .targets([
+        .testableTarget(
+          target: "FargTests",
           parallelization: .swiftTestingOnly
         ),
       ])

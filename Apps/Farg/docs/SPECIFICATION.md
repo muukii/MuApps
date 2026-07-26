@@ -85,9 +85,9 @@ dedicated Färg icon and supports portrait orientation only.
   among clips, and exposes **Delete Video** in each ready clip's context menu.
   Removing the last clip returns to the picker instead of showing an empty
   editor.
-- The selected video plays in the editor preview. LUT and intensity remain
-  shared across the collection; changing the preview does not change the
-  recipe.
+- The selected video plays in the editor preview. LUT and motion-blur settings
+  remain shared across the collection; changing the preview does not change
+  the recipe.
 - The preview uses Färg-owned playback controls instead of the system video
   player interface. It provides play/pause, current time, duration, and a
   timeline for seeking while keeping the video surface available for future
@@ -102,10 +102,17 @@ dedicated Färg icon and supports portrait orientation only.
   edge. Export remains disabled while an additional video selection is loading.
 - A collection containing one video uses the same editing model and layout as
   a larger batch.
-- The editing surface uses neutral dark chrome in both system appearances so
-  the video remains the only source of color.
+- The editing surface follows the system Light or Dark appearance and uses
+  semantic background, primary, and secondary styles to express hierarchy.
+  The video stage remains neutral black around the fitted movie.
 - In compact layouts, editing controls sit below the video. On wider portrait
   layouts, the controls move to a trailing inspector beside the video.
+- The editor orders its regions as video player, **Videos** filmstrip, then
+  editing controls. **Videos** stays outside the editing controls' vertical
+  scroll view while its own filmstrip remains horizontally scrollable.
+- Below **Videos**, a fixed bottom tab bar switches the editing controls between
+  **LUT** and **Motion Blur**. Switching tabs does not change the current video
+  or recipe.
 
 ## Shortcuts
 
@@ -159,10 +166,10 @@ dedicated Färg icon and supports portrait orientation only.
   copies as regular imported LUTs.
 - LUTs imported individually from Files can be deleted from the LUT library.
   Linked LUTs are managed by changing their source folder.
-- The intensity slider blends the selected LUT from 0% to 100%.
-- The editor labels the **Look** and **Intensity** controls. When **Original**
-  is selected, it reports that intensity is not applied instead of displaying
-  an inactive percentage.
+- The editor applies the selected LUT at full intensity. It does not currently
+  expose an intensity control.
+- The **LUT** tab contains the **Original** choice and the preview-backed LUT
+  selector.
 - Every LUT choice in the editor includes a still preview. Färg captures the
   source video's first frame on load and refreshes that still when playback
   stops or a paused scrub settles. It does not evaluate every LUT continuously
@@ -171,6 +178,10 @@ dedicated Färg icon and supports portrait orientation only.
   images from Photos. Each custom sample is copied into Application Support,
   normalized to a bounded JPEG, and given a required user-authored label such
   as a camera or Log profile.
+- Settings presents preview samples in a horizontally scrolling strip. Scrolling
+  only browses the strip; tapping a sample selects it as the common input for
+  the LUT previews below. An Add Sample tile stays at the trailing end, while
+  each custom sample exposes Rename and Delete through its context menu.
 - The active Settings sample is applied to every LUT under identical input
   conditions. Each LUT row shows only the rendered result at the same aspect
   ratio as the source preview. Custom sample labels can be renamed and their
@@ -179,8 +190,8 @@ dedicated Färg icon and supports portrait orientation only.
 ## Optical Flow motion blur
 
 - Motion blur is an optional shared part of the current video collection's
-  recipe. It appears in the editor inspector after LUT intensity and before the
-  export summary.
+  recipe. Its enable switch and Strength control appear in the dedicated
+  **Motion Blur** tab.
 - Färg prepares previous, current, and next source frames and sends them to the
   iOS 26 VideoToolbox motion-blur processor with internal Optical Flow
   calculation enabled. It does not substitute a simple frame blend.
@@ -219,38 +230,61 @@ dedicated Färg icon and supports portrait orientation only.
   completed file's measured bitrate can vary slightly with its content.
 - Before export, the editor identifies the number of separate outputs and warns
   how many HDR inputs will be rendered to SDR.
-- The app renders videos serially, displays both **Video X of N** and aggregate
-  progress, and supports cancellation. Serial rendering bounds peak GPU and
-  memory use for large collections.
+- The export sheet keeps every video in a picker-ordered list from start to
+  finish. Each stable row reports its own waiting, rendering, Photos-saving,
+  exported, failed, cancelling, or cancelled state and exposes the actions
+  appropriate to that video. A compact header retains aggregate progress.
+- Actual video rendering is admitted through one process-wide resource gate.
+  Its current capacity is one, so encoding remains serial and bounds peak GPU
+  and memory use. The job and UI model do not depend on that value, allowing a
+  measured future policy to admit more than one render without restructuring
+  export sessions.
+- The foreground **Export** action registers and submits every per-video
+  continued-processing request before starting app-owned work or presenting the
+  sheet. Work never waits for a background-task launch handler. An independent,
+  picker-ordered app scheduler admits renders up to the resource-gate capacity.
 - Starting export detaches the editor's player item and Optical Flow session so
   preview and export do not own two VideoToolbox pipelines simultaneously. The
   preview is rebuilt at the preserved playhead after the export sheet closes.
-- Cancelling export keeps the progress sheet presented until the in-flight
-  reader and Optical Flow frame have drained. Preview reconstruction starts
-  only after those media resources are released.
+- Each active row can be cancelled independently. **Cancel All** sends
+  cancellation to every pending or active attempt before waiting for in-flight
+  readers and Optical Flow frames to drain. Rows remain visible as
+  **Cancelling** until that drain completes and then become retryable.
 - A render failure is recorded for that video without preventing later videos
-  from being attempted. The completion screen lists per-video outcomes,
-  supports sharing or saving each successful output, and can retry only render
-  failures.
+  from being attempted. The same row then supports Retry; successful rows
+  support Share and preserve their output while a failed or cancelled sibling
+  is retried. Retry keeps the row identity but creates a new attempt identity.
 - Failure to save a completed render to Photos is distinct from render failure;
   the shareable movie remains available and can be saved again.
 - A movie is not eligible for Photos import until both the transferred video
   samples and the finalized output track reach the source video's intended end.
   An orderly early video EOF is treated as render failure instead of producing
   a movie that holds its final frame while audio continues.
-- One continued-processing background task owns the complete serial batch so it
-  can continue after the app leaves the foreground. On devices that advertise
-  background GPU support, the task requests the GPU; otherwise, it is submitted
-  with default resources. The task reports fine-grained sample progress to the
-  system while keeping visible UI updates percent-based. Each item's final
-  percentage remains pending until its Photos import completes.
-- When continued processing request submission fails, export falls back to a
-  foreground task, shows the system error domain and code, and tells the user
-  that the app must remain open.
-- System expiration and explicit cancellation remain authoritative while Photos
-  is saving; a cancelled batch cannot later report successful completion.
+- Every video attempt receives a unique continued-processing background task
+  identifier under `app.muukii.farg.export.*`. The task owns that video's system
+  runtime, progress, expiration, and completion, but it does not decide render
+  concurrency. Its launch handler attaches to the already-running attempt and
+  replays current progress; it never starts the render. Retrying a row creates a
+  new attempt identifier, which is registered and submitted from the foreground
+  Retry action before it enters the app scheduler.
+- On devices that advertise background GPU support, each request asks for the
+  GPU; otherwise, it is submitted with default resources. The task reports
+  truthful queue-admission progress from 0–5% based on all predecessor renders,
+  its own render from 5–99%, and Photos import from 99–100%. Waiting subtitles
+  identify the number of earlier videos rather than implying simultaneous
+  encoding. App rows update at whole-percent resolution. Progress reporting does
+  not prevent the system from expiring a task when conditions change.
+- When one continued-processing request cannot be registered or submitted, only
+  that video falls back to foreground execution. The header reports how many
+  videos require Färg to remain open and includes the system scheduling error.
+  This also provides a per-item fallback if a large selection exceeds the
+  system's pending-request allowance; background continuation is not guaranteed
+  for an unbounded number of videos.
+- System expiration or system cancellation stops only the corresponding video.
+  Explicit item or session cancellation remains authoritative while Photos is
+  saving, so a cancelled attempt cannot later report successful completion.
 - Completed exports are saved to the user's photo library when permission is
-  granted and remain shareable from the completion screen.
+  granted and remain shareable from their stable list rows.
 
 ## Rendering dependency
 

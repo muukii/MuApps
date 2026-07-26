@@ -20,7 +20,7 @@ struct EditorVideoPlayer: View {
     ZStack(alignment: .bottom) {
       switch model.renderState {
       case .empty:
-        EditorPalette.stage
+        Color.black
       case .preparing:
         EditorPreviewStatus(
           title: "Preparing preview…",
@@ -137,7 +137,7 @@ private struct EditorPreviewStatus: View {
     VStack(spacing: 10) {
       if showsProgress {
         ProgressView()
-          .tint(.white)
+          .tint(.primary)
       } else if let symbol {
         Image(systemName: symbol)
           .font(.title2)
@@ -146,9 +146,10 @@ private struct EditorPreviewStatus: View {
       Text(title)
         .font(.callout.weight(.medium))
     }
-    .foregroundStyle(EditorPalette.secondary)
+    .foregroundStyle(.secondary)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(EditorPalette.stage)
+    .background(.black)
+    .environment(\.colorScheme, .dark)
   }
 }
 

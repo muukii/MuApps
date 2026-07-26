@@ -2,26 +2,65 @@
 // Copyright (c) 2026 Hiroshi Kimura(Muukii) <muukii.app@gmail.com>
 //
 
-import AVFoundation
 import BackgroundTasks
-import BrightroomParametric
 import Foundation
 import OSLog
 
-/// Coordinates video export using iOS 26's `BGContinuedProcessingTask` so a
-/// render started in the foreground keeps running — with system progress UI —
-/// after the user leaves the app, then saves the result to Photos.
+/// Queue dependency for admitting one attempt at a bounded render capacity.
 ///
-/// When the continued-processing task can't be scheduled, the coordinator
-/// preserves the scheduling error while falling back to a foreground export.
-/// `activePath` lets the UI explain both the failure and whether the user may
-/// leave the app.
+/// Any predecessor may release the next slot, so capacity greater than one
+/// tracks a required completion count rather than pinning the dependency to a
+/// fixed subset of earlier attempts.
+nonisolated struct VideoRenderAdmissionDependency: Equatable, Sendable {
+
+  let predecessorAttemptIDs: [UUID]
+  let requiredCompletionCount: Int
+
+  init(
+    predecessorAttemptIDs: [UUID],
+    renderCapacity: Int
+  ) {
+    precondition(renderCapacity > 0)
+    self.predecessorAttemptIDs = predecessorAttemptIDs
+    requiredCompletionCount = max(
+      predecessorAttemptIDs.count - (renderCapacity - 1),
+      0
+    )
+  }
+
+  /// Returns truthful aggregate progress for the completions still needed.
+  func snapshot(
+    progressByAttemptID: [UUID: Double]
+  ) -> (fraction: Double, videosAhead: Int)? {
+    guard requiredCompletionCount > 0 else { return nil }
+    let progressValues = predecessorAttemptIDs.map {
+      min(max(progressByAttemptID[$0] ?? 1, 0), 1)
+    }
+    let mostAdvanced =
+      progressValues
+      .sorted(by: >)
+      .prefix(requiredCompletionCount)
+    let fraction =
+      mostAdvanced.reduce(0, +) / Double(requiredCompletionCount)
+    let completedCount = progressValues.count { $0 >= 1 }
+    return (
+      fraction,
+      max(requiredCompletionCount - completedCount, 0)
+    )
+  }
+}
+
+/// Owns one picker-ordered export session while each video receives an
+/// independent `BGContinuedProcessingTask`.
+///
+/// Continued-processing tasks provide system runtime, progress, and individual
+/// expiration. Actual encoding concurrency is independently bounded by
+/// `VideoRenderResourceGate`, whose production capacity is currently one.
 @MainActor
-@Observable
 final class BackgroundExportCoordinator {
 
-  /// The single permitted task identifier (see `BGTaskSchedulerPermittedIdentifiers`).
-  static let taskIdentifier = "app.muukii.farg.export"
+  /// Permitted wildcard prefix declared in Farg's Info.plist.
+  static let taskIdentifierPrefix = "app.muukii.farg.export"
 
   static let shared = BackgroundExportCoordinator()
 
@@ -30,424 +69,843 @@ final class BackgroundExportCoordinator {
     category: "BackgroundExport"
   )
 
-  enum Phase: Equatable {
-    case idle
-    case exporting(VideoExportBatchProgress)
-    case finished([VideoExportBatchResult])
-    case failed(String)
+  private let jobRunner: VideoExportJobRunner
+  private let maximumConcurrentRenders: Int
+  private var session: VideoExportSessionModel?
+  private var jobsByAttemptID: [UUID: VideoExportJob] = [:]
+  private var controlsByAttemptID: [UUID: ExportAttemptControl] = [:]
+  private var systemRelaysByAttemptID: [UUID: ContinuedProcessingTaskRelay] = [:]
+  private var pendingAttemptIDs: [UUID] = []
+  private var scheduledAttemptIDs: Set<UUID> = []
+  private var unsettledAttemptOrder: [UUID] = []
+  private var admissionDependenciesByAttemptID: [UUID: VideoRenderAdmissionDependency] = [:]
+  private var renderProgressByAttemptID: [UUID: Double] = [:]
+  private var isCancellingAll = false
+  private var manualSaveTasks: [UUID: Task<Void, Never>] = [:]
+
+  init(
+    jobRunner: VideoExportJobRunner = VideoExportJobRunner(
+      exporter: ParametricVideoExporter(),
+      renderGate: .shared,
+      saveToPhotos: PhotoLibrarySaver.save
+    ),
+    maximumConcurrentRenders: Int = VideoRenderResourceGate.productionCapacity
+  ) {
+    precondition(maximumConcurrentRenders > 0)
+    self.jobRunner = jobRunner
+    self.maximumConcurrentRenders = maximumConcurrentRenders
   }
 
-  /// A reason the system couldn't start a background-continuable export.
-  enum BackgroundStartError: LocalizedError, Equatable {
-    /// `BGTaskScheduler` rejected the continued-processing request.
-    case requestSubmissionFailed(
-      description: String,
-      domain: String,
-      code: Int
-    )
+  // MARK: - Session
 
-    var errorDescription: String? {
-      switch self {
-      case .requestSubmissionFailed(let description, let domain, let code):
-        return String(
-          localized:
-            "The system rejected the background export request: \(description) (\(domain), code \(code)).",
-          comment:
-            "Background export scheduling error. The variables are the system error description, domain, and numeric code."
+  /// Creates app-owned work and foreground-submits every per-video lease.
+  ///
+  /// Submission remains inside the initiating foreground action. Actual renders
+  /// enter the ordered app scheduler independently of handler delivery.
+  @discardableResult
+  func start(session: VideoExportSessionModel) -> Bool {
+    guard
+      self.session == nil,
+      isCancellingAll == false,
+      session.items.isEmpty == false
+    else {
+      return false
+    }
+
+    self.session = session
+    Self.cleanupExportsDirectory(keeping: [])
+
+    for item in session.items {
+      startNewAttempt(for: item, in: session)
+    }
+    scheduleWaitingAttempts()
+    return true
+  }
+
+  /// Discards only a fully-drained session.
+  ///
+  /// Active teardown must go through `cancelAllAndWait()` first so preview
+  /// reconstruction never overlaps an AVFoundation or Photos operation.
+  @discardableResult
+  func discardSettledSession(sessionID: UUID) -> Bool {
+    guard
+      session?.id == sessionID,
+      session?.isSettled == true,
+      session?.hasManualPhotosSaveInProgress == false,
+      jobsByAttemptID.isEmpty,
+      controlsByAttemptID.isEmpty,
+      systemRelaysByAttemptID.isEmpty,
+      pendingAttemptIDs.isEmpty,
+      scheduledAttemptIDs.isEmpty,
+      unsettledAttemptOrder.isEmpty,
+      manualSaveTasks.isEmpty
+    else {
+      return false
+    }
+    admissionDependenciesByAttemptID.removeAll()
+    renderProgressByAttemptID.removeAll()
+    session = nil
+    return true
+  }
+
+  /// Safety path for a sheet removed by its parent rather than its Done action.
+  func cancelAndDiscardCurrentSession() async {
+    guard let sessionID = session?.id else { return }
+    await cancelAllAndWait()
+    _ = discardSettledSession(sessionID: sessionID)
+  }
+
+  /// Retries only one failed or cancelled row with a new attempt identity.
+  func retry(itemID: VideoClip.ID) {
+    guard
+      isCancellingAll == false,
+      let session,
+      let item = session.item(id: itemID),
+      item.canRetry
+    else {
+      return
+    }
+    startNewAttempt(for: item, in: session)
+    scheduleWaitingAttempts()
+  }
+
+  // MARK: - Cancellation
+
+  /// Cancels one item and waits for its AVFoundation resources to drain.
+  func cancelAndWait(itemID: VideoClip.ID) async {
+    guard
+      let session,
+      let item = session.item(id: itemID),
+      let attempt = item.attempt,
+      item.isTerminal == false
+    else {
+      return
+    }
+
+    guard let control = controlsByAttemptID[attempt.id] else {
+      item.markCancelling(attemptID: attempt.id, origin: .user)
+      BGTaskScheduler.shared.cancel(
+        taskRequestWithIdentifier: attempt.taskIdentifier
+      )
+      systemRelaysByAttemptID[attempt.id]?.complete(success: false)
+      finishCancelled(
+        sessionID: session.id,
+        itemID: item.id,
+        attemptID: attempt.id,
+        path: attempt.path,
+        origin: .user
+      )
+      return
+    }
+
+    // Publish cancellation to the worker before changing presentation state,
+    // so a concurrent completion cannot commit success in between.
+    let cancellationWon = control.requestCancellation(origin: .user)
+    if cancellationWon {
+      item.markCancelling(attemptID: attempt.id, origin: .user)
+      BGTaskScheduler.shared.cancel(
+        taskRequestWithIdentifier: attempt.taskIdentifier
+      )
+    }
+    if control.hasAttachedTask {
+      await control.wait()
+    } else if cancellationWon {
+      systemRelaysByAttemptID[attempt.id]?.complete(success: false)
+      finishCancelled(
+        sessionID: session.id,
+        itemID: item.id,
+        attemptID: attempt.id,
+        path: attempt.path,
+        origin: .user
+      )
+    }
+  }
+
+  /// Cancels all nonterminal items before awaiting any one media drain.
+  func cancelAllAndWait() async {
+    guard let session else { return }
+    isCancellingAll = true
+    defer {
+      isCancellingAll = false
+      scheduleWaitingAttempts()
+    }
+
+    let attempts = session.items.compactMap {
+      item -> (VideoExportItemModel, VideoExportItemModel.Attempt)? in
+      guard item.isTerminal == false, let attempt = item.attempt else {
+        return nil
+      }
+      return (item, attempt)
+    }
+
+    var runningControls: [ExportAttemptControl] = []
+    for (item, attempt) in attempts {
+      if let control = controlsByAttemptID[attempt.id] {
+        let cancellationWon = control.requestCancellation(origin: .user)
+        if cancellationWon {
+          item.markCancelling(attemptID: attempt.id, origin: .user)
+          BGTaskScheduler.shared.cancel(
+            taskRequestWithIdentifier: attempt.taskIdentifier
+          )
+        }
+        if control.hasAttachedTask {
+          runningControls.append(control)
+        } else if cancellationWon {
+          systemRelaysByAttemptID[attempt.id]?.complete(success: false)
+          finishCancelled(
+            sessionID: session.id,
+            itemID: item.id,
+            attemptID: attempt.id,
+            path: attempt.path,
+            origin: .user
+          )
+        }
+      } else {
+        item.markCancelling(attemptID: attempt.id, origin: .user)
+        BGTaskScheduler.shared.cancel(
+          taskRequestWithIdentifier: attempt.taskIdentifier
+        )
+        systemRelaysByAttemptID[attempt.id]?.complete(success: false)
+        finishCancelled(
+          sessionID: session.id,
+          itemID: item.id,
+          attemptID: attempt.id,
+          path: attempt.path,
+          origin: .user
         )
       }
     }
 
-    init(submissionError: any Error) {
-      let error = submissionError as NSError
-      self = .requestSubmissionFailed(
-        description: error.localizedDescription,
-        domain: error.domain,
-        code: error.code
-      )
+    await withTaskGroup(of: Void.self) { group in
+      for control in runningControls {
+        group.addTask {
+          await control.wait()
+        }
+      }
+    }
+
+    let manualSaves = Array(manualSaveTasks.values)
+    await withTaskGroup(of: Void.self) { group in
+      for task in manualSaves {
+        group.addTask {
+          await task.value
+        }
+      }
     }
   }
 
-  enum ActivePath: Equatable {
-    /// Running as a `BGContinuedProcessingTask` — safe to leave the app.
-    case background
-    /// Foreground fallback caused by a background scheduling failure.
-    case foreground(BackgroundStartError)
+  // MARK: - Photos recovery
+
+  /// Retries Photos import without rerendering the already-shareable movie.
+  func saveToPhotos(itemID: VideoClip.ID) {
+    guard
+      isCancellingAll == false,
+      let session,
+      let item = session.item(id: itemID),
+      let save = item.beginManualPhotosSave()
+    else {
+      return
+    }
+
+    session.beginManualPhotosSave()
+    let task = Task {
+      do {
+        try await PhotoLibrarySaver.save(videoAt: save.url)
+        item.finishManualPhotosSave(
+          attemptID: save.attemptID,
+          result: .success(())
+        )
+      } catch {
+        item.finishManualPhotosSave(
+          attemptID: save.attemptID,
+          result: .failure(error)
+        )
+      }
+      session.finishManualPhotosSave()
+      manualSaveTasks.removeValue(forKey: save.attemptID)
+    }
+    manualSaveTasks[save.attemptID] = task
   }
 
-  private(set) var phase: Phase = .idle
-  private(set) var activePath: ActivePath?
+  // MARK: - Attempt submission
 
-  /// The export strategy. Nonisolated so the background task handler can use it.
-  private nonisolated let exporter: any VideoExporting = ParametricVideoExporter()
+  private func startNewAttempt(
+    for item: VideoExportItemModel,
+    in session: VideoExportSessionModel
+  ) {
+    let attemptID = UUID()
+    let taskIdentifier =
+      "\(Self.taskIdentifierPrefix).\(attemptID.uuidString.lowercased())"
+    let outputURL = Self.makeOutputURL(
+      position: item.position,
+      attemptID: attemptID
+    )
+    guard
+      let attempt = item.beginAttempt(
+        id: attemptID,
+        taskIdentifier: taskIdentifier,
+        outputURL: outputURL
+      )
+    else {
+      return
+    }
+    session.markAttemptStarted(itemID: item.id)
 
-  /// Holds the job for the system-launched task handler to pick up.
-  private nonisolated let jobBox = JobBox()
-
-  /// The in-flight export work, so an explicit cancel can stop it.
-  private nonisolated let workHandle = WorkHandle()
-
-  private var didRegister = false
-  private var activeJobID: UUID?
-
-  // MARK: - Launch registration
-
-  /// Registers the task handler. Call once, at app launch.
-  func registerHandler() {
-    guard didRegister == false else { return }
-    didRegister = true
-
-    BGTaskScheduler.shared.register(
-      forTaskWithIdentifier: Self.taskIdentifier,
-      // The handler is formed inside this MainActor-isolated coordinator.
-      // Delivering it on the default background queue violates that isolation
-      // before the export work can be handed to its nonisolated task.
-      using: .main
-    ) { [weak self] bgTask in
-      guard let task = bgTask as? BGContinuedProcessingTask else {
-        bgTask.setTaskCompleted(success: false)
+    let job = VideoExportJob(
+      sessionID: session.id,
+      itemID: item.id,
+      attemptID: attempt.id,
+      position: item.position,
+      displayName: item.displayName,
+      source: item.source,
+      colorInfo: item.colorInfo,
+      recipe: session.recipe,
+      outputURL: attempt.outputURL,
+      taskIdentifier: attempt.taskIdentifier
+    )
+    let control = ExportAttemptControl()
+    let admissionDependency = VideoRenderAdmissionDependency(
+      predecessorAttemptIDs: unsettledAttemptOrder,
+      renderCapacity: maximumConcurrentRenders
+    )
+    let initialDependencySnapshot = admissionDependency.snapshot(
+      progressByAttemptID: renderProgressByAttemptID
+    )
+    let sessionID = job.sessionID
+    let itemID = job.itemID
+    let jobAttemptID = job.attemptID
+    let systemRelay = ContinuedProcessingTaskRelay(
+      displayName: job.displayName,
+      waitingVideosAhead:
+        initialDependencySnapshot?.videosAhead
+        ?? admissionDependency.requiredCompletionCount
+    ) { [weak self, weak control] in
+      guard
+        let control,
+        control.requestCancellation(origin: .system)
+      else {
         return
       }
-      guard let self, let job = self.jobBox.take() else {
+      Task { @MainActor [weak self] in
+        self?.handleSystemCancellation(
+          sessionID: sessionID,
+          itemID: itemID,
+          attemptID: jobAttemptID
+        )
+      }
+    }
+    if let initialDependencySnapshot {
+      systemRelay.updateWaitingProgress(
+        predecessorFraction: initialDependencySnapshot.fraction,
+        videosAhead: initialDependencySnapshot.videosAhead
+      )
+    }
+
+    jobsByAttemptID[attempt.id] = job
+    controlsByAttemptID[attempt.id] = control
+    systemRelaysByAttemptID[attempt.id] = systemRelay
+    admissionDependenciesByAttemptID[attempt.id] = admissionDependency
+    renderProgressByAttemptID[attempt.id] = 0
+    unsettledAttemptOrder.append(attempt.id)
+    pendingAttemptIDs.append(attempt.id)
+
+    let path = submitSystemLease(
+      job: job,
+      control: control,
+      relay: systemRelay
+    )
+    item.markWaitingForRenderSlot(
+      attemptID: attempt.id,
+      path: path
+    )
+    updateWaitingSystemProgress()
+  }
+
+  /// Foreground-submits one per-video lease without transferring work ownership.
+  ///
+  /// The launch handler may attach before or after app-side admission. In both
+  /// cases the ordered app scheduler remains the only render-start authority.
+  private func submitSystemLease(
+    job: VideoExportJob,
+    control: ExportAttemptControl,
+    relay: ContinuedProcessingTaskRelay
+  ) -> VideoExportExecutionPath {
+    let didRegister = BGTaskScheduler.shared.register(
+      forTaskWithIdentifier: job.taskIdentifier,
+      // The handler only attaches a system lease to already-running app work.
+      using: .main
+    ) { task in
+      guard let continuedTask = task as? BGContinuedProcessingTask else {
         task.setTaskCompleted(success: false)
         return
       }
-      self.run(task: task, job: job)
+      relay.attach(continuedTask)
     }
-  }
 
-  // MARK: - Start
+    guard didRegister else {
+      let error =
+        VideoExportBackgroundStartError
+        .handlerRegistrationFailed(identifier: job.taskIdentifier)
+      Self.logger.error("\(error.localizedDescription, privacy: .public)")
+      relay.complete(success: false)
+      let path = VideoExportExecutionPath.foreground(error)
+      control.setExecutionPath(path)
+      return path
+    }
 
-  /// Starts a serial batch, preferring the background-continuable task.
-  ///
-  /// `retainedOutputURLs` keeps successful files from an earlier partial
-  /// attempt available while only failed items are retried.
-  func start(
-    batch: VideoExportBatch,
-    retaining retainedOutputURLs: Set<URL> = []
-  ) {
-    guard case .idle = phase, batch.items.isEmpty == false else { return }
-
-    let job = Job(
-      id: batch.id,
-      batch: batch,
-      outputURLs: batch.items.indices.map { index in
-        Self.makeOutputURL(position: index + 1)
-      }
-    )
-    Self.cleanupExportsDirectory(
-      keeping: Set(job.outputURLs).union(retainedOutputURLs)
-    )
-    activeJobID = job.id
-    phase = .exporting(
-      VideoExportBatchProgress(
-        currentItemIndex: 0,
-        itemCount: batch.items.count,
-        currentItemFraction: 0
-      )
-    )
-
+    let initialPresentation = relay.currentSnapshot()
     let request = BGContinuedProcessingTaskRequest(
-      identifier: Self.taskIdentifier,
-      title: Self.exportTitle(itemCount: batch.items.count),
-      subtitle: "Rendering your video…"
+      identifier: job.taskIdentifier,
+      title: initialPresentation.title,
+      subtitle: initialPresentation.subtitle
     )
     request.strategy = .queue
-    // Background GPU is an optional resource of a continued-processing task.
-    // Submit with default resources when the device doesn't advertise it,
-    // matching Apple's documented scheduling pattern.
     if BGTaskScheduler.supportedResources.contains(.gpu) {
       request.requiredResources = .gpu
     } else {
       Self.logger.notice(
-        "Background GPU is unavailable; submitting with default resources."
+        "Background GPU is unavailable; submitting \(job.taskIdentifier, privacy: .public) with default resources."
       )
     }
 
-    jobBox.set(job)
     do {
       try BGTaskScheduler.shared.submit(request)
-      activePath = .background
-      // The system invokes the registered handler, which drives `run(task:job:)`.
+      let path = VideoExportExecutionPath.background
+      control.setExecutionPath(path)
+      return path
     } catch {
-      let startError = BackgroundStartError(submissionError: error)
+      let startError = VideoExportBackgroundStartError(
+        submissionError: error
+      )
       Self.logger.error("\(startError.localizedDescription, privacy: .public)")
-      jobBox.take()
-      activePath = .foreground(startError)
-      runForeground(job: job)
+      relay.complete(success: false)
+      let path = VideoExportExecutionPath.foreground(startError)
+      control.setExecutionPath(path)
+      return path
     }
   }
 
-  /// Clears finished/failed state so a new export can start. No-op cancel if idle.
-  func reset() {
-    activeJobID = nil
-    BGTaskScheduler.shared.cancel(
-      taskRequestWithIdentifier: Self.taskIdentifier
-    )
-    workHandle.cancel()
-    jobBox.take()
-    phase = .idle
-    activePath = nil
+  // MARK: - Ordered app scheduler
+
+  private func scheduleWaitingAttempts() {
+    guard isCancellingAll == false else { return }
+
+    while scheduledAttemptIDs.count < maximumConcurrentRenders,
+      pendingAttemptIDs.isEmpty == false
+    {
+      let attemptID = pendingAttemptIDs.removeFirst()
+      guard
+        let job = jobsByAttemptID[attemptID],
+        let control = controlsByAttemptID[attemptID],
+        let systemRelay = systemRelaysByAttemptID[attemptID],
+        control.isCancellationRequested == false,
+        canRun(job: job)
+      else {
+        continue
+      }
+      scheduledAttemptIDs.insert(attemptID)
+      startWork(
+        job: job,
+        control: control,
+        systemRelay: systemRelay
+      )
+    }
+    updateWaitingSystemProgress()
   }
 
-  /// Explicitly aborts an in-flight export (background or foreground).
-  func cancelAndWait() async {
-    activeJobID = nil
-    BGTaskScheduler.shared.cancel(
-      taskRequestWithIdentifier: Self.taskIdentifier
-    )
-    jobBox.take()
-    if case .exporting = phase {
-      phase = .idle
+  private func canRun(job: VideoExportJob) -> Bool {
+    guard
+      session?.id == job.sessionID,
+      let item = session?.item(id: job.itemID),
+      let attempt = item.attempt,
+      attempt.id == job.attemptID,
+      case .active = attempt.state
+    else {
+      return false
     }
-    activePath = nil
-    await workHandle.cancelAndWait()
+    return true
   }
 
-  // MARK: - Background execution (system task handler)
+  /// Commits app-side render admission without waiting for handler delivery.
+  private func admitRender(
+    job: VideoExportJob,
+    control: ExportAttemptControl,
+    relay: ContinuedProcessingTaskRelay
+  ) throws -> VideoExportExecutionPath {
+    guard
+      control.isCancellationRequested == false,
+      let path = control.executionPath,
+      canRun(job: job)
+    else {
+      throw CancellationError()
+    }
+    relay.beginRendering()
+    return path
+  }
 
-  private nonisolated func run(task: BGContinuedProcessingTask, job: Job) {
-    let taskHandle = ContinuedProcessingTaskHandle(task)
-    let expirationCancellation = DeferredTaskCancellation()
-    taskHandle.setExpirationHandler {
-      expirationCancellation.cancel()
+  // MARK: - Work
+
+  private func startWork(
+    job: VideoExportJob,
+    control: ExportAttemptControl,
+    systemRelay: ContinuedProcessingTaskRelay
+  ) {
+    guard canRun(job: job) else {
+      return
     }
 
-    let work = Task { [exporter, taskHandle, expirationCancellation] in
-      defer { expirationCancellation.clear() }
-      do {
-        let results = try await Self.export(
+    let progressEmitter = ItemProgressEmitter(
+      systemRelay: systemRelay
+    ) { [weak self] path, renderFraction in
+      Task { @MainActor [weak self] in
+        self?.updateRendering(
           job: job,
-          using: exporter,
-          progressUnitCount: ContinuedProcessingTaskHandle.progressUnitCount
-        ) { progress in
-          // System progress is updated at media-sample granularity so a slow
-          // Optical Flow export does not look stalled to the scheduler. The
-          // app UI still updates only when the displayed whole percent changes.
-          if taskHandle.updateProgress(progress) {
-            Task { @MainActor in
-              BackgroundExportCoordinator.shared.update(
-                progress: progress,
-                jobID: job.id
-              )
-            }
-          }
-        }
-        await MainActor.run {
-          BackgroundExportCoordinator.shared.finish(
-            .finished(results),
-            jobID: job.id
-          )
-        }
-        taskHandle.complete(success: Self.allRendersSucceeded(results))
-      } catch is CancellationError {
-        Self.removeFiles(job.outputURLs)
-        await MainActor.run {
-          BackgroundExportCoordinator.shared.markCancelled(jobID: job.id)
-        }
-        taskHandle.complete(success: false)
-      } catch {
-        Self.removeFiles(job.outputURLs)
-        await MainActor.run {
-          BackgroundExportCoordinator.shared.finish(
-            .failed(error.localizedDescription),
-            jobID: job.id
-          )
-        }
-        taskHandle.complete(success: false)
+          path: path,
+          fraction: renderFraction
+        )
       }
     }
+    let runner = jobRunner
+    let coordinator = self
 
-    expirationCancellation.attach(work)
-    workHandle.set(work)
-  }
-
-  // MARK: - Foreground fallback
-
-  private func runForeground(job: Job) {
-    let work = Task { [exporter] in
+    // Handler delivery does not start this app-owned task. The ordered session
+    // scheduler starts it, then the process gate arbitrates other entry points.
+    let work = Task.detached(priority: .userInitiated) {
       do {
-        let results = try await Self.export(
+        let outcome = try await runner.run(
           job: job,
-          using: exporter,
-          progressUnitCount: 100
-        ) { progress in
-          Task { @MainActor in
-            BackgroundExportCoordinator.shared.update(
-              progress: progress,
-              jobID: job.id
+          onRenderAdmission: {
+            try Task.checkCancellation()
+            return try await coordinator.admitRender(
+              job: job,
+              control: control,
+              relay: systemRelay
+            )
+          },
+          onPhase: { phase, path in
+            if case .savingToPhotos = phase {
+              progressEmitter.markSavingToPhotos()
+            }
+            await coordinator.updatePhase(
+              phase,
+              job: job,
+              path: path
+            )
+          },
+          onRenderProgress: { path, fraction in
+            progressEmitter.update(
+              path: path,
+              renderFraction: fraction
             )
           }
+        )
+        if let origin = control.resolveCompletion() {
+          Self.removeFile(job.outputURL)
+          await coordinator.finishCancelled(
+            sessionID: job.sessionID,
+            itemID: job.itemID,
+            attemptID: job.attemptID,
+            path: outcome.path,
+            origin: origin
+          )
+          systemRelay.complete(success: false)
+        } else {
+          progressEmitter.complete()
+          let didFinish = await coordinator.finishExported(
+            job: job,
+            path: outcome.path,
+            photos: outcome.photos
+          )
+          systemRelay.complete(success: didFinish)
         }
-        finish(.finished(results), jobID: job.id)
       } catch is CancellationError {
-        Self.removeFiles(job.outputURLs)
-        markCancelled(jobID: job.id)
+        Self.removeFile(job.outputURL)
+        let origin =
+          control.resolveCompletion(
+            defaultCancellationOrigin: .system
+          ) ?? .system
+        await coordinator.finishCancelled(
+          sessionID: job.sessionID,
+          itemID: job.itemID,
+          attemptID: job.attemptID,
+          path: control.executionPath,
+          origin: origin
+        )
+        systemRelay.complete(success: false)
       } catch {
-        Self.removeFiles(job.outputURLs)
-        finish(.failed(error.localizedDescription), jobID: job.id)
+        Self.removeFile(job.outputURL)
+        if let origin = control.resolveCompletion() {
+          await coordinator.finishCancelled(
+            sessionID: job.sessionID,
+            itemID: job.itemID,
+            attemptID: job.attemptID,
+            path: control.executionPath,
+            origin: origin
+          )
+        } else {
+          await coordinator.finishFailed(
+            job: job,
+            path: control.executionPath,
+            message: error.localizedDescription
+          )
+        }
+        systemRelay.complete(success: false)
       }
     }
-    workHandle.set(work)
+    control.attach(work)
   }
 
-  // MARK: - Phase updates
-
-  /// Monotonic progress that also rejects late updates from a cancelled job.
-  fileprivate func update(
-    progress: VideoExportBatchProgress,
-    jobID: UUID
+  private func updatePhase(
+    _ phase: VideoExportJobRunner.Phase,
+    job: VideoExportJob,
+    path: VideoExportExecutionPath
   ) {
     guard
-      activeJobID == jobID,
-      case .exporting(let current) = phase,
-      progress.overallFraction >= current.overallFraction
+      session?.id == job.sessionID,
+      let item = session?.item(id: job.itemID),
+      let attempt = item.attempt,
+      attempt.id == job.attemptID
     else {
       return
     }
-    phase = .exporting(progress)
+
+    switch phase {
+    case .rendering:
+      guard case .active(.waitingForRenderSlot) = attempt.state else {
+        return
+      }
+      renderProgressByAttemptID[job.attemptID] = 0
+      item.markRendering(
+        attemptID: job.attemptID,
+        path: path,
+        fraction: 0
+      )
+      updateWaitingSystemProgress()
+    case .savingToPhotos:
+      renderProgressByAttemptID[job.attemptID] = 1
+      item.markSavingToPhotos(
+        attemptID: job.attemptID,
+        path: path
+      )
+      releaseScheduledAttempt(job.attemptID)
+    }
   }
 
-  fileprivate func finish(_ newPhase: Phase, jobID: UUID) {
-    guard activeJobID == jobID else { return }
-    phase = newPhase
-    activePath = nil
-    activeJobID = nil
-  }
-
-  fileprivate func markCancelled(jobID: UUID) {
-    guard activeJobID == jobID else { return }
-    phase = .idle
-    activePath = nil
-    activeJobID = nil
-  }
-
-  // MARK: - Helpers
-
-  /// Renders every item in order. A render failure becomes an item result and
-  /// does not prevent later videos from being attempted.
-  private nonisolated static func export(
-    job: Job,
-    using exporter: any VideoExporting,
-    progressUnitCount: Int,
-    onProgress: @escaping @Sendable (VideoExportBatchProgress) -> Void
-  ) async throws -> [VideoExportBatchResult] {
-    // Reserve the final one percent of each item for Photos import. The HEVC
-    // writer can finish before Photos has committed a large movie, so reporting
-    // 100% at that boundary would leave a live background task looking done.
-    let itemRenderProgressWeight = 0.99
-    let progressEmitter = BatchProgressEmitter(
-      itemCount: job.batch.items.count,
-      progressUnitCount: progressUnitCount,
-      onProgress: onProgress
+  private func updateRendering(
+    job: VideoExportJob,
+    path: VideoExportExecutionPath,
+    fraction: Double
+  ) {
+    guard
+      session?.id == job.sessionID,
+      let item = session?.item(id: job.itemID),
+      let attempt = item.attempt,
+      attempt.id == job.attemptID,
+      case .active(.rendering) = attempt.state
+    else {
+      return
+    }
+    let fraction = min(max(fraction, 0), 1)
+    renderProgressByAttemptID[job.attemptID] = max(
+      renderProgressByAttemptID[job.attemptID] ?? 0,
+      fraction
     )
-    var results: [VideoExportBatchResult] = []
-    results.reserveCapacity(job.batch.items.count)
-
-    for (index, item) in job.batch.items.enumerated() {
-      try Task.checkCancellation()
-      let outputURL = job.outputURLs[index]
-
-      do {
-        try await exporter.export(
-          asset: item.asset,
-          recipe: job.batch.recipe,
-          colorInfo: item.colorInfo,
-          to: outputURL
-        ) { fraction in
-          progressEmitter.update(
-            itemIndex: index,
-            itemFraction: fraction * itemRenderProgressWeight
-          )
-        }
-        try Task.checkCancellation()
-        let saved = try await saveToPhotos(outputURL)
-        try Task.checkCancellation()
-        results.append(
-          VideoExportBatchResult(
-            id: item.id,
-            displayName: item.displayName,
-            outcome: .exported(
-              url: outputURL,
-              savedToPhotos: saved
-            )
-          )
-        )
-      } catch is CancellationError {
-        removeFile(outputURL)
-        throw CancellationError()
-      } catch {
-        removeFile(outputURL)
-        results.append(
-          VideoExportBatchResult(
-            id: item.id,
-            displayName: item.displayName,
-            outcome: .failed(message: error.localizedDescription)
-          )
-        )
-      }
-
-      progressEmitter.update(itemIndex: index, itemFraction: 1)
-    }
-
-    return results
+    item.markRendering(
+      attemptID: job.attemptID,
+      path: path,
+      fraction: fraction
+    )
+    updateWaitingSystemProgress()
   }
 
-  private nonisolated static func allRendersSucceeded(
-    _ results: [VideoExportBatchResult]
+  private func releaseScheduledAttempt(_ attemptID: UUID) {
+    guard scheduledAttemptIDs.remove(attemptID) != nil else { return }
+    renderProgressByAttemptID[attemptID] = 1
+    scheduleWaitingAttempts()
+  }
+
+  /// Reports the real predecessor work that must advance before each queued
+  /// video can enter the app's render scheduler.
+  private func updateWaitingSystemProgress() {
+    for (attemptID, dependency) in admissionDependenciesByAttemptID {
+      guard
+        let relay = systemRelaysByAttemptID[attemptID],
+        let job = jobsByAttemptID[attemptID],
+        let item = session?.item(id: job.itemID),
+        let attempt = item.attempt,
+        attempt.id == attemptID,
+        case .active(.waitingForRenderSlot) = attempt.state,
+        let dependencySnapshot = dependency.snapshot(
+          progressByAttemptID: renderProgressByAttemptID
+        )
+      else {
+        continue
+      }
+
+      relay.updateWaitingProgress(
+        predecessorFraction: dependencySnapshot.fraction,
+        videosAhead: dependencySnapshot.videosAhead
+      )
+    }
+  }
+
+  private func handleSystemCancellation(
+    sessionID: UUID,
+    itemID: VideoClip.ID,
+    attemptID: UUID
+  ) {
+    guard
+      let session,
+      session.id == sessionID,
+      let item = session.item(id: itemID),
+      let attempt = item.attempt,
+      attempt.id == attemptID,
+      item.isTerminal == false,
+      let control = controlsByAttemptID[attemptID]
+    else {
+      return
+    }
+
+    item.markCancelling(attemptID: attemptID, origin: .system)
+    BGTaskScheduler.shared.cancel(
+      taskRequestWithIdentifier: attempt.taskIdentifier
+    )
+    guard control.hasAttachedTask == false else { return }
+
+    systemRelaysByAttemptID[attemptID]?.complete(success: false)
+    finishCancelled(
+      sessionID: sessionID,
+      itemID: itemID,
+      attemptID: attemptID,
+      path: control.executionPath,
+      origin: .system
+    )
+  }
+
+  private func finishExported(
+    job: VideoExportJob,
+    path: VideoExportExecutionPath,
+    photos: VideoExportItemModel.Attempt.PhotosState
   ) -> Bool {
-    results.allSatisfy { result in
-      switch result.outcome {
-      case .exported:
-        return true
-      case .failed:
-        return false
-      }
-    }
-  }
-
-  /// Saves a completed movie while preserving task cancellation as control flow.
-  ///
-  /// Photos permission and library errors remain a recoverable per-item result,
-  /// but expiration or an explicit cancel must terminate the background job.
-  private static func saveToPhotos(_ url: URL) async throws -> Bool {
-    try Task.checkCancellation()
-    do {
-      try await PhotoLibrarySaver.save(videoAt: url)
-      try Task.checkCancellation()
-      return true
-    } catch is CancellationError {
-      throw CancellationError()
-    } catch {
-      try Task.checkCancellation()
+    guard
+      let session,
+      session.id == job.sessionID,
+      let item = session.item(id: job.itemID)
+    else {
+      Self.removeFile(job.outputURL)
+      clearAttempt(job.attemptID)
       return false
     }
+    let didFinish = item.finish(
+      attemptID: job.attemptID,
+      with: .exported(
+        path: path,
+        url: job.outputURL,
+        photos: photos
+      )
+    )
+    if didFinish {
+      session.markAttemptFinished(itemID: job.itemID)
+    } else {
+      Self.removeFile(job.outputURL)
+    }
+    clearAttempt(job.attemptID)
+    return didFinish
   }
+
+  private func finishFailed(
+    job: VideoExportJob,
+    path: VideoExportExecutionPath?,
+    message: String
+  ) {
+    guard
+      let session,
+      session.id == job.sessionID,
+      let item = session.item(id: job.itemID)
+    else {
+      clearAttempt(job.attemptID)
+      return
+    }
+    let didFinish = item.finish(
+      attemptID: job.attemptID,
+      with: .failed(path: path, message: message)
+    )
+    if didFinish {
+      session.markAttemptFinished(itemID: job.itemID)
+    }
+    clearAttempt(job.attemptID)
+  }
+
+  private func finishCancelled(
+    sessionID: UUID,
+    itemID: VideoClip.ID,
+    attemptID: UUID,
+    path: VideoExportExecutionPath?,
+    origin: VideoExportCancellationOrigin
+  ) {
+    Self.removeFile(
+      jobsByAttemptID[attemptID]?.outputURL
+    )
+    guard
+      let session,
+      session.id == sessionID,
+      let item = session.item(id: itemID)
+    else {
+      clearAttempt(attemptID)
+      return
+    }
+    let didFinish = item.finish(
+      attemptID: attemptID,
+      with: .cancelled(path: path, origin: origin)
+    )
+    if didFinish {
+      session.markAttemptFinished(itemID: itemID)
+    }
+    clearAttempt(attemptID)
+  }
+
+  private func clearAttempt(_ attemptID: UUID) {
+    if let taskIdentifier = jobsByAttemptID[attemptID]?.taskIdentifier {
+      // App-owned work can finish before the system delivers its handler.
+      // Remove an unlaunched request; a racing late handler still reaches the
+      // relay captured by its registration and is completed immediately.
+      BGTaskScheduler.shared.cancel(
+        taskRequestWithIdentifier: taskIdentifier
+      )
+    }
+    renderProgressByAttemptID[attemptID] = 1
+    pendingAttemptIDs.removeAll { $0 == attemptID }
+    scheduledAttemptIDs.remove(attemptID)
+    unsettledAttemptOrder.removeAll { $0 == attemptID }
+    admissionDependenciesByAttemptID.removeValue(forKey: attemptID)
+    systemRelaysByAttemptID.removeValue(forKey: attemptID)
+    jobsByAttemptID.removeValue(forKey: attemptID)
+    controlsByAttemptID.removeValue(forKey: attemptID)
+    scheduleWaitingAttempts()
+  }
+
+  // MARK: - Output storage
 
   private nonisolated static func cachesExportsDirectory() -> URL {
     FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("Exports", isDirectory: true)
   }
 
-  private static func exportTitle(itemCount: Int) -> String {
-    if itemCount == 1 {
-      return String(localized: "Exporting video")
-    }
-    return String(
-      localized: "Exporting \(itemCount) videos",
-      comment: "System background-task title. The variable is the number of videos."
-    )
-  }
-
-  static func makeOutputURL(position: Int) -> URL {
+  private nonisolated static func makeOutputURL(
+    position: Int,
+    attemptID: UUID
+  ) -> URL {
     let directory = cachesExportsDirectory()
-    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try? FileManager.default.createDirectory(
+      at: directory,
+      withIntermediateDirectories: true
+    )
     return directory.appendingPathComponent(
-      "Färg-\(position)-\(UUID().uuidString).mov"
+      "Färg-\(position)-\(attemptID.uuidString).mov"
     )
   }
 
-  /// Removes previously exported files (already shared/saved) to bound storage.
+  /// Removes files from prior dismissed sessions while preserving this one.
   private nonisolated static func cleanupExportsDirectory(
     keeping keepURLs: Set<URL>
   ) {
@@ -465,237 +923,557 @@ final class BackgroundExportCoordinator {
     }
   }
 
-  private nonisolated static func removeFile(_ url: URL) {
+  private nonisolated static func removeFile(_ url: URL?) {
+    guard let url else { return }
     try? FileManager.default.removeItem(at: url)
-  }
-
-  private nonisolated static func removeFiles(_ urls: [URL]) {
-    for url in urls {
-      removeFile(url)
-    }
-  }
-
-  struct Job {
-    let id: UUID
-    let batch: VideoExportBatch
-    let outputURLs: [URL]
   }
 }
 
-/// A lock-guarded box that hands the pending job to the system task handler,
-/// which runs on a background queue separate from the main actor.
-private nonisolated final class JobBox: @unchecked Sendable {
-  private let lock = NSLock()
-  private var job: BackgroundExportCoordinator.Job?
+/// Immutable input for one video export attempt.
+nonisolated struct VideoExportJob: Sendable {
+  let sessionID: UUID
+  let itemID: VideoClip.ID
+  let attemptID: UUID
+  let position: Int
+  let displayName: String
+  let source: VideoSource
+  let colorInfo: VideoColorInfo
+  let recipe: FargVideoRenderRecipe
+  let outputURL: URL
+  let taskIdentifier: String
+}
 
-  func set(_ job: BackgroundExportCoordinator.Job?) {
-    lock.lock()
-    self.job = job
-    lock.unlock()
+/// Runs exactly one video through encoding and automatic Photos import.
+///
+/// The render permit is released before Photos work begins, allowing a future
+/// policy with multiple jobs to overlap lightweight import with the next
+/// resource-heavy encode.
+nonisolated struct VideoExportJobRunner: Sendable {
+
+  /// Result of an admitted render and its subsequent Photos import.
+  struct Outcome: Sendable {
+    let path: VideoExportExecutionPath
+    let photos: VideoExportItemModel.Attempt.PhotosState
+  }
+
+  enum Phase: Sendable {
+    case rendering
+    case savingToPhotos
+  }
+
+  typealias PhotoSaver = @Sendable (URL) async throws -> Void
+
+  let exporter: any VideoExporting
+  let renderGate: VideoRenderResourceGate
+  let saveToPhotos: PhotoSaver
+
+  func run(
+    job: VideoExportJob,
+    onRenderAdmission:
+      @escaping @Sendable () async throws -> VideoExportExecutionPath,
+    onPhase:
+      @escaping @Sendable (Phase, VideoExportExecutionPath) async -> Void,
+    onRenderProgress:
+      @escaping @Sendable (VideoExportExecutionPath, Double) -> Void
+  ) async throws -> Outcome {
+    let path = try await renderGate.withPermit {
+      try Task.checkCancellation()
+      let path = try await onRenderAdmission()
+      try Task.checkCancellation()
+      await onPhase(.rendering, path)
+      try await exporter.export(
+        asset: job.source.asset,
+        recipe: job.recipe,
+        colorInfo: job.colorInfo,
+        to: job.outputURL,
+        onProgress: { fraction in
+          onRenderProgress(path, fraction)
+        }
+      )
+      return path
+    }
+
+    try Task.checkCancellation()
+    await onPhase(.savingToPhotos, path)
+
+    do {
+      try await saveToPhotos(job.outputURL)
+      try Task.checkCancellation()
+      return Outcome(path: path, photos: .saved)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      try Task.checkCancellation()
+      return Outcome(
+        path: path,
+        photos: .readyToSave(message: error.localizedDescription)
+      )
+    }
+  }
+}
+
+/// Sticky cancellation shared by app controls and a system expiration handler.
+///
+/// Expiration can race task creation. `attach(_:)` observes an earlier request
+/// and immediately cancels the newly-created work, so no attempt escapes its
+/// system lease.
+nonisolated final class ExportAttemptControl: @unchecked Sendable {
+
+  private let lock = NSLock()
+  private var task: Task<Void, Never>?
+  private var cancellationDrain: Task<Void, Never>?
+  private var origin: VideoExportCancellationOrigin?
+  private var path: VideoExportExecutionPath?
+  private var didResolveCompletion = false
+
+  var hasAttachedTask: Bool {
+    lock.withLock { task != nil }
+  }
+
+  var cancellationOrigin: VideoExportCancellationOrigin? {
+    lock.withLock { origin }
+  }
+
+  var isCancellationRequested: Bool {
+    lock.withLock { origin != nil }
+  }
+
+  var executionPath: VideoExportExecutionPath? {
+    lock.withLock { path }
+  }
+
+  func setExecutionPath(_ newPath: VideoExportExecutionPath) {
+    lock.withLock {
+      if path == nil {
+        path = newPath
+      }
+    }
+  }
+
+  func attach(_ newTask: Task<Void, Never>) {
+    lock.withLock {
+      task = newTask
+      if origin != nil, cancellationDrain == nil {
+        cancellationDrain = Self.makeCancellationDrain(for: newTask)
+      }
+    }
   }
 
   @discardableResult
-  func take() -> BackgroundExportCoordinator.Job? {
-    lock.lock()
-    defer { lock.unlock() }
-    let value = job
-    job = nil
-    return value
-  }
-}
-
-/// Holds the in-flight export task so it can be cancelled from any context.
-private nonisolated final class WorkHandle: @unchecked Sendable {
-  private let lock = NSLock()
-  private var task: Task<Void, Never>?
-
-  func set(_ newTask: Task<Void, Never>?) {
-    lock.lock()
-    let old = task
-    task = newTask
-    lock.unlock()
-    Self.cancelOffMain(old)
-  }
-
-  func cancel() {
-    Self.cancelOffMain(take())
-  }
-
-  /// Cancels outside MainActor and returns only after media resources drain.
-  func cancelAndWait() async {
-    guard let current = take() else { return }
-
-    await Task.detached(priority: .userInitiated) {
-      current.cancel()
-      await current.value
+  func requestCancellation(
+    origin newOrigin: VideoExportCancellationOrigin
+  ) -> Bool {
+    lock.withLock {
+      guard didResolveCompletion == false, origin == nil else {
+        return false
+      }
+      origin = newOrigin
+      if let task, cancellationDrain == nil {
+        cancellationDrain = Self.makeCancellationDrain(for: task)
+      }
+      return true
     }
-    .value
   }
 
-  private func take() -> Task<Void, Never>? {
-    lock.lock()
-    defer { lock.unlock() }
-    let current = task
-    task = nil
-    return current
+  /// Atomically decides whether cancellation or ordinary completion won.
+  func resolveCompletion(
+    defaultCancellationOrigin: VideoExportCancellationOrigin? = nil
+  ) -> VideoExportCancellationOrigin? {
+    lock.withLock {
+      if origin == nil {
+        origin = defaultCancellationOrigin
+      }
+      didResolveCompletion = true
+      return origin
+    }
   }
 
-  private static func cancelOffMain(_ task: Task<Void, Never>?) {
-    guard let task else { return }
-    // AVAssetReader cancellation can synchronously wait for a device Optical
-    // Flow frame to finish. Keep that contract-correct drain off MainActor so
-    // the export UI reacts immediately to Cancel.
+  func wait() async {
+    let current = lock.withLock { cancellationDrain ?? task }
+    await current?.value
+  }
+
+  /// Runs synchronous media cancellation away from MainActor, then waits for
+  /// both its cancellation handler and the worker to release their resources.
+  private static func makeCancellationDrain(
+    for task: Task<Void, Never>
+  ) -> Task<Void, Never> {
     Task.detached(priority: .userInitiated) {
       task.cancel()
+      await task.value
     }
   }
 }
 
-/// Bridges an expiration callback that may arrive before its Swift task exists.
-///
-/// `BGTask.expirationHandler` is installed before export work is created. If
-/// expiration wins that race, attaching the work observes the sticky cancelled
-/// state and cancels it immediately.
-private nonisolated final class DeferredTaskCancellation: @unchecked Sendable {
+/// Coalesces sample callbacks to whole-percent app UI updates while keeping
+/// scheduler-visible background progress fine-grained.
+private nonisolated final class ItemProgressEmitter: @unchecked Sendable {
+
   private let lock = NSLock()
-  private var isCancelled = false
-  private var task: Task<Void, Never>?
-
-  func attach(_ newTask: Task<Void, Never>) {
-    lock.lock()
-    task = newTask
-    let shouldCancel = isCancelled
-    lock.unlock()
-
-    if shouldCancel {
-      newTask.cancel()
-    }
-  }
-
-  func cancel() {
-    lock.lock()
-    isCancelled = true
-    let current = task
-    lock.unlock()
-    current?.cancel()
-  }
-
-  func clear() {
-    lock.lock()
-    task = nil
-    lock.unlock()
-  }
-}
-
-/// Coalesces sample-level callbacks to a caller-selected progress resolution.
-///
-/// Foreground UI uses whole percentages, while continued processing uses finer
-/// scheduler-visible units so a slow media pipeline does not appear stalled.
-private nonisolated final class BatchProgressEmitter: @unchecked Sendable {
-  private let lock = NSLock()
-  private let itemCount: Int
-  private let progressUnitCount: Int
-  private let onProgress: @Sendable (VideoExportBatchProgress) -> Void
-  private var lastCompletedUnit = -1
-  private var lastItemIndex = -1
+  private let systemRelay: ContinuedProcessingTaskRelay
+  private let onVisibleProgress: @Sendable (VideoExportExecutionPath, Double) -> Void
+  private var lastVisiblePercent = -1
 
   init(
-    itemCount: Int,
-    progressUnitCount: Int,
-    onProgress: @escaping @Sendable (VideoExportBatchProgress) -> Void
+    systemRelay: ContinuedProcessingTaskRelay,
+    onVisibleProgress:
+      @escaping @Sendable (VideoExportExecutionPath, Double) -> Void
   ) {
-    self.itemCount = itemCount
-    self.progressUnitCount = max(progressUnitCount, 1)
-    self.onProgress = onProgress
+    self.systemRelay = systemRelay
+    self.onVisibleProgress = onVisibleProgress
   }
 
-  func update(itemIndex: Int, itemFraction: Double) {
-    let progress = VideoExportBatchProgress(
-      currentItemIndex: itemIndex,
-      itemCount: itemCount,
-      currentItemFraction: itemFraction
-    )
-    let completedUnit = Int(
-      progress.overallFraction * Double(progressUnitCount)
-    )
+  func update(
+    path: VideoExportExecutionPath,
+    renderFraction: Double
+  ) {
+    let fraction = min(max(renderFraction, 0), 1)
+    systemRelay.updateRenderingProgress(fraction)
+    let percent = Int(fraction * 100)
 
-    lock.lock()
-    let shouldEmit =
-      completedUnit != lastCompletedUnit
-      || itemIndex != lastItemIndex
-    if shouldEmit {
-      lastCompletedUnit = completedUnit
-      lastItemIndex = itemIndex
+    let shouldEmit = lock.withLock {
+      guard percent > lastVisiblePercent else { return false }
+      lastVisiblePercent = percent
+      return true
     }
-    lock.unlock()
+    if shouldEmit {
+      onVisibleProgress(path, fraction)
+    }
+  }
 
-    if shouldEmit {
-      onProgress(progress)
-    }
+  func markSavingToPhotos() {
+    systemRelay.markSavingToPhotos()
+  }
+
+  func complete() {
+    systemRelay.markWorkCompleted()
   }
 }
 
-/// Serializes access to a system continued-processing task across export tasks.
+/// Immutable progress and copy shown by one continued-processing task.
+nonisolated struct ContinuedProcessingTaskProgressSnapshot:
+  Equatable, Sendable
+{
+
+  let fraction: Double
+  let title: String
+  let subtitle: String
+}
+
+/// Bridges independently-started app work to a possibly late system handler.
 ///
-/// `BGContinuedProcessingTask` predates Swift's `Sendable` model even though
-/// its progress is updated by asynchronous work. The unchecked boundary is
-/// intentionally confined to this lock-protected adapter.
-private nonisolated final class ContinuedProcessingTaskHandle: @unchecked Sendable {
-  /// Finer than the visible percentage so sample progress remains observable.
-  static let progressUnitCount = 10_000
+/// Registration closures retain this small relay rather than media jobs. It
+/// caches progress until a handler arrives, forwards expiration to the attempt
+/// control, and immediately resolves a handler delivered after work settled.
+///
+/// The first 5% describes real scheduler admission: predecessor renders must
+/// advance before a queued item can start. Its own render occupies 5–99%, and
+/// Photos import occupies the final 1%.
+nonisolated final class ContinuedProcessingTaskRelay:
+  @unchecked Sendable
+{
+
+  private static let renderStartFraction = 0.05
+  private static let photosStartFraction = 0.99
+
+  private let lock = NSLock()
+  private let displayName: String
+  private var onExpiration: (@Sendable () -> Void)?
+  private var taskHandle: ContinuedProcessingTaskHandle?
+  private var latestSnapshot: ContinuedProcessingTaskProgressSnapshot
+  private var renderBaseFraction: Double?
+  private var completion: Bool?
+
+  init(
+    displayName: String,
+    waitingVideosAhead: Int,
+    onExpiration: @escaping @Sendable () -> Void
+  ) {
+    self.displayName = displayName
+    latestSnapshot = Self.waitingSnapshot(
+      displayName: displayName,
+      fraction: 0,
+      videosAhead: waitingVideosAhead
+    )
+    self.onExpiration = onExpiration
+  }
+
+  func attach(_ task: BGContinuedProcessingTask) {
+    let handle = ContinuedProcessingTaskHandle(task)
+    let state:
+      (
+        didAttach: Bool,
+        completion: Bool?,
+        snapshot: ContinuedProcessingTaskProgressSnapshot,
+        onExpiration: (@Sendable () -> Void)?
+      ) = lock.withLock {
+        guard completion == nil else {
+          return (false, completion, latestSnapshot, nil)
+        }
+        guard taskHandle == nil else {
+          return (false, false, latestSnapshot, nil)
+        }
+        taskHandle = handle
+        return (true, nil, latestSnapshot, onExpiration)
+      }
+
+    if state.didAttach {
+      if let onExpiration = state.onExpiration {
+        handle.setExpirationHandler(onExpiration)
+      }
+      handle.update(state.snapshot)
+    } else {
+      handle.update(state.snapshot)
+      handle.complete(success: state.completion ?? false)
+    }
+  }
+
+  /// Supplies truthful waiting copy before a system handler is attached.
+  func currentSnapshot() -> ContinuedProcessingTaskProgressSnapshot {
+    lock.withLock { latestSnapshot }
+  }
+
+  /// Advances only while actual predecessor renders make progress.
+  func updateWaitingProgress(
+    predecessorFraction: Double,
+    videosAhead: Int
+  ) {
+    let queueFraction =
+      min(max(predecessorFraction, 0), 1)
+      * Self.renderStartFraction
+    updateWhileActive { current in
+      guard renderBaseFraction == nil else { return nil }
+      return Self.waitingSnapshot(
+        displayName: displayName,
+        fraction: max(current.fraction, queueFraction),
+        videosAhead: videosAhead
+      )
+    }
+  }
+
+  /// Marks the app scheduler's real admission point for this render.
+  func beginRendering() {
+    updateWhileActive { current in
+      guard renderBaseFraction == nil else { return nil }
+      let base = max(current.fraction, Self.renderStartFraction)
+      renderBaseFraction = base
+      return Self.renderingSnapshot(
+        displayName: displayName,
+        fraction: base,
+        renderFraction: 0
+      )
+    }
+  }
+
+  func updateRenderingProgress(_ renderFraction: Double) {
+    let renderFraction = min(max(renderFraction, 0), 1)
+    updateWhileActive { current in
+      let base =
+        renderBaseFraction
+        ?? max(current.fraction, Self.renderStartFraction)
+      renderBaseFraction = base
+      let overallFraction =
+        base
+        + renderFraction * (Self.photosStartFraction - base)
+      return Self.renderingSnapshot(
+        displayName: displayName,
+        fraction: max(current.fraction, overallFraction),
+        renderFraction: renderFraction
+      )
+    }
+  }
+
+  func markSavingToPhotos() {
+    updateWhileActive { current in
+      ContinuedProcessingTaskProgressSnapshot(
+        fraction: max(current.fraction, Self.photosStartFraction),
+        title: Self.exportingTitle(displayName: displayName),
+        subtitle: String(localized: "Saving to Photos…")
+      )
+    }
+  }
+
+  func markWorkCompleted() {
+    updateWhileActive { _ in
+      Self.completedSnapshot(displayName: displayName)
+    }
+  }
+
+  @discardableResult
+  func complete(success: Bool) -> Bool {
+    let resolution:
+      (
+        handle: ContinuedProcessingTaskHandle?,
+        snapshot: ContinuedProcessingTaskProgressSnapshot
+      )? = lock.withLock {
+        guard completion == nil else { return nil }
+        completion = success
+        if success {
+          latestSnapshot = Self.completedSnapshot(
+            displayName: displayName
+          )
+        }
+        onExpiration = nil
+        defer { taskHandle = nil }
+        return (taskHandle, latestSnapshot)
+      }
+    guard let resolution else { return false }
+    resolution.handle?.update(resolution.snapshot)
+    resolution.handle?.complete(success: success)
+    return true
+  }
+
+  private func updateWhileActive(
+    _ transform:
+      (
+        ContinuedProcessingTaskProgressSnapshot
+      ) -> ContinuedProcessingTaskProgressSnapshot?
+  ) {
+    let update:
+      (
+        handle: ContinuedProcessingTaskHandle?,
+        snapshot: ContinuedProcessingTaskProgressSnapshot
+      )? = lock.withLock {
+        guard
+          completion == nil,
+          let next = transform(latestSnapshot),
+          next.fraction >= latestSnapshot.fraction,
+          next != latestSnapshot
+        else {
+          return nil
+        }
+        latestSnapshot = next
+        return (taskHandle, next)
+      }
+    if let update {
+      update.handle?.update(update.snapshot)
+    }
+  }
+
+  private static func waitingSnapshot(
+    displayName: String,
+    fraction: Double,
+    videosAhead: Int
+  ) -> ContinuedProcessingTaskProgressSnapshot {
+    let subtitle: String
+    switch videosAhead {
+    case ...0:
+      subtitle = String(localized: "Waiting for render slot…")
+    case 1:
+      subtitle = String(localized: "Waiting for 1 earlier video…")
+    default:
+      subtitle = String(
+        localized: "Waiting for \(videosAhead) earlier videos…",
+        comment:
+          "Queued export subtitle. The variable is the count of earlier videos."
+      )
+    }
+    return ContinuedProcessingTaskProgressSnapshot(
+      fraction: min(max(fraction, 0), Self.renderStartFraction),
+      title: String(
+        localized: "Waiting to export \(displayName)",
+        comment:
+          "System queued-export title. The variable is the video's display name."
+      ),
+      subtitle: subtitle
+    )
+  }
+
+  private static func renderingSnapshot(
+    displayName: String,
+    fraction: Double,
+    renderFraction: Double
+  ) -> ContinuedProcessingTaskProgressSnapshot {
+    let percent = Int(min(max(renderFraction, 0), 1) * 100)
+    return ContinuedProcessingTaskProgressSnapshot(
+      fraction: min(max(fraction, 0), Self.photosStartFraction),
+      title: exportingTitle(displayName: displayName),
+      subtitle: String(
+        localized: "\(percent)% complete",
+        comment:
+          "System export progress subtitle. The variable is the render's whole-number percentage."
+      )
+    )
+  }
+
+  private static func completedSnapshot(
+    displayName: String
+  ) -> ContinuedProcessingTaskProgressSnapshot {
+    ContinuedProcessingTaskProgressSnapshot(
+      fraction: 1,
+      title: exportingTitle(displayName: displayName),
+      subtitle: String(localized: "Complete")
+    )
+  }
+
+  private static func exportingTitle(displayName: String) -> String {
+    String(
+      localized: "Exporting \(displayName)",
+      comment:
+        "System export progress title. The variable is the video's display name."
+    )
+  }
+}
+
+/// Lock-confined adapter around the non-Sendable BackgroundTasks object.
+private nonisolated final class ContinuedProcessingTaskHandle:
+  @unchecked Sendable
+{
+
+  private static let progressUnitCount: Int64 = 10_000
 
   private let lock = NSLock()
   private let task: BGContinuedProcessingTask
   private var lastCompletedUnit: Int64 = -1
-  private var lastPercent = -1
-  private var lastItemIndex = -1
+  private var lastTitle: String?
+  private var lastSubtitle: String?
+  private var didComplete = false
 
   init(_ task: BGContinuedProcessingTask) {
     self.task = task
-    task.progress.totalUnitCount = Int64(Self.progressUnitCount)
+    task.progress.totalUnitCount = Self.progressUnitCount
   }
 
-  /// Updates scheduler-visible progress and returns whether app UI should update.
-  func updateProgress(_ progress: VideoExportBatchProgress) -> Bool {
+  func update(_ snapshot: ContinuedProcessingTaskProgressSnapshot) {
+    let fraction = min(max(snapshot.fraction, 0), 1)
     let completedUnit = Int64(
-      progress.overallFraction * Double(Self.progressUnitCount)
+      fraction * Double(Self.progressUnitCount)
     )
-    let percent = Int(progress.overallFraction * 100)
 
-    lock.lock()
-    if completedUnit > lastCompletedUnit {
-      lastCompletedUnit = completedUnit
-      task.progress.completedUnitCount = completedUnit
-    }
-    let shouldUpdateVisibleProgress =
-      percent != lastPercent
-      || progress.currentItemIndex != lastItemIndex
-    if shouldUpdateVisibleProgress {
-      lastPercent = percent
-      lastItemIndex = progress.currentItemIndex
-      task.updateTitle(
-        String(localized: "Exporting videos"),
-        subtitle: String(
-          localized:
-            "Video \(progress.currentItemIndex + 1) of \(progress.itemCount) · \(percent)%",
-          comment:
-            "System background-task progress. Variables are current video, total videos, and overall percent."
+    lock.withLock {
+      guard didComplete == false else { return }
+      if completedUnit > lastCompletedUnit {
+        lastCompletedUnit = completedUnit
+        task.progress.completedUnitCount = completedUnit
+      }
+      if snapshot.title != lastTitle
+        || snapshot.subtitle != lastSubtitle
+      {
+        lastTitle = snapshot.title
+        lastSubtitle = snapshot.subtitle
+        task.updateTitle(
+          snapshot.title,
+          subtitle: snapshot.subtitle
         )
-      )
+      }
     }
-    lock.unlock()
-    return shouldUpdateVisibleProgress
   }
 
   func complete(success: Bool) {
-    lock.lock()
-    task.setTaskCompleted(success: success)
-    lock.unlock()
+    lock.withLock {
+      guard didComplete == false else { return }
+      didComplete = true
+      task.expirationHandler = nil
+      task.setTaskCompleted(success: success)
+    }
   }
 
-  func setExpirationHandler(_ handler: @escaping @Sendable () -> Void) {
-    lock.lock()
-    task.expirationHandler = handler
-    lock.unlock()
+  func setExpirationHandler(
+    _ handler: @escaping @Sendable () -> Void
+  ) {
+    lock.withLock {
+      guard didComplete == false else { return }
+      task.expirationHandler = handler
+    }
   }
 }

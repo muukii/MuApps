@@ -109,7 +109,9 @@ private struct OriginalCell: View {
             .overlay {
               RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .stroke(
-                  isSelected ? EditorPalette.primary : EditorPalette.hairline,
+                  isSelected
+                    ? Color.primary
+                    : Color.secondary.opacity(0.2),
                   lineWidth: isSelected ? 2 : 1
                 )
             }
@@ -119,18 +121,18 @@ private struct OriginalCell: View {
         VStack(alignment: .leading, spacing: 1) {
           Text(title)
             .font(.caption.weight(isSelected ? .semibold : .regular))
-            .foregroundStyle(EditorPalette.primary)
+            .foregroundStyle(.primary)
             .lineLimit(1)
 
           if let subtitle {
             Text(subtitle)
               .font(.caption2)
-              .foregroundStyle(EditorPalette.secondary)
+              .foregroundStyle(.secondary)
               .lineLimit(1)
           } else if source == nil {
             Text("Pause to preview")
               .font(.caption2)
-              .foregroundStyle(EditorPalette.secondary)
+              .foregroundStyle(.secondary)
               .lineLimit(1)
           }
         }
@@ -171,7 +173,9 @@ private struct LUTPreviewCell: View {
           .overlay {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
               .strokeBorder(
-                isSelected ? EditorPalette.primary : EditorPalette.hairline,
+                isSelected
+                  ? Color.primary
+                  : Color.secondary.opacity(0.2),
                 lineWidth: isSelected ? 2 : 0
               )
           }
@@ -180,18 +184,18 @@ private struct LUTPreviewCell: View {
         VStack(alignment: .leading, spacing: 1) {
           Text(title)
             .font(.caption.weight(isSelected ? .semibold : .regular))
-            .foregroundStyle(EditorPalette.primary)
+            .foregroundStyle(.primary)
             .lineLimit(1)
 
           if let subtitle {
             Text(subtitle)
               .font(.caption2)
-              .foregroundStyle(EditorPalette.secondary)
+              .foregroundStyle(.secondary)
               .lineLimit(1)
           } else if source == nil {
             Text("Pause to preview")
               .font(.caption2)
-              .foregroundStyle(EditorPalette.secondary)
+              .foregroundStyle(.secondary)
               .lineLimit(1)
           }
         }
@@ -229,5 +233,5 @@ private struct LUTPreviewCell: View {
     )
   }
   .padding()
-  .background(EditorPalette.chrome)
+  .background(.background)
 }

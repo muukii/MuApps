@@ -11,14 +11,15 @@ import SwiftUI
 struct EditorView: View {
 
   let library: LUTLibrary
+  let previewSamples: LUTPreviewSampleLibrary
   @Bindable var editState: EditState
-  let onShowSettings: @MainActor @Sendable () -> Void
   let onFinishEditing: @MainActor @Sendable () -> Void
 
   @State private var preview = VideoPreviewModel()
   @State private var lutPreviewModels = LUTPreviewModelStore()
   @State private var pickerItems: [PhotosPickerItem] = []
-  @State private var exportBatch: VideoExportBatch?
+  @State private var isSettingsPresented = false
+  @State private var exportSession: VideoExportSessionModel?
   @State private var errorMessage: String?
   @State private var videoLoadRequestID: UUID?
   @State private var videoLoadTask: Task<Void, Never>?
@@ -33,14 +34,13 @@ struct EditorView: View {
       library: library,
       pickerItems: $pickerItems,
       selectedLUT: $editState.selectedLUT,
-      amount: $editState.amount,
       motionBlur: $editState.motionBlur,
       onSelectClip: editState.selectClip,
       onRemoveClip: removeClip,
       onPickFileURLs: loadPickedVideoFiles
     )
     .environment(lutPreviewModels)
-    .background(EditorPalette.chrome.ignoresSafeArea())
+    .background(.background)
     .toolbar {
       EditorToolbarContent(
         canExport:
@@ -48,13 +48,10 @@ struct EditorView: View {
           && editState.isPreparingClips == false
           && preview.renderState == .ready,
         onDiscard: onFinishEditing,
-        onShowSettings: onShowSettings,
+        onShowSettings: { isSettingsPresented = true },
         onExport: startExport
       )
     }
-    .toolbarBackground(EditorPalette.chrome, for: .navigationBar)
-    .toolbarBackground(.visible, for: .navigationBar)
-    .toolbarColorScheme(.dark, for: .navigationBar)
     .onAppear {
       reloadPreview()
     }
@@ -88,11 +85,18 @@ struct EditorView: View {
       )
     }
     .onChange(of: library.revision) { _, _ in reconcileSelectedLUT() }
+    .sheet(isPresented: $isSettingsPresented) {
+      FargSettingsView(
+        library: library,
+        previewSamples: previewSamples
+      )
+      .tint(.accentColor)
+    }
     .sheet(
-      item: $exportBatch,
+      item: $exportSession,
       onDismiss: exportPresentationDidDismiss
-    ) { batch in
-      ExportProgressView(batch: batch)
+    ) { session in
+      ExportProgressView(session: session)
     }
     .alert(
       "Something went wrong",
@@ -113,7 +117,7 @@ struct EditorView: View {
 
   private func viewDidDisappear() {
     videoLoadTask?.cancel()
-    if exportBatch == nil {
+    if exportSession == nil {
       // Navigation may retain this view's state briefly. Release the player
       // item now so its compositor, VideoToolbox session, and IOSurfaces do
       // not depend on SwiftUI's eventual state destruction.
@@ -229,16 +233,22 @@ struct EditorView: View {
   // MARK: - Export
 
   private func exportPresentationDidDismiss() {
-    BackgroundExportCoordinator.shared.reset()
-    if editState.hasVideos {
-      preview.resumeRendering()
-      applyComposition()
-      preview.play()
+    Task {
+      // Parent-driven sheet removal is rare, but it must still drain media work
+      // before rebuilding the editor's preview pipeline.
+      await BackgroundExportCoordinator.shared
+        .cancelAndDiscardCurrentSession()
+      if editState.hasVideos {
+        preview.resumeRendering()
+        applyComposition()
+        preview.play()
+      }
     }
   }
 
   private func startExport() {
     guard
+      exportSession == nil,
       editState.readyClips.isEmpty == false,
       editState.isPreparingClips == false
     else {
@@ -246,12 +256,12 @@ struct EditorView: View {
     }
     do {
       let recipe = try editState.makeRenderRecipe(using: library)
-      let items: [VideoExportBatch.Item] =
+      let items: [VideoExportSessionItem] =
         editState.readyClips.enumerated().compactMap {
           index,
-          clip -> VideoExportBatch.Item? in
+          clip -> VideoExportSessionItem? in
           guard let content = clip.content else { return nil }
-          return VideoExportBatch.Item(
+          return VideoExportSessionItem(
             id: clip.id,
             displayName:
               content.displayName.isEmpty
@@ -266,10 +276,22 @@ struct EditorView: View {
           )
         }
       preview.suspendRendering()
-      exportBatch = VideoExportBatch(
+      let session = VideoExportSessionModel(
         items: items,
         recipe: recipe
       )
+      // Background leases must be registered and submitted as part of this
+      // foreground user action, before presenting the progress sheet.
+      guard BackgroundExportCoordinator.shared.start(session: session) else {
+        preview.resumeRendering()
+        applyComposition()
+        preview.play()
+        errorMessage = String(
+          localized: "Another export session is still active."
+        )
+        return
+      }
+      exportSession = session
     } catch {
       errorMessage = error.localizedDescription
     }
@@ -287,7 +309,6 @@ private struct EditorLayout: View {
   let library: LUTLibrary
   @Binding var pickerItems: [PhotosPickerItem]
   @Binding var selectedLUT: LUT?
-  @Binding var amount: Double
   @Binding var motionBlur: MotionBlurSettings
   let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
@@ -304,29 +325,22 @@ private struct EditorLayout: View {
         )
         .padding(16)
 
-      controlPanel(placement: .bottom)
-        .frame(maxHeight: 420)
+      EditorLowerPanel(
+        placement: .bottom,
+        clips: clips,
+        selectedClipID: selectedClipID,
+        hdrVideoCount: hdrVideoCount,
+        library: library,
+        lutPreviewSource: lutPreviewSource,
+        pickerItems: $pickerItems,
+        selectedLUT: $selectedLUT,
+        motionBlur: $motionBlur,
+        onSelectClip: onSelectClip,
+        onRemoveClip: onRemoveClip,
+        onPickFileURLs: onPickFileURLs
+      )
+      .frame(maxHeight: 420)
     }
-  }
-
-  private func controlPanel(
-    placement: EditorPanelPlacement
-  ) -> some View {
-    EditorControlPanel(
-      placement: placement,
-      clips: clips,
-      selectedClipID: selectedClipID,
-      hdrVideoCount: hdrVideoCount,
-      library: library,
-      lutPreviewSource: lutPreviewSource,
-      pickerItems: $pickerItems,
-      selectedLUT: $selectedLUT,
-      amount: $amount,
-      motionBlur: $motionBlur,
-      onSelectClip: onSelectClip,
-      onRemoveClip: onRemoveClip,
-      onPickFileURLs: onPickFileURLs
-    )
   }
 }
 
@@ -346,8 +360,32 @@ private enum EditorPanelPlacement {
   case trailing
 }
 
-/// Places video, look, intensity, and export information in the active panel.
-private struct EditorControlPanel: View {
+/// The effect editor displayed below the shared video collection.
+private enum EditorEffectTab {
+  case lut
+  case motionBlur
+
+  var isLUT: Bool {
+    switch self {
+    case .lut:
+      return true
+    case .motionBlur:
+      return false
+    }
+  }
+
+  var isMotionBlur: Bool {
+    switch self {
+    case .lut:
+      return false
+    case .motionBlur:
+      return true
+    }
+  }
+}
+
+/// Separates the fixed video collection from the scrollable edit controls.
+private struct EditorLowerPanel: View {
 
   let placement: EditorPanelPlacement
   let clips: [VideoClip]
@@ -357,7 +395,6 @@ private struct EditorControlPanel: View {
   let lutPreviewSource: LUTPreviewSourceImage?
   @Binding var pickerItems: [PhotosPickerItem]
   @Binding var selectedLUT: LUT?
-  @Binding var amount: Double
   @Binding var motionBlur: MotionBlurSettings
   let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
@@ -366,7 +403,7 @@ private struct EditorControlPanel: View {
   var body: some View {
     switch placement {
     case .bottom:
-      EditorControlPanelBody(
+      EditorLowerPanelContent(
         contentPadding: 16,
         clips: clips,
         selectedClipID: selectedClipID,
@@ -375,21 +412,20 @@ private struct EditorControlPanel: View {
         lutPreviewSource: lutPreviewSource,
         pickerItems: $pickerItems,
         selectedLUT: $selectedLUT,
-        amount: $amount,
         motionBlur: $motionBlur,
         onSelectClip: onSelectClip,
         onRemoveClip: onRemoveClip,
         onPickFileURLs: onPickFileURLs
       )
-      .background(EditorPalette.chrome)
+      .background(.background)
       .overlay(alignment: .top) {
         Rectangle()
-          .fill(EditorPalette.hairline)
+          .fill(Color.secondary.opacity(0.2))
           .frame(height: 1)
       }
 
     case .trailing:
-      EditorControlPanelBody(
+      EditorLowerPanelContent(
         contentPadding: 20,
         clips: clips,
         selectedClipID: selectedClipID,
@@ -398,24 +434,23 @@ private struct EditorControlPanel: View {
         lutPreviewSource: lutPreviewSource,
         pickerItems: $pickerItems,
         selectedLUT: $selectedLUT,
-        amount: $amount,
         motionBlur: $motionBlur,
         onSelectClip: onSelectClip,
         onRemoveClip: onRemoveClip,
         onPickFileURLs: onPickFileURLs
       )
-      .background(EditorPalette.chrome)
+      .background(.background)
       .overlay(alignment: .leading) {
         Rectangle()
-          .fill(EditorPalette.hairline)
+          .fill(Color.secondary.opacity(0.2))
           .frame(width: 1)
       }
     }
   }
 }
 
-/// Scrolls the complete inspector after Export moves to the navigation bar.
-private struct EditorControlPanelBody: View {
+/// Composes Videos and EditControl as independent siblings.
+private struct EditorLowerPanelContent: View {
 
   let contentPadding: CGFloat
   let clips: [VideoClip]
@@ -425,79 +460,131 @@ private struct EditorControlPanelBody: View {
   let lutPreviewSource: LUTPreviewSourceImage?
   @Binding var pickerItems: [PhotosPickerItem]
   @Binding var selectedLUT: LUT?
-  @Binding var amount: Double
   @Binding var motionBlur: MotionBlurSettings
   let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
 
   var body: some View {
-    ScrollView {
-      EditorSharedControls(
+    VStack(spacing: 0) {
+      VideoBatchStripView(
         contentPadding: contentPadding,
         clips: clips,
         selectedClipID: selectedClipID,
-        hdrVideoCount: hdrVideoCount,
-        library: library,
-        lutPreviewSource: lutPreviewSource,
         pickerItems: $pickerItems,
-        selectedLUT: $selectedLUT,
-        amount: $amount,
-        motionBlur: $motionBlur,
         onSelectClip: onSelectClip,
         onRemoveClip: onRemoveClip,
         onPickFileURLs: onPickFileURLs
       )
       .padding(.vertical, contentPadding)
+
+      EditorEditControl(
+        contentPadding: contentPadding,
+        videoCount: clips.count,
+        hdrVideoCount: hdrVideoCount,
+        library: library,
+        lutPreviewSource: lutPreviewSource,
+        selectedLUT: $selectedLUT,
+        motionBlur: $motionBlur
+      )
     }
-    .scrollBounceBehavior(.basedOnSize)
+  }
+}
+
+/// Owns the LUT and Motion Blur tabs below the fixed video collection.
+private struct EditorEditControl: View {
+
+  let contentPadding: CGFloat
+  let videoCount: Int
+  let hdrVideoCount: Int
+  let library: LUTLibrary
+  let lutPreviewSource: LUTPreviewSourceImage?
+  @Binding var selectedLUT: LUT?
+  @Binding var motionBlur: MotionBlurSettings
+
+  @State private var selectedEffect: EditorEffectTab = .lut
+
+  var body: some View {
+    VStack(spacing: 0) {
+      ScrollView {
+        EditorControlContent(
+          contentPadding: contentPadding,
+          selectedEffect: selectedEffect,
+          videoCount: videoCount,
+          hdrVideoCount: hdrVideoCount,
+          library: library,
+          lutPreviewSource: lutPreviewSource,
+          selectedLUT: $selectedLUT,
+          motionBlur: $motionBlur
+        )
+        .padding(.vertical, contentPadding)
+      }
+      .scrollBounceBehavior(.basedOnSize)
+
+      EditorEffectTabBar(selection: $selectedEffect)
+    }
   }
 
-  /// Orders the shared decisions and summarizes the toolbar export action.
-  fileprivate struct EditorSharedControls: View {
+  /// Orders effect-specific controls and the shared export summary.
+  fileprivate struct EditorControlContent: View {
 
     let contentPadding: CGFloat
-    let clips: [VideoClip]
-    let selectedClipID: VideoClip.ID?
+    let selectedEffect: EditorEffectTab
+    let videoCount: Int
     let hdrVideoCount: Int
     let library: LUTLibrary
     let lutPreviewSource: LUTPreviewSourceImage?
-    @Binding var pickerItems: [PhotosPickerItem]
     @Binding var selectedLUT: LUT?
-    @Binding var amount: Double
     @Binding var motionBlur: MotionBlurSettings
-    let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
-    let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
-    let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
 
     var body: some View {
       VStack(alignment: .leading, spacing: 18) {
-        VideoBatchStripView(
+        EditorEffectControls(
           contentPadding: contentPadding,
-          clips: clips,
-          selectedClipID: selectedClipID,
-          pickerItems: $pickerItems,
-          onSelectClip: onSelectClip,
-          onRemoveClip: onRemoveClip,
-          onPickFileURLs: onPickFileURLs
-        )
-
-        EditorLookControls(
-          contentPadding: contentPadding,
+          selectedEffect: selectedEffect,
           library: library,
           lutPreviewSource: lutPreviewSource,
-          selectedLUT: $selectedLUT
+          selectedLUT: $selectedLUT,
+          motionBlur: $motionBlur
         )
-
-        EditorMotionBlurControls(settings: $motionBlur)
-          .padding(.horizontal, contentPadding)
-
-        EditorExportSummary(
-          videoCount: clips.count,
-          hdrVideoCount: hdrVideoCount
-        )
-        .padding(.horizontal, contentPadding)
       }
+    }
+  }
+
+  /// Displays only the controls that belong to the selected editing mode.
+  fileprivate struct EditorEffectControls: View {
+
+    let contentPadding: CGFloat
+    let selectedEffect: EditorEffectTab
+    let library: LUTLibrary
+    let lutPreviewSource: LUTPreviewSourceImage?
+    @Binding var selectedLUT: LUT?
+    @Binding var motionBlur: MotionBlurSettings
+
+    var body: some View {
+      ZStack(alignment: .topLeading) {
+        switch selectedEffect {
+        case .lut:
+          EditorLookControls(
+            contentPadding: contentPadding,
+            library: library,
+            lutPreviewSource: lutPreviewSource,
+            selectedLUT: $selectedLUT
+          )
+          .transition(.opacity)
+
+        case .motionBlur:
+          EditorMotionBlurControls(settings: $motionBlur)
+            .padding(.horizontal, contentPadding)
+            .transition(.opacity)
+        }
+      }
+      .frame(
+        maxWidth: .infinity,
+        minHeight: 154,
+        alignment: .topLeading
+      )
+      .animation(.snappy, value: selectedEffect)
     }
   }
 
@@ -512,13 +599,13 @@ private struct EditorControlPanelBody: View {
     var body: some View {
       VStack(alignment: .leading, spacing: 10) {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-          Text("LOOK")
+          Text("LUT")
             .font(.caption.weight(.semibold))
             .tracking(0.8)
-            .foregroundStyle(EditorPalette.secondary)
+            .foregroundStyle(.secondary)
         }
         .font(.caption)
-        .foregroundStyle(EditorPalette.primary)
+        .foregroundStyle(.primary)
         .padding(.horizontal, contentPadding)
 
         LUTStripView(
@@ -558,18 +645,18 @@ private struct EditorControlPanelBody: View {
             Text("MOTION BLUR")
               .font(.caption.weight(.semibold))
               .tracking(0.8)
-              .foregroundStyle(EditorPalette.secondary)
+              .foregroundStyle(.secondary)
 
             Text("Optical Flow")
               .font(.caption2)
-              .foregroundStyle(EditorPalette.secondary)
+              .foregroundStyle(.secondary)
           }
 
           Spacer(minLength: 12)
 
           Toggle("Motion Blur", isOn: $settings.isEnabled)
             .labelsHidden()
-            .tint(EditorPalette.primary)
+            .tint(.primary)
             .disabled(isSupported == false)
             .accessibilityIdentifier("motion-blur-toggle")
         }
@@ -579,19 +666,19 @@ private struct EditorControlPanelBody: View {
             "Requires a supported iPhone. Optical Flow isn't available in Simulator."
           )
           .font(.caption)
-          .foregroundStyle(EditorPalette.secondary)
+          .foregroundStyle(.secondary)
         } else if settings.isEnabled {
           HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text("Strength")
               .font(.caption)
-              .foregroundStyle(EditorPalette.secondary)
+              .foregroundStyle(.secondary)
 
             Spacer(minLength: 12)
 
             Text(settings.strength, format: .number)
               .font(.caption)
               .monospacedDigit()
-              .foregroundStyle(EditorPalette.primary)
+              .foregroundStyle(.primary)
           }
 
           Slider(
@@ -599,60 +686,95 @@ private struct EditorControlPanelBody: View {
             in: strengthRange,
             step: 1
           )
-          .tint(EditorPalette.primary)
+          .tint(.primary)
           .accessibilityLabel("Motion blur strength")
           .accessibilityValue(settings.strength.formatted())
         } else {
           Text("Uses adjacent frames to create ND-like motion trails.")
             .font(.caption)
-            .foregroundStyle(EditorPalette.secondary)
+            .foregroundStyle(.secondary)
         }
       }
       .animation(.snappy, value: settings.isEnabled)
     }
   }
+}
 
-  /// Describes the number and format of independent outputs before rendering.
-  fileprivate struct EditorExportSummary: View {
+/// Keeps effect selection reachable while the active controls scroll above it.
+private struct EditorEffectTabBar: View {
 
-    let videoCount: Int
-    let hdrVideoCount: Int
+  @Binding var selection: EditorEffectTab
 
-    var body: some View {
-      VStack(alignment: .leading, spacing: 8) {
-        if hdrVideoCount > 0 {
-          Group {
-            if hdrVideoCount == 1 {
-              Label(
-                "1 HDR video will be exported in SDR.",
-                systemImage: "exclamationmark.triangle"
-              )
-            } else {
-              Label(
-                "\(hdrVideoCount) HDR videos will be exported in SDR.",
-                systemImage: "exclamationmark.triangle"
-              )
-            }
-          }
-          .font(.caption)
-          .foregroundStyle(.orange)
-        }
+  var body: some View {
+    HStack(spacing: 0) {
+      EditorEffectTabButton(
+        title: "LUT",
+        systemImage: "camera.filters",
+        accessibilityIdentifier: "editor-effect-tab-lut",
+        isSelected: selection.isLUT
+      ) {
+        selection = .lut
+      }
 
-        if videoCount == 1 {
-          Text("HEVC  ·  Source resolution")
-            .font(.caption)
-            .foregroundStyle(EditorPalette.secondary)
-        } else {
-          Text(
-            "HEVC  ·  Source resolution  ·  \(videoCount) separate files",
-            comment:
-              "Export format summary. The variable is the number of output files."
-          )
-          .font(.caption)
-          .foregroundStyle(EditorPalette.secondary)
-        }
+      Rectangle()
+        .fill(Color.secondary.opacity(0.2))
+        .frame(width: 1)
+
+      EditorEffectTabButton(
+        title: "Motion Blur",
+        systemImage: "wind",
+        accessibilityIdentifier: "editor-effect-tab-motion-blur",
+        isSelected: selection.isMotionBlur
+      ) {
+        selection = .motionBlur
       }
     }
+    .frame(height: 64)
+    .background(.background)
+    .overlay(alignment: .top) {
+      Rectangle()
+        .fill(Color.secondary.opacity(0.2))
+        .frame(height: 1)
+    }
+  }
+}
+
+/// Represents one accessible effect mode in the editor's persistent tab bar.
+private struct EditorEffectTabButton: View {
+
+  let title: LocalizedStringResource
+  let systemImage: String
+  let accessibilityIdentifier: String
+  let isSelected: Bool
+  let action: @MainActor @Sendable () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      VStack(spacing: 6) {
+        Image(systemName: systemImage)
+          .font(.body)
+          .symbolVariant(isSelected ? .fill : .none)
+
+        Text(title)
+          .font(.caption.weight(isSelected ? .semibold : .regular))
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(title)
+    .foregroundStyle(
+      isSelected ? Color.primary : Color.secondary
+    )
+    .overlay(alignment: .bottom) {
+      Circle()
+        .fill(.primary)
+        .frame(width: 4, height: 4)
+        .padding(.bottom, 5)
+        .opacity(isSelected ? 1 : 0)
+    }
+    .accessibilityAddTraits(isSelected ? .isSelected : [])
+    .accessibilityIdentifier(accessibilityIdentifier)
   }
 }
 
@@ -684,7 +806,7 @@ private struct EditorToolbarContent: ToolbarContent {
       .accessibilityLabel("Close Editor")
       .accessibilityIdentifier("discard-editor-edits")
     }
-    
+
     ToolbarSpacer(.fixed, placement: .topBarLeading)
 
     ToolbarItem(placement: .topBarLeading) {
@@ -695,9 +817,12 @@ private struct EditorToolbarContent: ToolbarContent {
     }
 
     ToolbarItem(placement: .topBarTrailing) {
-      Button(action: onExport, label: {         
-        Image(systemName: "square.and.arrow.up")
-      })
+      Button(
+        action: onExport,
+        label: {
+          Image(systemName: "square.and.arrow.up")
+        }
+      )
       .disabled(canExport == false)
       .accessibilityIdentifier("export-videos")
     }
@@ -708,11 +833,10 @@ private struct EditorToolbarContent: ToolbarContent {
   NavigationStack {
     EditorView(
       library: LUTLibrary(),
+      previewSamples: LUTPreviewSampleLibrary(),
       editState: EditState(),
-      onShowSettings: {},
       onFinishEditing: {}
     )
-    .navigationTitle("Färg")
     .navigationBarTitleDisplayMode(.inline)
   }
 }
@@ -723,10 +847,10 @@ private struct EditorToolbarContent: ToolbarContent {
     strength: 50
   )
 
-  EditorControlPanelBody.EditorMotionBlurControls(
+  EditorEditControl.EditorMotionBlurControls(
     settings: $settings,
     isSupported: true
   )
   .padding(20)
-  .background(EditorPalette.chrome)
+  .background(.background)
 }

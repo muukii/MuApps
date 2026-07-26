@@ -23,7 +23,7 @@ struct FargSettingsView: View {
   @State private var isRenamingSample = false
   @State private var sampleToDelete: LUTPreviewSample?
   @State private var isShowingSampleDeleteConfirmation = false
-  @State private var previewSource: LUTPreviewSourceImage?
+  @State private var previewSources: [LUTPreviewSample.ID: LUTPreviewSourceImage]
   @State private var lutPreviewModels = LUTPreviewModelStore()
   @State private var folderToUnlink: LUTFolderLink?
   @State private var isShowingUnlinkConfirmation = false
@@ -38,14 +38,19 @@ struct FargSettingsView: View {
   ) {
     self.library = library
     self.previewSamples = previewSamples
-    _previewSource = State(initialValue: initialPreviewSource)
+    _previewSources = State(
+      initialValue: initialPreviewSource.map {
+        [LUTPreviewSample.colorTest.id: $0]
+      } ?? [:]
+    )
   }
 
   var body: some View {
+    let previewSource = previewSources[previewSamples.selectedSampleID]
     let content = FargSettingsList(
       library: library,
       previewSamples: previewSamples,
-      previewSource: previewSource,
+      previewSources: previewSources,
       pickedPreviewItem: $pickedPreviewItem,
       onSelectSample: selectSample,
       onRenameSample: beginRenaming,
@@ -150,11 +155,13 @@ struct FargSettingsView: View {
       .task {
         await library.refreshLinkedFolders()
       }
-      .task(id: PreviewSourceTaskID(
-        sampleID: previewSamples.selectedSampleID,
-        revision: previewSamples.revision
-      )) {
-        await loadPreviewSource()
+      .task(
+        id: PreviewSourcesTaskID(
+          selectedSampleID: previewSamples.selectedSampleID,
+          sampleIDs: previewSamples.samples.map(\.id)
+        )
+      ) {
+        await loadPreviewSources()
       }
       .onChange(of: previewSource?.id, initial: true) { _, sourceID in
         lutPreviewModels.updateContext(
@@ -266,25 +273,40 @@ struct FargSettingsView: View {
     }
   }
 
-  private func loadPreviewSource() async {
-    let requestedSampleID = previewSamples.selectedSampleID
-    let requestedRevision = previewSamples.revision
-    do {
-      let source = try await previewSamples.loadSelectedImage()
-      guard
-        Task.isCancelled == false,
-        requestedSampleID == previewSamples.selectedSampleID,
-        requestedRevision == previewSamples.revision
-      else {
+  private func loadPreviewSources() async {
+    let requestedSamples = previewSamples.samples
+    let validSampleIDs = Set(requestedSamples.map(\.id))
+    previewSources = previewSources.filter { validSampleIDs.contains($0.key) }
+
+    var samplesToLoad = requestedSamples
+    if let selectedIndex = samplesToLoad.firstIndex(
+      where: { $0.id == previewSamples.selectedSampleID }
+    ) {
+      let selectedSample = samplesToLoad.remove(at: selectedIndex)
+      samplesToLoad.insert(selectedSample, at: 0)
+    }
+
+    for sample in samplesToLoad where previewSources[sample.id] == nil {
+      do {
+        let source = try await previewSamples.loadImage(for: sample)
+        guard
+          Task.isCancelled == false,
+          previewSamples.samples.contains(where: {
+            $0.id == sample.id && $0.source == sample.source
+          })
+        else {
+          return
+        }
+        previewSources[sample.id] = source
+      } catch is CancellationError {
         return
+      } catch {
+        guard Task.isCancelled == false else { return }
+        if previewSamples.selectedSampleID == sample.id {
+          previewSources[sample.id] = nil
+          present(error)
+        }
       }
-      previewSource = source
-    } catch is CancellationError {
-      return
-    } catch {
-      guard Task.isCancelled == false else { return }
-      previewSource = nil
-      present(error)
     }
   }
 
@@ -383,7 +405,7 @@ private struct FargSettingsList: View {
 
   let library: LUTLibrary
   let previewSamples: LUTPreviewSampleLibrary
-  let previewSource: LUTPreviewSourceImage?
+  let previewSources: [LUTPreviewSample.ID: LUTPreviewSourceImage]
   @Binding var pickedPreviewItem: PhotosPickerItem?
   let onSelectSample: @MainActor @Sendable (LUTPreviewSample) -> Void
   let onRenameSample: @MainActor @Sendable (LUTPreviewSample) -> Void
@@ -392,12 +414,13 @@ private struct FargSettingsList: View {
   let onDeleteLUT: @MainActor @Sendable (LUT) -> Void
 
   var body: some View {
+    let previewSource = previewSources[previewSamples.selectedSampleID]
+
     List {
       PreviewSamplesSection(
         samples: previewSamples.samples,
-        selectedSample: previewSamples.selectedSample,
-        previewSource: previewSource,
-        library: library,
+        selectedSampleID: previewSamples.selectedSampleID,
+        previewSources: previewSources,
         pickedItem: $pickedPreviewItem,
         onSelect: onSelectSample,
         onRename: onRenameSample,
@@ -430,19 +453,18 @@ private struct FargSettingsList: View {
   }
 }
 
-/// Invalidates source decoding when the active sample or its pixels change.
-private struct PreviewSourceTaskID: Hashable {
-  var sampleID: LUTPreviewSample.ID
-  var revision: UInt
+/// Reprioritizes decoding when the active sample or source membership changes.
+private struct PreviewSourcesTaskID: Hashable {
+  var selectedSampleID: LUTPreviewSample.ID
+  var sampleIDs: [LUTPreviewSample.ID]
 }
 
 /// Selects and manages the common labeled input used by every LUT result.
 private struct PreviewSamplesSection: View {
 
   let samples: [LUTPreviewSample]
-  let selectedSample: LUTPreviewSample
-  let previewSource: LUTPreviewSourceImage?
-  let library: LUTLibrary
+  let selectedSampleID: LUTPreviewSample.ID
+  let previewSources: [LUTPreviewSample.ID: LUTPreviewSourceImage]
   @Binding var pickedItem: PhotosPickerItem?
   let onSelect: @MainActor @Sendable (LUTPreviewSample) -> Void
   let onRename: @MainActor @Sendable (LUTPreviewSample) -> Void
@@ -450,61 +472,222 @@ private struct PreviewSamplesSection: View {
 
   var body: some View {
     Section {
-      LUTPreviewImageView(
-        source: previewSource,
-        lut: nil,
-        library: library
+      PreviewSampleRail(
+        samples: samples,
+        selectedSampleID: selectedSampleID,
+        previewSources: previewSources,
+        pickedItem: $pickedItem,
+        onSelect: onSelect,
+        onRename: onRename,
+        onDelete: onDelete
       )
-      .aspectRatio(16 / 10, contentMode: .fit)
-      .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-      .padding(8)
-      .accessibilityLabel("Preview source \(selectedSample.label)")
+      .padding(.vertical, 8)
+    } header: {
+      Text("LUT Preview Source")
+    } footer: {
+      Text(
+        "Tap a sample to apply it to every LUT below. Touch and hold a custom sample to rename or delete it."
+      )
+    }
+  }
+}
 
-      Picker(
-        "Sample",
-        selection: Binding(
-          get: { selectedSample.id },
-          set: { selectedID in
-            guard let sample = samples.first(where: { $0.id == selectedID }) else {
-              return
-            }
-            onSelect(sample)
-          }
-        )
-      ) {
+/// Presents preview sources as a freely browsable, tap-selected strip.
+private struct PreviewSampleRail: View {
+
+  let samples: [LUTPreviewSample]
+  let selectedSampleID: LUTPreviewSample.ID
+  let previewSources: [LUTPreviewSample.ID: LUTPreviewSourceImage]
+  @Binding var pickedItem: PhotosPickerItem?
+  let onSelect: @MainActor @Sendable (LUTPreviewSample) -> Void
+  let onRename: @MainActor @Sendable (LUTPreviewSample) -> Void
+  let onDelete: @MainActor @Sendable (LUTPreviewSample) -> Void
+
+  var body: some View {
+    ScrollView(.horizontal) {
+      LazyHStack(alignment: .top, spacing: 12) {
         ForEach(samples) { sample in
-          Text(sample.label)
-            .tag(sample.id)
+          PreviewSampleRailItem(
+            sample: sample,
+            previewSource: previewSources[sample.id],
+            isSelected: selectedSampleID == sample.id,
+            onSelect: onSelect,
+            onRename: onRename,
+            onDelete: onDelete
+          )
         }
-      }
 
-      PhotosPicker(
-        selection: $pickedItem,
-        matching: .images
-      ) {
-        Label("Add Sample Image", systemImage: "photo.badge.plus")
+        PreviewSampleAddItem(pickedItem: $pickedItem)
       }
+    }
+    .contentMargins(.horizontal, 8, for: .scrollContent)
+    .scrollIndicators(.hidden)
+  }
+}
 
-      if selectedSample.canEdit {
+/// Adds per-sample editing actions without coupling them to the active sample.
+private struct PreviewSampleRailItem: View {
+
+  let sample: LUTPreviewSample
+  let previewSource: LUTPreviewSourceImage?
+  let isSelected: Bool
+  let onSelect: @MainActor @Sendable (LUTPreviewSample) -> Void
+  let onRename: @MainActor @Sendable (LUTPreviewSample) -> Void
+  let onDelete: @MainActor @Sendable (LUTPreviewSample) -> Void
+
+  var body: some View {
+    if sample.canEdit {
+      PreviewSampleSelectionButton(
+        sample: sample,
+        previewSource: previewSource,
+        isSelected: isSelected,
+        onSelect: onSelect
+      )
+      .contextMenu {
         Button {
-          onRename(selectedSample)
+          onRename(sample)
         } label: {
           Label("Rename Sample", systemImage: "pencil")
         }
 
         Button(role: .destructive) {
-          onDelete(selectedSample)
+          onDelete(sample)
         } label: {
           Label("Delete Sample", systemImage: "trash")
         }
       }
-    } header: {
-      Text("LUT Preview Source")
-    } footer: {
-      Text(
-        "Every LUT below uses this same input. Add a Log frame and label it with its camera or profile."
+      .accessibilityAction(named: "Rename Sample") {
+        onRename(sample)
+      }
+      .accessibilityAction(named: "Delete Sample") {
+        onDelete(sample)
+      }
+    } else {
+      PreviewSampleSelectionButton(
+        sample: sample,
+        previewSource: previewSource,
+        isSelected: isSelected,
+        onSelect: onSelect
       )
     }
+  }
+}
+
+/// Selects one preview source while making the persisted state visible.
+private struct PreviewSampleSelectionButton: View {
+
+  let sample: LUTPreviewSample
+  let previewSource: LUTPreviewSourceImage?
+  let isSelected: Bool
+  let onSelect: @MainActor @Sendable (LUTPreviewSample) -> Void
+
+  var body: some View {
+    Button {
+      onSelect(sample)
+    } label: {
+      VStack(alignment: .leading, spacing: 8) {
+        PreviewSampleThumbnail(
+          previewSource: previewSource,
+          isSelected: isSelected
+        )
+
+        Text(sample.label)
+          .font(.subheadline.weight(isSelected ? .semibold : .regular))
+          .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+          .lineLimit(1)
+      }
+      .frame(width: 144)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(sample.label)
+    .accessibilityHint("Applies this sample to every LUT preview")
+    .accessibilityAddTraits(isSelected ? .isSelected : [])
+  }
+}
+
+/// Draws one source thumbnail and its explicit selection treatment.
+private struct PreviewSampleThumbnail: View {
+
+  let previewSource: LUTPreviewSourceImage?
+  let isSelected: Bool
+
+  var body: some View {
+    ZStack {
+      Color.secondary.opacity(0.12)
+
+      if let previewSource {
+        Image(decorative: previewSource.image, scale: 1)
+          .resizable()
+          .scaledToFill()
+      } else {
+        Image(systemName: "photo")
+          .font(.title2)
+          .foregroundStyle(.tertiary)
+      }
+    }
+    .frame(width: 144, height: 90)
+    .clipped()
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .strokeBorder(
+          isSelected ? Color.accentColor : Color.secondary.opacity(0.18),
+          lineWidth: isSelected ? 3 : 1
+        )
+    }
+    .overlay(alignment: .topTrailing) {
+      if isSelected {
+        Image(systemName: "checkmark")
+          .font(.caption.weight(.bold))
+          .foregroundStyle(.white)
+          .frame(width: 24, height: 24)
+          .background(Color.accentColor, in: Circle())
+          .padding(8)
+      }
+    }
+  }
+}
+
+/// Keeps importing adjacent to the samples by placing it at the strip's end.
+private struct PreviewSampleAddItem: View {
+
+  @Binding var pickedItem: PhotosPickerItem?
+
+  var body: some View {
+    PhotosPicker(
+      selection: $pickedItem,
+      matching: .images
+    ) {
+      VStack(alignment: .leading, spacing: 8) {
+        ZStack {
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.secondary.opacity(0.08))
+
+          Image(systemName: "plus")
+            .font(.title2.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+        .frame(width: 144, height: 90)
+        .overlay {
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(
+              Color.secondary.opacity(0.35),
+              style: StrokeStyle(lineWidth: 1, dash: [4])
+            )
+        }
+
+        Text("Add Sample")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+      .frame(width: 144)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("Add Sample Image")
   }
 }
 

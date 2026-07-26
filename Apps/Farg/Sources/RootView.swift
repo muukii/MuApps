@@ -45,11 +45,10 @@ struct RootView: View {
       NavigationStack {
         EditorView(
           library: library,
+          previewSamples: previewSamples,
           editState: editState,
-          onShowSettings: { isShowingSettings = true },
           onFinishEditing: { isEditorPresented = false }
         )
-        .navigationTitle("Färg")
         .navigationBarTitleDisplayMode(.inline)
       }
       .interactiveDismissDisabled()

@@ -70,18 +70,22 @@ struct ApplyLUTToVideoIntent: ProgressReportingIntent {
     let outputURL = try ShortcutVideoRenderOutput.makeURL()
     let progressHandle = IntentProgressHandle(progress)
     let render: @Sendable () async throws -> Void = {
-      try await ParametricVideoExporter().export(
-        asset: asset,
-        recipe: FargVideoRenderRecipe(
-          document: document,
-          motionBlur: .disabled
-        ),
-        colorInfo: colorInfo,
-        to: outputURL,
-        onProgress: { fraction in
-          progressHandle.update(fraction)
-        }
-      )
+      // The intent and in-app export share one process-local resource policy.
+      // A future extension process will need an IPC-backed admission boundary.
+      try await VideoRenderResourceGate.shared.withPermit {
+        try await ParametricVideoExporter().export(
+          asset: asset,
+          recipe: FargVideoRenderRecipe(
+            document: document,
+            motionBlur: .disabled
+          ),
+          colorInfo: colorInfo,
+          to: outputURL,
+          onProgress: { fraction in
+            progressHandle.update(fraction)
+          }
+        )
+      }
     }
 
     do {

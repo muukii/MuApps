@@ -9,7 +9,7 @@ import ImageIO
 import Observation
 import UniformTypeIdentifiers
 
-/// A labeled still image used to compare every LUT under the same input.
+/// A labeled still image used to preview every LUT under the same input.
 ///
 /// Labels are intentionally user-authored so a sample can carry the source
 /// color-space meaning that pixels alone cannot express, such as “Sony S-Log3”.
@@ -91,7 +91,7 @@ struct PickedLUTPreviewImage: Transferable {
   }
 }
 
-/// Persists the user's labeled LUT comparison sources independently of LUTs.
+/// Persists the user's labeled LUT preview sources independently of LUTs.
 @MainActor
 @Observable
 final class LUTPreviewSampleLibrary {
@@ -119,32 +119,29 @@ final class LUTPreviewSampleLibrary {
   /// The sample applied to Settings previews.
   private(set) var selectedSampleID = LUTPreviewSample.colorTest.id
 
-  /// Invalidates source loading after a selection or metadata change.
-  private(set) var revision: UInt = 0
-
   private let fileManager = FileManager.default
 
   init() {
     load()
   }
 
-  var selectedSample: LUTPreviewSample {
-    samples.first { $0.id == selectedSampleID } ?? .colorTest
-  }
-
   /// Makes one labeled sample the common input for all Settings previews.
   func select(id: LUTPreviewSample.ID) throws {
-    guard samples.contains(where: { $0.id == id }) else { return }
+    guard
+      id != selectedSampleID,
+      samples.contains(where: { $0.id == id })
+    else {
+      return
+    }
     let payload = PersistedSamples(
       samples: importedSamples,
       selectedSampleID: id
     )
     try persist(payload)
     selectedSampleID = id
-    revision &+= 1
   }
 
-  /// Normalizes and saves a Photos image, then selects it for comparison.
+  /// Normalizes and saves a Photos image, then selects it for previewing.
   @discardableResult
   func addSample(
     from pickedURL: URL,
@@ -183,7 +180,6 @@ final class LUTPreviewSampleLibrary {
 
     samples = [.colorTest] + updatedSamples
     selectedSampleID = sample.id
-    revision &+= 1
     return sample
   }
 
@@ -203,7 +199,6 @@ final class LUTPreviewSampleLibrary {
       )
     )
     samples = [.colorTest] + updatedSamples
-    revision &+= 1
   }
 
   /// Deletes one user-added sample and falls back to the color test if selected.
@@ -227,13 +222,10 @@ final class LUTPreviewSampleLibrary {
         at: imageDirectory.appendingPathComponent(fileName)
       )
     }
-    revision &+= 1
   }
 
-  /// Decodes the selected sample away from SwiftUI body evaluation.
-  func loadSelectedImage() async throws -> LUTPreviewSourceImage {
-    let sample = selectedSample
-    let sourceID = "\(sample.id).\(revision)"
+  /// Decodes one preview sample without changing the persisted selection.
+  func loadImage(for sample: LUTPreviewSample) async throws -> LUTPreviewSourceImage {
     let url: URL?
     switch sample.source {
     case .builtIn:
@@ -254,7 +246,7 @@ final class LUTPreviewSampleLibrary {
     }.value
 
     return LUTPreviewSourceImage(
-      id: sourceID,
+      id: sample.id,
       image: image
     )
   }

@@ -52,12 +52,12 @@ private struct VideoBatchHeader: View {
       Text("VIDEOS")
         .font(.caption.weight(.semibold))
         .tracking(0.8)
-        .foregroundStyle(EditorPalette.secondary)
+        .foregroundStyle(.secondary)
 
       if let selectedIndex {
         Text("\(selectedIndex + 1) of \(clips.count)")
           .font(.caption.monospacedDigit())
-          .foregroundStyle(EditorPalette.primary)
+          .foregroundStyle(.primary)
       }
     }
   }
@@ -141,7 +141,9 @@ private struct VideoBatchClipCell: View {
           .overlay {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
               .stroke(
-                isSelected ? EditorPalette.primary : EditorPalette.hairline,
+                isSelected
+                  ? Color.primary
+                  : Color.secondary.opacity(0.2),
                 lineWidth: isSelected ? 2 : 1
               )
           }
@@ -169,17 +171,15 @@ private struct VideoBatchAddCell: View {
   let isDisabled: Bool
   let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
 
+  @State private var isPhotosPickerPresented = false
   @State private var isVideoFileImporterPresented = false
   @State private var fileImporterErrorMessage: String?
 
   var body: some View {
     Menu {
-      PhotosPicker(
-        selection: $pickerItems,
-        selectionBehavior: .ordered,
-        matching: .videos,
-        photoLibrary: .shared()
-      ) {
+      Button {
+        isPhotosPickerPresented = true
+      } label: {
         Label("Photos", systemImage: "photo.on.rectangle")
       }
 
@@ -191,16 +191,16 @@ private struct VideoBatchAddCell: View {
     } label: {
       Image(systemName: "plus")
         .font(.title3)
-        .foregroundStyle(EditorPalette.secondary)
+        .foregroundStyle(.secondary)
         .frame(width: 72, height: 52)
         .background(
-          EditorPalette.raised,
+          .background.secondary,
           in: RoundedRectangle(cornerRadius: 9, style: .continuous)
         )
         .overlay {
           RoundedRectangle(cornerRadius: 9, style: .continuous)
             .stroke(
-              EditorPalette.hairline,
+              Color.secondary.opacity(0.2),
               style: StrokeStyle(lineWidth: 1, dash: [4])
             )
         }
@@ -209,6 +209,13 @@ private struct VideoBatchAddCell: View {
     .buttonStyle(.plain)
     .disabled(isDisabled)
     .accessibilityLabel("Add Videos")
+    .photosPicker(
+      isPresented: $isPhotosPickerPresented,
+      selection: $pickerItems,
+      selectionBehavior: .ordered,
+      matching: .videos,
+      photoLibrary: .shared()
+    )
     .fileImporter(
       isPresented: $isVideoFileImporterPresented,
       allowedContentTypes: [.movie],
@@ -247,7 +254,8 @@ private struct VideoClipThumbnail: View {
 
   var body: some View {
     ZStack {
-      EditorPalette.raised
+      Rectangle()
+        .fill(.background.secondary)
 
       if let image {
         Image(decorative: image, scale: 1)
@@ -255,7 +263,7 @@ private struct VideoClipThumbnail: View {
           .scaledToFill()
       } else {
         Image(systemName: "film")
-          .foregroundStyle(EditorPalette.secondary)
+          .foregroundStyle(.secondary)
       }
     }
     .clipped()
@@ -283,16 +291,16 @@ private struct VideoBatchLoadingPlaceholder: View {
 
   var body: some View {
     ProgressView()
-      .tint(EditorPalette.primary)
+      .tint(.primary)
       .frame(width: 72, height: 52)
       .background(
-        EditorPalette.raised,
+        .background.secondary,
         in: RoundedRectangle(cornerRadius: 9, style: .continuous)
       )
       .overlay {
         RoundedRectangle(cornerRadius: 9, style: .continuous)
           .stroke(
-            EditorPalette.hairline,
+            Color.secondary.opacity(0.2),
             style: StrokeStyle(lineWidth: 1, dash: [4])
           )
       }
@@ -308,12 +316,12 @@ private struct VideoBatchFailurePlaceholder: View {
       .foregroundStyle(.orange)
       .frame(width: 72, height: 52)
       .background(
-        EditorPalette.raised,
+        .background.secondary,
         in: RoundedRectangle(cornerRadius: 9, style: .continuous)
       )
       .overlay {
         RoundedRectangle(cornerRadius: 9, style: .continuous)
-          .stroke(EditorPalette.hairline, lineWidth: 1)
+          .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
       }
       .accessibilityLabel("Video couldn't be loaded")
   }
