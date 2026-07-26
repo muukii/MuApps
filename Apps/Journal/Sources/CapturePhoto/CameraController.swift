@@ -1,12 +1,6 @@
 @preconcurrency import AVFoundation
-import CoreImage
 import ImageIO
 import Observation
-#if canImport(UIKit)
-import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
 
 /// Owns the AVFoundation camera session and bridges camera state to SwiftUI.
 /// Internal to the framework so AVFoundation setup stays behind the component's
@@ -28,6 +22,7 @@ final class CameraController {
   private(set) var authorization: AuthorizationState = .unknown
   private(set) var isFront = false
   private(set) var isRunning = false
+  private(set) var activeVideoDevice: AVCaptureDevice?
 
   /// Whether the current platform exposes meaningful front/back camera choices.
   var canFlipCamera: Bool {
@@ -40,6 +35,8 @@ final class CameraController {
 
   @ObservationIgnored private let cameraSession = CameraSession()
   @ObservationIgnored private var activePhotoCaptureProcessor: PhotoCaptureProcessor?
+  @ObservationIgnored private var captureRotationCoordinator:
+    AVCaptureDevice.RotationCoordinator?
 
   var previewSession: AVCaptureSession {
     cameraSession.session
@@ -87,9 +84,18 @@ final class CameraController {
     }
 
     let settings = cameraSession.makePhotoSettings()
+    guard let captureRotationCoordinator else {
+      throw CameraError.captureNotReady
+    }
+    let rotationAngle =
+      captureRotationCoordinator.videoRotationAngleForHorizonLevelCapture
+    try cameraSession.configurePhotoConnection(
+      rotationAngle: rotationAngle,
+      isMirrored: isFront
+    )
 
     return try await withCheckedThrowingContinuation { continuation in
-      let processor = PhotoCaptureProcessor(isMirrored: isFront) { [weak self] result in
+      let processor = PhotoCaptureProcessor { [weak self] result in
         self?.activePhotoCaptureProcessor = nil
         switch result {
         case .success(let photo):
@@ -114,6 +120,14 @@ final class CameraController {
       let position: AVCaptureDevice.Position = front ? .front : .back
       #endif
       try await cameraSession.configureAndStart(position: position)
+      guard let activeVideoDevice = cameraSession.activeVideoDevice else {
+        throw CameraError.couldNotFindCamera
+      }
+      self.activeVideoDevice = activeVideoDevice
+      captureRotationCoordinator = AVCaptureDevice.RotationCoordinator(
+        device: activeVideoDevice,
+        previewLayer: nil
+      )
       isFront = front
       isRunning = true
     } catch {
@@ -125,9 +139,12 @@ final class CameraController {
 /// Errors produced by the local camera implementation.
 private enum CameraError: LocalizedError, Sendable {
   case notAuthorized
+  case captureNotReady
   case couldNotFindCamera
   case couldNotAddInput
   case couldNotAddPhotoOutput
+  case missingPhotoConnection
+  case unsupportedRotationAngle(CGFloat)
   case missingImageRepresentation
   case missingJPEGData
   case captureFailed(String)
@@ -136,12 +153,18 @@ private enum CameraError: LocalizedError, Sendable {
     switch self {
     case .notAuthorized:
       return "Camera access is not authorized."
+    case .captureNotReady:
+      return "The camera is not ready to capture a photo."
     case .couldNotFindCamera:
       return "No usable camera is available."
     case .couldNotAddInput:
       return "The camera input could not be added to the session."
     case .couldNotAddPhotoOutput:
       return "The photo output could not be added to the session."
+    case .missingPhotoConnection:
+      return "The camera photo connection is unavailable."
+    case .unsupportedRotationAngle(let angle):
+      return "The camera does not support the required \(angle)-degree rotation."
     case .missingImageRepresentation:
       return "The captured photo did not contain an image representation."
     case .missingJPEGData:
@@ -161,6 +184,7 @@ private final class CameraSession: @unchecked Sendable {
   private let photoOutput = AVCapturePhotoOutput()
   private let queue = DispatchQueue(label: "app.muukii.journal.capture-photo.session")
   private var currentInput: AVCaptureDeviceInput?
+  private(set) var activeVideoDevice: AVCaptureDevice?
 
   init() {
     photoOutput.maxPhotoQualityPrioritization = .balanced
@@ -189,6 +213,7 @@ private final class CameraSession: @unchecked Sendable {
         }
         self.session.addInput(input)
         self.currentInput = input
+        self.activeVideoDevice = device
 
         if self.session.outputs.contains(self.photoOutput) == false {
           guard self.session.canAddOutput(self.photoOutput) else {
@@ -220,10 +245,28 @@ private final class CameraSession: @unchecked Sendable {
     with settings: AVCapturePhotoSettings,
     delegate: PhotoCaptureProcessor
   ) {
-    #if os(iOS)
-    photoOutput.connection(with: .video)?.setPortraitVideoRotationIfSupported()
-    #endif
     photoOutput.capturePhoto(with: settings, delegate: delegate)
+  }
+
+  /// Applies the current camera's capture rotation and the product's front-camera
+  /// mirror policy to the photo connection before a still is requested.
+  func configurePhotoConnection(
+    rotationAngle: CGFloat,
+    isMirrored: Bool
+  ) throws {
+    guard let connection = photoOutput.connection(with: .video) else {
+      throw CameraError.missingPhotoConnection
+    }
+    guard connection.isVideoRotationAngleSupported(rotationAngle) else {
+      throw CameraError.unsupportedRotationAngle(rotationAngle)
+    }
+
+    connection.videoRotationAngle = rotationAngle
+
+    if connection.isVideoMirroringSupported {
+      connection.automaticallyAdjustsVideoMirroring = false
+      connection.isVideoMirrored = isMirrored
+    }
   }
 
   func makePhotoSettings() -> AVCapturePhotoSettings {
@@ -268,14 +311,11 @@ private final class CameraSession: @unchecked Sendable {
 /// finishes, then reports a component-level `CapturedPhoto`.
 private final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Sendable {
 
-  private let isMirrored: Bool
   private let completion: @MainActor @Sendable (Result<CapturedPhoto, CameraError>) -> Void
 
   init(
-    isMirrored: Bool,
     completion: @escaping @MainActor @Sendable (Result<CapturedPhoto, CameraError>) -> Void
   ) {
-    self.isMirrored = isMirrored
     self.completion = completion
   }
 
@@ -290,7 +330,7 @@ private final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelega
       result = .failure(.captureFailed(error.localizedDescription))
     } else {
       do {
-        result = .success(try Self.makeCapturedPhoto(from: photo, isMirrored: isMirrored))
+        result = .success(try Self.makeCapturedPhoto(from: photo))
       } catch let error as CameraError {
         result = .failure(error)
       } catch {
@@ -304,40 +344,23 @@ private final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelega
   }
 
   private static func makeCapturedPhoto(
-    from photo: AVCapturePhoto,
-    isMirrored: Bool
+    from photo: AVCapturePhoto
   ) throws -> CapturedPhoto {
     guard let cgImage = photo.cgImageRepresentation() else {
       throw CameraError.missingImageRepresentation
     }
 
-    #if canImport(UIKit)
-    let orientation = photo.cgImagePropertyOrientation.uiImageOrientation
-    let image = UIImage(cgImage: cgImage, scale: 1, orientation: orientation)
-    let outputImage = isMirrored ? image.withHorizontallyFlippedOrientation() : image
-
-    guard let data = outputImage.jpegData(compressionQuality: 0.9) else {
+    do {
+      return try CapturedPhotoJPEGEncoder.encode(
+        cgImage,
+        orientation: photo.cgImagePropertyOrientation,
+        compressionQuality: 0.9
+      )
+    } catch CapturedPhotoJPEGEncoderError.destinationCreationFailed,
+      CapturedPhotoJPEGEncoderError.encodingFailed
+    {
       throw CameraError.missingJPEGData
     }
-
-    return CapturedPhoto(imageData: data, pixelSize: outputImage.size)
-    #elseif canImport(AppKit)
-    let orientedImage = CIImage(cgImage: cgImage)
-      .oriented(photo.cgImagePropertyOrientation)
-    let context = CIContext(options: [.useSoftwareRenderer: false])
-    guard let outputCGImage = context.createCGImage(orientedImage, from: orientedImage.extent) else {
-      throw CameraError.missingImageRepresentation
-    }
-
-    let bitmap = NSBitmapImageRep(cgImage: outputCGImage)
-    guard let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else {
-      throw CameraError.missingJPEGData
-    }
-    return CapturedPhoto(
-      imageData: data,
-      pixelSize: CGSize(width: outputCGImage.width, height: outputCGImage.height)
-    )
-    #endif
   }
 }
 
@@ -361,32 +384,6 @@ private extension AVCapturePhoto {
   }
 }
 
-#if canImport(UIKit)
-private extension CGImagePropertyOrientation {
-
-  var uiImageOrientation: UIImage.Orientation {
-    switch self {
-    case .up:
-      return .up
-    case .upMirrored:
-      return .upMirrored
-    case .down:
-      return .down
-    case .downMirrored:
-      return .downMirrored
-    case .left:
-      return .left
-    case .leftMirrored:
-      return .leftMirrored
-    case .right:
-      return .right
-    case .rightMirrored:
-      return .rightMirrored
-    }
-  }
-}
-#endif
-
 private extension DispatchQueue {
 
   func perform(_ work: @escaping @Sendable () -> Void) async {
@@ -408,16 +405,6 @@ private extension DispatchQueue {
           continuation.resume(throwing: error)
         }
       }
-    }
-  }
-}
-
-extension AVCaptureConnection {
-
-  func setPortraitVideoRotationIfSupported() {
-    let portraitAngle: CGFloat = 90
-    if isVideoRotationAngleSupported(portraitAngle) {
-      videoRotationAngle = portraitAngle
     }
   }
 }
