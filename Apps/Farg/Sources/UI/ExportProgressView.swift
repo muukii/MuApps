@@ -199,10 +199,10 @@ private struct ExportSessionSummaryView: View {
         .foregroundStyle(.red)
 
         if session.foregroundFallbackCount == 1 {
-          Text("1 video could not start in the background.")
+          Text("1 video must stay in the foreground.")
         } else {
           Text(
-            "\(session.foregroundFallbackCount) videos could not start in the background.",
+            "\(session.foregroundFallbackCount) videos must stay in the foreground.",
             comment:
               "Foreground fallback notice. The variable is a video count."
           )

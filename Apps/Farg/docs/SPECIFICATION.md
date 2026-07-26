@@ -4,17 +4,12 @@
 
 Färg is an iPhone video editor for applying one color lookup table (LUT) recipe
 to one or more videos. Preview and export evaluate the same Brightroom
-<<<<<<< Updated upstream
-parametric feature document for every video in the collection. The app uses its
-dedicated Färg icon and supports portrait orientation only.
-The visible app name remains **Färg**, while Spotlight can also find the app
-when a person searches for **Farg** without the diacritic.
-=======
 parametric feature document and temporal recipe for every video in the
 collection. Preview evaluates that recipe at the visible viewport's pixel
 resolution, while export preserves each source's display resolution. The app
 uses its dedicated Färg icon and supports portrait orientation only.
->>>>>>> Stashed changes
+The visible app name remains **Färg**, while Spotlight can also find the app
+when a person searches for **Farg** without the diacritic.
 
 ## Privacy
 
@@ -112,6 +107,10 @@ uses its dedicated Färg icon and supports portrait orientation only.
   coalesced briefly, preserve the current playhead and playback intent, and
   replace only the latest requested Preview target. A transient zero-size
   layout never replaces the last valid target with a full-resolution fallback.
+- Preview prepares one temporal source topology per selected movie. Viewport,
+  LUT, and Motion Blur enablement changes replace only the video composition on
+  the existing player item, while Strength changes update a live frame
+  parameter. These edits do not seek or reset the current playback position.
 - Preview audio mixes with music, podcasts, or other audio already playing
   outside Färg instead of interrupting it.
 - The editor navigation bar places its close menu and **Settings** at the
@@ -154,6 +153,11 @@ uses its dedicated Färg icon and supports portrait orientation only.
 ## LUT editing
 
 - **Original** disables LUT processing.
+- Färg currently supports LUTs whose final output is display-referred SDR
+  Rec.709. Because supported LUT file formats do not provide a reliable
+  standardized output-color-space declaration, every imported and bundled LUT
+  is interpreted under that contract; LUTs authored for another output color
+  space are not supported.
 - Färg installs **AppleLog1 Example** from its app bundle into the private LUT
   library on launch when that initial LUT record or stored copy is absent.
   The starter LUT uses the same validation and Application Support storage as
@@ -218,11 +222,21 @@ uses its dedicated Färg icon and supports portrait orientation only.
   copied audio timing do not change.
 - Motion blur is applied before the Brightroom parametric LUT, matching the
   ordering of an in-camera exposure followed by color processing.
+- Decoded source color is preserved through the temporal stage. When a LUT is
+  selected, only the post-LUT image is rendered and tagged as Rec.709; the
+  composition must not convert an Apple Log or wide-gamut source to Rec.709
+  before the LUT evaluates it.
 - Preview and export use the same temporal samples, ordering, and `Strength`
   value. Preview runs Optical Flow at its viewport-fitted working resolution;
   export runs at the source display resolution. `Strength` follows
   VideoToolbox's 1–100 range; Färg does not present it as a shutter angle
   because Apple defines no physical angle conversion.
+- Disabled Motion Blur is Preview's semantic strength zero: it keeps the
+  prepared temporal source but requests only the current track, bypassing
+  VideoToolbox and its previous/next working buffers. Literal zero is never
+  passed to VideoToolbox because its documented range begins at one. Export
+  uses the same custom-compositor current-frame path when Motion Blur is
+  disabled so its color processing does not change with the enable switch.
 - Realtime preview bounds temporal work to one rendering frame and the newest
   queued frame. If Optical Flow cannot match playback cadence, an obsolete
   queued preview frame is cancelled instead of retaining its three decoded
@@ -260,6 +274,10 @@ uses its dedicated Färg icon and supports portrait orientation only.
   preserve source frame timing; motion-blur exports use the nominal fixed
   cadence described above. Because HEVC bitrate is an average target, a
   completed file's measured bitrate can vary slightly with its content.
+- An export with a selected LUT carries Rec.709 primaries, transfer, and matrix
+  metadata from the video-composition output through the asset reader and HEVC
+  writer. The output contract is determined by the LUT rather than copied from
+  the source movie.
 - Before a rendered video sample reaches the HEVC writer, its format dimensions
   must exactly match the composition's source-resolution encoder dimensions.
   A portrait geometry mismatch fails at this boundary with expected and actual
@@ -303,13 +321,19 @@ uses its dedicated Färg icon and supports portrait orientation only.
   replays current progress; it never starts the render. Retrying a row creates a
   new attempt identifier, which is registered and submitted from the foreground
   Retry action before it enters the app scheduler.
-- On devices that advertise background GPU support, each request asks for the
-  GPU; otherwise, it is submitted with default resources. The task reports
-  truthful queue-admission progress from 0–5% based on all predecessor renders,
-  its own render from 5–99%, and Photos import from 99–100%. Waiting subtitles
-  identify the number of earlier videos rather than implying simultaneous
-  encoding. App rows update at whole-percent resolution. Progress reporting does
-  not prevent the system from expiring a task when conditions change.
+- On devices that advertise background GPU support, continued-processing
+  requests ask for the GPU. Without that support, LUT-only requests use default
+  resources while Motion Blur follows the foreground-only policy below. The task
+  reports truthful queue-admission progress from 0–5% based on all predecessor
+  renders, its own render from 5–99%, and Photos import from 99–100%. Waiting
+  subtitles identify the number of earlier videos rather than implying
+  simultaneous encoding. App rows update at whole-percent resolution. Progress
+  reporting does not prevent the system from expiring a task when conditions
+  change.
+- Motion Blur requires GPU-backed Optical Flow. When the device does not offer
+  background GPU access, Motion Blur attempts run only while Färg remains in the
+  foreground. The export sheet shows a red **Keep Färg open** notice with the
+  resource limitation while the attempt runs.
 - When one continued-processing request cannot be registered or submitted, only
   that video falls back to foreground execution. The header reports how many
   videos require Färg to remain open and includes the system scheduling error.

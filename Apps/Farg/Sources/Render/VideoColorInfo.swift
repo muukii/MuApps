@@ -28,6 +28,16 @@ nonisolated struct VideoColorInfo: Sendable, Equatable {
     isHDR: false
   )
 
+  /// The concrete output supported when no LUT overrides the source contract.
+  ///
+  /// The current Core Image pipeline is SDR-referenced, so HLG and PQ inputs
+  /// are intentionally materialized as SDR Rec.709 instead of being emitted
+  /// with misleading HDR metadata. Non-HDR pass-through recipes preserve the
+  /// source tags.
+  var resolvedForCurrentSDRPipeline: VideoColorInfo {
+    isHDR ? .sdrRec709 : self
+  }
+
   /// Reads the color attachments from a source asset's first video track.
   static func resolve(from asset: AVAsset) async -> VideoColorInfo {
     guard
@@ -38,33 +48,50 @@ nonisolated struct VideoColorInfo: Sendable, Equatable {
       return .sdrRec709
     }
 
-    func extension_(_ key: CFString) -> String? {
+    func formatExtension(_ key: CFString) -> String? {
       CMFormatDescriptionGetExtension(format, extensionKey: key) as? String
     }
 
-    let transfer = extension_(kCMFormatDescriptionExtension_TransferFunction)
+    let transfer = formatExtension(kCMFormatDescriptionExtension_TransferFunction)
     let isHDR =
       transfer == (kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String)
       || transfer == (kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ as String)
 
     return VideoColorInfo(
-      colorPrimaries: extension_(kCMFormatDescriptionExtension_ColorPrimaries),
+      colorPrimaries: formatExtension(kCMFormatDescriptionExtension_ColorPrimaries),
       transferFunction: transfer,
-      yCbCrMatrix: extension_(kCMFormatDescriptionExtension_YCbCrMatrix),
+      yCbCrMatrix: formatExtension(kCMFormatDescriptionExtension_YCbCrMatrix),
       isHDR: isHDR
     )
   }
 
   /// Tags the composition's output color.
   ///
-  /// The current Core Image pipeline is SDR-referenced, so HDR sources are
-  /// rendered and tagged as SDR Rec.709 (a deliberate, predictable downgrade)
-  /// rather than emitting a mislabeled HDR file. SDR / Display-P3 sources keep
-  /// their own primaries.
+  /// Callers pass the already resolved output rather than the source metadata.
+  /// This distinction matters for a LUT that consumes Apple Log or another
+  /// source space but emits display-referred Rec.709.
   func apply(to composition: AVMutableVideoComposition) {
-    let tags = isHDR ? VideoColorInfo.sdrRec709 : self
-    composition.colorPrimaries = tags.colorPrimaries ?? AVVideoColorPrimaries_ITU_R_709_2
-    composition.colorTransferFunction = tags.transferFunction ?? AVVideoTransferFunction_ITU_R_709_2
-    composition.colorYCbCrMatrix = tags.yCbCrMatrix ?? AVVideoYCbCrMatrix_ITU_R_709_2
+    composition.colorPrimaries =
+      colorPrimaries ?? AVVideoColorPrimaries_ITU_R_709_2
+    composition.colorTransferFunction =
+      transferFunction ?? AVVideoTransferFunction_ITU_R_709_2
+    composition.colorYCbCrMatrix =
+      yCbCrMatrix ?? AVVideoYCbCrMatrix_ITU_R_709_2
+  }
+
+  /// The concrete color-property dictionary shared by reader and writer.
+  ///
+  /// Keeping both media endpoints on the same resolved output contract avoids
+  /// an untagged intermediate sample being interpreted in a source color space
+  /// after the LUT has already produced Rec.709 pixels.
+  var avVideoColorProperties: [String: String] {
+    [
+      AVVideoColorPrimariesKey:
+        colorPrimaries ?? AVVideoColorPrimaries_ITU_R_709_2,
+      AVVideoTransferFunctionKey:
+        transferFunction ?? AVVideoTransferFunction_ITU_R_709_2,
+      AVVideoYCbCrMatrixKey:
+        yCbCrMatrix ?? AVVideoYCbCrMatrix_ITU_R_709_2,
+    ]
   }
 }

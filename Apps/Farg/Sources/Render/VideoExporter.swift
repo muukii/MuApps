@@ -104,7 +104,7 @@ nonisolated struct ParametricVideoExporter: VideoExporting {
     let encoding = try SourceVideoEncoding(
       renderSize: composition.renderSize,
       sourceBitRate: sourceBitRate,
-      colorInfo: colorInfo
+      outputColorInfo: prepared.outputColorInfo
     )
 
     try? FileManager.default.removeItem(at: outputURL)
@@ -128,7 +128,8 @@ nonisolated struct ParametricVideoExporter: VideoExporting {
       videoTracks: renderVideoTracks,
       videoSettings: [
         kCVPixelBufferPixelFormatTypeKey as String:
-          Int(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
+          Int(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange),
+        AVVideoColorPropertiesKey: prepared.outputColorInfo.avVideoColorProperties,
       ]
     )
     videoOutput.videoComposition = composition
@@ -327,7 +328,7 @@ private nonisolated struct SourceVideoEncoding {
   init(
     renderSize: CGSize,
     sourceBitRate: Float,
-    colorInfo: VideoColorInfo
+    outputColorInfo: VideoColorInfo
   ) throws {
     guard
       renderSize.width.isFinite,
@@ -348,7 +349,7 @@ private nonisolated struct SourceVideoEncoding {
     self.width = Int(renderSize.width.rounded())
     self.height = Int(renderSize.height.rounded())
     self.averageBitRate = Int(sourceBitRate.rounded())
-    self.colorInfo = colorInfo.isHDR ? .sdrRec709 : colorInfo
+    self.colorInfo = outputColorInfo
   }
 
   var outputSettings: [String: Any] {
@@ -356,14 +357,7 @@ private nonisolated struct SourceVideoEncoding {
       AVVideoCodecKey: AVVideoCodecType.hevc,
       AVVideoWidthKey: width,
       AVVideoHeightKey: height,
-      AVVideoColorPropertiesKey: [
-        AVVideoColorPrimariesKey:
-          colorInfo.colorPrimaries ?? AVVideoColorPrimaries_ITU_R_709_2,
-        AVVideoTransferFunctionKey:
-          colorInfo.transferFunction ?? AVVideoTransferFunction_ITU_R_709_2,
-        AVVideoYCbCrMatrixKey:
-          colorInfo.yCbCrMatrix ?? AVVideoYCbCrMatrix_ITU_R_709_2,
-      ],
+      AVVideoColorPropertiesKey: colorInfo.avVideoColorProperties,
       AVVideoCompressionPropertiesKey: [
         kVTCompressionPropertyKey_AverageBitRate as String: averageBitRate,
         kVTCompressionPropertyKey_ProfileLevel as String:

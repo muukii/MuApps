@@ -22,6 +22,10 @@ nonisolated struct VideoExportSessionItem: Identifiable, Sendable {
 /// Why a video attempt could not use continued processing.
 nonisolated enum VideoExportBackgroundStartError: LocalizedError, Equatable, Sendable {
 
+  /// Motion Blur cannot keep rendering after this device removes GPU access
+  /// from an app that leaves the foreground.
+  case motionBlurRequiresForeground
+
   /// The concrete dynamic identifier was not covered by the app's permitted
   /// wildcard, so `BGTaskScheduler` rejected handler registration.
   case handlerRegistrationFailed(identifier: String)
@@ -35,6 +39,14 @@ nonisolated enum VideoExportBackgroundStartError: LocalizedError, Equatable, Sen
 
   var errorDescription: String? {
     switch self {
+    case .motionBlurRequiresForeground:
+      return String(
+        localized:
+          "Motion Blur needs GPU access that this device does not provide in the background. Keep Färg open until export finishes.",
+        comment:
+          "Foreground-only export explanation shown when Motion Blur cannot use the GPU after the app is backgrounded."
+      )
+
     case .handlerRegistrationFailed(let identifier):
       return String(
         localized:
@@ -67,7 +79,8 @@ nonisolated enum VideoExportBackgroundStartError: LocalizedError, Equatable, Sen
 nonisolated enum VideoExportExecutionPath: Equatable, Sendable {
   /// A per-video continued-processing request was accepted by the system.
   case background
-  /// Running without a continued-processing lease because setup failed.
+  /// Running without a continued-processing lease because a required
+  /// background resource or request setup is unavailable.
   case foreground(VideoExportBackgroundStartError)
 }
 

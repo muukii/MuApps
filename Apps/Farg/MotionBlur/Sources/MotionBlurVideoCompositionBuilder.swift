@@ -6,6 +6,40 @@ import AVFoundation
 import CoreImage
 import Foundation
 
+/// Selects how a prepared temporal asset is rendered without replacing it.
+///
+/// `currentFrame` is Färg's semantic motion-blur strength zero. VideoToolbox
+/// itself accepts only 1...100, so the current-frame mode bypasses it entirely
+/// and asks AVFoundation to decode only the current temporal track.
+public enum MotionBlurRenderingMode: Sendable {
+  case currentFrame
+  case opticalFlow(strength: MotionBlurStrengthSource)
+}
+
+/// A source asset whose current, previous, and next tracks are prepared once.
+///
+/// The topology is independent of viewport size, LUT state, and whether Optical
+/// Flow is currently enabled. A composition made by
+/// `MotionBlurVideoCompositionBuilder.makeVideoComposition` must stay paired
+/// with this `asset` because its instructions reference this asset's track IDs.
+public struct PreparedMotionBlurSource: @unchecked Sendable {
+  public let asset: AVAsset
+
+  /// The source's display-oriented dimensions before viewport fitting.
+  ///
+  /// Preview uses this stable ratio for layout so even-pixel render rounding
+  /// cannot feed a slightly different aspect ratio back into viewport sizing.
+  public let sourceDisplaySize: CGSize
+
+  fileprivate let duration: CMTime
+  fileprivate let frameDuration: CMTime
+  fileprivate let previousTrackID: CMPersistentTrackID
+  fileprivate let currentTrackID: CMPersistentTrackID
+  fileprivate let nextTrackID: CMPersistentTrackID
+  fileprivate let naturalSize: CGSize
+  fileprivate let preferredTransform: CGAffineTransform
+}
+
 /// A source asset prepared with temporal-neighbor tracks and the composition
 /// that turns those tracks into one Optical Flow motion-blurred frame.
 ///
@@ -61,6 +95,10 @@ public enum MotionBlurError: LocalizedError, Equatable, Sendable {
   case cannotCreateFrameProcessor
   case unsupportedPixelFormat(OSType)
   case cannotCreatePixelBuffer
+  case cannotCreateRenderContextPixelBuffer
+  case cannotCreateProcessorPixelBuffer
+  case cannotCreateProcessorPixelBufferPool
+  case missingSourceFrame(MotionBlurFrameStage)
   case cannotWrapPixelBuffer
   case cannotCreateParameters
   case inconsistentFrameGeometry(
@@ -93,6 +131,14 @@ public enum MotionBlurError: LocalizedError, Equatable, Sendable {
         + "(\(Self.fourCharacterCode(pixelFormat)))."
     case .cannotCreatePixelBuffer:
       return "Färg couldn't allocate a motion-blur video frame."
+    case .cannotCreateRenderContextPixelBuffer:
+      return "Färg couldn't allocate the current Preview output frame."
+    case .cannotCreateProcessorPixelBuffer:
+      return "Färg couldn't allocate an Optical Flow working frame."
+    case .cannotCreateProcessorPixelBufferPool:
+      return "Färg couldn't create the Optical Flow working-frame pool."
+    case .missingSourceFrame(let stage):
+      return "Färg didn't receive the required \(stage.rawValue) video frame."
     case .cannotWrapPixelBuffer:
       return "Färg couldn't prepare an IOSurface-backed video frame."
     case .cannotCreateParameters:
@@ -176,6 +222,7 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
     asset sourceAsset: AVAsset,
     settings: MotionBlurSettings,
     renderTarget: MotionBlurRenderTarget,
+    outputColorSpace: CGColorSpace? = nil,
     postProcessor: @escaping PostProcessor
   ) async throws -> PreparedMotionBlurVideo {
     guard settings.isEnabled else {
@@ -184,8 +231,31 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
     guard MotionBlurAvailability.isSupported else {
       throw MotionBlurError.unavailable
     }
-    try Task.checkCancellation()
+    let source = try await prepareSource(asset: sourceAsset)
+    let videoComposition = try makeVideoComposition(
+      source: source,
+      mode: .opticalFlow(
+        strength: MotionBlurStrengthSource(strength: settings.strength)
+      ),
+      renderTarget: renderTarget,
+      outputColorSpace: outputColorSpace,
+      postProcessor: postProcessor
+    )
+    return PreparedMotionBlurVideo(
+      asset: source.asset,
+      videoComposition: videoComposition
+    )
+  }
 
+  /// Builds the reusable three-track topology independently of render settings.
+  ///
+  /// Viewport geometry, LUT state, and the current motion-blur mode belong to
+  /// the video composition rather than this source. Preview can therefore keep
+  /// one player item while replacing only its `videoComposition`.
+  public func prepareSource(
+    asset sourceAsset: AVAsset
+  ) async throws -> PreparedMotionBlurSource {
+    try Task.checkCancellation()
     let sourceVideoTracks = try await sourceAsset.loadTracks(withMediaType: .video)
     try Task.checkCancellation()
     guard let sourceVideoTrack = sourceVideoTracks.first else {
@@ -277,41 +347,96 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
     )
     try Task.checkCancellation()
 
-    let geometry = try Self.resolveFrameGeometry(
-      naturalSize: naturalSize,
-      preferredTransform: preferredTransform,
-      renderTarget: renderTarget
+    let normalizedNaturalSize = try Self.normalizedPixelSize(naturalSize)
+    let sourceGeometry = try Self.resolveGeometry(
+      naturalSize: normalizedNaturalSize,
+      preferredTransform: preferredTransform
     )
-    composition.naturalSize = geometry.compositionRenderSize
+    composition.naturalSize = sourceGeometry.renderSize
 
-    let instructions = Self.makeInstructions(
+    return PreparedMotionBlurSource(
+      asset: composition,
+      sourceDisplaySize: sourceGeometry.renderSize,
       duration: sourceTimeRange.duration,
-      neighborOffset: neighborOffset,
+      frameDuration: frameDuration,
       previousTrackID: previousTrack.trackID,
       currentTrackID: currentTrack.trackID,
       nextTrackID: nextTrack.trackID,
-      settings: settings,
+      naturalSize: naturalSize,
+      preferredTransform: preferredTransform
+    )
+  }
+
+  /// Creates a fresh render policy for an already prepared temporal source.
+  ///
+  /// `.currentFrame` asks AVFoundation for only the current track and bypasses
+  /// VideoToolbox. `.opticalFlow` references the same asset topology and reads
+  /// its live strength source once for each compositor request.
+  public func makeVideoComposition(
+    source: PreparedMotionBlurSource,
+    mode: MotionBlurRenderingMode,
+    renderTarget: MotionBlurRenderTarget,
+    outputColorSpace: CGColorSpace? = nil,
+    postProcessor: @escaping PostProcessor
+  ) throws -> AVMutableVideoComposition {
+    if case .opticalFlow = mode {
+      guard MotionBlurAvailability.isSupported else {
+        throw MotionBlurError.unavailable
+      }
+    }
+
+    let geometry = try Self.resolveFrameGeometry(
+      naturalSize: source.naturalSize,
+      preferredTransform: source.preferredTransform,
+      renderTarget: renderTarget
+    )
+    let neighborOffset = CMTimeMinimum(
+      source.frameDuration,
+      source.duration
+    )
+    let instructions = Self.makeInstructions(
+      duration: source.duration,
+      neighborOffset: neighborOffset,
+      previousTrackID: source.previousTrackID,
+      currentTrackID: source.currentTrackID,
+      nextTrackID: source.nextTrackID,
+      mode: mode,
       quality: quality,
       allowsRealtimeFrameDropping: allowsRealtimeFrameDropping,
       geometry: geometry,
       ciContext: ciContext,
+      outputColorSpace: outputColorSpace,
       postProcessor: postProcessor
     )
 
     let videoComposition = AVMutableVideoComposition()
     videoComposition.customVideoCompositorClass = MotionBlurVideoCompositor.self
     videoComposition.instructions = instructions
-    videoComposition.frameDuration = frameDuration
-    // Optical Flow requires equally spaced temporal samples. Do not preserve a
-    // VFR track's irregular request times while labeling its neighbors as t±d.
-    videoComposition.sourceTrackIDForFrameTiming = kCMPersistentTrackID_Invalid
+    videoComposition.frameDuration = source.frameDuration
+    videoComposition.sourceTrackIDForFrameTiming =
+      Self.sourceTrackIDForFrameTiming(
+        mode: mode,
+        currentTrackID: source.currentTrackID
+      )
     videoComposition.renderSize = geometry.compositionRenderSize
     videoComposition.renderScale = 1
+    return videoComposition
+  }
 
-    return PreparedMotionBlurVideo(
-      asset: composition,
-      videoComposition: videoComposition
-    )
+  /// Selects source-authored timing only when temporal neighbors are unused.
+  static func sourceTrackIDForFrameTiming(
+    mode: MotionBlurRenderingMode,
+    currentTrackID: CMPersistentTrackID
+  ) -> CMPersistentTrackID {
+    switch mode {
+    case .currentFrame:
+      // Bypass Preview retains the source's authored variable frame timing.
+      return currentTrackID
+    case .opticalFlow:
+      // Optical Flow requires equally spaced temporal samples. Do not preserve
+      // a VFR track's irregular times while labeling neighbors as t±d.
+      return kCMPersistentTrackID_Invalid
+    }
   }
 
   static func resolveFrameDuration(
@@ -611,13 +736,33 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
     previousTrackID: CMPersistentTrackID,
     currentTrackID: CMPersistentTrackID,
     nextTrackID: CMPersistentTrackID,
-    settings: MotionBlurSettings,
+    mode: MotionBlurRenderingMode,
     quality: MotionBlurQuality,
     allowsRealtimeFrameDropping: Bool,
     geometry: MotionBlurFrameGeometry,
     ciContext: CIContext,
+    outputColorSpace: CGColorSpace?,
     postProcessor: @escaping PostProcessor
   ) -> [MotionBlurCompositionInstruction] {
+    if case .currentFrame = mode {
+      return [
+        MotionBlurCompositionInstruction(
+          timeRange: CMTimeRange(start: .zero, duration: duration),
+          previousTrackID: nil,
+          currentTrackID: currentTrackID,
+          nextTrackID: nil,
+          renderingMode: mode,
+          quality: quality,
+          allowsRealtimeFrameDropping: allowsRealtimeFrameDropping,
+          frameDuration: neighborOffset,
+          geometry: geometry,
+          ciContext: ciContext,
+          outputColorSpace: outputColorSpace,
+          postProcessor: postProcessor
+        )
+      ]
+    }
+
     let finalNextTime = CMTimeMaximum(.zero, duration - neighborOffset)
     let boundaries = [.zero, neighborOffset, finalNextTime, duration]
       .filter { $0 >= .zero && $0 <= duration }
@@ -638,12 +783,13 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
         previousTrackID: hasPrevious ? previousTrackID : nil,
         currentTrackID: currentTrackID,
         nextTrackID: hasNext ? nextTrackID : nil,
-        settings: settings,
+        renderingMode: mode,
         quality: quality,
         allowsRealtimeFrameDropping: allowsRealtimeFrameDropping,
         frameDuration: neighborOffset,
         geometry: geometry,
         ciContext: ciContext,
+        outputColorSpace: outputColorSpace,
         postProcessor: postProcessor
       )
     }

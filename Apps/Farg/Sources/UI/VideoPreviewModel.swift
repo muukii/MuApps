@@ -24,6 +24,15 @@ enum VideoPreviewRenderState: Equatable {
   }
 }
 
+/// Identifies how narrowly the editor may update an existing Preview recipe.
+///
+/// Motion-blur-only edits can preserve both the current video composition and
+/// player item when only the live Strength value changed.
+enum VideoPreviewRecipeChange: Equatable, Sendable {
+  case complete
+  case motionBlur
+}
+
 /// Owns the preview `AVPlayer` and rebuilds it from the same complete render
 /// recipe used for export, including any temporal composition asset.
 @MainActor
@@ -38,6 +47,17 @@ final class VideoPreviewModel {
     let recipe: FargVideoRenderRecipe
     let source: VideoSource
     let colorInfo: VideoColorInfo
+  }
+
+  /// Source-owned temporal topology reused by every Preview presentation mode.
+  ///
+  /// The three-track asset is independent of viewport, LUT, enablement, and
+  /// Strength. Those values change only the composition installed on this
+  /// source or the live value read by its compositor.
+  private struct TemporalPreviewState {
+    let sourceID: VideoSource.ID
+    let source: PreparedMotionBlurSource
+    let strength: MotionBlurStrengthSource
   }
 
   let player = AVPlayer()
@@ -66,6 +86,12 @@ final class VideoPreviewModel {
     return min(max(playbackTime / playbackDuration, 0), 1)
   }
 
+  /// The display-oriented ratio used while an item or composition is replaced.
+  ///
+  /// Keeping this outside `AVPlayerItem` prevents a transient 16:9 fallback
+  /// from feeding a false viewport back into portrait Preview preparation.
+  private(set) var presentationAspectRatio: CGFloat = 16 / 9
+
   /// The relationship between the desired recipe and the installed player item.
   private(set) var renderState: VideoPreviewRenderState = .empty
 
@@ -76,14 +102,20 @@ final class VideoPreviewModel {
 
   private var loadedSource: VideoSource?
   private var desiredRenderRequest: DesiredRenderRequest?
+  private var temporalPreviewState: TemporalPreviewState?
   private var previewRenderTarget: FargPreviewRenderTarget?
-  private var hasScheduledPreviewForLoadedSource = false
-  private var compositionTask: Task<Void, Never>?
-  private var compositionGeneration: UInt = 0
+  private var hasInstalledPreviewForLoadedSource = false
+  private var preparingTemporalSourceID: VideoSource.ID?
+  private var sourcePreparationTask: Task<Void, Never>?
+  private var compositionUpdateTask: Task<Void, Never>?
+  private var sourceGeneration: UInt = 0
+  private var compositionRevision: UInt = 0
+  private var itemGeneration: UInt = 0
   private var frameCaptureTask: Task<Void, Never>?
   private var lastScheduledFrameTime: CMTime?
   private var isPlaybackRequested = false
   private var replacementSeekGeneration: UInt?
+  private var pendingCompositionAfterReplacementSeek: PreparedFargVideoRender?
   private var isSeeking = false
   private var shouldResumePlaybackAfterSeeking = false
   private var preservedPlaybackPosition: CMTime?
@@ -125,11 +157,18 @@ final class VideoPreviewModel {
   /// Selects a source while withholding raw frames until its recipe is ready.
   func load(_ source: VideoSource) {
     guard loadedSource?.id != source.id else { return }
-    compositionTask?.cancel()
-    compositionGeneration &+= 1
+    sourcePreparationTask?.cancel()
+    sourcePreparationTask = nil
+    compositionUpdateTask?.cancel()
+    compositionUpdateTask = nil
+    sourceGeneration &+= 1
+    compositionRevision &+= 1
+    itemGeneration &+= 1
     loadedSource = source
     desiredRenderRequest = nil
-    hasScheduledPreviewForLoadedSource = false
+    temporalPreviewState = nil
+    preparingTemporalSourceID = nil
+    hasInstalledPreviewForLoadedSource = false
     renderState = .preparing
     lutPreviewSource = nil
     lastScheduledFrameTime = nil
@@ -138,8 +177,11 @@ final class VideoPreviewModel {
     isPlaying = false
     playbackTime = 0
     playbackDuration = 0
+    presentationAspectRatio = 16 / 9
     preservedPlaybackPosition = nil
     replacementSeekGeneration = nil
+    pendingCompositionAfterReplacementSeek = nil
+    player.currentItem?.cancelPendingSeeks()
     player.replaceCurrentItem(with: nil)
     stopObservingCurrentItem()
     scheduleFrameCapture(at: .zero, debounce: false)
@@ -147,14 +189,20 @@ final class VideoPreviewModel {
 
   /// Releases the current preview when the last video leaves the collection.
   func clear() {
-    compositionTask?.cancel()
-    compositionTask = nil
-    compositionGeneration &+= 1
+    sourcePreparationTask?.cancel()
+    sourcePreparationTask = nil
+    compositionUpdateTask?.cancel()
+    compositionUpdateTask = nil
+    sourceGeneration &+= 1
+    compositionRevision &+= 1
+    itemGeneration &+= 1
     frameCaptureTask?.cancel()
     frameCaptureTask = nil
     loadedSource = nil
     desiredRenderRequest = nil
-    hasScheduledPreviewForLoadedSource = false
+    temporalPreviewState = nil
+    preparingTemporalSourceID = nil
+    hasInstalledPreviewForLoadedSource = false
     renderState = .empty
     lutPreviewSource = nil
     lastScheduledFrameTime = nil
@@ -162,24 +210,30 @@ final class VideoPreviewModel {
     isPlaying = false
     playbackTime = 0
     playbackDuration = 0
+    presentationAspectRatio = 16 / 9
     isSeeking = false
     shouldResumePlaybackAfterSeeking = false
     preservedPlaybackPosition = nil
     isRenderingSuspended = false
     replacementSeekGeneration = nil
+    pendingCompositionAfterReplacementSeek = nil
+    player.currentItem?.cancelPendingSeeks()
     player.replaceCurrentItem(with: nil)
     stopObservingCurrentItem()
   }
 
-  /// Rebuilds the live player item from one immutable render recipe.
+  /// Applies one immutable recipe to the source's reusable temporal topology.
   ///
-  /// Motion blur requires a prepared multi-track asset, so every request is
-  /// cancellable and generation-checked before it replaces the visible item.
+  /// Only a source change creates another topology and player item. Enablement,
+  /// viewport, and LUT changes replace the item's video composition in place;
+  /// a Strength-only edit updates the value consumed by subsequent frames.
   func apply(
     recipe: FargVideoRenderRecipe,
     for source: VideoSource,
-    colorInfo: VideoColorInfo?
+    colorInfo: VideoColorInfo?,
+    change: VideoPreviewRecipeChange = .complete
   ) {
+    let previousRequest = desiredRenderRequest
     let request = DesiredRenderRequest(
       recipe: recipe,
       source: source,
@@ -187,15 +241,36 @@ final class VideoPreviewModel {
     )
     desiredRenderRequest = request
     guard isRenderingSuspended == false else { return }
-    guard let previewRenderTarget else {
+
+    guard
+      let temporalPreviewState,
+      temporalPreviewState.sourceID == source.id
+    else {
+      renderState = .preparing
+      prepareTemporalSourceIfNeeded(for: source)
+      return
+    }
+
+    temporalPreviewState.strength.update(
+      strength: recipe.motionBlur.strength
+    )
+
+    if change == .motionBlur,
+      previousRequest?.source.id == source.id,
+      previousRequest?.recipe.motionBlur.isEnabled
+        == recipe.motionBlur.isEnabled,
+      player.currentItem?.asset === temporalPreviewState.source.asset
+    {
+      // Strength is sampled once at the start of each compositor request, so
+      // this edit neither invalidates queued playback nor resets the playhead.
+      return
+    }
+
+    guard previewRenderTarget != nil else {
       renderState = .preparing
       return
     }
-    schedulePreviewPreparation(
-      request: request,
-      target: previewRenderTarget,
-      debounce: false
-    )
+    scheduleCompositionUpdate(debounce: false)
   }
 
   /// Updates the operational preview resolution from the visible player area.
@@ -223,124 +298,158 @@ final class VideoPreviewModel {
     else {
       return
     }
-    schedulePreviewPreparation(
-      request: request,
-      target: target,
-      debounce: hasScheduledPreviewForLoadedSource
+    guard
+      let temporalPreviewState,
+      temporalPreviewState.sourceID == request.source.id
+    else {
+      prepareTemporalSourceIfNeeded(for: request.source)
+      return
+    }
+    scheduleCompositionUpdate(
+      debounce: hasInstalledPreviewForLoadedSource
     )
   }
 
-  private func schedulePreviewPreparation(
-    request: DesiredRenderRequest,
-    target: FargPreviewRenderTarget,
-    debounce: Bool
-  ) {
-    compositionTask?.cancel()
-    compositionGeneration &+= 1
-    let generation = compositionGeneration
-    hasScheduledPreviewForLoadedSource = true
-    player.currentItem?.cancelPendingSeeks()
-    replacementSeekGeneration = nil
+  /// Builds the source-owned three-track asset exactly once per selected clip.
+  private func prepareTemporalSourceIfNeeded(for source: VideoSource) {
+    guard temporalPreviewState?.sourceID != source.id else { return }
+    guard preparingTemporalSourceID != source.id else { return }
 
-    if debounce == false {
-      prepareVisibleStateForReplacement(
-        recipe: request.recipe
-      )
-    }
-
-    compositionTask = Task { [weak self] in
+    sourcePreparationTask?.cancel()
+    preparingTemporalSourceID = source.id
+    let generation = sourceGeneration
+    sourcePreparationTask = Task { [weak self] in
       do {
-        if debounce {
-          try await Task.sleep(for: .milliseconds(120))
-          guard
-            let self,
-            self.compositionGeneration == generation,
-            self.loadedSource?.id == request.source.id
-          else {
-            return
-          }
-          self.prepareVisibleStateForReplacement(
-            recipe: request.recipe
-          )
-        }
-
-        let prepared: PreparedFargVideoRender
-        if request.recipe.motionBlur.isEnabled {
-          prepared = try await FargVideoRenderPipeline().prepare(
-            asset: request.source.asset,
-            recipe: request.recipe,
-            colorInfo: request.colorInfo,
-            purpose: .preview(target)
-          )
-        } else {
-          prepared = try FargVideoRenderPipeline().prepareSingleFrame(
-            asset: request.source.asset,
-            recipe: request.recipe,
-            colorInfo: request.colorInfo,
-            purpose: .preview(target)
-          )
-        }
+        let preparedSource =
+          try await FargVideoRenderPipeline()
+          .prepareTemporalPreviewSource(asset: source.asset)
         try Task.checkCancellation()
         guard
           let self,
-          self.compositionGeneration == generation,
-          self.loadedSource?.id == request.source.id,
-          self.previewRenderTarget == target
+          self.sourceGeneration == generation,
+          self.loadedSource?.id == source.id
         else {
           return
         }
-        self.install(
-          prepared: prepared,
-          generation: generation
+        let strength = MotionBlurStrengthSource(
+          strength:
+            self.desiredRenderRequest?.recipe.motionBlur.strength
+            ?? MotionBlurSettings.disabled.strength
         )
+        self.updatePresentationAspectRatio(
+          from: preparedSource.sourceDisplaySize
+        )
+        self.temporalPreviewState = TemporalPreviewState(
+          sourceID: source.id,
+          source: preparedSource,
+          strength: strength
+        )
+        self.preparingTemporalSourceID = nil
+        self.sourcePreparationTask = nil
+
+        guard
+          self.isRenderingSuspended == false,
+          self.previewRenderTarget != nil,
+          self.desiredRenderRequest?.source.id == source.id
+        else {
+          return
+        }
+        self.scheduleCompositionUpdate(debounce: false)
       } catch is CancellationError {
         return
       } catch {
         guard
           let self,
-          self.compositionGeneration == generation,
-          self.loadedSource?.id == request.source.id
+          self.sourceGeneration == generation,
+          self.loadedSource?.id == source.id
         else {
           return
         }
+        self.preparingTemporalSourceID = nil
+        self.sourcePreparationTask = nil
         self.failRender(
-          message: error.localizedDescription,
-          generation: generation
+          message: error.localizedDescription
         )
       }
     }
   }
 
-  /// Hides a stale temporal result only when replacement work actually begins.
-  ///
-  /// LUT-only items remain attached because their composition can be replaced
-  /// in place without disrupting the decoder, playhead, or audio clock.
-  private func prepareVisibleStateForReplacement(
-    recipe: FargVideoRenderRecipe
-  ) {
-    guard recipe.motionBlur.isEnabled else {
-      if player.currentItem == nil {
-        renderState = .preparing
-      }
+  /// Coalesces operational resize bursts without rebuilding source topology.
+  private func scheduleCompositionUpdate(debounce: Bool) {
+    compositionUpdateTask?.cancel()
+    compositionRevision &+= 1
+    let revision = compositionRevision
+
+    guard debounce else {
+      installLatestComposition(revision: revision)
       return
     }
 
-    renderState = .preparing
-    detachCurrentItem(preservingPlaybackPosition: true)
-    isPlaying = false
+    compositionUpdateTask = Task { [weak self] in
+      do {
+        try await Task.sleep(for: .milliseconds(120))
+        guard
+          let self,
+          self.compositionRevision == revision
+        else {
+          return
+        }
+        self.compositionUpdateTask = nil
+        self.installLatestComposition(revision: revision)
+      } catch is CancellationError {
+        return
+      } catch {
+        return
+      }
+    }
+  }
+
+  /// Installs the latest composition while preserving the current player item.
+  private func installLatestComposition(revision: UInt) {
+    guard
+      compositionRevision == revision,
+      isRenderingSuspended == false,
+      let request = desiredRenderRequest,
+      let target = previewRenderTarget,
+      let temporalPreviewState,
+      temporalPreviewState.sourceID == request.source.id
+    else {
+      return
+    }
+
+    temporalPreviewState.strength.update(
+      strength: request.recipe.motionBlur.strength
+    )
+
+    do {
+      let prepared = try FargVideoRenderPipeline().makeTemporalPreview(
+        source: temporalPreviewState.source,
+        recipe: request.recipe,
+        colorInfo: request.colorInfo,
+        target: target,
+        strengthSource: temporalPreviewState.strength
+      )
+      guard compositionRevision == revision else { return }
+      install(prepared: prepared)
+    } catch {
+      guard compositionRevision == revision else { return }
+      failRender(message: error.localizedDescription)
+    }
   }
 
   /// Invalidates a preview when recipe creation fails before preparation starts.
   func failCurrentRender(_ error: any Error) {
-    compositionTask?.cancel()
-    compositionTask = nil
-    compositionGeneration &+= 1
+    sourcePreparationTask?.cancel()
+    sourcePreparationTask = nil
+    preparingTemporalSourceID = nil
+    compositionUpdateTask?.cancel()
+    compositionUpdateTask = nil
+    sourceGeneration &+= 1
+    compositionRevision &+= 1
     desiredRenderRequest = nil
     replacementSeekGeneration = nil
-    failRender(
-      message: error.localizedDescription,
-      generation: compositionGeneration
-    )
+    pendingCompositionAfterReplacementSeek = nil
+    failRender(message: error.localizedDescription)
   }
 
   /// Starts or resumes playback.
@@ -364,9 +473,13 @@ final class VideoPreviewModel {
   /// releasing the preview item prevents both pipelines from overlapping.
   func suspendRendering() {
     isRenderingSuspended = true
-    compositionTask?.cancel()
-    compositionTask = nil
-    compositionGeneration &+= 1
+    sourcePreparationTask?.cancel()
+    sourcePreparationTask = nil
+    preparingTemporalSourceID = nil
+    compositionUpdateTask?.cancel()
+    compositionUpdateTask = nil
+    sourceGeneration &+= 1
+    compositionRevision &+= 1
 
     isPlaybackRequested = false
     isPlaying = false
@@ -528,7 +641,7 @@ final class VideoPreviewModel {
 
   private func observe(
     item: AVPlayerItem,
-    generation: UInt
+    itemGeneration: UInt
   ) {
     stopObservingCurrentItem()
 
@@ -540,7 +653,7 @@ final class VideoPreviewModel {
       Task { @MainActor [weak self] in
         guard
           let self,
-          self.compositionGeneration == generation,
+          self.itemGeneration == itemGeneration,
           self.player.currentItem === item
         else {
           return
@@ -556,7 +669,7 @@ final class VideoPreviewModel {
       options: [.initial, .new]
     ) { [weak self] _, _ in
       Task { @MainActor [weak self] in
-        self?.handleCurrentItemStatus(generation: generation)
+        self?.handleCurrentItemStatus(itemGeneration: itemGeneration)
       }
     }
 
@@ -569,9 +682,15 @@ final class VideoPreviewModel {
         (notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? any Error)?
         .localizedDescription
       Task { @MainActor [weak self] in
-        self?.failRender(
-          message: message ?? "The preview renderer failed.",
-          generation: generation
+        guard
+          let self,
+          self.itemGeneration == itemGeneration,
+          self.player.currentItem === item
+        else {
+          return
+        }
+        self.failRender(
+          message: message ?? "The preview renderer failed."
         )
       }
     }
@@ -590,9 +709,9 @@ final class VideoPreviewModel {
     }
   }
 
-  private func handleCurrentItemStatus(generation: UInt) {
+  private func handleCurrentItemStatus(itemGeneration: UInt) {
     guard
-      compositionGeneration == generation,
+      self.itemGeneration == itemGeneration,
       let item = player.currentItem
     else {
       return
@@ -602,29 +721,23 @@ final class VideoPreviewModel {
     case .unknown:
       break
     case .readyToPlay:
-      guard replacementSeekGeneration != generation else { return }
+      guard replacementSeekGeneration != itemGeneration else { return }
       renderState = .ready
       if isPlaybackRequested {
         player.play()
       }
     case .failed:
       failRender(
-        message: item.error?.localizedDescription ?? "The preview renderer failed.",
-        generation: generation
+        message: item.error?.localizedDescription ?? "The preview renderer failed."
       )
     @unknown default:
       failRender(
-        message: "The preview renderer entered an unknown state.",
-        generation: generation
+        message: "The preview renderer entered an unknown state."
       )
     }
   }
 
-  private func failRender(
-    message: String,
-    generation: UInt
-  ) {
-    guard compositionGeneration == generation else { return }
+  private func failRender(message: String) {
     player.pause()
     isPlaying = false
     replacementSeekGeneration = nil
@@ -635,6 +748,7 @@ final class VideoPreviewModel {
   private func detachCurrentItem(
     preservingPlaybackPosition: Bool
   ) {
+    itemGeneration &+= 1
     player.currentItem?.cancelPendingSeeks()
     if preservingPlaybackPosition {
       let currentTime = player.currentTime()
@@ -643,26 +757,30 @@ final class VideoPreviewModel {
       }
     }
     replacementSeekGeneration = nil
+    pendingCompositionAfterReplacementSeek = nil
     player.pause()
     player.replaceCurrentItem(with: nil)
     stopObservingCurrentItem()
   }
 
-  private func install(
-    prepared: PreparedFargVideoRender,
-    generation: UInt
-  ) {
-    guard compositionGeneration == generation else { return }
-
-    if let sourceAsset = loadedSource?.asset,
-      prepared.asset === sourceAsset,
-      let item = player.currentItem,
-      item.asset === sourceAsset
+  private func install(prepared: PreparedFargVideoRender) {
+    if let item = player.currentItem,
+      item.asset === prepared.asset
     {
-      // LUT-only edits can update the existing item without disrupting its
-      // decoder, playhead, or audio clock.
+      if replacementSeekGeneration == itemGeneration {
+        // A portrait-driven viewport correction can arrive while the initial
+        // replacement seek is still positioning this item. Keep only the
+        // latest composition and install it after that seek completes.
+        pendingCompositionAfterReplacementSeek = prepared
+        return
+      }
+      // Mode, LUT, color, and viewport changes remain on the same decoder,
+      // playhead, and audio clock.
       item.videoComposition = prepared.videoComposition
-      observe(item: item, generation: generation)
+      hasInstalledPreviewForLoadedSource = true
+      if item.status == .readyToPlay {
+        renderState = .ready
+      }
       return
     }
 
@@ -677,11 +795,15 @@ final class VideoPreviewModel {
     renderState = .preparing
     player.pause()
     isPlaying = false
+    itemGeneration &+= 1
+    let generation = itemGeneration
     replacementSeekGeneration = generation
+    pendingCompositionAfterReplacementSeek = nil
     let item = AVPlayerItem(asset: prepared.asset)
     item.videoComposition = prepared.videoComposition
     player.replaceCurrentItem(with: item)
-    observe(item: item, generation: generation)
+    observe(item: item, itemGeneration: generation)
+    hasInstalledPreviewForLoadedSource = true
     player.seek(
       to: playbackPosition,
       toleranceBefore: .zero,
@@ -690,7 +812,7 @@ final class VideoPreviewModel {
       Task { @MainActor [weak self] in
         guard
           let self,
-          self.compositionGeneration == generation,
+          self.itemGeneration == generation,
           self.replacementSeekGeneration == generation
         else {
           return
@@ -698,14 +820,33 @@ final class VideoPreviewModel {
         self.replacementSeekGeneration = nil
         if finished {
           self.preservedPlaybackPosition = nil
-          self.handleCurrentItemStatus(generation: generation)
+          if let pendingComposition =
+            self.pendingCompositionAfterReplacementSeek,
+            pendingComposition.asset === item.asset
+          {
+            item.videoComposition =
+              pendingComposition.videoComposition
+          }
+          self.pendingCompositionAfterReplacementSeek = nil
+          self.handleCurrentItemStatus(itemGeneration: generation)
         } else {
           self.failRender(
-            message: "Färg couldn't position the prepared preview.",
-            generation: generation
+            message: "Färg couldn't position the prepared preview."
           )
         }
       }
     }
+  }
+
+  private func updatePresentationAspectRatio(from renderSize: CGSize) {
+    guard
+      renderSize.width.isFinite,
+      renderSize.height.isFinite,
+      renderSize.width > 0,
+      renderSize.height > 0
+    else {
+      return
+    }
+    presentationAspectRatio = renderSize.width / renderSize.height
   }
 }

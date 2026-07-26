@@ -8,6 +8,31 @@ import CoreImage
 import FargMotionBlur
 import Foundation
 
+/// The display-referred color space produced by a LUT supported by Färg.
+///
+/// A `.cube` file does not carry a standardized input/output color-space
+/// declaration. Färg therefore owns this contract separately from Brightroom's
+/// color-cube data. The current library accepts only LUTs whose final output is
+/// SDR Rec.709; additional cases must be introduced together with matching
+/// render and encoder support.
+nonisolated enum FargLUTOutputColorSpace: Equatable, Sendable {
+  case rec709
+
+  var videoColorInfo: VideoColorInfo {
+    switch self {
+    case .rec709:
+      return .sdrRec709
+    }
+  }
+
+  var cgColorSpace: CGColorSpace {
+    switch self {
+    case .rec709:
+      return CGColorSpace(name: CGColorSpace.itur_709)!
+    }
+  }
+}
+
 /// One immutable video-render recipe shared by preview and export.
 ///
 /// The Brightroom document remains a single-frame feature graph. Temporal
@@ -16,12 +41,34 @@ import Foundation
 nonisolated struct FargVideoRenderRecipe: Sendable {
   let document: EditingDocument
   let motionBlur: MotionBlurSettings
+
+  /// The color space produced by the recipe's LUT, or `nil` for pass-through.
+  let lutOutputColorSpace: FargLUTOutputColorSpace?
+
+  init(
+    document: EditingDocument,
+    motionBlur: MotionBlurSettings,
+    lutOutputColorSpace: FargLUTOutputColorSpace? = nil
+  ) {
+    self.document = document
+    self.motionBlur = motionBlur
+    self.lutOutputColorSpace = lutOutputColorSpace
+  }
+
+  /// Resolves concrete output tags without reusing the source as LUT metadata.
+  func resolveOutputColorInfo(
+    sourceColorInfo: VideoColorInfo
+  ) -> VideoColorInfo {
+    lutOutputColorSpace?.videoColorInfo
+      ?? sourceColorInfo.resolvedForCurrentSDRPipeline
+  }
 }
 
 /// The asset/composition pair a player or asset reader must use together.
 nonisolated struct PreparedFargVideoRender: @unchecked Sendable {
   let asset: AVAsset
   let videoComposition: AVMutableVideoComposition
+  let outputColorInfo: VideoColorInfo
 }
 
 /// Controls operational backpressure without changing the authored recipe.
@@ -58,6 +105,75 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
 
   var ciContext: CIContext = FargCIContext.shared
 
+  /// Prepares the stable temporal asset used by one editor Preview source.
+  ///
+  /// The returned source is independent of viewport size, LUT state, and Motion
+  /// Blur controls. Keeping it alive lets Preview replace only its video
+  /// composition while preserving the `AVPlayerItem`, decoder, playhead, and
+  /// audio clock.
+  func prepareTemporalPreviewSource(
+    asset: AVAsset
+  ) async throws -> PreparedMotionBlurSource {
+    try await MotionBlurVideoCompositionBuilder(
+      quality: .normal,
+      ciContext: ciContext,
+      allowsRealtimeFrameDropping: true
+    )
+    .prepareSource(asset: asset)
+  }
+
+  /// Builds one Preview composition over an already prepared temporal source.
+  ///
+  /// Disabled Motion Blur still uses the temporal source asset, but its
+  /// current-frame mode avoids requesting temporal neighbors or starting
+  /// VideoToolbox. Enabled mode shares a live strength source so slider changes
+  /// do not require another composition or player-item replacement.
+  func makeTemporalPreview(
+    source: PreparedMotionBlurSource,
+    recipe: FargVideoRenderRecipe,
+    colorInfo: VideoColorInfo,
+    target: FargPreviewRenderTarget,
+    strengthSource: MotionBlurStrengthSource
+  ) throws -> PreparedFargVideoRender {
+    strengthSource.update(strength: recipe.motionBlur.strength)
+    if recipe.motionBlur.isEnabled == false {
+      strengthSource.requestProcessorSessionReset()
+    }
+    let outputColorInfo = recipe.resolveOutputColorInfo(
+      sourceColorInfo: colorInfo
+    )
+
+    let mode: MotionBlurRenderingMode =
+      recipe.motionBlur.isEnabled
+      ? .opticalFlow(strength: strengthSource)
+      : .currentFrame
+    let parametricRenderer = ParametricVideoRenderer()
+    let composition = try MotionBlurVideoCompositionBuilder(
+      quality: .normal,
+      ciContext: ciContext,
+      allowsRealtimeFrameDropping: true
+    )
+    .makeVideoComposition(
+      source: source,
+      mode: mode,
+      renderTarget: .fitWithin(target.maximumPixelSize),
+      outputColorSpace: recipe.lutOutputColorSpace?.cgColorSpace
+    ) { image, renderExtent in
+      try parametricRenderer.makeFrameImage(
+        from: image,
+        document: recipe.document,
+        renderExtent: renderExtent
+      )
+    }
+    outputColorInfo.apply(to: composition)
+
+    return PreparedFargVideoRender(
+      asset: source.asset,
+      videoComposition: composition,
+      outputColorInfo: outputColorInfo
+    )
+  }
+
   func prepare(
     asset: AVAsset,
     recipe: FargVideoRenderRecipe,
@@ -65,125 +181,42 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
     purpose: FargVideoRenderPurpose
   ) async throws -> PreparedFargVideoRender {
     let parametricRenderer = ParametricVideoRenderer()
-
-    if recipe.motionBlur.isEnabled {
-      let prepared = try await MotionBlurVideoCompositionBuilder(
-        quality: .normal,
-        ciContext: ciContext,
-        allowsRealtimeFrameDropping: purpose.allowsRealtimeFrameDropping
-      )
-      .prepare(
-        asset: asset,
-        settings: recipe.motionBlur,
-        renderTarget: purpose.motionBlurRenderTarget
-      ) { image, renderExtent in
-        try parametricRenderer.makeFrameImage(
-          from: image,
-          document: recipe.document,
-          renderExtent: renderExtent
+    let outputColorInfo = recipe.resolveOutputColorInfo(
+      sourceColorInfo: colorInfo
+    )
+    let builder = MotionBlurVideoCompositionBuilder(
+      quality: .normal,
+      ciContext: ciContext,
+      allowsRealtimeFrameDropping: purpose.allowsRealtimeFrameDropping
+    )
+    let source = try await builder.prepareSource(asset: asset)
+    let mode: MotionBlurRenderingMode =
+      recipe.motionBlur.isEnabled
+      ? .opticalFlow(
+        strength: MotionBlurStrengthSource(
+          strength: recipe.motionBlur.strength
         )
-      }
-      colorInfo.apply(to: prepared.videoComposition)
-      return PreparedFargVideoRender(
-        asset: prepared.asset,
-        videoComposition: prepared.videoComposition
       )
-    }
-
-    return try prepareSingleFrame(
-      asset: asset,
-      recipe: recipe,
-      colorInfo: colorInfo,
-      purpose: purpose
-    )
-  }
-
-  /// Prepares the ordinary single-frame path synchronously.
-  ///
-  /// The editor uses this entry point for LUT slider changes so the current
-  /// source-backed player item can update in place without an asynchronous
-  /// preparing-state flash.
-  func prepareSingleFrame(
-    asset: AVAsset,
-    recipe: FargVideoRenderRecipe,
-    colorInfo: VideoColorInfo,
-    purpose: FargVideoRenderPurpose
-  ) throws -> PreparedFargVideoRender {
-    precondition(recipe.motionBlur.isEnabled == false)
-    let parametricRenderer = ParametricVideoRenderer()
-    let composition: AVMutableVideoComposition
-    switch purpose {
-    case .export:
-      composition = try parametricRenderer.makeVideoComposition(
-        for: asset,
+      : .currentFrame
+    let composition = try builder.makeVideoComposition(
+      source: source,
+      mode: mode,
+      renderTarget: purpose.motionBlurRenderTarget,
+      outputColorSpace: recipe.lutOutputColorSpace?.cgColorSpace
+    ) { image, renderExtent in
+      try parametricRenderer.makeFrameImage(
+        from: image,
         document: recipe.document,
-        renderSizeMode: .source,
-        ciContext: ciContext
+        renderExtent: renderExtent
       )
-
-    case .preview(let target):
-      let sourceRenderSize = try Self.sourceRenderSize(for: asset)
-      let previewRenderSize = try target.resolveRenderSize(
-        sourceDisplaySize: sourceRenderSize
-      )
-      let renderExtent = CGRect(
-        origin: .zero,
-        size: previewRenderSize
-      )
-      let document = recipe.document
-      let ciContext = ciContext
-      composition = AVMutableVideoComposition(asset: asset) { request in
-        do {
-          let sourceImage = try Self.makePreviewSourceImage(
-            request.sourceImage,
-            renderExtent: renderExtent
-          )
-          let output = try parametricRenderer.makeFrameImage(
-            from: sourceImage,
-            document: document,
-            renderExtent: renderExtent
-          )
-          request.finish(with: output, context: ciContext)
-        } catch {
-          request.finish(with: error)
-        }
-      }
-      composition.renderSize = previewRenderSize
     }
+    outputColorInfo.apply(to: composition)
 
-    colorInfo.apply(to: composition)
     return PreparedFargVideoRender(
-      asset: asset,
-      videoComposition: composition
+      asset: source.asset,
+      videoComposition: composition,
+      outputColorInfo: outputColorInfo
     )
-  }
-
-  /// Returns the display-oriented canvas supplied by AVFoundation's Core Image
-  /// composition handler.
-  ///
-  /// This sizing probe intentionally lives in Farg: viewport resolution is an
-  /// editor-only operational policy and does not expand Brightroom's public
-  /// rendering API.
-  private static func sourceRenderSize(for asset: AVAsset) throws -> CGSize {
-    let composition = AVMutableVideoComposition(asset: asset) { request in
-      request.finish(with: request.sourceImage, context: nil)
-    }
-    let sourceRenderSize: CGSize
-    if composition.renderSize.isFargValidVideoRenderSize {
-      sourceRenderSize = composition.renderSize
-    } else if let compositionAsset = asset as? AVComposition,
-      compositionAsset.naturalSize.isFargValidVideoRenderSize
-    {
-      sourceRenderSize = compositionAsset.naturalSize
-    } else {
-      sourceRenderSize = composition.renderSize
-    }
-    guard sourceRenderSize.isFargValidVideoRenderSize else {
-      throw ParametricVideoRendererError.invalidSourceRenderSize(
-        sourceRenderSize
-      )
-    }
-    return sourceRenderSize
   }
 
   /// Normalizes and downsamples AVFoundation's display-oriented frame before
@@ -221,15 +254,5 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
         )
       )
       .cropped(to: renderExtent)
-  }
-}
-
-extension CGSize {
-
-  fileprivate nonisolated var isFargValidVideoRenderSize: Bool {
-    width.isFinite
-      && height.isFinite
-      && width > 0
-      && height > 0
   }
 }

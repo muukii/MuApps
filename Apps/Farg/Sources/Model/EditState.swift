@@ -129,9 +129,14 @@ final class EditState {
 
   /// Snapshots the complete render recipe used by preview and export.
   func makeRenderRecipe(using library: LUTLibrary) throws -> FargVideoRenderRecipe {
-    FargVideoRenderRecipe(
+    let lutOutputColorSpace: FargLUTOutputColorSpace? =
+      selectedLUT != nil && amount > Self.minimumAmount
+      ? .rec709
+      : nil
+    return FargVideoRenderRecipe(
       document: try makeDocument(using: library),
-      motionBlur: motionBlur
+      motionBlur: motionBlur,
+      lutOutputColorSpace: lutOutputColorSpace
     )
   }
 }

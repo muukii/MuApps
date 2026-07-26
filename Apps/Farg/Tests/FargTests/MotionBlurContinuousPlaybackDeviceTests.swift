@@ -1,9 +1,13 @@
 import AVFoundation
+import BrightroomParametric
 import CoreImage
 import CoreVideo
 import FargMotionBlur
 import Foundation
+import QuartzCore
 import Testing
+
+@testable import Farg
 
 #if !targetEnvironment(simulator)
 
@@ -43,6 +47,202 @@ import Testing
       let renderedFrameCount = try await prepared.renderedFrameCount()
 
       #expect(renderedFrameCount == expectedFrameCount)
+    }
+
+    /// Verifies that editor control changes do not replace the active item or
+    /// seek away from the current Preview position.
+    @Test
+    @MainActor
+    func previewModeAndStrengthChangesPreservePlayerItemAndPlayhead() async throws {
+      guard MotionBlurAvailability.isSupported else {
+        return
+      }
+
+      let fixtureURL = try await MotionBlurSequenceFixture.make(
+        frameCount: 90
+      )
+      defer {
+        try? FileManager.default.removeItem(at: fixtureURL)
+      }
+
+      let model = VideoPreviewModel()
+      let source = VideoSource(appOwnedURL: fixtureURL)
+      let document = EditingDocument(
+        mainTree: MainTree(features: [])
+      )
+      model.load(source)
+      model.updateViewport(
+        sizeInPoints: CGSize(width: 96, height: 64),
+        displayScale: 1
+      )
+      model.apply(
+        recipe: FargVideoRenderRecipe(
+          document: document,
+          motionBlur: .disabled
+        ),
+        for: source,
+        colorInfo: .sdrRec709
+      )
+      try await waitUntilPreviewIsReady(model)
+      model.pause()
+
+      guard let originalItem = model.player.currentItem else {
+        Issue.record("Preview became ready without a player item.")
+        return
+      }
+      let videoOutput = AVPlayerItemVideoOutput(
+        pixelBufferAttributes: [
+          kCVPixelBufferPixelFormatTypeKey as String:
+            Int(kCVPixelFormatType_32BGRA)
+        ]
+      )
+      originalItem.add(videoOutput)
+      let expectedTime = CMTime(seconds: 1, preferredTimescale: 600)
+      try await seek(model.player, to: expectedTime)
+      let disabledComposition = originalItem.videoComposition
+
+      model.apply(
+        recipe: FargVideoRenderRecipe(
+          document: document,
+          motionBlur: MotionBlurSettings(isEnabled: false, strength: 80)
+        ),
+        for: source,
+        colorInfo: .sdrRec709,
+        change: .motionBlur
+      )
+      #expect(model.player.currentItem === originalItem)
+      #expect(originalItem.videoComposition === disabledComposition)
+
+      model.apply(
+        recipe: FargVideoRenderRecipe(
+          document: document,
+          motionBlur: MotionBlurSettings(isEnabled: true, strength: 80)
+        ),
+        for: source,
+        colorInfo: .sdrRec709,
+        change: .motionBlur
+      )
+      #expect(model.player.currentItem === originalItem)
+      #expect(model.renderState == .ready)
+      guard let opticalFlowComposition = originalItem.videoComposition else {
+        Issue.record("Enabled Preview has no video composition.")
+        return
+      }
+
+      model.play()
+      let timeAfterEnable = try await waitForPreviewProgress(
+        model,
+        output: videoOutput,
+        after: expectedTime
+      )
+      model.apply(
+        recipe: FargVideoRenderRecipe(
+          document: document,
+          motionBlur: MotionBlurSettings(isEnabled: true, strength: 95)
+        ),
+        for: source,
+        colorInfo: .sdrRec709,
+        change: .motionBlur
+      )
+      #expect(model.player.currentItem === originalItem)
+      #expect(originalItem.videoComposition === opticalFlowComposition)
+      let timeAfterStrength = try await waitForPreviewProgress(
+        model,
+        output: videoOutput,
+        after: timeAfterEnable
+      )
+
+      model.apply(
+        recipe: FargVideoRenderRecipe(
+          document: document,
+          motionBlur: .disabled
+        ),
+        for: source,
+        colorInfo: .sdrRec709,
+        change: .motionBlur
+      )
+      #expect(model.player.currentItem === originalItem)
+      let timeAfterDisable = try await waitForPreviewProgress(
+        model,
+        output: videoOutput,
+        after: timeAfterStrength
+      )
+      #expect(timeAfterDisable > timeAfterStrength)
+      #expect(model.renderState == .ready)
+
+      model.pause()
+      model.clear()
+    }
+
+    @MainActor
+    private func waitUntilPreviewIsReady(
+      _ model: VideoPreviewModel
+    ) async throws {
+      for _ in 0..<200 {
+        switch model.renderState {
+        case .ready:
+          return
+        case .failed(let message):
+          throw MotionBlurSequenceFixtureError.previewFailed(message)
+        case .empty, .preparing:
+          try await Task.sleep(for: .milliseconds(25))
+        }
+      }
+      throw MotionBlurSequenceFixtureError.previewTimedOut
+    }
+
+    @MainActor
+    private func seek(
+      _ player: AVPlayer,
+      to time: CMTime
+    ) async throws {
+      let finished = await withCheckedContinuation { continuation in
+        player.seek(
+          to: time,
+          toleranceBefore: .zero,
+          toleranceAfter: .zero
+        ) { finished in
+          continuation.resume(returning: finished)
+        }
+      }
+      guard finished else {
+        throw MotionBlurSequenceFixtureError.cannotSeekPreview
+      }
+    }
+
+    @MainActor
+    private func waitForPreviewProgress(
+      _ model: VideoPreviewModel,
+      output: AVPlayerItemVideoOutput,
+      after startTime: CMTime
+    ) async throws -> CMTime {
+      var renderedFrameCount = 0
+      for _ in 0..<200 {
+        if case .failed(let message) = model.renderState {
+          throw MotionBlurSequenceFixtureError.previewFailed(message)
+        }
+
+        let outputTime = output.itemTime(
+          forHostTime: CACurrentMediaTime()
+        )
+        if output.hasNewPixelBuffer(forItemTime: outputTime),
+          output.copyPixelBuffer(
+            forItemTime: outputTime,
+            itemTimeForDisplay: nil
+          ) != nil
+        {
+          renderedFrameCount += 1
+        }
+
+        let currentTime = model.player.currentTime()
+        if renderedFrameCount >= 2,
+          currentTime.seconds >= startTime.seconds + 0.2
+        {
+          return currentTime
+        }
+        try await Task.sleep(for: .milliseconds(10))
+      }
+      throw MotionBlurSequenceFixtureError.previewProgressTimedOut
     }
   }
 
@@ -183,6 +383,10 @@ import Testing
     case cannotAddReaderOutput
     case cannotStartReading
     case cannotFinishReading
+    case cannotSeekPreview
+    case previewFailed(String)
+    case previewProgressTimedOut
+    case previewTimedOut
   }
 
 #endif

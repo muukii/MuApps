@@ -61,7 +61,9 @@ struct EditorView: View {
     }
     .onChange(of: editState.selectedLUT) { _, _ in applyComposition() }
     .onChange(of: editState.amount) { _, _ in applyComposition() }
-    .onChange(of: editState.motionBlur) { _, _ in applyComposition() }
+    .onChange(of: editState.motionBlur) { _, _ in
+      applyComposition(change: .motionBlur)
+    }
     .onChange(of: preview.renderingErrorMessage) { _, message in
       if let message {
         errorMessage = message
@@ -209,14 +211,17 @@ struct EditorView: View {
     applyComposition()
   }
 
-  private func applyComposition() {
+  private func applyComposition(
+    change: VideoPreviewRecipeChange = .complete
+  ) {
     guard let content = editState.selectedClip?.content else { return }
     do {
       let recipe = try editState.makeRenderRecipe(using: library)
       preview.apply(
         recipe: recipe,
         for: content.source,
-        colorInfo: content.colorInfo
+        colorInfo: content.colorInfo,
+        change: change
       )
     } catch {
       preview.failCurrentRender(error)
@@ -407,9 +412,9 @@ private struct EditorLowerPanel: View {
       onRemoveClip: onRemoveClip,
       onPickFileURLs: onPickFileURLs
     )
-    .background(.background)   
+    .background(.background)
   }
-  
+
   /// Composes Videos and EditControl as independent siblings.
   private struct EditorLowerPanelContent: View {
 
@@ -452,7 +457,6 @@ private struct EditorLowerPanel: View {
     }
   }
 
-  
   /// Owns the LUT and Motion Blur tabs below the fixed video collection.
   private struct EditorEditControl: View {
 
@@ -503,7 +507,7 @@ private struct EditorLowerPanel: View {
             ) {
               selection = .lut
             }
-            
+
             EditorEffectTabButton(
               title: "Motion",
               systemImage: "wind",
@@ -516,9 +520,9 @@ private struct EditorLowerPanel: View {
         }
         .defaultScrollAnchor(.center)
         .frame(height: 64)
-        .background(.background)  
+        .background(.background)
       }
-      
+
       /// Represents one accessible effect mode in the editor's persistent tab bar.
       private struct EditorEffectTabButton: View {
 
@@ -571,7 +575,7 @@ private struct EditorLowerPanel: View {
       let lutPreviewSource: LUTPreviewSourceImage?
       @Binding var selectedLUT: LUT?
       @Binding var motionBlur: MotionBlurSettings
-      
+
       var body: some View {
         ZStack(alignment: .topLeading) {
           switch selectedEffect {
@@ -701,9 +705,7 @@ private struct EditorLowerPanel: View {
     }
   }
 
-
 }
-
 
 extension ShapeStyle where Self == Color {
   static var debug: Self {

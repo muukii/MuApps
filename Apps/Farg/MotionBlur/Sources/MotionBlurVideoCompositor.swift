@@ -8,6 +8,29 @@ import CoreVideo
 import Foundation
 import VideoToolbox
 
+/// Decoder formats Färg can preserve until its own source-to-processor render.
+///
+/// Apple Log is commonly decoded from ProRes as 10-bit 4:2:2, while HEVC
+/// sources are commonly 4:2:0. Advertising both families is required for
+/// `canConformColorOfSourceFrames` to prevent an implicit conversion into the
+/// composition's Rec.709 output space.
+private let motionBlurAcceptedSourcePixelFormats: [OSType] = [
+  kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange,
+  kCVPixelFormatType_422YpCbCr10BiPlanarFullRange,
+  kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange,
+  kCVPixelFormatType_420YpCbCr10BiPlanarFullRange,
+  kCVPixelFormatType_444YpCbCr10BiPlanarVideoRange,
+  kCVPixelFormatType_444YpCbCr10BiPlanarFullRange,
+  kCVPixelFormatType_422YpCbCr8BiPlanarVideoRange,
+  kCVPixelFormatType_422YpCbCr8BiPlanarFullRange,
+  kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+  kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+  kCVPixelFormatType_444YpCbCr8BiPlanarVideoRange,
+  kCVPixelFormatType_444YpCbCr8BiPlanarFullRange,
+  kCVPixelFormatType_32BGRA,
+  kCVPixelFormatType_64RGBAHalf,
+]
+
 /// The immutable instruction consumed by `MotionBlurVideoCompositor`.
 final class MotionBlurCompositionInstruction:
   NSObject,
@@ -26,12 +49,20 @@ final class MotionBlurCompositionInstruction:
   let previousTrackID: CMPersistentTrackID?
   let currentTrackID: CMPersistentTrackID
   let nextTrackID: CMPersistentTrackID?
-  let settings: MotionBlurSettings
+  let renderingMode: MotionBlurRenderingMode
   let quality: MotionBlurQuality
   let allowsRealtimeFrameDropping: Bool
   let frameDuration: CMTime
   let geometry: MotionBlurFrameGeometry
   let ciContext: CIContext
+
+  /// The display color space produced after `postProcessor`, when known.
+  ///
+  /// This is intentionally independent of the decoded source frame's color
+  /// space. A LUT may consume Apple Log or wide-gamut pixels while producing
+  /// display-referred Rec.709.
+  let outputColorSpace: CGColorSpace?
+
   let postProcessor: PostProcessor
 
   var renderExtent: CGRect {
@@ -43,29 +74,42 @@ final class MotionBlurCompositionInstruction:
     previousTrackID: CMPersistentTrackID?,
     currentTrackID: CMPersistentTrackID,
     nextTrackID: CMPersistentTrackID?,
-    settings: MotionBlurSettings,
+    renderingMode: MotionBlurRenderingMode,
     quality: MotionBlurQuality,
     allowsRealtimeFrameDropping: Bool,
     frameDuration: CMTime,
     geometry: MotionBlurFrameGeometry,
     ciContext: CIContext,
+    outputColorSpace: CGColorSpace? = nil,
     postProcessor: @escaping PostProcessor
   ) {
+    let resolvedPreviousTrackID: CMPersistentTrackID?
+    let resolvedNextTrackID: CMPersistentTrackID?
+    switch renderingMode {
+    case .currentFrame:
+      resolvedPreviousTrackID = nil
+      resolvedNextTrackID = nil
+    case .opticalFlow:
+      resolvedPreviousTrackID = previousTrackID
+      resolvedNextTrackID = nextTrackID
+    }
+
     self.timeRange = timeRange
-    self.previousTrackID = previousTrackID
+    self.previousTrackID = resolvedPreviousTrackID
     self.currentTrackID = currentTrackID
-    self.nextTrackID = nextTrackID
-    self.settings = settings
+    self.nextTrackID = resolvedNextTrackID
+    self.renderingMode = renderingMode
     self.quality = quality
     self.allowsRealtimeFrameDropping = allowsRealtimeFrameDropping
     self.frameDuration = frameDuration
     self.geometry = geometry
     self.ciContext = ciContext
+    self.outputColorSpace = outputColorSpace
     self.postProcessor = postProcessor
     self.requiredSourceTrackIDs = [
-      previousTrackID,
+      resolvedPreviousTrackID,
       currentTrackID,
-      nextTrackID,
+      resolvedNextTrackID,
     ]
     .compactMap { $0 }
     .map { NSNumber(value: $0) }
@@ -87,7 +131,7 @@ public final class MotionBlurVideoCompositor:
 
   public let sourcePixelBufferAttributes: [String: any Sendable]? = [
     kCVPixelBufferPixelFormatTypeKey as String:
-      Int(kCVPixelFormatType_64RGBAHalf),
+      motionBlurAcceptedSourcePixelFormats.map(Int.init),
     kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: String],
     kCVPixelBufferMetalCompatibilityKey as String: true,
   ]
@@ -98,11 +142,15 @@ public final class MotionBlurVideoCompositor:
     kCVPixelBufferMetalCompatibilityKey as String: true,
   ]
 
-  /// Preserve wide-gamut SDR inputs; AVFoundation still converts HDR inputs to
-  /// the composition's SDR color space before the VideoToolbox processor.
+  /// Preserve source color until Färg's post-LUT render resolves the output.
+  ///
+  /// `canConformColorOfSourceFrames` only prevents AVFoundation's conversion
+  /// when the decoded format is advertised above. Optical Flow inputs are
+  /// converted to its required half-float format inside this compositor so a
+  /// Rec.709 output contract never converts Apple Log before the LUT.
   public let supportsWideColorSourceFrames = true
-  public let supportsHDRSourceFrames = false
-  public let canConformColorOfSourceFrames = false
+  public let supportsHDRSourceFrames = true
+  public let canConformColorOfSourceFrames = true
 
   private let renderingQueue = DispatchQueue(
     label: "app.muukii.farg.motion-blur-compositor",
@@ -115,6 +163,8 @@ public final class MotionBlurVideoCompositor:
     private var processorSession: MotionBlurProcessorSession?
     private var lastCompositionTime: CMTime?
     private var lastSubmissionGeneration: UInt?
+    private let processorSessionResetRegistrationID = UUID()
+    private var registeredStrengthSources: [ObjectIdentifier: MotionBlurStrengthSource] = [:]
   #endif
 
   public override init() {
@@ -123,6 +173,11 @@ public final class MotionBlurVideoCompositor:
 
   deinit {
     #if !targetEnvironment(simulator)
+      for source in registeredStrengthSources.values {
+        source.unregisterProcessorSessionResetHandler(
+          id: processorSessionResetRegistrationID
+        )
+      }
       processorSession?.end()
     #endif
   }
@@ -195,41 +250,73 @@ public final class MotionBlurVideoCompositor:
   ) throws -> CVPixelBuffer {
     guard
       let instruction =
-        request.videoCompositionInstruction as? MotionBlurCompositionInstruction,
-      let currentBuffer = request.sourceFrame(
-        byTrackID: instruction.currentTrackID
-      )
+        request.videoCompositionInstruction as? MotionBlurCompositionInstruction
     else {
       throw MotionBlurError.cannotWrapPixelBuffer
+    }
+    let currentBuffer = try sourceFrame(
+      byTrackID: instruction.currentTrackID,
+      stage: .currentSource,
+      instruction: instruction,
+      request: request
+    )
+
+    try validateGeometry(
+      of: currentBuffer,
+      expected: instruction.geometry.sourceEncodedSize,
+      stage: .currentSource
+    )
+
+    let strengthSource: MotionBlurStrengthSource
+    switch instruction.renderingMode {
+    case .currentFrame:
+      #if !targetEnvironment(simulator)
+        // A same-item composition replacement does not necessarily create a
+        // new compositor or render context. Release the prior Optical Flow
+        // session explicitly when the first bypass request reaches this queue.
+        resetProcessorSession()
+      #endif
+      return try compose(
+        imageBuffer: currentBuffer,
+        currentBuffer: currentBuffer,
+        imageTransform:
+          instruction.geometry.sourceToProcessorTransform.concatenating(
+            instruction.geometry.processorToRenderTransform
+          ),
+        instruction: instruction,
+        request: request
+      )
+    case .opticalFlow(let source):
+      strengthSource = source
     }
 
     #if targetEnvironment(simulator)
       throw MotionBlurError.unavailable
     #else
+      registerProcessorSessionReset(with: strengthSource)
       let previousBuffer: CVPixelBuffer?
       if let previousTrackID = instruction.previousTrackID {
-        guard let buffer = request.sourceFrame(byTrackID: previousTrackID) else {
-          throw MotionBlurError.cannotWrapPixelBuffer
-        }
-        previousBuffer = buffer
+        previousBuffer = try sourceFrame(
+          byTrackID: previousTrackID,
+          stage: .previousSource,
+          instruction: instruction,
+          request: request
+        )
       } else {
         previousBuffer = nil
       }
       let nextBuffer: CVPixelBuffer?
       if let nextTrackID = instruction.nextTrackID {
-        guard let buffer = request.sourceFrame(byTrackID: nextTrackID) else {
-          throw MotionBlurError.cannotWrapPixelBuffer
-        }
-        nextBuffer = buffer
+        nextBuffer = try sourceFrame(
+          byTrackID: nextTrackID,
+          stage: .nextSource,
+          instruction: instruction,
+          request: request
+        )
       } else {
         nextBuffer = nil
       }
 
-      try validateGeometry(
-        of: currentBuffer,
-        expected: instruction.geometry.sourceEncodedSize,
-        stage: .currentSource
-      )
       if let previousBuffer {
         try validateGeometry(
           of: previousBuffer,
@@ -248,9 +335,11 @@ public final class MotionBlurVideoCompositor:
       let sourcePixelFormat = CVPixelBufferGetPixelFormatType(currentBuffer)
       let sourceBuffers = [previousBuffer, currentBuffer, nextBuffer].compactMap { $0 }
       guard
-        sourcePixelFormat == kCVPixelFormatType_64RGBAHalf,
+        motionBlurAcceptedSourcePixelFormats.contains(sourcePixelFormat),
         sourceBuffers.allSatisfy({
-          CVPixelBufferGetPixelFormatType($0) == sourcePixelFormat
+          motionBlurAcceptedSourcePixelFormats.contains(
+            CVPixelBufferGetPixelFormatType($0)
+          )
         })
       else {
         throw MotionBlurError.unsupportedPixelFormat(sourcePixelFormat)
@@ -275,7 +364,7 @@ public final class MotionBlurVideoCompositor:
       let session = try processorSession(
         width: Int(instruction.geometry.processorInputSize.width),
         height: Int(instruction.geometry.processorInputSize.height),
-        sourcePixelFormat: sourcePixelFormat,
+        sourcePixelFormat: kCVPixelFormatType_64RGBAHalf,
         quality: instruction.quality
       )
       let processorCurrentBuffer = try processorSourceBuffer(
@@ -370,7 +459,7 @@ public final class MotionBlurVideoCompositor:
           previousFrame: previousFrame,
           nextOpticalFlow: nil,
           previousOpticalFlow: nil,
-          motionBlurStrength: instruction.settings.strength,
+          motionBlurStrength: strengthSource.snapshot(),
           submissionMode: submissionMode,
           destinationFrame: destinationFrame
         )
@@ -395,6 +484,27 @@ public final class MotionBlurVideoCompositor:
     #endif
   }
 
+  /// Resolves one requested source frame using Preview's drop policy.
+  ///
+  /// AVFoundation can briefly omit a source while the same player item adopts
+  /// a new video composition. Realtime Preview cancels that obsolete request
+  /// and lets the player ask again; offline Export still treats it as a hard
+  /// source-contract failure.
+  private func sourceFrame(
+    byTrackID trackID: CMPersistentTrackID,
+    stage: MotionBlurFrameStage,
+    instruction: MotionBlurCompositionInstruction,
+    request: AVAsynchronousVideoCompositionRequest
+  ) throws -> CVPixelBuffer {
+    if let sourceFrame = request.sourceFrame(byTrackID: trackID) {
+      return sourceFrame
+    }
+    if instruction.allowsRealtimeFrameDropping {
+      throw CancellationError()
+    }
+    throw MotionBlurError.missingSourceFrame(stage)
+  }
+
   private func compose(
     imageBuffer: CVPixelBuffer,
     currentBuffer: CVPixelBuffer,
@@ -417,7 +527,8 @@ public final class MotionBlurVideoCompositor:
       instruction.renderExtent
     )
     let renderColorSpace =
-      CVImageBufferGetColorSpace(outputBuffer)?.takeUnretainedValue()
+      instruction.outputColorSpace
+      ?? CVImageBufferGetColorSpace(outputBuffer)?.takeUnretainedValue()
       ?? sourceImage.colorSpace
       ?? CIImage(cvPixelBuffer: currentBuffer).colorSpace
       ?? CGColorSpace(name: CGColorSpace.itur_709)
@@ -446,7 +557,10 @@ public final class MotionBlurVideoCompositor:
       session: MotionBlurProcessorSession,
       instruction: MotionBlurCompositionInstruction
     ) throws -> CVPixelBuffer {
-      if instruction.geometry.usesSourceBuffersDirectly {
+      if instruction.geometry.usesSourceBuffersDirectly,
+        CVPixelBufferGetPixelFormatType(sourceBuffer)
+          == session.sourcePixelFormat
+      {
         try validateGeometry(
           of: sourceBuffer,
           expected: instruction.geometry.processorInputSize,
@@ -538,6 +652,20 @@ public final class MotionBlurVideoCompositor:
       }
     }
 
+    /// Connects app-owned OFF transitions to this compositor's private session.
+    private func registerProcessorSessionReset(
+      with source: MotionBlurStrengthSource
+    ) {
+      let identifier = ObjectIdentifier(source)
+      guard registeredStrengthSources[identifier] == nil else { return }
+      registeredStrengthSources[identifier] = source
+      source.registerProcessorSessionResetHandler(
+        id: processorSessionResetRegistrationID
+      ) { [weak self] in
+        self?.scheduleProcessorSessionReset()
+      }
+    }
+
     private func resetProcessorSession() {
       processorSession?.end()
       processorSession = nil
@@ -616,7 +744,7 @@ private func copyAttachment(
 extension AVVideoCompositionRenderContext {
   fileprivate func makePixelBuffer() throws -> CVPixelBuffer {
     guard let pixelBuffer = newPixelBuffer() else {
-      throw MotionBlurError.cannotCreatePixelBuffer
+      throw MotionBlurError.cannotCreateRenderContextPixelBuffer
     }
     return pixelBuffer
   }
@@ -982,7 +1110,7 @@ extension NSCondition {
         &pixelBuffer
       )
       guard status == kCVReturnSuccess, let pixelBuffer else {
-        throw MotionBlurError.cannotCreatePixelBuffer
+        throw MotionBlurError.cannotCreateProcessorPixelBuffer
       }
       return pixelBuffer
     }
@@ -1004,7 +1132,7 @@ extension NSCondition {
         &resolvedAttributes
       )
       guard resolveStatus == kCVReturnSuccess, let resolvedAttributes else {
-        throw MotionBlurError.cannotCreatePixelBuffer
+        throw MotionBlurError.cannotCreateProcessorPixelBufferPool
       }
 
       var pool: CVPixelBufferPool?
@@ -1018,7 +1146,7 @@ extension NSCondition {
         &pool
       )
       guard poolStatus == kCVReturnSuccess, let pool else {
-        throw MotionBlurError.cannotCreatePixelBuffer
+        throw MotionBlurError.cannotCreateProcessorPixelBufferPool
       }
       return pool
     }

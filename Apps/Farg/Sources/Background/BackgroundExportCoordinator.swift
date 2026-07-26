@@ -3,6 +3,7 @@
 //
 
 import BackgroundTasks
+import FargMotionBlur
 import Foundation
 import OSLog
 
@@ -47,6 +48,33 @@ nonisolated struct VideoRenderAdmissionDependency: Equatable, Sendable {
       fraction,
       max(requiredCompletionCount - completedCount, 0)
     )
+  }
+}
+
+/// Decides whether one export can obtain every background resource it needs.
+///
+/// A default continued-processing task provides CPU and network execution, but
+/// it does not grant GPU access. Motion Blur must therefore remain foreground
+/// work on devices that do not advertise the optional GPU resource.
+nonisolated enum VideoExportBackgroundResourceDecision: Equatable, Sendable {
+  /// Submit without an optional system resource requirement.
+  case submitWithDefaultResources
+  /// Submit only when the system grants background GPU access.
+  case submitRequiringGPU
+  /// Run in the foreground and explain why leaving Färg is unsafe.
+  case foreground(VideoExportBackgroundStartError)
+
+  static func resolve(
+    isMotionBlurEnabled: Bool,
+    supportedResources: BGContinuedProcessingTaskRequest.Resources
+  ) -> Self {
+    if supportedResources.contains(.gpu) {
+      return .submitRequiringGPU
+    }
+    if isMotionBlurEnabled {
+      return .foreground(.motionBlurRequiresForeground)
+    }
+    return .submitWithDefaultResources
   }
 }
 
@@ -430,6 +458,26 @@ final class BackgroundExportCoordinator {
     control: ExportAttemptControl,
     relay: ContinuedProcessingTaskRelay
   ) -> VideoExportExecutionPath {
+    let resourceDecision =
+      VideoExportBackgroundResourceDecision.resolve(
+        isMotionBlurEnabled: job.recipe.motionBlur.isEnabled,
+        supportedResources: BGTaskScheduler.supportedResources
+      )
+    let shouldRequestGPU: Bool
+    switch resourceDecision {
+    case .foreground(let error):
+      Self.logger.notice("\(error.localizedDescription, privacy: .public)")
+      relay.complete(success: false)
+      let path = VideoExportExecutionPath.foreground(error)
+      control.setExecutionPath(path)
+      return path
+
+    case .submitWithDefaultResources:
+      shouldRequestGPU = false
+    case .submitRequiringGPU:
+      shouldRequestGPU = true
+    }
+
     let didRegister = BGTaskScheduler.shared.register(
       forTaskWithIdentifier: job.taskIdentifier,
       // The handler only attaches a system lease to already-running app work.
@@ -460,7 +508,7 @@ final class BackgroundExportCoordinator {
       subtitle: initialPresentation.subtitle
     )
     request.strategy = .queue
-    if BGTaskScheduler.supportedResources.contains(.gpu) {
+    if shouldRequestGPU {
       request.requiredResources = .gpu
     } else {
       Self.logger.notice(
@@ -981,6 +1029,7 @@ nonisolated struct VideoExportJobRunner: Sendable {
       let path = try await onRenderAdmission()
       try Task.checkCancellation()
       await onPhase(.rendering, path)
+      try Task.checkCancellation()
       try await exporter.export(
         asset: job.source.asset,
         recipe: job.recipe,
@@ -995,6 +1044,7 @@ nonisolated struct VideoExportJobRunner: Sendable {
 
     try Task.checkCancellation()
     await onPhase(.savingToPhotos, path)
+    try Task.checkCancellation()
 
     do {
       try await saveToPhotos(job.outputURL)

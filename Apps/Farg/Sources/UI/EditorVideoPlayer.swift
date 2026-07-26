@@ -24,7 +24,7 @@ struct EditorVideoPlayer: View {
     ZStack {
       VStack(spacing: Self.controlsSpacing) {
         PlayerLayerSurface(player: model.player)
-          .aspectRatio(playerPresentationAspectRatio, contentMode: .fit)
+          .aspectRatio(model.presentationAspectRatio, contentMode: .fit)
           .clipShape(.rect(cornerRadius: 8))
           .accessibilityHidden(true)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -79,31 +79,6 @@ struct EditorVideoPlayer: View {
   private static let controlsSpacing: CGFloat = 8
   private static let controlsBottomPadding: CGFloat = 12
 
-  /// The visible item's display ratio after orientation and composition.
-  ///
-  /// `presentationSize` becomes valid when the item is ready and is tracked
-  /// directly through AVFoundation's Swift Observation support. The render size
-  /// avoids a transient fallback ratio while a new composition is installed.
-  private var playerPresentationAspectRatio: CGFloat {
-    guard let item = model.player.currentItem else {
-      return 16 / 9
-    }
-    return Self.aspectRatio(for: item.presentationSize)
-      ?? Self.aspectRatio(for: item.videoComposition?.renderSize ?? .zero)
-      ?? 16 / 9
-  }
-
-  private static func aspectRatio(for size: CGSize) -> CGFloat? {
-    guard
-      size.width.isFinite,
-      size.height.isFinite,
-      size.width > 0,
-      size.height > 0
-    else {
-      return nil
-    }
-    return size.width / size.height
-  }
 }
 
 /// Replaces the video surface while its desired recipe is not renderable.
@@ -196,7 +171,7 @@ private struct EditorPlaybackControlsComponent: View {
       .buttonStyle(.plain)
       .accessibilityLabel(isPlaying ? "Pause" : "Play")
       .accessibilityIdentifier("video-playback-toggle")
-  
+
       HStack(spacing: 12) {
         Text(Self.format(time: displayedTime))
           .frame(minWidth: 28, alignment: .trailing)
@@ -220,7 +195,7 @@ private struct EditorPlaybackControlsComponent: View {
           .frame(minWidth: 28, alignment: .leading)
           .foregroundStyle(.secondary)
       }
-      
+
       Button(action: onToggleMute) {
         Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
           .font(.body.weight(.semibold))

@@ -43,6 +43,69 @@ public struct MotionBlurSettings: Equatable, Sendable {
   }
 }
 
+/// A thread-safe live strength value shared by Preview composition instructions.
+///
+/// VideoToolbox reads strength synchronously for each frame. Keeping this one
+/// value behind a lock lets the editor update Strength without replacing its
+/// `AVVideoComposition`, custom compositor, or player item.
+public final class MotionBlurStrengthSource: @unchecked Sendable {
+
+  private let lock = NSLock()
+  private var storedStrength: Int
+  private var processorSessionResetHandlers: [UUID: @Sendable () -> Void] = [:]
+
+  /// Creates a source whose value is normalized to VideoToolbox's 1...100 range.
+  public init(strength: Int) {
+    self.storedStrength = MotionBlurSettings(strength: strength).strength
+  }
+
+  /// Returns one stable value for the duration of a compositor request.
+  public func snapshot() -> Int {
+    lock.lock()
+    defer {
+      lock.unlock()
+    }
+    return storedStrength
+  }
+
+  /// Changes the value consumed by subsequent compositor requests.
+  public func update(strength: Int) {
+    let normalizedStrength = MotionBlurSettings(strength: strength).strength
+    lock.lock()
+    storedStrength = normalizedStrength
+    lock.unlock()
+  }
+
+  /// Requests immediate release of processor sessions reading this source.
+  ///
+  /// A paused player may not request a bypass frame after Motion Blur is
+  /// disabled. Explicit invalidation prevents the previous VideoToolbox session
+  /// and its IOSurfaces from waiting for playback to resume before releasing.
+  public func requestProcessorSessionReset() {
+    lock.lock()
+    let handlers = Array(processorSessionResetHandlers.values)
+    lock.unlock()
+    for handler in handlers {
+      handler()
+    }
+  }
+
+  func registerProcessorSessionResetHandler(
+    id: UUID,
+    _ handler: @escaping @Sendable () -> Void
+  ) {
+    lock.lock()
+    processorSessionResetHandlers[id] = handler
+    lock.unlock()
+  }
+
+  func unregisterProcessorSessionResetHandler(id: UUID) {
+    lock.lock()
+    processorSessionResetHandlers[id] = nil
+    lock.unlock()
+  }
+}
+
 /// Runtime support for Färg's Optical Flow motion-blur backend.
 public enum MotionBlurAvailability {
 

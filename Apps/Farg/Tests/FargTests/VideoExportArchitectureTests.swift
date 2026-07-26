@@ -1,4 +1,5 @@
 import AVFoundation
+import BackgroundTasks
 import BrightroomParametric
 import Dispatch
 import FargMotionBlur
@@ -6,6 +7,50 @@ import Foundation
 import Testing
 
 @testable import Farg
+
+@Suite("Background export resource policy")
+struct VideoExportBackgroundResourceDecisionTests {
+
+  @Test
+  func motionBlurRequiresForegroundWithoutBackgroundGPU() {
+    let decision = VideoExportBackgroundResourceDecision.resolve(
+      isMotionBlurEnabled: true,
+      supportedResources: []
+    )
+
+    #expect(decision == .foreground(.motionBlurRequiresForeground))
+  }
+
+  @Test
+  func motionBlurRequestsAnAvailableBackgroundGPU() {
+    let decision = VideoExportBackgroundResourceDecision.resolve(
+      isMotionBlurEnabled: true,
+      supportedResources: [.gpu]
+    )
+
+    #expect(decision == .submitRequiringGPU)
+  }
+
+  @Test
+  func ordinaryExportRetainsDefaultBackgroundResources() {
+    let decision = VideoExportBackgroundResourceDecision.resolve(
+      isMotionBlurEnabled: false,
+      supportedResources: []
+    )
+
+    #expect(decision == .submitWithDefaultResources)
+  }
+
+  @Test
+  func ordinaryExportRetainsTheExistingGPURequestWhenAvailable() {
+    let decision = VideoExportBackgroundResourceDecision.resolve(
+      isMotionBlurEnabled: false,
+      supportedResources: [.gpu]
+    )
+
+    #expect(decision == .submitRequiringGPU)
+  }
+}
 
 @Suite("Video render resource gate")
 struct VideoRenderResourceGateTests {
@@ -467,6 +512,82 @@ struct VideoExportJobRunnerTests {
     )
   }
 
+  @Test
+  func cancellationAtTheRenderingPhaseDoesNotStartExport() async throws {
+    let renderingPhase = ControlledOperation()
+    let exportStart = AdmissionProbe()
+    let runner = VideoExportJobRunner(
+      exporter: ProbedExporter(probe: exportStart),
+      renderGate: VideoRenderResourceGate(capacity: 1),
+      saveToPhotos: { _ in }
+    )
+    let run = Task {
+      try await runner.run(
+        job: makeJob(
+          outputURL: URL(filePath: "/tmp/cancelled-before-export.mov")
+        ),
+        onRenderAdmission: { .foreground(.motionBlurRequiresForeground) },
+        onPhase: { phase, _ in
+          if case .rendering = phase {
+            await renderingPhase.run(id: 1)
+          }
+        },
+        onRenderProgress: { _, _ in }
+      )
+    }
+
+    await renderingPhase.waitUntilStarted(count: 1)
+    run.cancel()
+    await renderingPhase.release(id: 1)
+
+    do {
+      _ = try await run.value
+      Issue.record("A cancelled attempt unexpectedly started its exporter.")
+    } catch is CancellationError {
+      // Expected.
+    }
+    #expect(await exportStart.count == 0)
+  }
+
+  @Test
+  func cancellationAtThePhotosPhaseDoesNotStartImport() async throws {
+    let savingPhase = ControlledOperation()
+    let photoSave = AdmissionProbe()
+    let runner = VideoExportJobRunner(
+      exporter: ImmediateExporter(),
+      renderGate: VideoRenderResourceGate(capacity: 1),
+      saveToPhotos: { _ in
+        await photoSave.record()
+      }
+    )
+    let run = Task {
+      try await runner.run(
+        job: makeJob(
+          outputURL: URL(filePath: "/tmp/cancelled-before-photos.mov")
+        ),
+        onRenderAdmission: { .foreground(.motionBlurRequiresForeground) },
+        onPhase: { phase, _ in
+          if case .savingToPhotos = phase {
+            await savingPhase.run(id: 1)
+          }
+        },
+        onRenderProgress: { _, _ in }
+      )
+    }
+
+    await savingPhase.waitUntilStarted(count: 1)
+    run.cancel()
+    await savingPhase.release(id: 1)
+
+    do {
+      _ = try await run.value
+      Issue.record("A cancelled export unexpectedly started Photos import.")
+    } catch is CancellationError {
+      // Expected.
+    }
+    #expect(await photoSave.count == 0)
+  }
+
   private func makeJob(outputURL: URL) -> VideoExportJob {
     let source = VideoSource(
       appOwnedURL: URL(filePath: "/tmp/input.mov")
@@ -671,6 +792,21 @@ private nonisolated struct ImmediateExporter: VideoExporting {
     onProgress: @escaping @Sendable (Double) -> Void
   ) async throws {
     onProgress(1)
+  }
+}
+
+/// Records exporter entry without performing media work.
+private nonisolated struct ProbedExporter: VideoExporting {
+  let probe: AdmissionProbe
+
+  func export(
+    asset: AVAsset,
+    recipe: FargVideoRenderRecipe,
+    colorInfo: VideoColorInfo,
+    to outputURL: URL,
+    onProgress: @escaping @Sendable (Double) -> Void
+  ) async throws {
+    await probe.record()
   }
 }
 

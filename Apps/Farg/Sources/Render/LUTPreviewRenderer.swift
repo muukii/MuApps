@@ -168,7 +168,10 @@ actor LUTPreviewRenderer {
       guard
         let rendered = FargCIContext.shared.createCGImage(
           output,
-          from: output.extent
+          from: output.extent,
+          format: .RGBA8,
+          colorSpace: FargLUTOutputColorSpace.rec709.cgColorSpace,
+          deferred: false
         )
       else {
         throw RenderError.failedToCreateImage
