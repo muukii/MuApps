@@ -40,7 +40,7 @@ struct EditorView: View {
       onPickFileURLs: loadPickedVideoFiles
     )
     .environment(lutPreviewModels)
-    .background(.background)
+    .background(.background.secondary)
     .toolbar {
       EditorToolbarContent(
         canExport:
@@ -326,7 +326,6 @@ private struct EditorLayout: View {
         .padding(16)
 
       EditorLowerPanel(
-        placement: .bottom,
         clips: clips,
         selectedClipID: selectedClipID,
         hdrVideoCount: hdrVideoCount,
@@ -352,12 +351,6 @@ private struct EditorPreviewStage: View {
   var body: some View {
     EditorVideoPlayer(model: preview)
   }
-}
-
-/// The physical edge occupied by the editing inspector.
-private enum EditorPanelPlacement {
-  case bottom
-  case trailing
 }
 
 /// The effect editor displayed below the shared video collection.
@@ -387,7 +380,6 @@ private enum EditorEffectTab {
 /// Separates the fixed video collection from the scrollable edit controls.
 private struct EditorLowerPanel: View {
 
-  let placement: EditorPanelPlacement
   let clips: [VideoClip]
   let selectedClipID: VideoClip.ID?
   let hdrVideoCount: Int
@@ -401,50 +393,25 @@ private struct EditorLowerPanel: View {
   let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
 
   var body: some View {
-    switch placement {
-    case .bottom:
-      EditorLowerPanelContent(
-        contentPadding: 16,
-        clips: clips,
-        selectedClipID: selectedClipID,
-        hdrVideoCount: hdrVideoCount,
-        library: library,
-        lutPreviewSource: lutPreviewSource,
-        pickerItems: $pickerItems,
-        selectedLUT: $selectedLUT,
-        motionBlur: $motionBlur,
-        onSelectClip: onSelectClip,
-        onRemoveClip: onRemoveClip,
-        onPickFileURLs: onPickFileURLs
-      )
-      .background(.background)
-      .overlay(alignment: .top) {
-        Rectangle()
-          .fill(Color.secondary.opacity(0.2))
-          .frame(height: 1)
-      }
-
-    case .trailing:
-      EditorLowerPanelContent(
-        contentPadding: 20,
-        clips: clips,
-        selectedClipID: selectedClipID,
-        hdrVideoCount: hdrVideoCount,
-        library: library,
-        lutPreviewSource: lutPreviewSource,
-        pickerItems: $pickerItems,
-        selectedLUT: $selectedLUT,
-        motionBlur: $motionBlur,
-        onSelectClip: onSelectClip,
-        onRemoveClip: onRemoveClip,
-        onPickFileURLs: onPickFileURLs
-      )
-      .background(.background)
-      .overlay(alignment: .leading) {
-        Rectangle()
-          .fill(Color.secondary.opacity(0.2))
-          .frame(width: 1)
-      }
+    EditorLowerPanelContent(
+      contentPadding: 16,
+      clips: clips,
+      selectedClipID: selectedClipID,
+      hdrVideoCount: hdrVideoCount,
+      library: library,
+      lutPreviewSource: lutPreviewSource,
+      pickerItems: $pickerItems,
+      selectedLUT: $selectedLUT,
+      motionBlur: $motionBlur,
+      onSelectClip: onSelectClip,
+      onRemoveClip: onRemoveClip,
+      onPickFileURLs: onPickFileURLs
+    )
+    .background(.background)
+    .overlay(alignment: .top) {
+      Rectangle()
+        .fill(Color.secondary.opacity(0.2))
+        .frame(height: 1)
     }
   }
 }
@@ -706,36 +673,30 @@ private struct EditorEffectTabBar: View {
   @Binding var selection: EditorEffectTab
 
   var body: some View {
-    HStack(spacing: 0) {
-      EditorEffectTabButton(
-        title: "LUT",
-        systemImage: "camera.filters",
-        accessibilityIdentifier: "editor-effect-tab-lut",
-        isSelected: selection.isLUT
-      ) {
-        selection = .lut
-      }
-
-      Rectangle()
-        .fill(Color.secondary.opacity(0.2))
-        .frame(width: 1)
-
-      EditorEffectTabButton(
-        title: "Motion Blur",
-        systemImage: "wind",
-        accessibilityIdentifier: "editor-effect-tab-motion-blur",
-        isSelected: selection.isMotionBlur
-      ) {
-        selection = .motionBlur
+    ScrollView(.horizontal) {
+      HStack(spacing: 8) {
+        EditorEffectTabButton(
+          title: "LUT",
+          systemImage: "camera.filters",
+          accessibilityIdentifier: "editor-effect-tab-lut",
+          isSelected: selection.isLUT
+        ) {
+          selection = .lut
+        }
+        
+        EditorEffectTabButton(
+          title: "Motion Blur",
+          systemImage: "wind",
+          accessibilityIdentifier: "editor-effect-tab-motion-blur",
+          isSelected: selection.isMotionBlur
+        ) {
+          selection = .motionBlur
+        }
       }
     }
+    .defaultScrollAnchor(.center)
     .frame(height: 64)
-    .background(.background)
-    .overlay(alignment: .top) {
-      Rectangle()
-        .fill(Color.secondary.opacity(0.2))
-        .frame(height: 1)
-    }
+    .background(.background)  
   }
 }
 
@@ -854,3 +815,4 @@ private struct EditorToolbarContent: ToolbarContent {
   .padding(20)
   .background(.background)
 }
+

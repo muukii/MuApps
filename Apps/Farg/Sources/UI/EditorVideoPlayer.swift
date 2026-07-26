@@ -148,7 +148,6 @@ private struct EditorPreviewStatus: View {
     }
     .foregroundStyle(.secondary)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(.black)
     .environment(\.colorScheme, .dark)
   }
 }
@@ -162,42 +161,55 @@ private struct EditorPlaybackControls: View {
   @State private var isScrubbing = false
 
   var body: some View {
-    HStack(spacing: 12) {
+    HStack(spacing: 2) {
+      
       Button(action: model.togglePlayback) {
         Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
           .font(.body.weight(.semibold))
-          .foregroundStyle(.white)
           .frame(width: 44, height: 44)
-          .background(.black.opacity(0.45), in: Circle())
           .contentTransition(.symbolEffect(.replace))
       }
+      .sensoryFeedback(trigger: model.isPlaying, { oldValue, newValue in
+        return .impact
+      })
       .buttonStyle(.plain)
       .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
       .accessibilityIdentifier("video-playback-toggle")
 
-      Text(Self.format(time: displayedTime))
-        .frame(minWidth: 36, alignment: .trailing)
+      HStack(spacing: 12) {
+        Text(Self.format(time: displayedTime))
+          .frame(minWidth: 36, alignment: .trailing)
+          .foregroundStyle(.secondary)
 
-      Slider(
-        value: $scrubberProgress,
-        in: 0...1,
-        onEditingChanged: setScrubbing
-      ) {
-        Text("Video position")
+        Slider(
+          value: $scrubberProgress,
+          in: 0...1,
+          onEditingChanged: setScrubbing
+        ) {
+          Text("Video position")
+        }
+        .tint(.primary)
+        .disabled(model.playbackDuration <= 0)
+        .accessibilityValue(
+          "\(Self.format(time: displayedTime)) of \(Self.format(time: model.playbackDuration))"
+        )
+        .accessibilityIdentifier("video-playback-timeline")
+
+        Text(Self.format(time: model.playbackDuration))
+          .frame(minWidth: 36, alignment: .leading)
+          .foregroundStyle(.secondary)
       }
-      .tint(.white)
-      .disabled(model.playbackDuration <= 0)
-      .accessibilityValue(
-        "\(Self.format(time: displayedTime)) of \(Self.format(time: model.playbackDuration))"
-      )
-      .accessibilityIdentifier("video-playback-timeline")
 
-      Text(Self.format(time: model.playbackDuration))
-        .frame(minWidth: 36, alignment: .leading)
     }
     .font(.caption.monospacedDigit())
-    .foregroundStyle(.white)
-    .shadow(color: .black.opacity(0.45), radius: 2, y: 1)
+    .foregroundStyle(.primary)
+    .padding(.horizontal, 8)
+    .padding(.vertical, 8)
+    .background(
+      Capsule()
+        .foregroundStyle(.regularMaterial)
+        // .foregroundStyle(.thinMaterial)
+    )    
     .onAppear {
       scrubberProgress = model.playbackProgress
     }
