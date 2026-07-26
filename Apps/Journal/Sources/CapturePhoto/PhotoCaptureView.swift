@@ -22,7 +22,11 @@ public struct PhotoCaptureView: View {
       case .unknown:
         ProgressView().tint(.primary)
       case .authorized:
-        CameraPreviewView(session: controller.previewSession, isMirrored: controller.isFront)
+        CameraPreviewView(
+          session: controller.previewSession,
+          device: controller.activeVideoDevice,
+          isMirrored: controller.isFront
+        )
           .ignoresSafeArea()
       case .denied:
         unavailableMessage("Camera access is off. Enable it in Settings to take a photo.")
@@ -105,37 +109,42 @@ public struct PhotoCaptureView: View {
 #if canImport(UIKit)
 private struct CameraPreviewView: UIViewRepresentable {
   let session: AVCaptureSession
+  let device: AVCaptureDevice?
   let isMirrored: Bool
 
   func makeUIView(context: Context) -> PreviewView {
     let view = PreviewView()
-    view.configure(session: session, isMirrored: isMirrored)
+    view.configure(session: session, device: device, isMirrored: isMirrored)
     return view
   }
 
   func updateUIView(_ uiView: PreviewView, context: Context) {
-    uiView.configure(session: session, isMirrored: isMirrored)
+    uiView.configure(session: session, device: device, isMirrored: isMirrored)
   }
 }
 #elseif canImport(AppKit)
 /// Hosts the same AVFoundation preview session in a layer-backed AppKit view.
 private struct CameraPreviewView: NSViewRepresentable {
   let session: AVCaptureSession
+  let device: AVCaptureDevice?
   let isMirrored: Bool
 
   func makeNSView(context: Context) -> PreviewView {
     let view = PreviewView()
-    view.configure(session: session, isMirrored: isMirrored)
+    view.configure(session: session, device: device, isMirrored: isMirrored)
     return view
   }
 
   func updateNSView(_ nsView: PreviewView, context: Context) {
-    nsView.configure(session: session, isMirrored: isMirrored)
+    nsView.configure(session: session, device: device, isMirrored: isMirrored)
   }
 }
 
 private final class PreviewView: NSView {
   private let previewLayer = AVCaptureVideoPreviewLayer()
+  private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+  private var rotationObservation: NSKeyValueObservation?
+  private var previewRotationAngle: CGFloat = 0
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -153,15 +162,62 @@ private final class PreviewView: NSView {
     previewLayer.frame = bounds
   }
 
-  func configure(session: AVCaptureSession, isMirrored: Bool) {
+  func configure(
+    session: AVCaptureSession,
+    device: AVCaptureDevice?,
+    isMirrored: Bool
+  ) {
     previewLayer.videoGravity = .resizeAspectFill
     if previewLayer.session !== session {
       previewLayer.session = session
     }
+    configureRotationCoordinator(for: device)
     if let connection = previewLayer.connection, connection.isVideoMirroringSupported {
       connection.automaticallyAdjustsVideoMirroring = false
       connection.isVideoMirrored = isMirrored
     }
+    applyPreviewRotation()
+  }
+
+  private func configureRotationCoordinator(for device: AVCaptureDevice?) {
+    guard rotationCoordinator?.device !== device else {
+      return
+    }
+
+    rotationObservation = nil
+    rotationCoordinator = nil
+    previewRotationAngle = 0
+
+    guard let device else {
+      return
+    }
+
+    let coordinator = AVCaptureDevice.RotationCoordinator(
+      device: device,
+      previewLayer: previewLayer
+    )
+    rotationCoordinator = coordinator
+    previewRotationAngle = coordinator.videoRotationAngleForHorizonLevelPreview
+    rotationObservation = coordinator.observe(
+      \.videoRotationAngleForHorizonLevelPreview,
+      options: [.new]
+    ) { [weak self] coordinator, _ in
+      let angle = coordinator.videoRotationAngleForHorizonLevelPreview
+      Task { @MainActor [weak self] in
+        self?.previewRotationAngle = angle
+        self?.applyPreviewRotation()
+      }
+    }
+  }
+
+  private func applyPreviewRotation() {
+    guard
+      let connection = previewLayer.connection,
+      connection.isVideoRotationAngleSupported(previewRotationAngle)
+    else {
+      return
+    }
+    connection.videoRotationAngle = previewRotationAngle
   }
 }
 #endif
@@ -178,13 +234,21 @@ private final class PreviewView: UIView {
   }
 
   private var isMirrored = false
+  private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+  private var rotationObservation: NSKeyValueObservation?
+  private var previewRotationAngle: CGFloat = 0
 
-  func configure(session: AVCaptureSession, isMirrored: Bool) {
+  func configure(
+    session: AVCaptureSession,
+    device: AVCaptureDevice?,
+    isMirrored: Bool
+  ) {
     previewLayer.videoGravity = .resizeAspectFill
     if previewLayer.session !== session {
       previewLayer.session = session
     }
     self.isMirrored = isMirrored
+    configureRotationCoordinator(for: device)
     configureConnection()
   }
 
@@ -196,11 +260,44 @@ private final class PreviewView: UIView {
   private func configureConnection() {
     guard let connection = previewLayer.connection else { return }
 
-    connection.setPortraitVideoRotationIfSupported()
+    if connection.isVideoRotationAngleSupported(previewRotationAngle) {
+      connection.videoRotationAngle = previewRotationAngle
+    }
 
     if connection.isVideoMirroringSupported {
       connection.automaticallyAdjustsVideoMirroring = false
       connection.isVideoMirrored = isMirrored
+    }
+  }
+
+  private func configureRotationCoordinator(for device: AVCaptureDevice?) {
+    guard rotationCoordinator?.device !== device else {
+      return
+    }
+
+    rotationObservation = nil
+    rotationCoordinator = nil
+    previewRotationAngle = 0
+
+    guard let device else {
+      return
+    }
+
+    let coordinator = AVCaptureDevice.RotationCoordinator(
+      device: device,
+      previewLayer: previewLayer
+    )
+    rotationCoordinator = coordinator
+    previewRotationAngle = coordinator.videoRotationAngleForHorizonLevelPreview
+    rotationObservation = coordinator.observe(
+      \.videoRotationAngleForHorizonLevelPreview,
+      options: [.new]
+    ) { [weak self] coordinator, _ in
+      let angle = coordinator.videoRotationAngleForHorizonLevelPreview
+      Task { @MainActor [weak self] in
+        self?.previewRotationAngle = angle
+        self?.configureConnection()
+      }
     }
   }
 }

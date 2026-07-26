@@ -525,7 +525,33 @@ let project = Project(
         ),
       ]
     ),
-    journalFramework(name: "CapturePhoto"),
+    journalFramework(
+      name: "CapturePhoto",
+      dependencies: [
+        .sdk(name: "AVFoundation", type: .framework),
+        .sdk(name: "ImageIO", type: .framework),
+        .sdk(name: "UniformTypeIdentifiers", type: .framework),
+      ]
+    ),
+    .target(
+      name: "CapturePhotoTests",
+      destinations: journalDestinations,
+      product: .unitTests,
+      bundleId: "app.muukii.journal.CapturePhotoTests",
+      deploymentTargets: journalDeploymentTargets,
+      infoPlist: .default,
+      buildableFolders: ["Tests/CapturePhotoTests"],
+      dependencies: [
+        .target(name: "CapturePhoto"),
+      ],
+      settings: .settings(
+        base: [:],
+        configurations: [
+          .debug(name: "Debug"),
+          .release(name: "Release"),
+        ]
+      )
+    ),
     // Save-time raster derivatives for large media such as photos and videos.
     journalFramework(
       name: "MediaProcessing",
@@ -586,6 +612,16 @@ let project = Project(
       testAction: .targets([
         .testableTarget(
           target: "JournalIntentsTests",
+          parallelization: .swiftTestingOnly
+        ),
+      ])
+    ),
+    .scheme(
+      name: "CapturePhotoTests",
+      buildAction: .buildAction(targets: ["CapturePhotoTests"]),
+      testAction: .targets([
+        .testableTarget(
+          target: "CapturePhotoTests",
           parallelization: .swiftTestingOnly
         ),
       ])
