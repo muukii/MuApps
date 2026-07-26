@@ -7,7 +7,9 @@ let appInfoPlist: InfoPlist = .extendingDefault(with: [
     "app.muukii.farg.export.*",
   ]),
   "CFBundleDisplayName": "Färg",
-  "CFBundleName": "Färg",
+  // Keep the visible product name while giving system app search an
+  // accent-free bundle name that matches the spelling people may type.
+  "CFBundleName": "Farg",
   "CFBundleShortVersionString": "1.0",
   "CFBundleVersion": "1",
   "ITSAppUsesNonExemptEncryption": false,

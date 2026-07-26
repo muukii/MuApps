@@ -6,6 +6,8 @@ Färg is an iPhone video editor for applying one color lookup table (LUT) recipe
 to one or more videos. Preview and export evaluate the same Brightroom
 parametric feature document for every video in the collection. The app uses its
 dedicated Färg icon and supports portrait orientation only.
+The visible app name remains **Färg**, while Spotlight can also find the app
+when a person searches for **Farg** without the diacritic.
 
 ## Privacy
 
