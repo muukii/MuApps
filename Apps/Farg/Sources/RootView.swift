@@ -41,6 +41,7 @@ struct RootView: View {
         onShowSettings: { isShowingSettings = true }
       )
     }
+    .appBlockingOverlayTarget()
     .fullScreenCover(isPresented: $isEditorPresented) {
       NavigationStack {
         EditorView(
@@ -244,7 +245,7 @@ private struct FargMediaPickerView: View {
     .photosPickerDisabledCapabilities(.selectionActions)
     .photosPickerAccessoryVisibility(.visible, edges: .top)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .clipShape(.rect(cornerRadius: 32))
+    .clipShape(.rect(cornerRadius: 36))
     .padding(.horizontal, 4)
     .safeAreaInset(edge: .bottom, spacing: 0) {
       MediaPickerEditAction(
@@ -252,17 +253,14 @@ private struct FargMediaPickerView: View {
         onStartEditing: onStartEditing
       )
     }
-    .overlay {
+    .appBlockingOverlay(isPresented: loadingProgress != nil) {
       if let loadingProgress {
         InitialVideoLoadingHUD(
           progress: loadingProgress,
           onCancel: onCancelLoading
         )
-        .transition(.opacity)
       }
     }
-    // Animate only the HUD lifecycle, never individual progress updates.
-    .animation(.snappy, value: loadingProgress != nil)
     .background(.background.secondary)
     .toolbarTitleDisplayMode(.inline)
     .toolbar {
