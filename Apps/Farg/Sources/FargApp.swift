@@ -60,3 +60,16 @@ private struct FargAppRootView: View {
     .animation(.smooth, value: hasCompletedOnboarding)
   }
 }
+
+
+#Preview {
+  RoundedRectangle(cornerRadius: 1)
+    .foregroundStyle(.secondary)
+    
+    .overlay { 
+      ConcentricRectangle()
+        .foregroundStyle(.quaternary)
+        .padding()
+    }
+    .foregroundStyle(.background)
+}

@@ -6,6 +6,7 @@ import AVFoundation
 import BrightroomParametric
 import CoreImage
 import CoreMedia
+import CoreVideo
 import Foundation
 import VideoToolbox
 
@@ -17,6 +18,7 @@ nonisolated enum VideoExportError: LocalizedError {
   case cannotAttachReaderOutput(AVMediaType)
   case cannotAttachWriterInput(AVMediaType)
   case missingAudioFormatDescription
+  case inconsistentVideoFrameSize(expected: CGSize, actual: CGSize)
   case failed(String)
 
   var errorDescription: String? {
@@ -33,6 +35,10 @@ nonisolated enum VideoExportError: LocalizedError {
       return "Could not write the output \(mediaType.exportDisplayName) track."
     case .missingAudioFormatDescription:
       return "Could not preserve the source audio format."
+    case .inconsistentVideoFrameSize(let expected, let actual):
+      return
+        "The rendered video frame is \(actual.width)×\(actual.height), but "
+        + "the encoder requires \(expected.width)×\(expected.height)."
     case .failed(let message):
       return message
     }
@@ -146,7 +152,11 @@ nonisolated struct ParametricVideoExporter: VideoExporting {
     let videoReceiver = writer.inputReceiver(for: videoInput)
     let videoTransfer = AssetSampleTransfer(
       provider: videoProvider,
-      receiver: videoReceiver
+      receiver: videoReceiver,
+      expectedVideoFrameSize: CGSize(
+        width: encoding.width,
+        height: encoding.height
+      )
     )
 
     var audioTransfers: [AssetSampleTransfer] = []
@@ -374,6 +384,19 @@ private nonisolated struct AssetSampleTransfer: @unchecked Sendable {
       CMReadySampleBuffer<CMSampleBuffer.DynamicContent>
     >
   let receiver: AVAssetWriterInput.SampleBufferReceiver
+  let expectedVideoFrameSize: CGSize?
+
+  init(
+    provider: AVAssetReaderOutput.Provider<
+      CMReadySampleBuffer<CMSampleBuffer.DynamicContent>
+    >,
+    receiver: AVAssetWriterInput.SampleBufferReceiver,
+    expectedVideoFrameSize: CGSize? = nil
+  ) {
+    self.provider = provider
+    self.receiver = receiver
+    self.expectedVideoFrameSize = expectedVideoFrameSize
+  }
 
   func transfer(
     onSample: (@Sendable (CMTime) -> Void)? = nil
@@ -388,6 +411,17 @@ private nonisolated struct AssetSampleTransfer: @unchecked Sendable {
         break
       }
       try Task.checkCancellation()
+      if let expectedVideoFrameSize {
+        guard let formatDescription = sampleBuffer.formatDescription else {
+          throw VideoExportError.failed(
+            "The rendered video sample has no format description."
+          )
+        }
+        try VideoExportFrameGeometry.validate(
+          formatDescription: formatDescription,
+          expected: expectedVideoFrameSize
+        )
+      }
       try await appender.append {
         try receiver.appendImmediately(sampleBuffer)
       }
@@ -402,6 +436,40 @@ private nonisolated struct AssetSampleTransfer: @unchecked Sendable {
     }
     try Task.checkCancellation()
     return timeline
+  }
+}
+
+/// Validates the final composition-to-encoder pixel contract.
+///
+/// Keeping this guard outside the custom compositor identifies whether a
+/// portrait mismatch occurred at the temporal processor or only after
+/// AVAssetReader produced the encoder input.
+nonisolated enum VideoExportFrameGeometry {
+
+  static func validate(
+    formatDescription: CMFormatDescription,
+    expected: CGSize
+  ) throws {
+    let dimensions = CMVideoFormatDescriptionGetDimensions(formatDescription)
+    try validate(
+      actual: CGSize(
+        width: Int(dimensions.width),
+        height: Int(dimensions.height)
+      ),
+      expected: expected
+    )
+  }
+
+  private static func validate(
+    actual: CGSize,
+    expected: CGSize
+  ) throws {
+    guard actual == expected else {
+      throw VideoExportError.inconsistentVideoFrameSize(
+        expected: expected,
+        actual: actual
+      )
+    }
   }
 }
 

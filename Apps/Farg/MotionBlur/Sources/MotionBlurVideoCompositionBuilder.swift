@@ -24,6 +24,32 @@ public struct PreparedMotionBlurVideo: @unchecked Sendable {
   }
 }
 
+/// The spatial policy used by the temporal processor.
+///
+/// This is operational render state rather than part of
+/// `MotionBlurSettings`: preview can process viewport-sized frames while
+/// export continues to use the source display resolution.
+public enum MotionBlurRenderTarget: Equatable, Sendable {
+  /// Preserve the source display resolution.
+  case source
+
+  /// Uniformly fit the display-oriented source inside a pixel size whose
+  /// dimensions are both at least two.
+  case fitWithin(CGSize)
+}
+
+/// The buffer stage at which a frame-geometry contract failed.
+public enum MotionBlurFrameStage: String, Equatable, Sendable {
+  case previousSource
+  case currentSource
+  case nextSource
+  case previousProcessor
+  case currentProcessor
+  case nextProcessor
+  case processorDestination
+  case renderContext
+}
+
 /// Errors raised before or during Optical Flow composition.
 public enum MotionBlurError: LocalizedError, Equatable, Sendable {
   case unavailable
@@ -37,6 +63,11 @@ public enum MotionBlurError: LocalizedError, Equatable, Sendable {
   case cannotCreatePixelBuffer
   case cannotWrapPixelBuffer
   case cannotCreateParameters
+  case inconsistentFrameGeometry(
+    stage: MotionBlurFrameStage,
+    expected: CGSize,
+    actual: CGSize
+  )
 
   public var errorDescription: String? {
     switch self {
@@ -50,8 +81,8 @@ public enum MotionBlurError: LocalizedError, Equatable, Sendable {
       return "The source frame size is invalid (\(size.width)×\(size.height))."
     case .unsupportedFrameSize(let width, let height):
       return
-        "Optical Flow motion blur supports source frames up to 4096×2160; "
-        + "this video is \(width)×\(height)."
+        "Optical Flow motion blur supports working frames that fit within "
+        + "4096×2160 in either orientation; this frame is \(width)×\(height)."
     case .cannotCreateCompositionTrack:
       return "Färg couldn't prepare the temporal video tracks."
     case .cannotCreateFrameProcessor:
@@ -66,6 +97,11 @@ public enum MotionBlurError: LocalizedError, Equatable, Sendable {
       return "Färg couldn't prepare an IOSurface-backed video frame."
     case .cannotCreateParameters:
       return "Färg couldn't configure motion blur for this frame."
+    case .inconsistentFrameGeometry(let stage, let expected, let actual):
+      return
+        "Färg received an incompatible \(stage.rawValue) frame size "
+        + "(\(actual.width)×\(actual.height)); expected "
+        + "\(expected.width)×\(expected.height)."
     }
   }
 
@@ -78,6 +114,35 @@ public enum MotionBlurError: LocalizedError, Equatable, Sendable {
     ]
     return String(bytes: bytes, encoding: .macOSRoman) ?? "\(value)"
   }
+}
+
+/// The four spatial coordinate spaces used by one temporal composition.
+///
+/// Video files may store portrait pixels directly or store landscape pixels
+/// with a portrait track transform. Keeping each size explicit prevents a
+/// display-oriented viewport from being mistaken for VideoToolbox's encoded
+/// processor dimensions.
+struct MotionBlurFrameGeometry: Equatable, Sendable {
+  /// Pixel dimensions emitted by the decoder before any display transform.
+  let sourceEncodedSize: CGSize
+
+  /// Full source dimensions after applying the track's display transform.
+  let sourceDisplaySize: CGSize
+
+  /// Pixel dimensions supplied to every VideoToolbox source and destination.
+  let processorInputSize: CGSize
+
+  /// Display-oriented dimensions emitted by the video composition.
+  let compositionRenderSize: CGSize
+
+  /// Maps a decoded source buffer into `processorInputSize`.
+  let sourceToProcessorTransform: CGAffineTransform
+
+  /// Maps a processed VideoToolbox buffer into `compositionRenderSize`.
+  let processorToRenderTransform: CGAffineTransform
+
+  /// Whether decoded buffers already satisfy the processor geometry.
+  let usesSourceBuffersDirectly: Bool
 }
 
 /// Builds the multi-track input required by an `AVVideoCompositing` temporal
@@ -110,6 +175,7 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
   public func prepare(
     asset sourceAsset: AVAsset,
     settings: MotionBlurSettings,
+    renderTarget: MotionBlurRenderTarget,
     postProcessor: @escaping PostProcessor
   ) async throws -> PreparedMotionBlurVideo {
     guard settings.isEnabled else {
@@ -145,15 +211,6 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
       naturalSize.height > 0
     else {
       throw MotionBlurError.invalidFrameSize(naturalSize)
-    }
-
-    let frameWidth = Int(naturalSize.width.rounded())
-    let frameHeight = Int(naturalSize.height.rounded())
-    guard frameWidth <= 4096, frameHeight <= 2160 else {
-      throw MotionBlurError.unsupportedFrameSize(
-        width: frameWidth,
-        height: frameHeight
-      )
     }
 
     let frameDuration = Self.resolveFrameDuration(
@@ -220,11 +277,12 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
     )
     try Task.checkCancellation()
 
-    let geometry = try Self.resolveGeometry(
+    let geometry = try Self.resolveFrameGeometry(
       naturalSize: naturalSize,
-      preferredTransform: preferredTransform
+      preferredTransform: preferredTransform,
+      renderTarget: renderTarget
     )
-    composition.naturalSize = geometry.renderSize
+    composition.naturalSize = geometry.compositionRenderSize
 
     let instructions = Self.makeInstructions(
       duration: sourceTimeRange.duration,
@@ -235,8 +293,7 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
       settings: settings,
       quality: quality,
       allowsRealtimeFrameDropping: allowsRealtimeFrameDropping,
-      sourceTransform: geometry.coreImageTransform,
-      renderSize: geometry.renderSize,
+      geometry: geometry,
       ciContext: ciContext,
       postProcessor: postProcessor
     )
@@ -248,7 +305,7 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
     // Optical Flow requires equally spaced temporal samples. Do not preserve a
     // VFR track's irregular request times while labeling its neighbors as t±d.
     videoComposition.sourceTrackIDForFrameTiming = kCMPersistentTrackID_Invalid
-    videoComposition.renderSize = geometry.renderSize
+    videoComposition.renderSize = geometry.compositionRenderSize
     videoComposition.renderScale = 1
 
     return PreparedMotionBlurVideo(
@@ -389,6 +446,165 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
     return (renderSize, coreImageTransform)
   }
 
+  /// Resolves source, processor, and display geometry without conflating their
+  /// coordinate spaces.
+  ///
+  /// VideoToolbox accepts a maximum working shape of 4096×2160. A file that
+  /// physically stores portrait pixels can still fit that limit after an
+  /// internal quarter-turn, which is reversed before the display transform is
+  /// applied. The quarter-turn is an implementation detail and never changes
+  /// the composition's visible orientation.
+  static func resolveFrameGeometry(
+    naturalSize: CGSize,
+    preferredTransform: CGAffineTransform,
+    renderTarget: MotionBlurRenderTarget
+  ) throws -> MotionBlurFrameGeometry {
+    let sourceEncodedSize = try normalizedPixelSize(naturalSize)
+    let sourceDisplayGeometry = try resolveGeometry(
+      naturalSize: sourceEncodedSize,
+      preferredTransform: preferredTransform
+    )
+    let sourceDisplaySize = sourceDisplayGeometry.renderSize
+
+    let candidateEncodedSize: CGSize
+    switch renderTarget {
+    case .source:
+      candidateEncodedSize = sourceEncodedSize
+
+    case .fitWithin(let maximumPixelSize):
+      guard
+        maximumPixelSize.width.isFinite,
+        maximumPixelSize.height.isFinite,
+        maximumPixelSize.width >= 2,
+        maximumPixelSize.height >= 2
+      else {
+        throw MotionBlurError.invalidFrameSize(maximumPixelSize)
+      }
+      let scale = min(
+        1,
+        maximumPixelSize.width / sourceDisplaySize.width,
+        maximumPixelSize.height / sourceDisplaySize.height
+      )
+      candidateEncodedSize = evenPixelSize(
+        CGSize(
+          width: sourceEncodedSize.width * scale,
+          height: sourceEncodedSize.height * scale
+        )
+      )
+    }
+
+    let candidateDisplayGeometry = try resolveGeometry(
+      naturalSize: candidateEncodedSize,
+      preferredTransform: preferredTransform
+    )
+    let sourceScale = CGAffineTransform(
+      scaleX: candidateEncodedSize.width / sourceEncodedSize.width,
+      y: candidateEncodedSize.height / sourceEncodedSize.height
+    )
+
+    let processorLimit = CGSize(width: 4_096, height: 2_160)
+    let processorInputSize: CGSize
+    let canonicalTransform: CGAffineTransform
+    if candidateEncodedSize.fits(within: processorLimit) {
+      processorInputSize = candidateEncodedSize
+      canonicalTransform = .identity
+    } else {
+      let rotatedSize = CGSize(
+        width: candidateEncodedSize.height,
+        height: candidateEncodedSize.width
+      )
+      guard rotatedSize.fits(within: processorLimit) else {
+        throw MotionBlurError.unsupportedFrameSize(
+          width: Int(candidateEncodedSize.width),
+          height: Int(candidateEncodedSize.height)
+        )
+      }
+      processorInputSize = rotatedSize
+      canonicalTransform = normalizedCoreImageTransform(
+        naturalSize: candidateEncodedSize,
+        // Use an exact orthogonal matrix. `rotationAngle:` introduces tiny
+        // cosine residues that can expand a pixel extent fractionally.
+        transform: CGAffineTransform(
+          a: 0,
+          b: 1,
+          c: -1,
+          d: 0,
+          tx: 0,
+          ty: 0
+        )
+      )
+    }
+
+    let sourceToProcessorTransform = sourceScale.concatenating(
+      canonicalTransform
+    )
+    let processorToRenderTransform =
+      canonicalTransform
+      .inverted()
+      .concatenating(candidateDisplayGeometry.coreImageTransform)
+
+    return MotionBlurFrameGeometry(
+      sourceEncodedSize: sourceEncodedSize,
+      sourceDisplaySize: sourceDisplaySize,
+      processorInputSize: processorInputSize,
+      compositionRenderSize: candidateDisplayGeometry.renderSize,
+      sourceToProcessorTransform: sourceToProcessorTransform,
+      processorToRenderTransform: processorToRenderTransform,
+      usesSourceBuffersDirectly:
+        sourceToProcessorTransform.isIdentity
+        && processorInputSize == sourceEncodedSize
+    )
+  }
+
+  private static func normalizedPixelSize(_ size: CGSize) throws -> CGSize {
+    let normalized = CGSize(
+      width: size.width.rounded(),
+      height: size.height.rounded()
+    )
+    guard
+      normalized.width.isFinite,
+      normalized.height.isFinite,
+      normalized.width > 0,
+      normalized.height > 0
+    else {
+      throw MotionBlurError.invalidFrameSize(size)
+    }
+    return normalized
+  }
+
+  /// Produces positive even dimensions for a hardware processing buffer.
+  ///
+  /// Flooring ensures a viewport is never exceeded. The two-pixel minimum
+  /// avoids collapsing a very small but otherwise valid layout measurement.
+  private static func evenPixelSize(_ size: CGSize) -> CGSize {
+    func evenFloor(_ value: CGFloat) -> CGFloat {
+      max(2, floor(value / 2) * 2)
+    }
+    return CGSize(
+      width: evenFloor(size.width),
+      height: evenFloor(size.height)
+    )
+  }
+
+  /// Normalizes a Core Image transform so its transformed extent starts at
+  /// zero, independent of rotation direction.
+  private static func normalizedCoreImageTransform(
+    naturalSize: CGSize,
+    transform: CGAffineTransform
+  ) -> CGAffineTransform {
+    let transformedExtent = CGRect(
+      origin: .zero,
+      size: naturalSize
+    )
+    .applying(transform)
+    return transform.concatenating(
+      CGAffineTransform(
+        translationX: -transformedExtent.minX,
+        y: -transformedExtent.minY
+      )
+    )
+  }
+
   private static func makeInstructions(
     duration: CMTime,
     neighborOffset: CMTime,
@@ -398,8 +614,7 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
     settings: MotionBlurSettings,
     quality: MotionBlurQuality,
     allowsRealtimeFrameDropping: Bool,
-    sourceTransform: CGAffineTransform,
-    renderSize: CGSize,
+    geometry: MotionBlurFrameGeometry,
     ciContext: CIContext,
     postProcessor: @escaping PostProcessor
   ) -> [MotionBlurCompositionInstruction] {
@@ -427,11 +642,17 @@ public struct MotionBlurVideoCompositionBuilder: Sendable {
         quality: quality,
         allowsRealtimeFrameDropping: allowsRealtimeFrameDropping,
         frameDuration: neighborOffset,
-        sourceTransform: sourceTransform,
-        renderExtent: CGRect(origin: .zero, size: renderSize),
+        geometry: geometry,
         ciContext: ciContext,
         postProcessor: postProcessor
       )
     }
+  }
+}
+
+extension CGSize {
+
+  fileprivate func fits(within limit: CGSize) -> Bool {
+    width <= limit.width && height <= limit.height
   }
 }

@@ -4,10 +4,17 @@
 
 Färg is an iPhone video editor for applying one color lookup table (LUT) recipe
 to one or more videos. Preview and export evaluate the same Brightroom
+<<<<<<< Updated upstream
 parametric feature document for every video in the collection. The app uses its
 dedicated Färg icon and supports portrait orientation only.
 The visible app name remains **Färg**, while Spotlight can also find the app
 when a person searches for **Farg** without the diacritic.
+=======
+parametric feature document and temporal recipe for every video in the
+collection. Preview evaluates that recipe at the visible viewport's pixel
+resolution, while export preserves each source's display resolution. The app
+uses its dedicated Färg icon and supports portrait orientation only.
+>>>>>>> Stashed changes
 
 ## Privacy
 
@@ -91,12 +98,20 @@ when a person searches for **Farg** without the diacritic.
   remain shared across the collection; changing the preview does not change
   the recipe.
 - The preview uses Färg-owned playback controls instead of the system video
-  player interface. It provides play/pause, current time, duration, and a
-  timeline for seeking while keeping the video surface available for future
-  editor-specific controls.
+  player interface. Preview audio starts muted. The controls provide play/pause,
+  mute/unmute, current time, duration, and a timeline for seeking while keeping
+  the video surface available for future editor-specific controls.
 - The video surface is centered and fitted to the selected movie's presentation
   aspect ratio. Any remaining letterbox area belongs to the neutral editor
   stage instead of enlarging the player layer beyond the movie.
+- Live Preview resolves its processing ceiling from the player area above the
+  transport controls multiplied by the current display scale. The
+  display-oriented source is uniformly fitted to that pixel ceiling, never
+  upscaled, and rounded down to hardware-compatible even dimensions.
+- The first valid viewport prepares immediately. Later layout changes are
+  coalesced briefly, preserve the current playhead and playback intent, and
+  replace only the latest requested Preview target. A transient zero-size
+  layout never replaces the last valid target with a full-resolution fallback.
 - Preview audio mixes with music, podcasts, or other audio already playing
   outside Färg instead of interrupting it.
 - The editor navigation bar places its close menu and **Settings** at the
@@ -203,20 +218,35 @@ when a person searches for **Farg** without the diacritic.
   copied audio timing do not change.
 - Motion blur is applied before the Brightroom parametric LUT, matching the
   ordering of an in-camera exposure followed by color processing.
-- Preview and export use the same temporal composition and the same `Strength`
-  value. `Strength` follows VideoToolbox's 1–100 range; Färg does not present it
-  as a shutter angle because Apple defines no physical angle conversion.
+- Preview and export use the same temporal samples, ordering, and `Strength`
+  value. Preview runs Optical Flow at its viewport-fitted working resolution;
+  export runs at the source display resolution. `Strength` follows
+  VideoToolbox's 1–100 range; Färg does not present it as a shutter angle
+  because Apple defines no physical angle conversion.
 - Realtime preview bounds temporal work to one rendering frame and the newest
   queued frame. If Optical Flow cannot match playback cadence, an obsolete
   queued preview frame is cancelled instead of retaining its three decoded
   source frames indefinitely. Offline export never drops a requested frame.
+- Encoded source size, display-oriented size, VideoToolbox working size, and
+  composition output size are separate geometry contracts. Metadata-rotated
+  portrait movies and physically portrait-encoded movies therefore produce the
+  same upright Preview without treating display width and processor width as
+  interchangeable.
+- When viewport fitting or portrait canonicalization is required, Preview
+  transforms all three temporal source buffers into bounded, IOSurface-backed
+  pools before Optical Flow. A source-sized buffer that already matches the
+  processor geometry is passed through directly. Pool allocation is capped and
+  the VideoToolbox session plus both pools are flushed when the render context,
+  source, target, or owner changes.
 - The effect is available only when
   `VTMotionBlurConfiguration.isSupported` is true. Simulator shows the control
   as unavailable, and a preparation failure is reported rather than silently
   exporting without the effect.
-- VideoToolbox accepts raw source frames up to 4096×2160 on iOS. Inputs above
-  that limit fail with an explicit message instead of being downscaled
-  implicitly.
+- VideoToolbox accepts a working frame up to 4096×2160 on iOS. Preview checks
+  this limit after viewport downsampling. A source-resolution physical portrait
+  export such as 2160×3840 is rotated only inside the processor to 3840×2160
+  and restored to 2160×3840 for output. A working frame that does not fit the
+  limit in either orientation fails with an explicit message.
 - LUT still thumbnails remain single-frame previews and do not attempt to
   display motion blur.
 
@@ -230,6 +260,10 @@ when a person searches for **Farg** without the diacritic.
   preserve source frame timing; motion-blur exports use the nominal fixed
   cadence described above. Because HEVC bitrate is an average target, a
   completed file's measured bitrate can vary slightly with its content.
+- Before a rendered video sample reaches the HEVC writer, its format dimensions
+  must exactly match the composition's source-resolution encoder dimensions.
+  A portrait geometry mismatch fails at this boundary with expected and actual
+  sizes instead of surfacing later as an opaque writer failure.
 - Before export, the editor identifies the number of separate outputs and warns
   how many HDR inputs will be rendered to SDR.
 - The export sheet keeps every video in a picker-ordered list from start to

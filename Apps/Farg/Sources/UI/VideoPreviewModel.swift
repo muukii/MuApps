@@ -30,6 +30,16 @@ enum VideoPreviewRenderState: Equatable {
 @Observable
 final class VideoPreviewModel {
 
+  /// The latest authored recipe paired with the source it applies to.
+  ///
+  /// Viewport changes can reprepare this request without asking `EditorView`
+  /// to rebuild editing state or resetting the playhead through `load(_:)`.
+  private struct DesiredRenderRequest {
+    let recipe: FargVideoRenderRecipe
+    let source: VideoSource
+    let colorInfo: VideoColorInfo
+  }
+
   let player = AVPlayer()
 
   /// The fixed source frame used by visible editor LUT thumbnails.
@@ -37,6 +47,12 @@ final class VideoPreviewModel {
 
   /// Whether playback is active or waiting for enough media to continue.
   private(set) var isPlaying = false
+
+  /// Whether audio from the editor preview is currently suppressed.
+  ///
+  /// This state belongs to the player rather than an individual player item, so
+  /// replacing a prepared preview does not unexpectedly restore its audio.
+  private(set) var isMuted = true
 
   /// The current playback position in seconds.
   private(set) var playbackTime: TimeInterval = 0
@@ -59,6 +75,9 @@ final class VideoPreviewModel {
   }
 
   private var loadedSource: VideoSource?
+  private var desiredRenderRequest: DesiredRenderRequest?
+  private var previewRenderTarget: FargPreviewRenderTarget?
+  private var hasScheduledPreviewForLoadedSource = false
   private var compositionTask: Task<Void, Never>?
   private var compositionGeneration: UInt = 0
   private var frameCaptureTask: Task<Void, Never>?
@@ -84,6 +103,7 @@ final class VideoPreviewModel {
 
   init() {
     player.actionAtItemEnd = .none
+    player.isMuted = isMuted
     observePlaybackStatus()
     observePlaybackTime()
   }
@@ -108,6 +128,8 @@ final class VideoPreviewModel {
     compositionTask?.cancel()
     compositionGeneration &+= 1
     loadedSource = source
+    desiredRenderRequest = nil
+    hasScheduledPreviewForLoadedSource = false
     renderState = .preparing
     lutPreviewSource = nil
     lastScheduledFrameTime = nil
@@ -131,6 +153,8 @@ final class VideoPreviewModel {
     frameCaptureTask?.cancel()
     frameCaptureTask = nil
     loadedSource = nil
+    desiredRenderRequest = nil
+    hasScheduledPreviewForLoadedSource = false
     renderState = .empty
     lutPreviewSource = nil
     lastScheduledFrameTime = nil
@@ -156,49 +180,112 @@ final class VideoPreviewModel {
     for source: VideoSource,
     colorInfo: VideoColorInfo?
   ) {
+    let request = DesiredRenderRequest(
+      recipe: recipe,
+      source: source,
+      colorInfo: colorInfo ?? .sdrRec709
+    )
+    desiredRenderRequest = request
     guard isRenderingSuspended == false else { return }
+    guard let previewRenderTarget else {
+      renderState = .preparing
+      return
+    }
+    schedulePreviewPreparation(
+      request: request,
+      target: previewRenderTarget,
+      debounce: false
+    )
+  }
+
+  /// Updates the operational preview resolution from the visible player area.
+  ///
+  /// Invalid transient layout values are ignored. The first usable viewport is
+  /// applied immediately; later resize bursts are coalesced while the last
+  /// valid preview remains visible.
+  func updateViewport(
+    sizeInPoints: CGSize,
+    displayScale: CGFloat
+  ) {
+    guard
+      let target = FargPreviewRenderTarget(
+        viewportSizeInPoints: sizeInPoints,
+        displayScale: displayScale
+      ),
+      target != previewRenderTarget
+    else {
+      return
+    }
+    previewRenderTarget = target
+    guard
+      isRenderingSuspended == false,
+      let request = desiredRenderRequest
+    else {
+      return
+    }
+    schedulePreviewPreparation(
+      request: request,
+      target: target,
+      debounce: hasScheduledPreviewForLoadedSource
+    )
+  }
+
+  private func schedulePreviewPreparation(
+    request: DesiredRenderRequest,
+    target: FargPreviewRenderTarget,
+    debounce: Bool
+  ) {
     compositionTask?.cancel()
     compositionGeneration &+= 1
     let generation = compositionGeneration
+    hasScheduledPreviewForLoadedSource = true
     player.currentItem?.cancelPendingSeeks()
     replacementSeekGeneration = nil
 
-    if recipe.motionBlur.isEnabled == false {
-      do {
-        let prepared = try FargVideoRenderPipeline().prepareSingleFrame(
-          asset: source.asset,
-          recipe: recipe,
-          colorInfo: colorInfo ?? .sdrRec709
-        )
-        install(prepared: prepared, generation: generation)
-      } catch {
-        failRender(
-          message: error.localizedDescription,
-          generation: generation
-        )
-      }
-      return
+    if debounce == false {
+      prepareVisibleStateForReplacement(
+        recipe: request.recipe
+      )
     }
-
-    renderState = .preparing
-    // Preserve the user's playback intent while preventing a stale player item
-    // from continuing expensive decoding behind the preparing surface.
-    detachCurrentItem(preservingPlaybackPosition: true)
-    isPlaying = false
 
     compositionTask = Task { [weak self] in
       do {
-        let prepared = try await FargVideoRenderPipeline().prepare(
-          asset: source.asset,
-          recipe: recipe,
-          colorInfo: colorInfo ?? .sdrRec709,
-          purpose: .preview
-        )
+        if debounce {
+          try await Task.sleep(for: .milliseconds(120))
+          guard
+            let self,
+            self.compositionGeneration == generation,
+            self.loadedSource?.id == request.source.id
+          else {
+            return
+          }
+          self.prepareVisibleStateForReplacement(
+            recipe: request.recipe
+          )
+        }
+
+        let prepared: PreparedFargVideoRender
+        if request.recipe.motionBlur.isEnabled {
+          prepared = try await FargVideoRenderPipeline().prepare(
+            asset: request.source.asset,
+            recipe: request.recipe,
+            colorInfo: request.colorInfo,
+            purpose: .preview(target)
+          )
+        } else {
+          prepared = try FargVideoRenderPipeline().prepareSingleFrame(
+            asset: request.source.asset,
+            recipe: request.recipe,
+            colorInfo: request.colorInfo,
+            purpose: .preview(target)
+          )
+        }
         try Task.checkCancellation()
         guard
           let self,
           self.compositionGeneration == generation,
-          self.loadedSource?.id == source.id
+          self.loadedSource?.id == request.source.id,
+          self.previewRenderTarget == target
         else {
           return
         }
@@ -212,7 +299,7 @@ final class VideoPreviewModel {
         guard
           let self,
           self.compositionGeneration == generation,
-          self.loadedSource?.id == source.id
+          self.loadedSource?.id == request.source.id
         else {
           return
         }
@@ -224,11 +311,31 @@ final class VideoPreviewModel {
     }
   }
 
+  /// Hides a stale temporal result only when replacement work actually begins.
+  ///
+  /// LUT-only items remain attached because their composition can be replaced
+  /// in place without disrupting the decoder, playhead, or audio clock.
+  private func prepareVisibleStateForReplacement(
+    recipe: FargVideoRenderRecipe
+  ) {
+    guard recipe.motionBlur.isEnabled else {
+      if player.currentItem == nil {
+        renderState = .preparing
+      }
+      return
+    }
+
+    renderState = .preparing
+    detachCurrentItem(preservingPlaybackPosition: true)
+    isPlaying = false
+  }
+
   /// Invalidates a preview when recipe creation fails before preparation starts.
   func failCurrentRender(_ error: any Error) {
     compositionTask?.cancel()
     compositionTask = nil
     compositionGeneration &+= 1
+    desiredRenderRequest = nil
     replacementSeekGeneration = nil
     failRender(
       message: error.localizedDescription,
@@ -279,6 +386,12 @@ final class VideoPreviewModel {
     } else {
       play()
     }
+  }
+
+  /// Switches preview audio between its audible and muted states.
+  func toggleMute() {
+    isMuted.toggle()
+    player.isMuted = isMuted
   }
 
   /// Pauses playback and remembers whether it should resume after scrubbing.

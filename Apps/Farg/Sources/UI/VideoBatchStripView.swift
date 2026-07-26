@@ -20,13 +20,7 @@ struct VideoBatchStripView: View {
   let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      VideoBatchHeader(
-        clips: clips,
-        selectedClipID: selectedClipID
-      )
-      .padding(.horizontal, contentPadding)
-
+    VStack(alignment: .leading, spacing: 10) {    
       VideoBatchFilmstrip(
         contentPadding: contentPadding,
         clips: clips,
@@ -38,33 +32,6 @@ struct VideoBatchStripView: View {
         onPickFileURLs: onPickFileURLs
       )
     }
-  }
-}
-
-/// Shows the collection position above the filmstrip.
-private struct VideoBatchHeader: View {
-
-  let clips: [VideoClip]
-  let selectedClipID: VideoClip.ID?
-
-  var body: some View {
-    HStack(alignment: .firstTextBaseline, spacing: 10) {
-      Text("VIDEOS")
-        .font(.caption.weight(.semibold))
-        .tracking(0.8)
-        .foregroundStyle(.secondary)
-
-      if let selectedIndex {
-        Text("\(selectedIndex + 1) of \(clips.count)")
-          .font(.caption.monospacedDigit())
-          .foregroundStyle(.primary)
-      }
-    }
-  }
-
-  private var selectedIndex: Int? {
-    guard let selectedClipID else { return nil }
-    return clips.firstIndex { $0.id == selectedClipID }
   }
 }
 
@@ -120,6 +87,20 @@ private struct VideoBatchFilmstrip: View {
   }
 }
 
+extension View {
+  
+  func selectionOverlay(isSelected: Bool) -> some View {
+    overlay {
+      RoundedRectangle(cornerRadius: 9, style: .continuous)
+        .stroke(
+          .tint,
+          lineWidth: isSelected ? 2 : 0
+        )
+    }
+  }
+  
+}
+
 /// Renders one clip's lifecycle at its stable filmstrip position.
 private struct VideoBatchClipCell: View {
 
@@ -138,15 +119,7 @@ private struct VideoBatchClipCell: View {
         VideoClipThumbnail(source: content.source)
           .frame(width: 72, height: 52)
           .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-          .overlay {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-              .stroke(
-                isSelected
-                  ? Color.primary
-                  : Color.secondary.opacity(0.2),
-                lineWidth: isSelected ? 2 : 1
-              )
-          }
+          .selectionOverlay(isSelected: isSelected)
       }
       .buttonStyle(.plain)
       .contextMenu {
@@ -209,6 +182,7 @@ private struct VideoBatchAddCell: View {
     .buttonStyle(.plain)
     .disabled(isDisabled)
     .accessibilityLabel("Add Videos")
+    // TODO: Cellにこういうアクションがあるのはだめ
     .photosPicker(
       isPresented: $isPhotosPickerPresented,
       selection: $pickerItems,

@@ -30,10 +30,13 @@ final class MotionBlurCompositionInstruction:
   let quality: MotionBlurQuality
   let allowsRealtimeFrameDropping: Bool
   let frameDuration: CMTime
-  let sourceTransform: CGAffineTransform
-  let renderExtent: CGRect
+  let geometry: MotionBlurFrameGeometry
   let ciContext: CIContext
   let postProcessor: PostProcessor
+
+  var renderExtent: CGRect {
+    CGRect(origin: .zero, size: geometry.compositionRenderSize)
+  }
 
   init(
     timeRange: CMTimeRange,
@@ -44,8 +47,7 @@ final class MotionBlurCompositionInstruction:
     quality: MotionBlurQuality,
     allowsRealtimeFrameDropping: Bool,
     frameDuration: CMTime,
-    sourceTransform: CGAffineTransform,
-    renderExtent: CGRect,
+    geometry: MotionBlurFrameGeometry,
     ciContext: CIContext,
     postProcessor: @escaping PostProcessor
   ) {
@@ -57,8 +59,7 @@ final class MotionBlurCompositionInstruction:
     self.quality = quality
     self.allowsRealtimeFrameDropping = allowsRealtimeFrameDropping
     self.frameDuration = frameDuration
-    self.sourceTransform = sourceTransform
-    self.renderExtent = renderExtent
+    self.geometry = geometry
     self.ciContext = ciContext
     self.postProcessor = postProcessor
     self.requiredSourceTrackIDs = [
@@ -223,6 +224,27 @@ public final class MotionBlurVideoCompositor:
       } else {
         nextBuffer = nil
       }
+
+      try validateGeometry(
+        of: currentBuffer,
+        expected: instruction.geometry.sourceEncodedSize,
+        stage: .currentSource
+      )
+      if let previousBuffer {
+        try validateGeometry(
+          of: previousBuffer,
+          expected: instruction.geometry.sourceEncodedSize,
+          stage: .previousSource
+        )
+      }
+      if let nextBuffer {
+        try validateGeometry(
+          of: nextBuffer,
+          expected: instruction.geometry.sourceEncodedSize,
+          stage: .nextSource
+        )
+      }
+
       let sourcePixelFormat = CVPixelBufferGetPixelFormatType(currentBuffer)
       let sourceBuffers = [previousBuffer, currentBuffer, nextBuffer].compactMap { $0 }
       guard
@@ -241,29 +263,63 @@ public final class MotionBlurVideoCompositor:
         return try compose(
           imageBuffer: currentBuffer,
           currentBuffer: currentBuffer,
+          imageTransform:
+            instruction.geometry.sourceToProcessorTransform.concatenating(
+              instruction.geometry.processorToRenderTransform
+            ),
           instruction: instruction,
           request: request
         )
       }
 
       let session = try processorSession(
-        width: CVPixelBufferGetWidth(currentBuffer),
-        height: CVPixelBufferGetHeight(currentBuffer),
+        width: Int(instruction.geometry.processorInputSize.width),
+        height: Int(instruction.geometry.processorInputSize.height),
         sourcePixelFormat: sourcePixelFormat,
         quality: instruction.quality
       )
-      let destinationBuffer = try session.makeDestinationPixelBuffer()
+      let processorCurrentBuffer = try processorSourceBuffer(
+        from: currentBuffer,
+        stage: .currentProcessor,
+        slot: .current,
+        session: session,
+        instruction: instruction
+      )
+      let processorPreviousBuffer = try previousBuffer.map {
+        try processorSourceBuffer(
+          from: $0,
+          stage: .previousProcessor,
+          slot: .previous,
+          session: session,
+          instruction: instruction
+        )
+      }
+      let processorNextBuffer = try nextBuffer.map {
+        try processorSourceBuffer(
+          from: $0,
+          stage: .nextProcessor,
+          slot: .next,
+          session: session,
+          instruction: instruction
+        )
+      }
+      let destinationBuffer = try session.destinationPixelBuffer()
+      try validateGeometry(
+        of: destinationBuffer,
+        expected: instruction.geometry.processorInputSize,
+        stage: .processorDestination
+      )
       // VideoToolbox writes into a caller-owned buffer and does not promise to
       // copy color metadata. Preserve P3/Rec.709 interpretation when Core Image
       // consumes the motion-blurred half-float pixels.
       copyColorAttachments(
-        from: currentBuffer,
+        from: processorCurrentBuffer,
         to: destinationBuffer
       )
 
       guard
         let currentFrame = VTFrameProcessorFrame(
-          buffer: currentBuffer,
+          buffer: processorCurrentBuffer,
           presentationTimeStamp: request.compositionTime
         ),
         let destinationFrame = VTFrameProcessorFrame(
@@ -275,10 +331,10 @@ public final class MotionBlurVideoCompositor:
       }
 
       let previousFrame: VTFrameProcessorFrame?
-      if let previousBuffer {
+      if let processorPreviousBuffer {
         guard
           let frame = VTFrameProcessorFrame(
-            buffer: previousBuffer,
+            buffer: processorPreviousBuffer,
             presentationTimeStamp: request.compositionTime - instruction.frameDuration
           )
         else {
@@ -289,10 +345,10 @@ public final class MotionBlurVideoCompositor:
         previousFrame = nil
       }
       let nextFrame: VTFrameProcessorFrame?
-      if let nextBuffer {
+      if let processorNextBuffer {
         guard
           let frame = VTFrameProcessorFrame(
-            buffer: nextBuffer,
+            buffer: processorNextBuffer,
             presentationTimeStamp: request.compositionTime + instruction.frameDuration
           )
         else {
@@ -332,6 +388,7 @@ public final class MotionBlurVideoCompositor:
       return try compose(
         imageBuffer: destinationBuffer,
         currentBuffer: currentBuffer,
+        imageTransform: instruction.geometry.processorToRenderTransform,
         instruction: instruction,
         request: request
       )
@@ -341,14 +398,20 @@ public final class MotionBlurVideoCompositor:
   private func compose(
     imageBuffer: CVPixelBuffer,
     currentBuffer: CVPixelBuffer,
+    imageTransform: CGAffineTransform,
     instruction: MotionBlurCompositionInstruction,
     request: AVAsynchronousVideoCompositionRequest
   ) throws -> CVPixelBuffer {
     let outputBuffer = try request.renderContext.makePixelBuffer()
+    try validateGeometry(
+      of: outputBuffer,
+      expected: instruction.geometry.compositionRenderSize,
+      stage: .renderContext
+    )
     let sourceImage = CIImage(cvPixelBuffer: imageBuffer)
     let motionBlurredImage =
       sourceImage
-      .transformed(by: instruction.sourceTransform)
+      .transformed(by: imageTransform)
     let outputImage = try instruction.postProcessor(
       motionBlurredImage,
       instruction.renderExtent
@@ -370,6 +433,58 @@ public final class MotionBlurVideoCompositor:
   }
 
   #if !targetEnvironment(simulator)
+    /// Converts a decoded frame into the one canonical pixel space consumed by
+    /// every temporal input of the VideoToolbox session.
+    ///
+    /// Preview downsampling and physical-portrait canonicalization happen in
+    /// three session-owned IOSurface slots. Requests are serialized, so each
+    /// slot is reused only after VideoToolbox has completed the prior request.
+    private func processorSourceBuffer(
+      from sourceBuffer: CVPixelBuffer,
+      stage: MotionBlurFrameStage,
+      slot: MotionBlurProcessorSourceBufferSlot,
+      session: MotionBlurProcessorSession,
+      instruction: MotionBlurCompositionInstruction
+    ) throws -> CVPixelBuffer {
+      if instruction.geometry.usesSourceBuffersDirectly {
+        try validateGeometry(
+          of: sourceBuffer,
+          expected: instruction.geometry.processorInputSize,
+          stage: stage
+        )
+        return sourceBuffer
+      }
+
+      let processorBuffer = try session.sourcePixelBuffer(for: slot)
+      copyColorAttachments(from: sourceBuffer, to: processorBuffer)
+
+      let processorExtent = CGRect(
+        origin: .zero,
+        size: instruction.geometry.processorInputSize
+      )
+      let sourceImage = CIImage(cvPixelBuffer: sourceBuffer)
+      let processorImage =
+        sourceImage
+        .transformed(by: instruction.geometry.sourceToProcessorTransform)
+        .cropped(to: processorExtent)
+      let colorSpace =
+        CVImageBufferGetColorSpace(processorBuffer)?.takeUnretainedValue()
+        ?? sourceImage.colorSpace
+        ?? CGColorSpace(name: CGColorSpace.itur_709)
+      instruction.ciContext.render(
+        processorImage,
+        to: processorBuffer,
+        bounds: processorExtent,
+        colorSpace: colorSpace
+      )
+      try validateGeometry(
+        of: processorBuffer,
+        expected: instruction.geometry.processorInputSize,
+        stage: stage
+      )
+      return processorBuffer
+    }
+
     private func processorSession(
       width: Int,
       height: Int,
@@ -434,6 +549,27 @@ public final class MotionBlurVideoCompositor:
   #endif
 }
 
+/// Enforces AVFoundation, Core Image, and VideoToolbox's shared frame-size
+/// contract at the exact boundary where a mismatched buffer would otherwise
+/// fail later with an opaque framework error.
+private func validateGeometry(
+  of pixelBuffer: CVPixelBuffer,
+  expected: CGSize,
+  stage: MotionBlurFrameStage
+) throws {
+  let actual = CGSize(
+    width: CVPixelBufferGetWidth(pixelBuffer),
+    height: CVPixelBufferGetHeight(pixelBuffer)
+  )
+  guard actual == expected else {
+    throw MotionBlurError.inconsistentFrameGeometry(
+      stage: stage,
+      expected: expected,
+      actual: actual
+    )
+  }
+}
+
 /// Copies only metadata that affects RGB interpretation.
 ///
 /// Full attachment propagation would also copy clean aperture and pixel aspect
@@ -465,6 +601,8 @@ private func copyAttachment(
       &sourceMode
     )
   else {
+    // Reusable working buffers may still carry this key from the prior frame.
+    CVBufferRemoveAttachment(destination, key)
     return
   }
   CVBufferSetAttachment(
@@ -721,7 +859,18 @@ extension NSCondition {
 }
 
 #if !targetEnvironment(simulator)
-  /// One configured VideoToolbox session and its compatible destination pool.
+  /// The temporal role of one reusable processor input buffer.
+  ///
+  /// A request may need all three roles at once, so roles never share a buffer.
+  /// The compositor's serial queue permits each role to reuse its buffer after
+  /// the prior VideoToolbox callback has completed.
+  private enum MotionBlurProcessorSourceBufferSlot: Int, Hashable {
+    case current
+    case previous
+    case next
+  }
+
+  /// One configured VideoToolbox session and its bounded working-buffer set.
   private final class MotionBlurProcessorSession {
     let width: Int
     let height: Int
@@ -729,7 +878,10 @@ extension NSCondition {
     let quality: MotionBlurQuality
 
     private let processor: VTFrameProcessor
+    private let sourcePool: CVPixelBufferPool
     private let destinationPool: CVPixelBufferPool
+    private var sourceBuffers: [MotionBlurProcessorSourceBufferSlot: CVPixelBuffer] = [:]
+    private var destinationBuffer: CVPixelBuffer?
 
     init(
       width: Int,
@@ -760,12 +912,89 @@ extension NSCondition {
       let requestedAttributes: [String: any Sendable] = [
         kCVPixelBufferWidthKey as String: width,
         kCVPixelBufferHeightKey as String: height,
+        kCVPixelBufferPixelFormatTypeKey as String: Int(sourcePixelFormat),
         kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: String],
         kCVPixelBufferMetalCompatibilityKey as String: true,
       ]
+
+      let sourcePool: CVPixelBufferPool
+      let destinationPool: CVPixelBufferPool
+      do {
+        sourcePool = try Self.makePixelBufferPool(
+          configurationAttributes:
+            configuration.sourcePixelBufferAttributes as CFDictionary,
+          requestedAttributes: requestedAttributes,
+          minimumBufferCount: 3
+        )
+        destinationPool = try Self.makePixelBufferPool(
+          configurationAttributes:
+            configuration.destinationPixelBufferAttributes as CFDictionary,
+          requestedAttributes: requestedAttributes,
+          minimumBufferCount: 1
+        )
+      } catch {
+        processor.endSession()
+        throw error
+      }
+
+      self.width = width
+      self.height = height
+      self.sourcePixelFormat = sourcePixelFormat
+      self.quality = quality
+      self.processor = processor
+      self.sourcePool = sourcePool
+      self.destinationPool = destinationPool
+    }
+
+    /// Returns the stable working buffer assigned to one temporal input role.
+    ///
+    /// Buffers are allocated lazily because source-sized landscape frames can
+    /// bypass this pool, while Preview downsampling and portrait
+    /// canonicalization need up to exactly three roles.
+    func sourcePixelBuffer(
+      for slot: MotionBlurProcessorSourceBufferSlot
+    ) throws -> CVPixelBuffer {
+      if let sourceBuffer = sourceBuffers[slot] {
+        return sourceBuffer
+      }
+      let sourceBuffer = try Self.makePixelBuffer(from: sourcePool)
+      sourceBuffers[slot] = sourceBuffer
+      return sourceBuffer
+    }
+
+    /// Returns the single output buffer reused by serialized process calls.
+    func destinationPixelBuffer() throws -> CVPixelBuffer {
+      if let destinationBuffer {
+        return destinationBuffer
+      }
+      let destinationBuffer = try Self.makePixelBuffer(from: destinationPool)
+      self.destinationBuffer = destinationBuffer
+      return destinationBuffer
+    }
+
+    private static func makePixelBuffer(
+      from pool: CVPixelBufferPool
+    ) throws -> CVPixelBuffer {
+      var pixelBuffer: CVPixelBuffer?
+      let status = CVPixelBufferPoolCreatePixelBuffer(
+        kCFAllocatorDefault,
+        pool,
+        &pixelBuffer
+      )
+      guard status == kCVReturnSuccess, let pixelBuffer else {
+        throw MotionBlurError.cannotCreatePixelBuffer
+      }
+      return pixelBuffer
+    }
+
+    private static func makePixelBufferPool(
+      configurationAttributes: CFDictionary,
+      requestedAttributes: [String: any Sendable],
+      minimumBufferCount: Int
+    ) throws -> CVPixelBufferPool {
       let attributeSets =
         [
-          configuration.destinationPixelBufferAttributes as CFDictionary,
+          configurationAttributes,
           requestedAttributes as CFDictionary,
         ] as CFArray
       var resolvedAttributes: CFDictionary?
@@ -775,41 +1004,23 @@ extension NSCondition {
         &resolvedAttributes
       )
       guard resolveStatus == kCVReturnSuccess, let resolvedAttributes else {
-        processor.endSession()
         throw MotionBlurError.cannotCreatePixelBuffer
       }
 
       var pool: CVPixelBufferPool?
       let poolStatus = CVPixelBufferPoolCreate(
         kCFAllocatorDefault,
-        nil,
+        [
+          kCVPixelBufferPoolMinimumBufferCountKey as String:
+            minimumBufferCount
+        ] as CFDictionary,
         resolvedAttributes,
         &pool
       )
       guard poolStatus == kCVReturnSuccess, let pool else {
-        processor.endSession()
         throw MotionBlurError.cannotCreatePixelBuffer
       }
-
-      self.width = width
-      self.height = height
-      self.sourcePixelFormat = sourcePixelFormat
-      self.quality = quality
-      self.processor = processor
-      self.destinationPool = pool
-    }
-
-    func makeDestinationPixelBuffer() throws -> CVPixelBuffer {
-      var pixelBuffer: CVPixelBuffer?
-      let status = CVPixelBufferPoolCreatePixelBuffer(
-        kCFAllocatorDefault,
-        destinationPool,
-        &pixelBuffer
-      )
-      guard status == kCVReturnSuccess, let pixelBuffer else {
-        throw MotionBlurError.cannotCreatePixelBuffer
-      }
-      return pixelBuffer
+      return pool
     }
 
     func process(parameters: VTMotionBlurParameters) throws {
@@ -822,6 +1033,9 @@ extension NSCondition {
 
     func end() {
       processor.endSession()
+      sourceBuffers.removeAll(keepingCapacity: false)
+      destinationBuffer = nil
+      CVPixelBufferPoolFlush(sourcePool, .excessBuffers)
       CVPixelBufferPoolFlush(destinationPool, .excessBuffers)
     }
   }

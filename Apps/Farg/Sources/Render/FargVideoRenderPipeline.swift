@@ -25,9 +25,9 @@ nonisolated struct PreparedFargVideoRender: @unchecked Sendable {
 }
 
 /// Controls operational backpressure without changing the authored recipe.
-nonisolated enum FargVideoRenderPurpose: Sendable {
-  /// Realtime playback keeps only the newest queued Optical Flow frame.
-  case preview
+nonisolated enum FargVideoRenderPurpose: Equatable, Sendable {
+  /// Realtime playback renders only the pixels consumed by the live viewport.
+  case preview(FargPreviewRenderTarget)
   /// Export completes every requested frame.
   case export
 
@@ -37,6 +37,15 @@ nonisolated enum FargVideoRenderPurpose: Sendable {
       return true
     case .export:
       return false
+    }
+  }
+
+  var motionBlurRenderTarget: MotionBlurRenderTarget {
+    switch self {
+    case .preview(let target):
+      return .fitWithin(target.maximumPixelSize)
+    case .export:
+      return .source
     }
   }
 }
@@ -65,7 +74,8 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
       )
       .prepare(
         asset: asset,
-        settings: recipe.motionBlur
+        settings: recipe.motionBlur,
+        renderTarget: purpose.motionBlurRenderTarget
       ) { image, renderExtent in
         try parametricRenderer.makeFrameImage(
           from: image,
@@ -83,7 +93,8 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
     return try prepareSingleFrame(
       asset: asset,
       recipe: recipe,
-      colorInfo: colorInfo
+      colorInfo: colorInfo,
+      purpose: purpose
     )
   }
 
@@ -95,20 +106,130 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
   func prepareSingleFrame(
     asset: AVAsset,
     recipe: FargVideoRenderRecipe,
-    colorInfo: VideoColorInfo
+    colorInfo: VideoColorInfo,
+    purpose: FargVideoRenderPurpose
   ) throws -> PreparedFargVideoRender {
     precondition(recipe.motionBlur.isEnabled == false)
     let parametricRenderer = ParametricVideoRenderer()
-    let composition = try parametricRenderer.makeVideoComposition(
-      for: asset,
-      document: recipe.document,
-      renderSizeMode: .source,
-      ciContext: ciContext
-    )
+    let composition: AVMutableVideoComposition
+    switch purpose {
+    case .export:
+      composition = try parametricRenderer.makeVideoComposition(
+        for: asset,
+        document: recipe.document,
+        renderSizeMode: .source,
+        ciContext: ciContext
+      )
+
+    case .preview(let target):
+      let sourceRenderSize = try Self.sourceRenderSize(for: asset)
+      let previewRenderSize = try target.resolveRenderSize(
+        sourceDisplaySize: sourceRenderSize
+      )
+      let renderExtent = CGRect(
+        origin: .zero,
+        size: previewRenderSize
+      )
+      let document = recipe.document
+      let ciContext = ciContext
+      composition = AVMutableVideoComposition(asset: asset) { request in
+        do {
+          let sourceImage = try Self.makePreviewSourceImage(
+            request.sourceImage,
+            renderExtent: renderExtent
+          )
+          let output = try parametricRenderer.makeFrameImage(
+            from: sourceImage,
+            document: document,
+            renderExtent: renderExtent
+          )
+          request.finish(with: output, context: ciContext)
+        } catch {
+          request.finish(with: error)
+        }
+      }
+      composition.renderSize = previewRenderSize
+    }
+
     colorInfo.apply(to: composition)
     return PreparedFargVideoRender(
       asset: asset,
       videoComposition: composition
     )
+  }
+
+  /// Returns the display-oriented canvas supplied by AVFoundation's Core Image
+  /// composition handler.
+  ///
+  /// This sizing probe intentionally lives in Farg: viewport resolution is an
+  /// editor-only operational policy and does not expand Brightroom's public
+  /// rendering API.
+  private static func sourceRenderSize(for asset: AVAsset) throws -> CGSize {
+    let composition = AVMutableVideoComposition(asset: asset) { request in
+      request.finish(with: request.sourceImage, context: nil)
+    }
+    let sourceRenderSize: CGSize
+    if composition.renderSize.isFargValidVideoRenderSize {
+      sourceRenderSize = composition.renderSize
+    } else if let compositionAsset = asset as? AVComposition,
+      compositionAsset.naturalSize.isFargValidVideoRenderSize
+    {
+      sourceRenderSize = compositionAsset.naturalSize
+    } else {
+      sourceRenderSize = composition.renderSize
+    }
+    guard sourceRenderSize.isFargValidVideoRenderSize else {
+      throw ParametricVideoRendererError.invalidSourceRenderSize(
+        sourceRenderSize
+      )
+    }
+    return sourceRenderSize
+  }
+
+  /// Normalizes and downsamples AVFoundation's display-oriented frame before
+  /// the Brightroom feature graph evaluates it.
+  ///
+  /// Exact x/y ratios fill the already aspect-fitted even-pixel target and
+  /// prevent fractional transparent edges at the composition boundary.
+  static func makePreviewSourceImage(
+    _ sourceImage: CIImage,
+    renderExtent: CGRect
+  ) throws -> CIImage {
+    let sourceExtent = sourceImage.extent
+    guard
+      sourceExtent.width.isFinite,
+      sourceExtent.height.isFinite,
+      sourceExtent.width > 0,
+      sourceExtent.height > 0
+    else {
+      throw ParametricVideoRendererError.invalidSourceRenderSize(
+        sourceExtent.size
+      )
+    }
+    let normalizedImage = sourceImage.transformed(
+      by: CGAffineTransform(
+        translationX: -sourceExtent.minX,
+        y: -sourceExtent.minY
+      )
+    )
+    return
+      normalizedImage
+      .transformed(
+        by: CGAffineTransform(
+          scaleX: renderExtent.width / sourceExtent.width,
+          y: renderExtent.height / sourceExtent.height
+        )
+      )
+      .cropped(to: renderExtent)
+  }
+}
+
+extension CGSize {
+
+  fileprivate nonisolated var isFargValidVideoRenderSize: Bool {
+    width.isFinite
+      && height.isFinite
+      && width > 0
+      && height > 0
   }
 }

@@ -407,96 +407,56 @@ private struct EditorLowerPanel: View {
       onRemoveClip: onRemoveClip,
       onPickFileURLs: onPickFileURLs
     )
-    .background(.background)
-    .overlay(alignment: .top) {
-      Rectangle()
-        .fill(Color.secondary.opacity(0.2))
-        .frame(height: 1)
-    }
+    .background(.background)   
   }
-}
+  
+  /// Composes Videos and EditControl as independent siblings.
+  private struct EditorLowerPanelContent: View {
 
-/// Composes Videos and EditControl as independent siblings.
-private struct EditorLowerPanelContent: View {
+    let contentPadding: CGFloat
+    let clips: [VideoClip]
+    let selectedClipID: VideoClip.ID?
+    let hdrVideoCount: Int
+    let library: LUTLibrary
+    let lutPreviewSource: LUTPreviewSourceImage?
+    @Binding var pickerItems: [PhotosPickerItem]
+    @Binding var selectedLUT: LUT?
+    @Binding var motionBlur: MotionBlurSettings
+    let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
+    let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
+    let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
 
-  let contentPadding: CGFloat
-  let clips: [VideoClip]
-  let selectedClipID: VideoClip.ID?
-  let hdrVideoCount: Int
-  let library: LUTLibrary
-  let lutPreviewSource: LUTPreviewSourceImage?
-  @Binding var pickerItems: [PhotosPickerItem]
-  @Binding var selectedLUT: LUT?
-  @Binding var motionBlur: MotionBlurSettings
-  let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
-  let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
-  let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
-
-  var body: some View {
-    VStack(spacing: 0) {
-      VideoBatchStripView(
-        contentPadding: contentPadding,
-        clips: clips,
-        selectedClipID: selectedClipID,
-        pickerItems: $pickerItems,
-        onSelectClip: onSelectClip,
-        onRemoveClip: onRemoveClip,
-        onPickFileURLs: onPickFileURLs
-      )
-      .padding(.vertical, contentPadding)
-
-      EditorEditControl(
-        contentPadding: contentPadding,
-        videoCount: clips.count,
-        hdrVideoCount: hdrVideoCount,
-        library: library,
-        lutPreviewSource: lutPreviewSource,
-        selectedLUT: $selectedLUT,
-        motionBlur: $motionBlur
-      )
-    }
-  }
-}
-
-/// Owns the LUT and Motion Blur tabs below the fixed video collection.
-private struct EditorEditControl: View {
-
-  let contentPadding: CGFloat
-  let videoCount: Int
-  let hdrVideoCount: Int
-  let library: LUTLibrary
-  let lutPreviewSource: LUTPreviewSourceImage?
-  @Binding var selectedLUT: LUT?
-  @Binding var motionBlur: MotionBlurSettings
-
-  @State private var selectedEffect: EditorEffectTab = .lut
-
-  var body: some View {
-    VStack(spacing: 0) {
-      ScrollView {
-        EditorControlContent(
+    var body: some View {
+      VStack(spacing: 0) {
+        VideoBatchStripView(
           contentPadding: contentPadding,
-          selectedEffect: selectedEffect,
-          videoCount: videoCount,
+          clips: clips,
+          selectedClipID: selectedClipID,
+          pickerItems: $pickerItems,
+          onSelectClip: onSelectClip,
+          onRemoveClip: onRemoveClip,
+          onPickFileURLs: onPickFileURLs
+        )
+        .padding(.vertical, contentPadding)
+
+        EditorEditControl(
+          contentPadding: contentPadding,
+          videoCount: clips.count,
           hdrVideoCount: hdrVideoCount,
           library: library,
           lutPreviewSource: lutPreviewSource,
           selectedLUT: $selectedLUT,
           motionBlur: $motionBlur
         )
-        .padding(.vertical, contentPadding)
       }
-      .scrollBounceBehavior(.basedOnSize)
-
-      EditorEffectTabBar(selection: $selectedEffect)
     }
   }
 
-  /// Orders effect-specific controls and the shared export summary.
-  fileprivate struct EditorControlContent: View {
+  
+  /// Owns the LUT and Motion Blur tabs below the fixed video collection.
+  private struct EditorEditControl: View {
 
     let contentPadding: CGFloat
-    let selectedEffect: EditorEffectTab
     let videoCount: Int
     let hdrVideoCount: Int
     let library: LUTLibrary
@@ -504,240 +464,246 @@ private struct EditorEditControl: View {
     @Binding var selectedLUT: LUT?
     @Binding var motionBlur: MotionBlurSettings
 
-    var body: some View {
-      VStack(alignment: .leading, spacing: 18) {
-        EditorEffectControls(
-          contentPadding: contentPadding,
-          selectedEffect: selectedEffect,
-          library: library,
-          lutPreviewSource: lutPreviewSource,
-          selectedLUT: $selectedLUT,
-          motionBlur: $motionBlur
-        )
-      }
-    }
-  }
-
-  /// Displays only the controls that belong to the selected editing mode.
-  fileprivate struct EditorEffectControls: View {
-
-    let contentPadding: CGFloat
-    let selectedEffect: EditorEffectTab
-    let library: LUTLibrary
-    let lutPreviewSource: LUTPreviewSourceImage?
-    @Binding var selectedLUT: LUT?
-    @Binding var motionBlur: MotionBlurSettings
+    @State private var selectedEffect: EditorEffectTab = .lut
 
     var body: some View {
-      ZStack(alignment: .topLeading) {
-        switch selectedEffect {
-        case .lut:
-          EditorLookControls(
+      VStack(spacing: 0) {
+        ScrollView {
+          EditorControlContent(
             contentPadding: contentPadding,
+            selectedEffect: selectedEffect,
+            videoCount: videoCount,
+            hdrVideoCount: hdrVideoCount,
             library: library,
             lutPreviewSource: lutPreviewSource,
-            selectedLUT: $selectedLUT
+            selectedLUT: $selectedLUT,
+            motionBlur: $motionBlur
           )
-          .transition(.opacity)
+          .padding(.vertical, contentPadding)
+        }
+        .scrollBounceBehavior(.basedOnSize)
 
-        case .motionBlur:
-          EditorMotionBlurControls(settings: $motionBlur)
-            .padding(.horizontal, contentPadding)
-            .transition(.opacity)
+        EditorEffectTabBar(selection: $selectedEffect)
+      }
+    }
+
+    /// Keeps effect selection reachable while the active controls scroll above it.
+    private struct EditorEffectTabBar: View {
+
+      @Binding var selection: EditorEffectTab
+
+      var body: some View {
+        ScrollView(.horizontal) {
+          HStack(spacing: 16) {
+            EditorEffectTabButton(
+              title: "LUT",
+              systemImage: "camera.filters",
+              accessibilityIdentifier: "editor-effect-tab-lut",
+              isSelected: selection.isLUT
+            ) {
+              selection = .lut
+            }
+            
+            EditorEffectTabButton(
+              title: "Motion",
+              systemImage: "wind",
+              accessibilityIdentifier: "editor-effect-tab-motion-blur",
+              isSelected: selection.isMotionBlur
+            ) {
+              selection = .motionBlur
+            }
+          }
+        }
+        .defaultScrollAnchor(.center)
+        .frame(height: 64)
+        .background(.background)  
+      }
+      
+      /// Represents one accessible effect mode in the editor's persistent tab bar.
+      private struct EditorEffectTabButton: View {
+
+        let title: LocalizedStringResource
+        let systemImage: String
+        let accessibilityIdentifier: String
+        let isSelected: Bool
+        let action: @MainActor @Sendable () -> Void
+
+        var body: some View {
+          Button(action: action) {
+            VStack(spacing: 6) {
+              Image(systemName: systemImage)
+                .font(.body)
+                .symbolVariant(isSelected ? .fill : .none)
+
+              Text(title)
+                .font(.caption.weight(isSelected ? .semibold : .regular))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel(title)
+          .foregroundStyle(
+            isSelected ? Color.primary : Color.secondary
+          )
+          .overlay(alignment: .bottom) {
+            Circle()
+              .fill(.primary)
+              .frame(width: 4, height: 4)
+              .padding(.bottom, 5)
+              .opacity(isSelected ? 1 : 0)
+          }
+          .accessibilityAddTraits(isSelected ? .isSelected : [])
+          .accessibilityIdentifier(accessibilityIdentifier)
         }
       }
-      .frame(
-        maxWidth: .infinity,
-        minHeight: 154,
-        alignment: .topLeading
-      )
-      .animation(.snappy, value: selectedEffect)
+
     }
-  }
 
-  /// Names the shared look and exposes the library's quick selector.
-  fileprivate struct EditorLookControls: View {
+    /// Orders effect-specific controls and the shared export summary.
+    fileprivate struct EditorControlContent: View {
 
-    let contentPadding: CGFloat
-    let library: LUTLibrary
-    let lutPreviewSource: LUTPreviewSourceImage?
-    @Binding var selectedLUT: LUT?
+      let contentPadding: CGFloat
+      let selectedEffect: EditorEffectTab
+      let videoCount: Int
+      let hdrVideoCount: Int
+      let library: LUTLibrary
+      let lutPreviewSource: LUTPreviewSourceImage?
+      @Binding var selectedLUT: LUT?
+      @Binding var motionBlur: MotionBlurSettings
+      
+      var body: some View {
+        ZStack(alignment: .topLeading) {
+          switch selectedEffect {
+          case .lut:
+            EditorLookControls(
+              contentPadding: contentPadding,
+              library: library,
+              lutPreviewSource: lutPreviewSource,
+              selectedLUT: $selectedLUT
+            )
+            .transition(.opacity)
 
-    var body: some View {
-      VStack(alignment: .leading, spacing: 10) {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-          Text("LUT")
-            .font(.caption.weight(.semibold))
-            .tracking(0.8)
-            .foregroundStyle(.secondary)
+          case .motionBlur:
+            EditorMotionBlurControls(settings: $motionBlur)
+              .padding(.horizontal, contentPadding)
+              .transition(.opacity)
+          }
         }
-        .font(.caption)
-        .foregroundStyle(.primary)
-        .padding(.horizontal, contentPadding)
+        .frame(
+          maxWidth: .infinity,
+          minHeight: 154,
+          alignment: .topLeading
+        )
+        .animation(.snappy, value: selectedEffect)
+      }
+    }
 
-        LUTStripView(
-          contentPadding: contentPadding,
-          library: library,
-          source: lutPreviewSource,
-          selected: $selectedLUT
+    /// Names the shared look and exposes the library's quick selector.
+    fileprivate struct EditorLookControls: View {
+
+      let contentPadding: CGFloat
+      let library: LUTLibrary
+      let lutPreviewSource: LUTPreviewSourceImage?
+      @Binding var selectedLUT: LUT?
+
+      var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+          LUTStripView(
+            contentPadding: contentPadding,
+            library: library,
+            source: lutPreviewSource,
+            selected: $selectedLUT
+          )
+        }
+      }
+    }
+
+    /// Exposes Apple's Optical Flow motion blur without presenting backend tuning
+    /// as a physical shutter angle.
+    fileprivate struct EditorMotionBlurControls: View {
+
+      @Binding var settings: MotionBlurSettings
+      var isSupported = MotionBlurAvailability.isSupported
+
+      private var strength: Binding<Double> {
+        Binding(
+          get: { Double(settings.strength) },
+          set: { settings.strength = Int($0.rounded()) }
         )
       }
-    }
-  }
 
-  /// Exposes Apple's Optical Flow motion blur without presenting backend tuning
-  /// as a physical shutter angle.
-  fileprivate struct EditorMotionBlurControls: View {
+      private var strengthRange: ClosedRange<Double> {
+        Double(
+          MotionBlurSettings.strengthRange.lowerBound
+        )...Double(MotionBlurSettings.strengthRange.upperBound)
+      }
 
-    @Binding var settings: MotionBlurSettings
-    var isSupported = MotionBlurAvailability.isSupported
+      var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+          HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+              Text("MOTION BLUR")
+                .font(.caption.weight(.semibold))
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
 
-    private var strength: Binding<Double> {
-      Binding(
-        get: { Double(settings.strength) },
-        set: { settings.strength = Int($0.rounded()) }
-      )
-    }
-
-    private var strengthRange: ClosedRange<Double> {
-      Double(
-        MotionBlurSettings.strengthRange.lowerBound
-      )...Double(MotionBlurSettings.strengthRange.upperBound)
-    }
-
-    var body: some View {
-      VStack(alignment: .leading, spacing: 10) {
-        HStack(alignment: .center, spacing: 12) {
-          VStack(alignment: .leading, spacing: 3) {
-            Text("MOTION BLUR")
-              .font(.caption.weight(.semibold))
-              .tracking(0.8)
-              .foregroundStyle(.secondary)
-
-            Text("Optical Flow")
-              .font(.caption2)
-              .foregroundStyle(.secondary)
-          }
-
-          Spacer(minLength: 12)
-
-          Toggle("Motion Blur", isOn: $settings.isEnabled)
-            .labelsHidden()
-            .tint(.primary)
-            .disabled(isSupported == false)
-            .accessibilityIdentifier("motion-blur-toggle")
-        }
-
-        if isSupported == false {
-          Text(
-            "Requires a supported iPhone. Optical Flow isn't available in Simulator."
-          )
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        } else if settings.isEnabled {
-          HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("Strength")
-              .font(.caption)
-              .foregroundStyle(.secondary)
+              Text("Optical Flow")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
 
             Spacer(minLength: 12)
 
-            Text(settings.strength, format: .number)
-              .font(.caption)
-              .monospacedDigit()
-              .foregroundStyle(.primary)
+            Toggle("Motion Blur", isOn: $settings.isEnabled)
+              .labelsHidden()
+              .tint(.primary)
+              .disabled(isSupported == false)
+              .accessibilityIdentifier("motion-blur-toggle")
           }
 
-          Slider(
-            value: strength,
-            in: strengthRange,
-            step: 1
-          )
-          .tint(.primary)
-          .accessibilityLabel("Motion blur strength")
-          .accessibilityValue(settings.strength.formatted())
-        } else {
-          Text("Uses adjacent frames to create ND-like motion trails.")
+          if isSupported == false {
+            Text(
+              "Requires a supported iPhone. Optical Flow isn't available in Simulator."
+            )
             .font(.caption)
             .foregroundStyle(.secondary)
-        }
-      }
-      .animation(.snappy, value: settings.isEnabled)
-    }
-  }
-}
+          } else if settings.isEnabled {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+              Text("Strength")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
-/// Keeps effect selection reachable while the active controls scroll above it.
-private struct EditorEffectTabBar: View {
+              Spacer(minLength: 12)
 
-  @Binding var selection: EditorEffectTab
+              Text(settings.strength, format: .number)
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+            }
 
-  var body: some View {
-    ScrollView(.horizontal) {
-      HStack(spacing: 8) {
-        EditorEffectTabButton(
-          title: "LUT",
-          systemImage: "camera.filters",
-          accessibilityIdentifier: "editor-effect-tab-lut",
-          isSelected: selection.isLUT
-        ) {
-          selection = .lut
+            Slider(
+              value: strength,
+              in: strengthRange,
+              step: 1
+            )
+            .tint(.primary)
+            .accessibilityLabel("Motion blur strength")
+            .accessibilityValue(settings.strength.formatted())
+          } else {
+            Text("Uses adjacent frames to create ND-like motion trails.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
         }
-        
-        EditorEffectTabButton(
-          title: "Motion Blur",
-          systemImage: "wind",
-          accessibilityIdentifier: "editor-effect-tab-motion-blur",
-          isSelected: selection.isMotionBlur
-        ) {
-          selection = .motionBlur
-        }
+        .animation(.snappy, value: settings.isEnabled)
       }
     }
-    .defaultScrollAnchor(.center)
-    .frame(height: 64)
-    .background(.background)  
   }
+
+
 }
 
-/// Represents one accessible effect mode in the editor's persistent tab bar.
-private struct EditorEffectTabButton: View {
-
-  let title: LocalizedStringResource
-  let systemImage: String
-  let accessibilityIdentifier: String
-  let isSelected: Bool
-  let action: @MainActor @Sendable () -> Void
-
-  var body: some View {
-    Button(action: action) {
-      VStack(spacing: 6) {
-        Image(systemName: systemImage)
-          .font(.body)
-          .symbolVariant(isSelected ? .fill : .none)
-
-        Text(title)
-          .font(.caption.weight(isSelected ? .semibold : .regular))
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .accessibilityLabel(title)
-    .foregroundStyle(
-      isSelected ? Color.primary : Color.secondary
-    )
-    .overlay(alignment: .bottom) {
-      Circle()
-        .fill(.primary)
-        .frame(width: 4, height: 4)
-        .padding(.bottom, 5)
-        .opacity(isSelected ? 1 : 0)
-    }
-    .accessibilityAddTraits(isSelected ? .isSelected : [])
-    .accessibilityIdentifier(accessibilityIdentifier)
-  }
-}
 
 extension ShapeStyle where Self == Color {
   static var debug: Self {
@@ -801,18 +767,3 @@ private struct EditorToolbarContent: ToolbarContent {
     .navigationBarTitleDisplayMode(.inline)
   }
 }
-
-#Preview("Motion Blur Controls") {
-  @Previewable @State var settings = MotionBlurSettings(
-    isEnabled: true,
-    strength: 50
-  )
-
-  EditorEditControl.EditorMotionBlurControls(
-    settings: $settings,
-    isSupported: true
-  )
-  .padding(20)
-  .background(.background)
-}
-

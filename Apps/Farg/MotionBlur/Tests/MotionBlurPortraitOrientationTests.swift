@@ -83,6 +83,96 @@ struct MotionBlurPortraitTransformTests {
         )
     )
   }
+
+  @Test
+  func metadataPortraitPreviewUsesUniformViewportScale() throws {
+    let sourceSize = CGSize(width: 3_840, height: 2_160)
+    let portraitTransform = CGAffineTransform(
+      a: 0,
+      b: 1,
+      c: -1,
+      d: 0,
+      tx: sourceSize.height,
+      ty: 0
+    )
+
+    let geometry = try MotionBlurVideoCompositionBuilder.resolveFrameGeometry(
+      naturalSize: sourceSize,
+      preferredTransform: portraitTransform,
+      renderTarget: .fitWithin(CGSize(width: 468, height: 834))
+    )
+
+    #expect(geometry.sourceEncodedSize == sourceSize)
+    #expect(geometry.sourceDisplaySize == CGSize(width: 2_160, height: 3_840))
+    #expect(geometry.processorInputSize == CGSize(width: 832, height: 468))
+    #expect(geometry.compositionRenderSize == CGSize(width: 468, height: 832))
+    #expect(geometry.usesSourceBuffersDirectly == false)
+  }
+
+  @Test
+  func physicallyStoredPortraitCanBeDownsampledBeforeTheHardwareLimit() throws {
+    let sourceSize = CGSize(width: 2_160, height: 3_840)
+
+    let geometry = try MotionBlurVideoCompositionBuilder.resolveFrameGeometry(
+      naturalSize: sourceSize,
+      preferredTransform: .identity,
+      renderTarget: .fitWithin(CGSize(width: 468, height: 834))
+    )
+
+    #expect(geometry.sourceDisplaySize == sourceSize)
+    #expect(geometry.processorInputSize == CGSize(width: 468, height: 832))
+    #expect(geometry.compositionRenderSize == CGSize(width: 468, height: 832))
+    #expect(geometry.usesSourceBuffersDirectly == false)
+  }
+
+  @Test
+  func sourceResolutionPhysicalPortraitIsCanonicalizedOnlyForProcessor() throws {
+    let sourceSize = CGSize(width: 2_160, height: 3_840)
+
+    let geometry = try MotionBlurVideoCompositionBuilder.resolveFrameGeometry(
+      naturalSize: sourceSize,
+      preferredTransform: .identity,
+      renderTarget: .source
+    )
+
+    #expect(geometry.sourceDisplaySize == sourceSize)
+    #expect(geometry.processorInputSize == CGSize(width: 3_840, height: 2_160))
+    #expect(geometry.compositionRenderSize == sourceSize)
+    #expect(geometry.usesSourceBuffersDirectly == false)
+    #expect(
+      geometry.sourceToProcessorTransform.concatenating(
+        geometry.processorToRenderTransform
+      ) == .identity
+    )
+  }
+
+  @Test
+  func sourceResolutionLandscapeKeepsDecodedBuffersDirect() throws {
+    let sourceSize = CGSize(width: 3_840, height: 2_160)
+
+    let geometry = try MotionBlurVideoCompositionBuilder.resolveFrameGeometry(
+      naturalSize: sourceSize,
+      preferredTransform: .identity,
+      renderTarget: .source
+    )
+
+    #expect(geometry.processorInputSize == sourceSize)
+    #expect(geometry.compositionRenderSize == sourceSize)
+    #expect(geometry.sourceToProcessorTransform == .identity)
+    #expect(geometry.processorToRenderTransform == .identity)
+    #expect(geometry.usesSourceBuffersDirectly)
+  }
+
+  @Test
+  func subTwoPixelRenderTargetIsRejectedInsteadOfUpscaled() {
+    #expect(throws: MotionBlurError.invalidFrameSize(CGSize(width: 1, height: 480))) {
+      try MotionBlurVideoCompositionBuilder.resolveFrameGeometry(
+        naturalSize: CGSize(width: 1_920, height: 1_080),
+        preferredTransform: .identity,
+        renderTarget: .fitWithin(CGSize(width: 1, height: 480))
+      )
+    }
+  }
 }
 
 #if !targetEnvironment(simulator)
@@ -115,6 +205,7 @@ struct MotionBlurPortraitTransformTests {
       .prepare(
         asset: sourceAsset,
         settings: MotionBlurSettings(isEnabled: true),
+        renderTarget: .source,
         postProcessor: { image, _ in image }
       )
       let renderedImage = try await prepared.orientationRenderedImage()
@@ -131,6 +222,40 @@ struct MotionBlurPortraitTransformTests {
         rendered: \(renderedSignature)
         """
       )
+    }
+
+    /// Exercises the IOSurface source pool used by viewport-sized Preview.
+    ///
+    /// The source remains metadata-rotated landscape pixels, while every
+    /// temporal input is resized before VideoToolbox and returned as an upright
+    /// portrait frame.
+    @Test
+    func portraitViewportMotionBlurUsesWorkingBuffersWithoutChangingOrientation() async throws {
+      guard MotionBlurAvailability.isSupported else {
+        return
+      }
+
+      let fixtureURL = try await PortraitVideoFixture.make()
+      defer {
+        try? FileManager.default.removeItem(at: fixtureURL)
+      }
+
+      let sourceAsset = AVURLAsset(url: fixtureURL)
+      let sourceImage = try await sourceAsset.orientationReferenceImage()
+      let prepared = try await MotionBlurVideoCompositionBuilder(
+        ciContext: CIContext()
+      )
+      .prepare(
+        asset: sourceAsset,
+        settings: MotionBlurSettings(isEnabled: true),
+        renderTarget: .fitWithin(CGSize(width: 32, height: 48)),
+        postProcessor: { image, _ in image }
+      )
+      let renderedImage = try await prepared.orientationRenderedImage()
+
+      #expect(renderedImage.width == 32)
+      #expect(renderedImage.height == 48)
+      #expect(try renderedImage.cornerSignature == sourceImage.cornerSignature)
     }
   }
 

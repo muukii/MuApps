@@ -46,6 +46,7 @@ struct LUTStripView: View {
           }
         }
       }
+      .scrollClipDisabled()
       .contentMargins(.horizontal, contentPadding, for: .scrollContent)
       .onAppear {
         proxy.scrollTo(selectedItemID, anchor: .center)
@@ -105,17 +106,9 @@ private struct OriginalCell: View {
           Image(decorative: source.image, scale: 1)
             .resizable()
             .scaledToFill()
-            .frame(width: 64, height: 64)
-            .overlay {
-              RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(
-                  isSelected
-                    ? Color.primary
-                    : Color.secondary.opacity(0.2),
-                  lineWidth: isSelected ? 2 : 1
-                )
-            }
+            .frame(width: 64, height: 64)            
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .selectionOverlay(isSelected: isSelected)
         }
 
         VStack(alignment: .leading, spacing: 1) {
@@ -170,15 +163,7 @@ private struct LUTPreviewCell: View {
             )
           }
           .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-          .overlay {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-              .strokeBorder(
-                isSelected
-                  ? Color.primary
-                  : Color.secondary.opacity(0.2),
-                lineWidth: isSelected ? 2 : 0
-              )
-          }
+          .selectionOverlay(isSelected: isSelected)
           .aspectRatio(1, contentMode: .fit)
 
         VStack(alignment: .leading, spacing: 1) {

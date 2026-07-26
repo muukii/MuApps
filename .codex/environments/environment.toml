@@ -6,6 +6,6 @@ name = "MuApps"
 script = '''
 mise trust
 mise install
-tuist install
-tuist generate --no-open
-'''
+git submodule update --init
+mise exec -- tuist install
+mise exec -- tuist generate --no-open'''

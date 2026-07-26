@@ -14,10 +14,40 @@ import UIKit
 /// evolve independently from AVKit's standard player interface.
 struct EditorVideoPlayer: View {
 
+  @Environment(\.displayScale) private var displayScale
+
   let model: VideoPreviewModel
 
   var body: some View {
-    ZStack(alignment: .bottom) {
+    let currentDisplayScale = displayScale
+
+    ZStack {
+      VStack(spacing: Self.controlsSpacing) {
+        PlayerLayerSurface(player: model.player)
+          .aspectRatio(playerPresentationAspectRatio, contentMode: .fit)
+          .clipShape(.rect(cornerRadius: 8))
+          .accessibilityHidden(true)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .onGeometryChange(for: PreviewViewportMeasurement.self) { proxy in
+            PreviewViewportMeasurement(
+              sizeInPoints: proxy.size,
+              displayScale: currentDisplayScale
+            )
+          } action: { measurement in
+            model.updateViewport(
+              sizeInPoints: measurement.sizeInPoints,
+              displayScale: measurement.displayScale
+            )
+          }
+
+        EditorPlaybackControls(model: model)
+          .padding(.horizontal, 16)
+          .padding(.bottom, Self.controlsBottomPadding)
+      }
+      .opacity(model.renderState == .ready ? 1 : 0)
+      .allowsHitTesting(model.renderState == .ready)
+      .accessibilityHidden(model.renderState != .ready)
+
       switch model.renderState {
       case .empty:
         Color.black
@@ -34,42 +64,18 @@ struct EditorVideoPlayer: View {
           showsProgress: false
         )
       case .ready:
-        GeometryReader { proxy in
-          let playerBounds = CGSize(
-            width: proxy.size.width,
-            height: max(
-              0,
-              proxy.size.height
-                - Self.controlsHeight
-                - Self.controlsSpacing
-                - Self.controlsBottomPadding
-            )
-          )
-          let fittedSize = Self.fittedPlayerSize(
-            aspectRatio: playerPresentationAspectRatio,
-            inside: playerBounds
-          )
-
-          VStack(spacing: Self.controlsSpacing) {
-            ZStack {
-              PlayerLayerSurface(player: model.player)
-                .frame(width: fittedSize.width, height: fittedSize.height)
-                .clipShape(.rect(cornerRadius: 8))
-                .accessibilityHidden(true)
-            }
-            .frame(height: playerBounds.height)
-
-            EditorPlaybackControls(model: model)
-              .frame(height: Self.controlsHeight)
-              .padding(.horizontal, 16)
-              .padding(.bottom, Self.controlsBottomPadding)
-          }
-        }
+        EmptyView()
       }
     }
   }
 
-  private static let controlsHeight: CGFloat = 44
+  /// A normalized SwiftUI layout measurement used to suppress duplicate
+  /// viewport notifications.
+  private nonisolated struct PreviewViewportMeasurement: Equatable, Sendable {
+    let sizeInPoints: CGSize
+    let displayScale: CGFloat
+  }
+
   private static let controlsSpacing: CGFloat = 8
   private static let controlsBottomPadding: CGFloat = 12
 
@@ -98,32 +104,6 @@ struct EditorVideoPlayer: View {
     }
     return size.width / size.height
   }
-
-  /// Fits an aspect ratio inside the space reserved above the controls.
-  ///
-  /// An explicit size keeps tall surfaces from overflowing the flexible
-  /// `GeometryReader` allocation into the transport controls.
-  private static func fittedPlayerSize(
-    aspectRatio: CGFloat,
-    inside bounds: CGSize
-  ) -> CGSize {
-    guard
-      aspectRatio.isFinite,
-      aspectRatio > 0,
-      bounds.width.isFinite,
-      bounds.height.isFinite,
-      bounds.width > 0,
-      bounds.height > 0
-    else {
-      return .zero
-    }
-
-    if bounds.width / bounds.height > aspectRatio {
-      return CGSize(width: bounds.height * aspectRatio, height: bounds.height)
-    } else {
-      return CGSize(width: bounds.width, height: bounds.width / aspectRatio)
-    }
-  }
 }
 
 /// Replaces the video surface while its desired recipe is not renderable.
@@ -146,39 +126,80 @@ private struct EditorPreviewStatus: View {
       Text(title)
         .font(.callout.weight(.medium))
     }
-    .foregroundStyle(.secondary)
+    .foregroundStyle(.primary.secondary)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .environment(\.colorScheme, .dark)
   }
 }
 
-/// Presents play/pause and timeline seeking for an editor preview.
+/// Adapts preview model state and actions into playback component values.
 private struct EditorPlaybackControls: View {
 
   let model: VideoPreviewModel
+
+  var body: some View {
+    EditorPlaybackControlsComponent(
+      isPlaying: model.isPlaying,
+      isMuted: model.isMuted,
+      playbackTime: model.playbackTime,
+      playbackDuration: model.playbackDuration,
+      playbackProgress: model.playbackProgress,
+      onTogglePlayback: {
+        model.togglePlayback()
+      },
+      onToggleMute: {
+        model.toggleMute()
+      },
+      onBeginSeeking: {
+        model.beginSeeking()
+      },
+      onSeek: { progress in
+        model.seek(toProgress: progress)
+      },
+      onEndSeeking: {
+        model.endSeeking()
+      }
+    )
+  }
+}
+
+/// Renders preview transport controls from display values and user actions.
+///
+/// The component deliberately has no knowledge of `VideoPreviewModel`, which
+/// keeps its layout, interaction states, and future previews inexpensive to
+/// construct.
+private struct EditorPlaybackControlsComponent: View {
+
+  let isPlaying: Bool
+  let isMuted: Bool
+  let playbackTime: TimeInterval
+  let playbackDuration: TimeInterval
+  let playbackProgress: Double
+  let onTogglePlayback: @MainActor @Sendable () -> Void
+  let onToggleMute: @MainActor @Sendable () -> Void
+  let onBeginSeeking: @MainActor @Sendable () -> Void
+  let onSeek: @MainActor @Sendable (Double) -> Void
+  let onEndSeeking: @MainActor @Sendable () -> Void
 
   @State private var scrubberProgress = 0.0
   @State private var isScrubbing = false
 
   var body: some View {
     HStack(spacing: 2) {
-      
-      Button(action: model.togglePlayback) {
-        Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
+
+      Button(action: onTogglePlayback) {
+        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
           .font(.body.weight(.semibold))
-          .frame(width: 44, height: 44)
+          .frame(width: 38, height: 38)
           .contentTransition(.symbolEffect(.replace))
       }
-      .sensoryFeedback(trigger: model.isPlaying, { oldValue, newValue in
-        return .impact
-      })
+      .sensoryFeedback(.impact, trigger: isPlaying)
       .buttonStyle(.plain)
-      .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
+      .accessibilityLabel(isPlaying ? "Pause" : "Play")
       .accessibilityIdentifier("video-playback-toggle")
-
+  
       HStack(spacing: 12) {
         Text(Self.format(time: displayedTime))
-          .frame(minWidth: 36, alignment: .trailing)
+          .frame(minWidth: 28, alignment: .trailing)
           .foregroundStyle(.secondary)
 
         Slider(
@@ -189,55 +210,64 @@ private struct EditorPlaybackControls: View {
           Text("Video position")
         }
         .tint(.primary)
-        .disabled(model.playbackDuration <= 0)
+        .disabled(playbackDuration <= 0)
         .accessibilityValue(
-          "\(Self.format(time: displayedTime)) of \(Self.format(time: model.playbackDuration))"
+          "\(Self.format(time: displayedTime)) of \(Self.format(time: playbackDuration))"
         )
         .accessibilityIdentifier("video-playback-timeline")
 
-        Text(Self.format(time: model.playbackDuration))
-          .frame(minWidth: 36, alignment: .leading)
+        Text(Self.format(time: playbackDuration))
+          .frame(minWidth: 28, alignment: .leading)
           .foregroundStyle(.secondary)
       }
-
+      
+      Button(action: onToggleMute) {
+        Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+          .font(.body.weight(.semibold))
+          .frame(width: 38, height: 38)
+          .contentTransition(.symbolEffect(.replace))
+      }
+      .sensoryFeedback(.selection, trigger: isMuted)
+      .buttonStyle(.plain)
+      .accessibilityLabel(isMuted ? "Unmute" : "Mute")
+      .accessibilityIdentifier("video-mute-toggle")
     }
     .font(.caption.monospacedDigit())
     .foregroundStyle(.primary)
-    .padding(.horizontal, 8)
+    .padding(.horizontal, 12)
     .padding(.vertical, 8)
     .background(
       Capsule()
-        .foregroundStyle(.regularMaterial)
-        // .foregroundStyle(.thinMaterial)
-    )    
+        .foregroundStyle(.foreground.quinary)
+    )
     .onAppear {
-      scrubberProgress = model.playbackProgress
+      scrubberProgress = playbackProgress
     }
-    .onChange(of: model.playbackProgress) { _, progress in
+    .onChange(of: playbackProgress) { _, progress in
       guard isScrubbing == false else { return }
       scrubberProgress = progress
     }
     .onChange(of: scrubberProgress) { _, progress in
       guard isScrubbing else { return }
-      model.seek(toProgress: progress)
+      onSeek(progress)
     }
   }
 
   private var displayedTime: TimeInterval {
     if isScrubbing {
-      return model.playbackDuration * scrubberProgress
+      return playbackDuration * scrubberProgress
     } else {
-      return model.playbackTime
+      return playbackTime
     }
   }
 
   private func setScrubbing(_ isEditing: Bool) {
     if isEditing {
       isScrubbing = true
-      model.beginSeeking()
+      onBeginSeeking()
     } else {
-      model.seek(toProgress: scrubberProgress)
-      model.endSeeking()
+      onSeek(scrubberProgress)
+      onEndSeeking()
       isScrubbing = false
     }
   }
@@ -255,6 +285,36 @@ private struct EditorPlaybackControls: View {
       return String(format: "%d:%02d", minutes, seconds)
     }
   }
+}
+
+#Preview("Playback controls", traits: .sizeThatFitsLayout) {
+  @Previewable @State var isPlaying = false
+  @Previewable @State var isMuted = true
+  @Previewable @State var playbackProgress = 0.35
+  let playbackDuration: TimeInterval = 125
+
+  EditorPlaybackControlsComponent(
+    isPlaying: isPlaying,
+    isMuted: isMuted,
+    playbackTime: playbackDuration * playbackProgress,
+    playbackDuration: playbackDuration,
+    playbackProgress: playbackProgress,
+    onTogglePlayback: {
+      isPlaying.toggle()
+    },
+    onToggleMute: {
+      isMuted.toggle()
+    },
+    onBeginSeeking: {},
+    onSeek: { progress in
+      playbackProgress = progress
+    },
+    onEndSeeking: {}
+  )
+  .padding(.horizontal, 16)
+  .padding(.vertical, 24)
+  .frame(width: 390)
+  .background(.background.secondary)
 }
 
 /// Bridges an `AVPlayerLayer` into SwiftUI without adopting AVKit controls.
