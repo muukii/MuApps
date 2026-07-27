@@ -19,6 +19,8 @@ struct EditorView: View {
   @State private var lutPreviewModels = LUTPreviewModelStore()
   @State private var pickerItems: [PhotosPickerItem] = []
   @State private var isSettingsPresented = false
+  @State private var videoInformationPresentation: VideoInformationPresentation?
+  @State private var selectedEffect: EditorEffectTab = .lut
   @State private var exportSession: VideoExportSessionModel?
   @State private var errorMessage: String?
   @State private var videoLoadRequestID: UUID?
@@ -35,20 +37,27 @@ struct EditorView: View {
       pickerItems: $pickerItems,
       selectedLUT: $editState.selectedLUT,
       motionBlur: $editState.motionBlur,
+      selectedEffect: $selectedEffect,
       onSelectClip: editState.selectClip,
       onRemoveClip: removeClip,
       onPickFileURLs: loadPickedVideoFiles
     )
     .environment(lutPreviewModels)
-    .background(.background.secondary)
+    .background(
+      Rectangle()
+        .foregroundStyle(.background.secondary)
+        .ignoresSafeArea()
+    )
     .toolbar {
       EditorToolbarContent(
         canExport:
           editState.hasVideos
           && editState.isPreparingClips == false
           && preview.renderState == .ready,
+        canShowVideoInformation: editState.selectedClip?.content != nil,
         onDiscard: onFinishEditing,
         onShowSettings: { isSettingsPresented = true },
+        onShowVideoInformation: showSelectedVideoInformation,
         onExport: startExport
       )
     }
@@ -93,6 +102,12 @@ struct EditorView: View {
         previewSamples: previewSamples
       )
       .tint(.accentColor)
+    }
+    .sheet(item: $videoInformationPresentation) { presentation in
+      VideoInformationView(
+        displayName: presentation.content.displayName,
+        source: presentation.content.source
+      )
     }
     .sheet(
       item: $exportSession,
@@ -200,6 +215,16 @@ struct EditorView: View {
     }
   }
 
+  private func showSelectedVideoInformation() {
+    guard let clip = editState.selectedClip, let content = clip.content else {
+      return
+    }
+    videoInformationPresentation = VideoInformationPresentation(
+      id: clip.id,
+      content: content
+    )
+  }
+
   // MARK: - Preview
 
   private func reloadPreview() {
@@ -303,6 +328,12 @@ struct EditorView: View {
   }
 }
 
+/// Freezes the selected clip at the moment its Information button is pressed.
+private struct VideoInformationPresentation: Identifiable {
+  let id: VideoClip.ID
+  let content: VideoClip.Content
+}
+
 /// Places the selected preview above or beside the shared batch inspector.
 private struct EditorLayout: View {
 
@@ -315,17 +346,19 @@ private struct EditorLayout: View {
   @Binding var pickerItems: [PhotosPickerItem]
   @Binding var selectedLUT: LUT?
   @Binding var motionBlur: MotionBlurSettings
+  @Binding var selectedEffect: EditorEffectTab
   let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
 
   var body: some View {
     VStack(spacing: 0) {
+      
       EditorPreviewStage(preview: preview)
         .frame(
           minWidth: 0,
           maxWidth: .infinity,
-          minHeight: 220,
+          minHeight: 120,
           maxHeight: .infinity
         )
         .padding(16)
@@ -339,11 +372,24 @@ private struct EditorLayout: View {
         pickerItems: $pickerItems,
         selectedLUT: $selectedLUT,
         motionBlur: $motionBlur,
+        selectedEffect: $selectedEffect,
         onSelectClip: onSelectClip,
         onRemoveClip: onRemoveClip,
         onPickFileURLs: onPickFileURLs
       )
-      .frame(maxHeight: 420)
+      .fixedSize(horizontal: false, vertical: true)
+    }
+    .animation(.smooth, value: selectedEffect)
+    .background(
+      Rectangle()
+        .foregroundStyle(.background)
+    )
+    .clipShape(
+      RoundedRectangle(cornerRadius: 34)
+    )
+    .padding(4)
+    .safeAreaInset(edge: .bottom) {
+      EditorEffectTabBar(selection: $selectedEffect)
     }
   }
 }
@@ -393,6 +439,7 @@ private struct EditorLowerPanel: View {
   @Binding var pickerItems: [PhotosPickerItem]
   @Binding var selectedLUT: LUT?
   @Binding var motionBlur: MotionBlurSettings
+  @Binding var selectedEffect: EditorEffectTab
   let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
@@ -408,11 +455,11 @@ private struct EditorLowerPanel: View {
       pickerItems: $pickerItems,
       selectedLUT: $selectedLUT,
       motionBlur: $motionBlur,
+      selectedEffect: $selectedEffect,
       onSelectClip: onSelectClip,
       onRemoveClip: onRemoveClip,
       onPickFileURLs: onPickFileURLs
     )
-    .background(.background)
   }
 
   /// Composes Videos and EditControl as independent siblings.
@@ -427,6 +474,7 @@ private struct EditorLowerPanel: View {
     @Binding var pickerItems: [PhotosPickerItem]
     @Binding var selectedLUT: LUT?
     @Binding var motionBlur: MotionBlurSettings
+    @Binding var selectedEffect: EditorEffectTab
     let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
     let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
     let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
@@ -451,7 +499,8 @@ private struct EditorLowerPanel: View {
           library: library,
           lutPreviewSource: lutPreviewSource,
           selectedLUT: $selectedLUT,
-          motionBlur: $motionBlur
+          motionBlur: $motionBlur,
+          selectedEffect: $selectedEffect
         )
       }
     }
@@ -467,100 +516,23 @@ private struct EditorLowerPanel: View {
     let lutPreviewSource: LUTPreviewSourceImage?
     @Binding var selectedLUT: LUT?
     @Binding var motionBlur: MotionBlurSettings
-
-    @State private var selectedEffect: EditorEffectTab = .lut
+    @Binding var selectedEffect: EditorEffectTab
 
     var body: some View {
-      VStack(spacing: 0) {
-        ScrollView {
-          EditorControlContent(
-            contentPadding: contentPadding,
-            selectedEffect: selectedEffect,
-            videoCount: videoCount,
-            hdrVideoCount: hdrVideoCount,
-            library: library,
-            lutPreviewSource: lutPreviewSource,
-            selectedLUT: $selectedLUT,
-            motionBlur: $motionBlur
-          )
-          .padding(.vertical, contentPadding)
-        }
-        .scrollBounceBehavior(.basedOnSize)
-
-        EditorEffectTabBar(selection: $selectedEffect)
+      ScrollView {
+        EditorControlContent(
+          contentPadding: contentPadding,
+          selectedEffect: selectedEffect,
+          videoCount: videoCount,
+          hdrVideoCount: hdrVideoCount,
+          library: library,
+          lutPreviewSource: lutPreviewSource,
+          selectedLUT: $selectedLUT,
+          motionBlur: $motionBlur
+        )
+        .padding(.vertical, contentPadding)
       }
-    }
-
-    /// Keeps effect selection reachable while the active controls scroll above it.
-    private struct EditorEffectTabBar: View {
-
-      @Binding var selection: EditorEffectTab
-
-      var body: some View {
-        ScrollView(.horizontal) {
-          HStack(spacing: 16) {
-            EditorEffectTabButton(
-              title: "LUT",
-              systemImage: "camera.filters",
-              accessibilityIdentifier: "editor-effect-tab-lut",
-              isSelected: selection.isLUT
-            ) {
-              selection = .lut
-            }
-
-            EditorEffectTabButton(
-              title: "Motion",
-              systemImage: "wind",
-              accessibilityIdentifier: "editor-effect-tab-motion-blur",
-              isSelected: selection.isMotionBlur
-            ) {
-              selection = .motionBlur
-            }
-          }
-        }
-        .defaultScrollAnchor(.center)
-        .frame(height: 64)
-        .background(.background)
-      }
-
-      /// Represents one accessible effect mode in the editor's persistent tab bar.
-      private struct EditorEffectTabButton: View {
-
-        let title: LocalizedStringResource
-        let systemImage: String
-        let accessibilityIdentifier: String
-        let isSelected: Bool
-        let action: @MainActor @Sendable () -> Void
-
-        var body: some View {
-          Button(action: action) {
-            VStack(spacing: 6) {
-              Image(systemName: systemImage)
-                .font(.body)
-                .symbolVariant(isSelected ? .fill : .none)
-
-              Text(title)
-                .font(.caption.weight(isSelected ? .semibold : .regular))
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
-          }
-          .buttonStyle(.plain)
-          .accessibilityLabel(title)
-          .foregroundStyle(
-            isSelected ? Color.primary : Color.secondary
-          )
-          .overlay(alignment: .bottom) {
-            Circle()
-              .fill(.primary)
-              .frame(width: 4, height: 4)
-              .padding(.bottom, 5)
-              .opacity(isSelected ? 1 : 0)
-          }
-          .accessibilityAddTraits(isSelected ? .isSelected : [])
-          .accessibilityIdentifier(accessibilityIdentifier)
-        }
-      }
+      .scrollBounceBehavior(.basedOnSize)
 
     }
 
@@ -580,11 +552,11 @@ private struct EditorLowerPanel: View {
         ZStack(alignment: .topLeading) {
           switch selectedEffect {
           case .lut:
-            EditorLookControls(
+            LUTStripView(
               contentPadding: contentPadding,
               library: library,
-              lutPreviewSource: lutPreviewSource,
-              selectedLUT: $selectedLUT
+              source: lutPreviewSource,
+              selected: $selectedLUT
             )
             .transition(.opacity)
 
@@ -592,37 +564,13 @@ private struct EditorLowerPanel: View {
             EditorMotionBlurControls(settings: $motionBlur)
               .padding(.horizontal, contentPadding)
               .transition(.opacity)
+              .frame(height: 200)
           }
-        }
-        .frame(
-          maxWidth: .infinity,
-          minHeight: 154,
-          alignment: .topLeading
-        )
+        }       
         .animation(.snappy, value: selectedEffect)
       }
     }
-
-    /// Names the shared look and exposes the library's quick selector.
-    fileprivate struct EditorLookControls: View {
-
-      let contentPadding: CGFloat
-      let library: LUTLibrary
-      let lutPreviewSource: LUTPreviewSourceImage?
-      @Binding var selectedLUT: LUT?
-
-      var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-          LUTStripView(
-            contentPadding: contentPadding,
-            library: library,
-            source: lutPreviewSource,
-            selected: $selectedLUT
-          )
-        }
-      }
-    }
-
+  
     /// Exposes Apple's Optical Flow motion blur without presenting backend tuning
     /// as a physical shutter angle.
     fileprivate struct EditorMotionBlurControls: View {
@@ -707,6 +655,89 @@ private struct EditorLowerPanel: View {
 
 }
 
+/// Keeps effect selection reachable while the active controls scroll above it.
+private struct EditorEffectTabBar: View {
+
+  @Binding var selection: EditorEffectTab
+
+  var body: some View {
+
+    HStack(spacing: 16) {
+      Group {
+        EditorEffectTabButton(
+          title: "LUT",
+          systemImage: "circlebadge.2",
+          accessibilityIdentifier: "editor-effect-tab-lut",
+          isSelected: selection.isLUT
+        ) {
+          selection = .lut
+        }
+
+        EditorEffectTabButton(
+          title: "Motion",
+          systemImage: "app.background.dotted",
+          accessibilityIdentifier: "editor-effect-tab-motion-blur",
+          isSelected: selection.isMotionBlur
+        ) {
+          selection = .motionBlur
+        }
+      }
+      .frame(width: 44)
+    }
+    .frame(height: 64)
+    .padding(.horizontal, 24)
+    .background(
+      Capsule()
+        .foregroundStyle(Color.init(white: 1, opacity: 0.05))
+        .glassEffect(
+          .regular.interactive()
+        )
+    )
+    .fixedSize(horizontal: true, vertical: false)
+
+  }
+
+  /// Represents one accessible effect mode in the editor's persistent tab bar.
+  private struct EditorEffectTabButton: View {
+
+    let title: LocalizedStringResource
+    let systemImage: String
+    let accessibilityIdentifier: String
+    let isSelected: Bool
+    let action: @MainActor @Sendable () -> Void
+
+    var body: some View {
+      Button(action: action) {
+        VStack(spacing: 6) {
+          Image(systemName: systemImage)
+            .font(.body)
+          //            .symbolVariant(isSelected ? .fill : .none)
+
+          Text(title)
+            .font(.caption.weight(isSelected ? .semibold : .regular))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(title)
+      .foregroundStyle(
+        isSelected ? Color.primary : Color.secondary
+      )
+      .overlay(alignment: .bottom) {
+        Circle()
+          .fill(.primary)
+          .frame(width: 4, height: 4)
+          .padding(.bottom, 5)
+          .opacity(isSelected ? 1 : 0)
+      }
+      .accessibilityAddTraits(isSelected ? .isSelected : [])
+      .accessibilityIdentifier(accessibilityIdentifier)
+    }
+  }
+
+}
+
 extension ShapeStyle where Self == Color {
   static var debug: Self {
     #if DEBUG
@@ -716,13 +747,15 @@ extension ShapeStyle where Self == Color {
     #endif
   }
 }
-/// Keeps close and Settings available beside navigation and Export as the primary action.
+/// Keeps editor navigation, source information, and the primary Export action reachable.
 private struct EditorToolbarContent: ToolbarContent {
 
   let canExport: Bool
+  let canShowVideoInformation: Bool
   /// Finishes the editor after the user selects the destructive discard action.
   let onDiscard: @MainActor @Sendable () -> Void
   let onShowSettings: @MainActor @Sendable () -> Void
+  let onShowVideoInformation: @MainActor @Sendable () -> Void
   let onExport: @MainActor @Sendable () -> Void
 
   var body: some ToolbarContent {
@@ -744,6 +777,17 @@ private struct EditorToolbarContent: ToolbarContent {
       }
       .accessibilityLabel("Settings")
     }
+
+    ToolbarItem(placement: .topBarTrailing) {
+      Button(action: onShowVideoInformation) {
+        Image(systemName: "info")
+      }
+      .disabled(canShowVideoInformation == false)
+      .accessibilityLabel("Video Information")
+      .accessibilityIdentifier("show-video-information")
+    }
+
+    ToolbarSpacer(.fixed, placement: .topBarTrailing)
 
     ToolbarItem(placement: .topBarTrailing) {
       Button(

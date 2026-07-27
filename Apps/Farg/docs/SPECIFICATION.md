@@ -114,8 +114,13 @@ when a person searches for **Farg** without the diacritic.
 - Preview audio mixes with music, podcasts, or other audio already playing
   outside Färg instead of interrupting it.
 - The editor navigation bar places its close menu and **Settings** at the
-  leading edge as separate Liquid Glass groups, and **Export** at the trailing
-  edge. Export remains disabled while an additional video selection is loading.
+  leading edge as separate Liquid Glass groups. The selected video's
+  **Information** action and **Export** sit at the trailing edge as separate
+  groups. Export remains disabled while an additional video selection is loading.
+- **Information** presents the selected video's name and source category, then
+  lazily reads duration, display-oriented resolution, nominal frame rate, codec,
+  estimated video bitrate, dynamic range, color primaries, transfer function,
+  and YCbCr matrix. It does not expose a Files path or Photos identifier.
 - A collection containing one video uses the same editing model and layout as
   a larger batch.
 - The editing surface follows the system Light or Dark appearance and uses
@@ -299,10 +304,11 @@ when a person searches for **Farg** without the diacritic.
   and memory use. The job and UI model do not depend on that value, allowing a
   measured future policy to admit more than one render without restructuring
   export sessions.
-- The foreground **Export** action registers and submits every per-video
-  continued-processing request before starting app-owned work or presenting the
-  sheet. Work never waits for a background-task launch handler. An independent,
-  picker-ordered app scheduler admits renders up to the resource-gate capacity.
+- The foreground **Export** action registers and submits every
+  background-eligible per-video continued-processing request before starting
+  app-owned work or presenting the sheet. Work never waits for a background-task
+  launch handler. An independent, picker-ordered app scheduler admits renders up
+  to the resource-gate capacity.
 - Starting export detaches the editor's player item and Optical Flow session so
   preview and export do not own two VideoToolbox pipelines simultaneously. The
   preview is rebuilt at the preserved playhead after the export sheet closes.
@@ -320,26 +326,29 @@ when a person searches for **Farg** without the diacritic.
   samples and the finalized output track reach the source video's intended end.
   An orderly early video EOF is treated as render failure instead of producing
   a movie that holds its final frame while audio continues.
-- Every video attempt receives a unique continued-processing background task
-  identifier under `app.muukii.farg.export.*`. The task owns that video's system
-  runtime, progress, expiration, and completion, but it does not decide render
-  concurrency. Its launch handler attaches to the already-running attempt and
-  replays current progress; it never starts the render. Retrying a row creates a
-  new attempt identifier, which is registered and submitted from the foreground
-  Retry action before it enters the app scheduler.
-- On devices that advertise background GPU support, continued-processing
-  requests ask for the GPU. Without that support, LUT-only requests use default
-  resources while Motion Blur follows the foreground-only policy below. The task
-  reports truthful queue-admission progress from 0–5% based on all predecessor
-  renders, its own render from 5–99%, and Photos import from 99–100%. Waiting
-  subtitles identify the number of earlier videos rather than implying
-  simultaneous encoding. App rows update at whole-percent resolution. Progress
-  reporting does not prevent the system from expiring a task when conditions
-  change.
-- Motion Blur requires GPU-backed Optical Flow. When the device does not offer
-  background GPU access, Motion Blur attempts run only while Färg remains in the
-  foreground. The export sheet shows a red **Keep Färg open** notice with the
-  resource limitation while the attempt runs.
+- Every background-eligible video attempt receives a unique
+  continued-processing task identifier under `app.muukii.farg.export.*`. The
+  task owns that video's system runtime, progress, expiration, and completion,
+  but it does not decide render concurrency. Its launch handler attaches to the
+  already-running attempt and replays current progress; it never starts the
+  render. Retrying a row creates a new attempt identifier, which is registered
+  and submitted from the foreground Retry action before it enters the app
+  scheduler.
+- LUT-only attempts are eligible for continued processing. On devices that
+  advertise background GPU support, their requests ask for the GPU; otherwise
+  they use default resources. The task reports truthful queue-admission progress
+  from 0–5% based on all predecessor renders, its own render from 5–99%, and
+  Photos import from 99–100%. Waiting subtitles identify the number of earlier
+  videos rather than implying simultaneous encoding. App rows update at
+  whole-percent resolution. Progress reporting does not prevent the system from
+  expiring a task when conditions change.
+- Motion Blur requires GPU-backed Optical Flow and is foreground-only. Färg does
+  not submit a continued-processing request for an attempt whose recipe includes
+  Motion Blur, even when the device advertises background GPU support. The export
+  sheet shows a red **Keep Färg open** notice while any such attempt remains
+  unsettled. Leaving Färg does not provide a supported pause, resume, or automatic
+  cancellation boundary, so completion and output after leaving the foreground
+  are not guaranteed.
 - When one continued-processing request cannot be registered or submitted, only
   that video falls back to foreground execution. The header reports how many
   videos require Färg to remain open and includes the system scheduling error.

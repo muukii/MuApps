@@ -21,10 +21,7 @@ struct LUTStripView: View {
         LazyHStack(alignment: .top, spacing: 10) {
           OriginalCell(
             title: "Original",
-            subtitle: nil,
             source: source,
-            lut: nil,
-            library: library,
             isSelected: selected == nil
           ) {
             selected = nil
@@ -57,7 +54,7 @@ struct LUTStripView: View {
         }
       }
     }
-    .frame(height: 126)
+    .frame(height: 70)
   }
 
   private var selectedItemID: LUTStripItemID {
@@ -91,50 +88,39 @@ private enum LUTStripItemID: Hashable {
 private struct OriginalCell: View {
 
   let title: String
-  let subtitle: String?
   let source: LUTPreviewSourceImage?
-  let lut: LUT?
-  // TODO: shold not have this directly
-  let library: LUTLibrary
   let isSelected: Bool
   let action: @MainActor @Sendable () -> Void
 
   var body: some View {
     Button(action: action) {
       VStack(alignment: .leading, spacing: 7) {
-        if let source {
-          Image(decorative: source.image, scale: 1)
-            .resizable()
-            .scaledToFill()
-            .frame(width: 64, height: 64)            
-            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .selectionOverlay(isSelected: isSelected)
-        }
+        
+        Color.clear
+          .overlay {
+            if let source {
+              Image(decorative: source.image, scale: 1)
+                .resizable()
+                .scaledToFill()
+                .aspectRatio(1, contentMode: .fit)
+            }
+          }
+          .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+          .selectionOverlay(isSelected: isSelected)
+          .aspectRatio(1, contentMode: .fit)
 
         VStack(alignment: .leading, spacing: 1) {
           Text(title)
             .font(.caption.weight(isSelected ? .semibold : .regular))
             .foregroundStyle(.primary)
             .lineLimit(1)
-
-          if let subtitle {
-            Text(subtitle)
-              .font(.caption2)
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-          } else if source == nil {
-            Text("Pause to preview")
-              .font(.caption2)
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-          }
         }
       }
+      .frame(width: 64)
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
     .accessibilityLabel(title)
-    .accessibilityValue(subtitle ?? "")
     .accessibilityAddTraits(isSelected ? .isSelected : [])
   }
 }
