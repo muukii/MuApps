@@ -22,6 +22,7 @@ enum Settings {
       NavigationStack {
         List {
           appleIntelligenceSection
+          languageSection
           transcriptionSection
           siriAndShortcutsSection
           dataManagementSection
@@ -71,6 +72,16 @@ enum Settings {
           explanationService: explanationService,
           foundationModelService: foundationModelService
         )
+      }
+    }
+
+    private var languageSection: some SwiftUI.View {
+      Section {
+        ExplanationLanguagePicker()
+      } header: {
+        Text("Language")
+      } footer: {
+        Text("Language used for explanations, vocabulary auto-fill, and the ChatGPT prompt. System follows your device language.")
       }
     }
 
@@ -268,6 +279,25 @@ enum Settings {
   }
 
   // MARK: - Section Components
+
+  struct ExplanationLanguagePicker: SwiftUI.View {
+    @AppStorage(ExplanationLanguage.storageKey) private var language: ExplanationLanguage = .system
+
+    var body: some SwiftUI.View {
+      Picker(selection: $language) {
+        ForEach(ExplanationLanguage.allCases) { language in
+          Text(language.displayName).tag(language)
+        }
+      } label: {
+        Label {
+          Text("AI Response Language")
+        } icon: {
+          Image(systemName: "globe")
+            .foregroundStyle(.green)
+        }
+      }
+    }
+  }
 
   struct AutoTranscribeToggle: SwiftUI.View {
     @AppStorage("autoTranscribeEnabled") private var autoTranscribeEnabled: Bool = true

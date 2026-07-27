@@ -181,7 +181,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 #### 2.4 Subtitle Actions
 - Swipe actions:
   - Translate (leading)
-  - Explain (trailing)
+  - Ask ChatGPT (trailing) — opens the default browser directly with the explanation prompt pre-filled (surrounding cues included as context); does not open the explanation sheet
 - Context menu per cue:
   - Copy
   - Explain
@@ -199,13 +199,16 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
   - Delete local video
 
 ### 3. AI and Language Tools
+- AI Response Language (Settings > Language): System / English / Japanese
+  - Determines the language AI answers in: explanations, vocabulary auto-fill, and the ChatGPT prompt
+  - System (default) follows the device language
 - Word/phrase explanations using Apple Intelligence
   - On-device processing with structured generation for:
-    - Translation (in user's preferred language)
+    - Translation (in the selected AI Response Language)
     - Detailed explanation of meaning, usage, and nuances
     - Phrase analysis: breakdown of context sentence into meaningful phrases with grammatical roles
     - Idiom detection: identifies idioms/fixed expressions with meaning and origin
-  - "Ask ChatGPT" button opens ChatGPT with the same prompt (in-app browser on iOS)
+  - "Ask ChatGPT" button opens ChatGPT with the same prompt in the default browser (leaves the app, so the ChatGPT app opens instead when it is installed and handles the link)
   - "Share Prompt" option to share the explanation prompt
 - Vocabulary auto-fill using Apple Intelligence
   - Structured generation for meaning, examples, and notes
@@ -297,6 +300,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 ### Settings (SettingsView)
 - Apple Intelligence status for Word Explanations
 - Apple Intelligence status for Vocabulary Auto-Fill
+- Language: AI Response Language picker (System / English / Japanese)
 - Siri and Shortcuts tips
 - Data: Clear History (with confirmation dialog)
 - Experimental: Vocabulary, Playlists, Live Transcription
@@ -312,7 +316,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 
 ### Interactions
 - Auto-tracking stops on manual scroll or selection
-- Swipe actions for translate/explain
+- Swipe actions for translate / Ask ChatGPT
 - Context menus for subtitle actions and step mode
 - Sheets use medium/large detents on iOS
 - Selecting a history item pushes the player onto the navigation stack with a zoom transition from the tapped thumbnail

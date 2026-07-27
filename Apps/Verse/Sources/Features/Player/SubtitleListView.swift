@@ -154,6 +154,8 @@ enum SubtitleAction {
   case setRepeatB(time: Double)
   case setRepeatRange(startTime: Double, endTime: Double)
   case explain(cue: Subtitle.Cue)
+  /// Opens ChatGPT in an in-app browser with the explanation prompt pre-filled.
+  case askChatGPT(cue: Subtitle.Cue)
   case translate(cue: Subtitle.Cue)
   case explainSelection(text: String, context: String)
   case showSelectionActions(text: String, context: String)
@@ -215,9 +217,9 @@ private struct SubtitleScrollContent: View {
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
           Button {
-            onAction(.explain(cue: cue))
+            onAction(.askChatGPT(cue: cue))
           } label: {
-            Label("Explain", systemImage: "sparkles")
+            Label("Ask ChatGPT", systemImage: "sparkle.magnifyingglass")
           }
           .tint(.purple)
         }

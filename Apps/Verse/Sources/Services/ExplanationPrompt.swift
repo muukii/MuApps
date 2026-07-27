@@ -11,21 +11,6 @@ import Foundation
 /// Used by both on-device LLM (LLMService) and external services (ChatGPT).
 struct ExplanationPrompt {
 
-  // MARK: - Device Language
-
-  /// Returns the user's preferred language name for LLM responses.
-  /// Uses Locale.preferredLanguages which reflects the user's system language settings.
-  /// For example: "Japanese", "English", "French", etc.
-  static var deviceLanguage: String {
-    // Get the user's preferred language from system settings
-    guard let preferredLanguage = Locale.preferredLanguages.first else {
-      return "English"
-    }
-    // Extract the language code (e.g., "ja" from "ja-JP")
-    let languageCode = Locale(identifier: preferredLanguage).language.languageCode?.identifier ?? preferredLanguage
-    return Locale(identifier: "en").localizedString(forLanguageCode: languageCode) ?? "English"
-  }
-
   // MARK: - Default Instructions
 
   static let defaultSystemInstruction = """
@@ -79,7 +64,7 @@ struct ExplanationPrompt {
   // MARK: - Prompt Building
 
   /// Builds the system instruction with language specification.
-  /// - Parameter targetLanguage: The language for the response (defaults to device language)
+  /// - Parameter targetLanguage: The language for the response (defaults to the language selected in Settings)
   /// - Returns: Complete system instruction string
   static func buildSystemInstruction(
     customInstruction: String? = nil,
@@ -88,7 +73,7 @@ struct ExplanationPrompt {
     let baseInstruction = customInstruction?.isEmpty == false
       ? customInstruction!
       : defaultSystemInstruction
-    let language = targetLanguage ?? deviceLanguage
+    let language = targetLanguage ?? ExplanationLanguage.current.promptName
     return """
       <Instruction>
       \(baseInstruction)
@@ -126,7 +111,7 @@ struct ExplanationPrompt {
   ///   - context: The surrounding context
   ///   - customSystemInstruction: Custom system instruction (optional)
   ///   - customUserPromptTemplate: Custom user prompt template (optional)
-  ///   - targetLanguage: The language for the response (defaults to device language)
+  ///   - targetLanguage: The language for the response (defaults to the language selected in Settings)
   /// - Returns: Complete prompt string
   static func buildFullPrompt(
     text: String,

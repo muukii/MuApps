@@ -37,7 +37,6 @@ struct SelectionActionSheet: View {
 
   // Internal state
   @State private var showVocabulary = false
-  @State private var chatGPTURL: URL?
 
   var body: some View {
     List {
@@ -46,8 +45,7 @@ struct SelectionActionSheet: View {
       WordExplanationView(
         service: service,
         text: selection.text,
-        context: selection.context,
-        chatGPTURL: $chatGPTURL
+        context: selection.context
       )
     }
     .safeAreaPadding(.top, 20)
@@ -56,10 +54,6 @@ struct SelectionActionSheet: View {
     .presentationDragIndicator(.automatic)
     .sheet(isPresented: $showVocabulary) {
       VocabularyEditSheet(mode: .add(initialTerm: selection.text))
-    }
-    .sheet(item: $chatGPTURL) { url in
-      SafariView(url: url)
-        .ignoresSafeArea()
     }
   }
 

@@ -6,9 +6,6 @@
 //
 
 import SwiftUI
-#if os(iOS)
-import SafariServices
-#endif
 
 // MARK: - ChatGPT URL Builder
 
@@ -46,33 +43,6 @@ struct ChatGPTURLBuilder {
   }
 }
 
-// MARK: - Safari View (iOS only)
-
-#if os(iOS)
-/// SwiftUI wrapper for SFSafariViewController
-struct SafariView: UIViewControllerRepresentable {
-  let url: URL
-
-  func makeUIViewController(context: Context) -> SFSafariViewController {
-    let configuration = SFSafariViewController.Configuration()
-    configuration.entersReaderIfAvailable = false
-    configuration.barCollapsingEnabled = true
-    let safari = SFSafariViewController(url: url, configuration: configuration)
-    return safari
-  }
-
-  func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {
-    // No updates needed
-  }
-}
-#endif
-
-// MARK: - URL Identifiable Extension
-
-extension URL: @retroactive Identifiable {
-  public var id: String { absoluteString }
-}
-
 // MARK: - Word Explanation View (List-Hosted Component)
 
 /// Embeddable view for displaying Apple Intelligence-generated word/phrase explanations.
@@ -82,7 +52,8 @@ struct WordExplanationView: View {
   let service: ExplanationService
   let text: String
   let context: String
-  @Binding var chatGPTURL: URL?
+
+  @Environment(\.openURL) private var openURL
 
   @State private var translation: String = ""
   @State private var explanation: String = ""
@@ -210,7 +181,10 @@ struct WordExplanationView: View {
   private var chatGPTSection: some View {
     Section {
       Button {
-        chatGPTURL = ChatGPTURLBuilder.buildURL(text: text, context: context)
+        // Opens in the default browser so the ChatGPT app can claim the universal link
+        if let url = ChatGPTURLBuilder.buildURL(text: text, context: context) {
+          openURL(url)
+        }
       } label: {
         Label("Ask ChatGPT", systemImage: "sparkle.magnifyingglass")
       }
@@ -325,7 +299,6 @@ struct WordExplanationView: View {
 // MARK: - Preview
 
 #Preview("In List") {
-  @Previewable @State var chatGPTURL: URL?
   List {
     Section {
       Text("serendipity")
@@ -338,8 +311,7 @@ struct WordExplanationView: View {
     WordExplanationView(
       service: .init(),
       text: "serendipity",
-      context: "It was pure serendipity that we met.",
-      chatGPTURL: $chatGPTURL
+      context: "It was pure serendipity that we met."
     )
   }
   .listStyle(.insetGrouped)

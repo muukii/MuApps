@@ -156,6 +156,8 @@ private struct TextKit2SubtitleTextViewPreview: View {
       lastActionDescription = "Repeat: \(timeLabel(startTime)) - \(timeLabel(endTime))"
     case .explain(let cue):
       lastActionDescription = "Explain cue \(cue.id)"
+    case .askChatGPT(let cue):
+      lastActionDescription = "Ask ChatGPT cue \(cue.id)"
     case .translate(let cue):
       lastActionDescription = "Translate cue \(cue.id)"
     case .explainSelection(let text, _):

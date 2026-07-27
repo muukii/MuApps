@@ -20,6 +20,7 @@ struct PlayerView: View {
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @Environment(\.verticalSizeClass) private var verticalSizeClass
+  @Environment(\.openURL) private var openURL
   @Environment(DownloadManager.self) private var downloadManager
   @Environment(VideoItemService.self) private var historyService
   @ObjectEdge private var model = PlayerModel()
@@ -326,6 +327,14 @@ struct PlayerView: View {
           case .explain(let cue):
             // Redirect to SelectionActionSheet
             selectionForActionSheet = TextSelection(text: cue.decodedText, context: buildContextForCue(cue))
+          case .askChatGPT(let cue):
+            // Opens in the default browser so the ChatGPT app can claim the universal link
+            if let url = ChatGPTURLBuilder.buildURL(
+              text: cue.decodedText,
+              context: buildContextForCue(cue)
+            ) {
+              openURL(url)
+            }
           case .translate(let cue):
             selectedCueForTranslation = cue
           case .explainSelection(let text, let context):

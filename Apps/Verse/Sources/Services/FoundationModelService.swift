@@ -63,10 +63,9 @@ final class FoundationModelService {
 
   var state: State = .idle
 
+  /// The language selected in Settings (falls back to the device language).
   static var preferredLanguageCode: String {
-    Locale.preferredLanguages.first
-      .flatMap { Locale(identifier: $0).language.languageCode?.identifier }
-      ?? "en"
+    ExplanationLanguage.current.languageCode
   }
 
   static func languageName(for code: String) -> String {
