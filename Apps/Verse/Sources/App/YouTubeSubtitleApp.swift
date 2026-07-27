@@ -23,8 +23,6 @@ struct YouTubeSubtitleApp: App {
     let schema = Schema([
       VideoItem.self,
       DownloadStateEntity.self,
-      VocabularyItem.self,
-      VocabularyExample.self,
       TranscriptionSession.self,
       TranscriptionEntry.self,
       Playlist.self,

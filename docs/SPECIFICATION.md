@@ -126,7 +126,6 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 #### 1.1 Video Sources
 - Play YouTube videos by URL (watch, youtu.be, shorts, etc.)
 - In-app YouTube browser with "Open with Subtitles" action
-- Deep link and Shortcuts support for opening YouTube URLs
 - Import one audio or video file at a time from Files
   - Validate that the selected file contains playable audio or video
   - Copy the imported file into app-managed Documents storage for persistent access
@@ -235,12 +234,6 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Video entries show playback progress bar on thumbnails
 - Open videos from playlist view
 
-#### 4.3 Vocabulary (Experimental)
-- Manual vocabulary list (term, meaning, part of speech, examples, notes)
-- All fields are entered manually
-- Learning state badges (New, Learning, Reviewing, Mastered)
-- Search, add, edit, delete
-
 ### 5. Downloads and Offline Playback (Feature-Flagged)
 - Download progressive MP4 streams with quality selection
 - Progress indicators in history and player
@@ -249,9 +242,8 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - UI hidden in Release builds; downloads still used internally for transcription
 
 ### 6. External Integrations
-- Siri and Shortcuts: "Open YouTube Video" intent
-- Deep link handling for YouTube URLs
 - In-app YouTube browser (with iOS sign-in flow)
+- Ask ChatGPT opens the default browser (or the ChatGPT app via universal link)
 
 ### 7. Live Transcription (Experimental)
 - Real-time microphone transcription (iOS 26+ physical device)
@@ -290,9 +282,8 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 
 ### Settings (SettingsView)
 - Language: AI Response Language picker (System / English / Japanese)
-- Siri and Shortcuts tips
 - Data: Clear History (with confirmation dialog)
-- Experimental: Vocabulary, Playlists, Live Transcription
+- Experimental: Playlists, Live Transcription
 - Debug-only feature flags
 
 ## UI/UX Specifications
@@ -325,7 +316,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Explanations require leaving the app for ChatGPT (browser or ChatGPT app); there is no offline or in-app explanation
 
 ## Future Enhancements
-- CloudKit sync for history, playlists, and vocabulary
+- CloudKit sync for history and playlists
 - Subtitle language selection and multi-language support
 - Subtitle search and filtering
 - Improved channel/author metadata

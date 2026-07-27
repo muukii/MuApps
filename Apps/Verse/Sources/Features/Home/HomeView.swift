@@ -7,7 +7,6 @@
 
 import SwiftUI
 import SwiftData
-import AppIntents
 import TypedIdentifier
 import UniformTypeIdentifiers
 
@@ -30,7 +29,6 @@ enum HistorySortOption: String, CaseIterable, Identifiable {
 struct HomeView: View {
   @Environment(\.modelContext) private var modelContext
   @Environment(VideoItemService.self) private var historyService
-  @Environment(VocabularyService.self) private var vocabularyService
   @Environment(DownloadManager.self) private var downloadManager
   @Query(sort: \VideoItem.sortOrder) private var allHistory: [VideoItem]
 
@@ -42,7 +40,6 @@ struct HomeView: View {
   @State private var isImportingMedia: Bool = false
   @State private var importErrorMessage: String?
   @State private var videoToAddToPlaylist: VideoItem?
-  private let deepLinkManager = DeepLinkManager.shared
   @AppStorage("historySortOption") private var sortOption: HistorySortOption = .manual
 
   @Namespace private var namespace
@@ -108,22 +105,8 @@ struct HomeView: View {
           }
         }
     }
-    .onChange(of: deepLinkManager.pendingVideoID) { _, newVideoID in
-      if let videoID = newVideoID {
-        // Fetch the VideoItem for this videoID
-        let videoIDRaw = videoID.rawValue
-        let descriptor = FetchDescriptor<VideoItem>(
-          predicate: #Predicate { $0._videoID == videoIDRaw }
-        )
-        if let item = try? modelContext.fetch(descriptor).first {
-          selectedVideoItemID = item.typedID
-        }
-        deepLinkManager.pendingVideoID = nil
-      }
-    }
     .sheet(isPresented: $showSettings) {
       SettingsView()
-        .environment(vocabularyService)
         .environment(historyService)
     }
     .fittingSheet(isPresented: $showURLInput) {

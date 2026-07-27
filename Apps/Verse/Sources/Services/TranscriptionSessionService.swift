@@ -9,7 +9,6 @@ import Foundation
 import SwiftData
 
 /// Service for managing transcription sessions with CRUD operations.
-/// Follows the existing pattern from VocabularyService.
 @Observable
 @MainActor
 final class TranscriptionSessionService {

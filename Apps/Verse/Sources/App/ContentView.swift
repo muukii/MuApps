@@ -12,14 +12,12 @@ struct ContentView: View {
   @Environment(\.modelContext) private var modelContext
   @Environment(DownloadManager.self) private var downloadManager
   @State private var historyService: VideoItemService?
-  @State private var vocabularyService: VocabularyService?
 
   var body: some View {
     Group {
-      if let historyService, let vocabularyService {
+      if let historyService {
         HomeView()
           .environment(historyService)
-          .environment(vocabularyService)
       } else {
         ProgressView()
       }
@@ -30,9 +28,6 @@ struct ContentView: View {
           modelContext: modelContext,
           downloadManager: downloadManager
         )
-      }
-      if vocabularyService == nil {
-        vocabularyService = VocabularyService(modelContext: modelContext)
       }
     }
   }

@@ -5,7 +5,6 @@
 //  Created by Hiroshi Kimura on 2025/12/04.
 //
 
-import AppIntents
 import SwiftUI
 
 enum Settings {
@@ -21,7 +20,6 @@ enum Settings {
         List {
           languageSection
           transcriptionSection
-          siriAndShortcutsSection
           dataManagementSection
           debugSection
           experimentalFeaturesSection
@@ -73,27 +71,6 @@ enum Settings {
         Text("Transcription")
       } footer: {
         Text("Automatically generate subtitles from video audio when cached subtitles are missing or don't include word timing.")
-      }
-    }
-
-    private var siriAndShortcutsSection: some SwiftUI.View {
-      Group {
-        Section {
-          SiriTipView(intent: OpenYouTubeVideoIntent())
-        } header: {
-          Text("Siri")
-        } footer: {
-          Text("Use Siri to quickly open YouTube videos with subtitles.")
-        }
-
-        Section {
-          ShortcutsLink()
-            .shortcutsLinkStyle(.automaticOutline)
-        } header: {
-          Text("Shortcuts")
-        } footer: {
-          Text("Create custom shortcuts with the Shortcuts app.")
-        }
       }
     }
 
@@ -179,17 +156,6 @@ enum Settings {
     var body: some SwiftUI.View {
       Section {
         SubtitleDisplayPicker()
-
-        NavigationLink {
-          VocabularyListView()
-        } label: {
-          FeatureLabel(
-            title: "Vocabulary",
-            description: "Save and review words from subtitles",
-            systemImage: "text.book.closed",
-            color: .blue
-          )
-        }
 
         NavigationLink {
           PlaylistListView()
