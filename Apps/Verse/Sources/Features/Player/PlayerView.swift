@@ -44,7 +44,6 @@ struct PlayerView: View {
 
   // Subtitle interaction state
   @State private var selectedCueForTranslation: Subtitle.Cue?
-  @State private var selectionForActionSheet: TextSelection?
 
   // On-device transcribe state
   @State private var onDeviceTranscribeViewModel = OnDeviceTranscribeViewModel()
@@ -207,13 +206,6 @@ struct PlayerView: View {
         ),
         text: selectedCueForTranslation?.decodedText ?? ""
       )
-      .sheet(item: $selectionForActionSheet) { selection in
-        SelectionActionSheet(
-          selection: selection,
-          onCopy: { selectionForActionSheet = nil },
-          onDismiss: { selectionForActionSheet = nil }
-        )
-      }
       .onDisappear {
         // Save playback position before leaving
         savePlaybackPosition()
@@ -324,24 +316,12 @@ struct PlayerView: View {
           case .setRepeatRange(let startTime, let endTime):
             model.repeatStartTime = startTime
             model.repeatEndTime = endTime
-          case .explain(let cue):
-            // Redirect to SelectionActionSheet
-            selectionForActionSheet = TextSelection(text: cue.decodedText, context: buildContextForCue(cue))
           case .askChatGPT(let cue):
-            // Opens in the default browser so the ChatGPT app can claim the universal link
-            if let url = ChatGPTURLBuilder.buildURL(
-              text: cue.decodedText,
-              context: buildContextForCue(cue)
-            ) {
-              openURL(url)
-            }
+            askChatGPT(text: cue.decodedText, context: buildContextForCue(cue))
+          case .askChatGPTSelection(let text, let context):
+            askChatGPT(text: text, context: context)
           case .translate(let cue):
             selectedCueForTranslation = cue
-          case .explainSelection(let text, let context):
-            // Redirect to SelectionActionSheet
-            selectionForActionSheet = TextSelection(text: text, context: context)
-          case .showSelectionActions(let text, let context):
-            selectionForActionSheet = TextSelection(text: text, context: context)
           }
         }
       )
@@ -566,9 +546,18 @@ struct PlayerView: View {
     }
   }
 
+  // MARK: - Ask ChatGPT
+
+  /// Opens the explanation prompt in the default browser, which hands off to the
+  /// ChatGPT app when it is installed (chatgpt.com claims `/?q=` as a universal link).
+  private func askChatGPT(text: String, context: String) {
+    guard let url = ChatGPTURLBuilder.buildURL(text: text, context: context) else { return }
+    openURL(url)
+  }
+
   // MARK: - Context Building
 
-  /// Build context string from surrounding subtitle cues for LLM explanation.
+  /// Build context string from surrounding subtitle cues for the explanation prompt.
   /// Includes 2 cues before and 2 cues after the selected cue for better context.
   private func buildContextForCue(_ cue: Subtitle.Cue) -> String {
     guard let cues = currentSubtitles?.cues,

@@ -18,10 +18,9 @@ struct SubtitleRowView: View {
     case setRepeatA
     case setRepeatB
     case setRepeatRange
-    case explain
+    case askChatGPT
     case translate
-    case explainSelection(String)
-    case showSelectionActions(String)
+    case askChatGPTSelection(String)
   }
 
   let cue: Subtitle.Cue
@@ -66,11 +65,8 @@ struct SubtitleRowView: View {
           unplayedTextColor: .tintColor.withAlphaComponent(0.4),
           lineSpacing: 10,
           playbackTime: currentTime.value,
-          onExplain: { selectedText in
-            onAction(.explainSelection(selectedText))
-          },
-          onShowActions: { selectedText in
-            onAction(.showSelectionActions(selectedText))
+          onAskChatGPT: { selectedText in
+            onAction(.askChatGPTSelection(selectedText))
           }
         )
         .fixedSize(horizontal: false, vertical: true)
@@ -101,9 +97,9 @@ struct SubtitleRowView: View {
       }
 
       Button {
-        onAction(.explain)
+        onAction(.askChatGPT)
       } label: {
-        Label("Explain", systemImage: "sparkles")
+        Label("Ask ChatGPT", systemImage: "sparkle.magnifyingglass")
       }
 
       Button {

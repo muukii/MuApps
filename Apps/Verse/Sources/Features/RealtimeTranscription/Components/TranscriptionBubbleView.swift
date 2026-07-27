@@ -25,18 +25,16 @@ protocol TranscriptionDisplayable: Identifiable {
 struct TranscriptionBubbleView<Item: TranscriptionDisplayable>: View {
   let item: Item
   var highlightTime: CMTime?
-  var onExplain: ((String) -> Void)?
   var onSelectionChanged: ((String?) -> Void)?
-  var onShowActions: ((String) -> Void)?
+  var onAskChatGPT: ((String) -> Void)?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
       SelectableSubtitleTextView(
         content: .init(text: item.displayText, wordTimings: item.displayWordTimings),
         highlightTime: highlightTime,
-        onExplain: onExplain,
         onSelectionChanged: onSelectionChanged,
-        onShowActions: onShowActions
+        onAskChatGPT: onAskChatGPT
       )
       .fixedSize(horizontal: false, vertical: true)
 

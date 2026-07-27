@@ -7,8 +7,7 @@
 
 import Foundation
 
-/// Shared prompt builder for word/phrase explanations.
-/// Used by both on-device LLM (LLMService) and external services (ChatGPT).
+/// Prompt builder for word/phrase explanations, sent to ChatGPT via `ChatGPTURLBuilder`.
 struct ExplanationPrompt {
 
   // MARK: - Default Instructions

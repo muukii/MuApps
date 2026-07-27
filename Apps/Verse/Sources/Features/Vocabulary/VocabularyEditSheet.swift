@@ -37,18 +37,12 @@ struct VocabularyEditSheet: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(VocabularyService.self) private var vocabularyService
 
-  @State private var foundationModelService = FoundationModelService()
-
   @State private var term: String = ""
   @State private var meaning: String = ""
   @State private var partOfSpeech: PartOfSpeech? = nil
   @State private var examples: [EditableExample] = []
   @State private var notes: String = ""
   @State private var showDeleteConfirmation: Bool = false
-
-  // Auto-fill state
-  @State private var isAutoFilling: Bool = false
-  @State private var autoFillError: String?
 
   /// Editable example for UI state management
   struct EditableExample: Identifiable {
@@ -68,36 +62,12 @@ struct VocabularyEditSheet: View {
   var body: some View {
     NavigationStack {
       Form {
-        // Term (required) with auto-fill button
+        // Term (required)
         Section {
-          HStack {
-            TextField("Word or phrase", text: $term)
-              .textInputAutocapitalization(.never)
-
-            Button {
-              Task {
-                await performAutoFill()
-              }
-            } label: {
-              if isAutoFilling {
-                ProgressView()
-                  .controlSize(.small)
-              } else {
-                Image(systemName: "sparkles")
-              }
-            }
-            .disabled(term.trimmingCharacters(in: .whitespaces).isEmpty || isAutoFilling)
-            .buttonStyle(.borderless)
-          }
+          TextField("Word or phrase", text: $term)
+            .textInputAutocapitalization(.never)
         } header: {
           Text("Term")
-        } footer: {
-          if let error = autoFillError {
-            Text(error)
-              .foregroundStyle(.red)
-          } else {
-            Text("Tap ✨ to auto-fill fields using AI")
-          }
         }
 
         // Meaning
@@ -265,44 +235,6 @@ struct VocabularyEditSheet: View {
     }
 
     dismiss()
-  }
-
-  private func performAutoFill() async {
-    let trimmedTerm = term.trimmingCharacters(in: .whitespaces)
-    guard !trimmedTerm.isEmpty else { return }
-
-    isAutoFilling = true
-    autoFillError = nil
-
-    do {
-      let response = try await foundationModelService.generateVocabularyAutoFill(
-        term: trimmedTerm,
-        context: nil
-      )
-
-      // Only fill empty fields to preserve user input
-      if meaning.isEmpty && !response.meaning.isEmpty {
-        meaning = response.meaning
-      }
-      if partOfSpeech == nil {
-        partOfSpeech = PartOfSpeech(rawValue: response.partOfSpeech.lowercased())
-      }
-      if examples.isEmpty && !response.examples.isEmpty {
-        examples = response.examples.map { example in
-          EditableExample(
-            originalSentence: example.originalSentence,
-            translatedSentence: example.translatedSentence
-          )
-        }
-      }
-      if notes.isEmpty && !response.notes.isEmpty {
-        notes = response.notes
-      }
-    } catch {
-      autoFillError = error.localizedDescription
-    }
-
-    isAutoFilling = false
   }
 
   // MARK: - Example Management

@@ -14,10 +14,9 @@ import Speech
 /// Sample view demonstrating real-time microphone transcription using SpeechAnalyzer (iOS 26+)
 struct RealtimeTranscriptionView: View {
   @Environment(\.modelContext) private var modelContext
+  @Environment(\.openURL) private var openURL
   @State private var viewModel: RealtimeTranscriptionViewModel?
-  @State private var explainText: Identified<String>?
   @State private var showSessionHistory = false
-  @State private var selectionForActionSheet: TextSelection?
 
   var body: some View {
     Group {
@@ -61,18 +60,8 @@ struct RealtimeTranscriptionView: View {
       // Prevent screen sleep during recording
       UIApplication.shared.isIdleTimerDisabled = isRecording ?? false
     }
-    .sheet(item: $explainText) { item in
-      ExplainSheet(text: item.value)
-    }
     .sheet(isPresented: $showSessionHistory) {
       TranscriptionSessionHistoryView()
-    }
-    .sheet(item: $selectionForActionSheet) { selection in
-      SelectionActionSheet(
-        selection: selection,
-        onCopy: { selectionForActionSheet = nil },
-        onDismiss: { selectionForActionSheet = nil }
-      )
     }
   }
 
@@ -142,11 +131,10 @@ struct RealtimeTranscriptionView: View {
           ForEach(viewModel.transcriptions) { item in
             TranscriptionBubbleView(
               item: item,
-              onExplain: { text in
-                explainText = Identified(text)
-              },
-              onShowActions: { text in
-                selectionForActionSheet = TextSelection(text: text)
+              onAskChatGPT: { text in
+                if let url = ChatGPTURLBuilder.buildURL(text: text, context: text) {
+                  openURL(url)
+                }
               }
             )
             .id(item.id)
@@ -322,64 +310,6 @@ private struct AudioLevelMeter: View {
     } else {
       return .green
     }
-  }
-}
-
-// MARK: - Explain Sheet
-
-private struct ExplainSheet: View {
-  @Environment(\.dismiss) private var dismiss
-  let text: String
-
-  var body: some View {
-    NavigationStack {
-      ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-          Text("Selected Text")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-          Text(text)
-            .font(.body)
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-
-          Divider()
-
-          Text("Explanation")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-          // TODO: Add AI explanation here
-          Text("Explanation feature coming soon...")
-            .font(.body)
-            .foregroundStyle(.secondary)
-            .italic()
-        }
-        .padding()
-      }
-      .navigationTitle("Explain")
-      #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-      #endif
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("Done") {
-            dismiss()
-          }
-        }
-        ToolbarItem(placement: .primaryAction) {
-          Button {
-            UIPasteboard.general.string = text
-          } label: {
-            Image(systemName: "doc.on.doc")
-          }
-        }
-      }
-    }
-    .presentationDetents([.medium, .large])
   }
 }
 

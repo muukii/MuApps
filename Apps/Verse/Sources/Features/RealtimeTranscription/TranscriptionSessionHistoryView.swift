@@ -165,9 +165,9 @@ struct TranscriptionSessionDetailView: View {
   @Environment(\.modelContext) private var modelContext
 
   let session: TranscriptionSession
+  @Environment(\.openURL) private var openURL
   @State private var editedTitle: String = ""
   @State private var isEditing = false
-  @State private var selectionForActionSheet: TextSelection?
 
   var body: some View {
     NavigationStack {
@@ -202,13 +202,6 @@ struct TranscriptionSessionDetailView: View {
       }
       .onAppear {
         editedTitle = session.title ?? ""
-      }
-      .sheet(item: $selectionForActionSheet) { selection in
-        SelectionActionSheet(
-          selection: selection,
-          onCopy: { selectionForActionSheet = nil },
-          onDismiss: { selectionForActionSheet = nil }
-        )
       }
     }
   }
@@ -268,12 +261,10 @@ struct TranscriptionSessionDetailView: View {
       ForEach(sortedEntries) { entry in
         TranscriptionBubbleView(
           item: entry,
-          onExplain: { text in
-            // Redirect to SelectionActionSheet (which now embeds WordExplanationView)
-            selectionForActionSheet = TextSelection(text: text)
-          },
-          onShowActions: { text in
-            selectionForActionSheet = TextSelection(text: text)
+          onAskChatGPT: { text in
+            if let url = ChatGPTURLBuilder.buildURL(text: text, context: text) {
+              openURL(url)
+            }
           }
         )
       }

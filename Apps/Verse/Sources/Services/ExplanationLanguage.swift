@@ -7,7 +7,7 @@
 
 import Foundation
 
-/// The language AI responses are written in (explanations, vocabulary auto-fill, ChatGPT prompt).
+/// The language the ChatGPT explanation prompt asks for answers in.
 ///
 /// Stored in `UserDefaults` so both the Settings picker (`@AppStorage`) and the
 /// non-View prompt builders read the same value.

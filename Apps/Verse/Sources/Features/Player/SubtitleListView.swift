@@ -153,12 +153,11 @@ enum SubtitleAction {
   case setRepeatA(time: Double)
   case setRepeatB(time: Double)
   case setRepeatRange(startTime: Double, endTime: Double)
-  case explain(cue: Subtitle.Cue)
-  /// Opens ChatGPT in an in-app browser with the explanation prompt pre-filled.
+  /// Opens ChatGPT with the explanation prompt for the whole cue.
   case askChatGPT(cue: Subtitle.Cue)
+  /// Opens ChatGPT with the explanation prompt for a selected part of the cue.
+  case askChatGPTSelection(text: String, context: String)
   case translate(cue: Subtitle.Cue)
-  case explainSelection(text: String, context: String)
-  case showSelectionActions(text: String, context: String)
 }
 
 // MARK: - Subtitle Scroll Content
@@ -192,15 +191,13 @@ private struct SubtitleScrollContent: View {
               // Use next cue's startTime as end to handle overlapping cues
               let endTime = cues[safe: index + 1]?.startTime ?? cue.endTime
               onAction(.setRepeatRange(startTime: cue.startTime, endTime: endTime))
-            case .explain:
-              onAction(.explain(cue: cue))
+            case .askChatGPT:
+              onAction(.askChatGPT(cue: cue))
             case .translate:
               onAction(.translate(cue: cue))
-            case .explainSelection(let selectedText):
-              onAction(.explainSelection(text: selectedText, context: cue.decodedText))
-            case .showSelectionActions(let selectedText):
+            case .askChatGPTSelection(let selectedText):
               onSelectionChanged?(true)
-              onAction(.showSelectionActions(text: selectedText, context: cue.decodedText))
+              onAction(.askChatGPTSelection(text: selectedText, context: cue.decodedText))
             }
           }
         )

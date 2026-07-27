@@ -33,11 +33,11 @@ struct TextKit2SubtitleTextView: UIViewRepresentable {
     }
 
     textView.onActionButton = { _, cueText in
-      onAction(.showSelectionActions(text: cueText, context: cueText))
+      onAction(.askChatGPTSelection(text: cueText, context: cueText))
     }
 
     textView.onSelectText = { text, context in
-      onAction(.showSelectionActions(text: text, context: context))
+      onAction(.askChatGPTSelection(text: text, context: context))
     }
 
     textView.onTrackingShouldPause = { [binding = $isTrackingEnabled] in
@@ -154,16 +154,12 @@ private struct TextKit2SubtitleTextViewPreview: View {
       lastActionDescription = "Set B: \(timeLabel(time))"
     case .setRepeatRange(let startTime, let endTime):
       lastActionDescription = "Repeat: \(timeLabel(startTime)) - \(timeLabel(endTime))"
-    case .explain(let cue):
-      lastActionDescription = "Explain cue \(cue.id)"
     case .askChatGPT(let cue):
       lastActionDescription = "Ask ChatGPT cue \(cue.id)"
+    case .askChatGPTSelection(let text, _):
+      lastActionDescription = "Ask ChatGPT selection: \(text)"
     case .translate(let cue):
       lastActionDescription = "Translate cue \(cue.id)"
-    case .explainSelection(let text, _):
-      lastActionDescription = "Explain selection: \(text)"
-    case .showSelectionActions(let text, _):
-      lastActionDescription = "Actions: \(text)"
     }
   }
 

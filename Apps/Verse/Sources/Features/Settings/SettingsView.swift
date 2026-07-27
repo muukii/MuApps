@@ -14,14 +14,11 @@ enum Settings {
   struct View: SwiftUI.View {
     @Environment(\.dismiss) private var dismiss
     @Environment(VideoItemService.self) private var historyService
-    @State private var explanationService = ExplanationService()
-    @State private var foundationModelService = FoundationModelService()
     @State private var showClearHistoryConfirmation = false
 
     var body: some SwiftUI.View {
       NavigationStack {
         List {
-          appleIntelligenceSection
           languageSection
           transcriptionSection
           siriAndShortcutsSection
@@ -59,29 +56,13 @@ enum Settings {
 
     // MARK: - Sections
 
-    private var appleIntelligenceSection: some SwiftUI.View {
-      Section {
-        AppleIntelligenceStatusRow(
-          explanationService: explanationService,
-          foundationModelService: foundationModelService
-        )
-      } header: {
-        Text("Apple Intelligence")
-      } footer: {
-        AppleIntelligenceFooter(
-          explanationService: explanationService,
-          foundationModelService: foundationModelService
-        )
-      }
-    }
-
     private var languageSection: some SwiftUI.View {
       Section {
         ExplanationLanguagePicker()
       } header: {
         Text("Language")
       } footer: {
-        Text("Language used for explanations, vocabulary auto-fill, and the ChatGPT prompt. System follows your device language.")
+        Text("Language the ChatGPT prompt asks for answers in. System follows your device language.")
       }
     }
 
@@ -131,150 +112,6 @@ enum Settings {
     @ViewBuilder
     private var experimentalFeaturesSection: some SwiftUI.View {
       ExperimentalFeaturesSection()
-    }
-  }
-
-  // MARK: - Apple Intelligence Components
-
-  struct AppleIntelligenceStatusRow: SwiftUI.View {
-    let explanationService: ExplanationService
-    let foundationModelService: FoundationModelService
-
-    var body: some SwiftUI.View {
-      VStack(alignment: .leading, spacing: 12) {
-        // Word Explanations
-        HStack {
-          Label {
-            Text("Word Explanations")
-          } icon: {
-            Image(systemName: "text.bubble")
-              .foregroundStyle(.blue)
-          }
-
-          Spacer()
-
-          statusBadge(for: explanationService)
-        }
-
-        // Vocabulary Auto-Fill
-        HStack {
-          Label {
-            Text("Vocabulary Auto-Fill")
-          } icon: {
-            Image(systemName: "text.book.closed")
-              .foregroundStyle(.purple)
-          }
-
-          Spacer()
-
-          statusBadge(for: foundationModelService)
-        }
-      }
-      .padding(.vertical, 4)
-    }
-
-    @ViewBuilder
-    private func statusBadge(for service: ExplanationService) -> some SwiftUI.View {
-      let availability = service.checkAvailability()
-
-      switch availability {
-      case .available:
-        HStack(spacing: 4) {
-          Image(systemName: "checkmark.circle.fill")
-            .foregroundStyle(.green)
-          Text("Available")
-            .foregroundStyle(.secondary)
-        }
-        .font(.caption)
-
-      case .unavailable(let reason):
-        HStack(spacing: 4) {
-          Image(systemName: "xmark.circle.fill")
-            .foregroundStyle(.orange)
-          Text(statusText(for: reason))
-            .foregroundStyle(.secondary)
-        }
-        .font(.caption)
-      }
-    }
-
-    @ViewBuilder
-    private func statusBadge(for service: FoundationModelService) -> some SwiftUI.View {
-      let availability = service.checkAvailability()
-
-      switch availability {
-      case .available:
-        HStack(spacing: 4) {
-          Image(systemName: "checkmark.circle.fill")
-            .foregroundStyle(.green)
-          Text("Available")
-            .foregroundStyle(.secondary)
-        }
-        .font(.caption)
-
-      case .unavailable:
-        HStack(spacing: 4) {
-          Image(systemName: "xmark.circle.fill")
-            .foregroundStyle(.orange)
-          Text("Unavailable")
-            .foregroundStyle(.secondary)
-        }
-        .font(.caption)
-      }
-    }
-
-    private func statusText(for reason: ExplanationService.Availability.UnavailabilityReason) -> String {
-      switch reason {
-      case .deviceNotEligible:
-        return "Not Supported"
-      case .appleIntelligenceNotEnabled:
-        return "Enable in Settings"
-      case .modelNotReady:
-        return "Downloading..."
-      case .unknown:
-        return "Unavailable"
-      }
-    }
-  }
-
-  struct AppleIntelligenceFooter: SwiftUI.View {
-    let explanationService: ExplanationService
-    let foundationModelService: FoundationModelService
-
-    var body: some SwiftUI.View {
-      let explanationAvailability = explanationService.checkAvailability()
-      let vocabularyAvailability = foundationModelService.checkAvailability()
-
-      VStack(alignment: .leading, spacing: 8) {
-        // Overall status
-        switch (explanationAvailability, vocabularyAvailability) {
-        case (.available, .available):
-          Text("Apple Intelligence is ready to use for word explanations and vocabulary auto-fill.")
-
-        case (.available, .unavailable):
-          Text("Apple Intelligence is ready for word explanations. Vocabulary auto-fill is not available.")
-
-        case (.unavailable, .available):
-          Text("Apple Intelligence is ready for vocabulary auto-fill. Word explanations are not available.")
-
-        case (.unavailable(let reason), .unavailable):
-          detailedUnavailableMessage(for: reason)
-        }
-      }
-    }
-
-    @ViewBuilder
-    private func detailedUnavailableMessage(for reason: ExplanationService.Availability.UnavailabilityReason) -> some SwiftUI.View {
-      switch reason {
-      case .deviceNotEligible:
-        Text("This device does not support Apple Intelligence. These features require a compatible device.")
-      case .appleIntelligenceNotEnabled:
-        Text("Enable Apple Intelligence in System Settings > Apple Intelligence & Siri to use these features.")
-      case .modelNotReady:
-        Text("Apple Intelligence model is being downloaded by the system. Features will be available when ready.")
-      case .unknown:
-        Text("Apple Intelligence is not available for these features.")
-      }
     }
   }
 

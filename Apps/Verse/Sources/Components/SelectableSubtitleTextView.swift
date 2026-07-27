@@ -77,14 +77,11 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
   /// Current playback time in seconds. Used to determine past/future when highlightTime is nil.
   var playbackTime: Double?
 
-  /// Callback when "Explain" is selected from the context menu.
-  var onExplain: ((String) -> Void)?
-
   /// Callback when text selection changes. Returns selected text or nil if no selection.
   var onSelectionChanged: ((String?) -> Void)?
 
-  /// Callback when "Actions..." is selected from the context menu.
-  var onShowActions: ((String) -> Void)?
+  /// Callback when "Ask ChatGPT" is selected from the context menu.
+  var onAskChatGPT: ((String) -> Void)?
 
   // MARK: - Initializer
 
@@ -98,9 +95,8 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
     unplayedTextColor: UIColor = .secondaryLabel,
     lineSpacing: CGFloat = 0,
     playbackTime: Double? = nil,
-    onExplain: ((String) -> Void)? = nil,
     onSelectionChanged: ((String?) -> Void)? = nil,
-    onShowActions: ((String) -> Void)? = nil
+    onAskChatGPT: ((String) -> Void)? = nil
   ) {
     self.content = content
     self.highlightTime = highlightTime
@@ -110,9 +106,8 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
     self.unplayedTextColor = unplayedTextColor
     self.lineSpacing = lineSpacing
     self.playbackTime = playbackTime
-    self.onExplain = onExplain
     self.onSelectionChanged = onSelectionChanged
-    self.onShowActions = onShowActions
+    self.onAskChatGPT = onAskChatGPT
   }
 
 
@@ -159,9 +154,8 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
   func updateUIView(_ textView: UITextView, context: Context) {
     let coordinator = context.coordinator
 
-    coordinator.onExplain = self.onExplain
     coordinator.onSelectionChanged = self.onSelectionChanged
-    coordinator.onShowActions = self.onShowActions
+    coordinator.onAskChatGPT = self.onAskChatGPT
 
     // Build word ranges
     let wordRanges = buildWordRanges()
@@ -305,7 +299,7 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
   }
 
   public func makeCoordinator() -> Coordinator {
-    Coordinator(onExplain: onExplain)
+    Coordinator(onAskChatGPT: onAskChatGPT)
   }
 
   // MARK: - WordRange
@@ -319,15 +313,14 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
   // MARK: - Coordinator
 
   public class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
-    var onExplain: ((String) -> Void)?
     var onSelectionChanged: ((String?) -> Void)?
-    var onShowActions: ((String) -> Void)?
+    var onAskChatGPT: ((String) -> Void)?
 
     // Track previous selected text to avoid redundant callbacks
     private var lastSelectedText: String?
 
-    init(onExplain: ((String) -> Void)?) {
-      self.onExplain = onExplain
+    init(onAskChatGPT: ((String) -> Void)?) {
+      self.onAskChatGPT = onAskChatGPT
     }
 
     @objc func handleTap(_ gesture: UITapGestureRecognizer) {
@@ -424,12 +417,11 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
         return UIMenu(children: suggestedActions)
       }
 
-      // Create custom action to show SelectionActionSheet
       let actionsItem = UIAction(
-        title: "Actions...",
-        image: UIImage(systemName: "ellipsis.circle")
+        title: "Ask ChatGPT",
+        image: UIImage(systemName: "sparkle.magnifyingglass")
       ) { [weak self] _ in
-        self?.onShowActions?(selectedText)
+        self?.onAskChatGPT?(selectedText)
       }
 
       // Add custom action before system actions
