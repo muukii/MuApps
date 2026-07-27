@@ -41,7 +41,7 @@ final class VideoPreviewModel {
 
   /// The latest authored recipe paired with the source it applies to.
   ///
-  /// Viewport changes can reprepare this request without asking `EditorView`
+  /// Recipe changes can reprepare this request without asking `EditorView`
   /// to rebuild editing state or resetting the playhead through `load(_:)`.
   private struct DesiredRenderRequest {
     let recipe: FargVideoRenderRecipe
@@ -51,8 +51,8 @@ final class VideoPreviewModel {
 
   /// Source-owned temporal topology reused by every Preview presentation mode.
   ///
-  /// The three-track asset is independent of viewport, LUT, enablement, and
-  /// Strength. Those values change only the composition installed on this
+  /// The three-track asset is independent of editor layout, LUT, enablement,
+  /// and Strength. Those values change only the composition installed on this
   /// source or the live value read by its compositor.
   private struct TemporalPreviewState {
     let sourceID: VideoSource.ID
@@ -103,6 +103,11 @@ final class VideoPreviewModel {
   private var loadedSource: VideoSource?
   private var desiredRenderRequest: DesiredRenderRequest?
   private var temporalPreviewState: TemporalPreviewState?
+  /// The most recent stable Editor window target, retained for the next clip.
+  private var editorWindowRenderTarget: FargPreviewRenderTarget?
+  /// The render target locked while the currently selected clip is active.
+  ///
+  /// Tab controls may alter the player surface but must not alter this target.
   private var previewRenderTarget: FargPreviewRenderTarget?
   private var hasInstalledPreviewForLoadedSource = false
   private var preparingTemporalSourceID: VideoSource.ID?
@@ -167,6 +172,7 @@ final class VideoPreviewModel {
     loadedSource = source
     desiredRenderRequest = nil
     temporalPreviewState = nil
+    previewRenderTarget = editorWindowRenderTarget
     preparingTemporalSourceID = nil
     hasInstalledPreviewForLoadedSource = false
     renderState = .preparing
@@ -201,6 +207,7 @@ final class VideoPreviewModel {
     loadedSource = nil
     desiredRenderRequest = nil
     temporalPreviewState = nil
+    previewRenderTarget = nil
     preparingTemporalSourceID = nil
     hasInstalledPreviewForLoadedSource = false
     renderState = .empty
@@ -273,24 +280,27 @@ final class VideoPreviewModel {
     scheduleCompositionUpdate(debounce: false)
   }
 
-  /// Updates the operational preview resolution from the visible player area.
+  /// Captures a bounded Preview quality target from the Editor window.
   ///
-  /// Invalid transient layout values are ignored. The first usable viewport is
-  /// applied immediately; later resize bursts are coalesced while the last
-  /// valid preview remains visible.
-  func updateViewport(
+  /// The active clip keeps its target even when the player surface changes.
+  /// This prevents a tab's layout animation from replacing the custom
+  /// compositor's render context mid-request. A later source selection uses
+  /// the newest valid Editor window target.
+  func updateEditorWindow(
     sizeInPoints: CGSize,
     displayScale: CGFloat
   ) {
     guard
       let target = FargPreviewRenderTarget(
-        viewportSizeInPoints: sizeInPoints,
+        editorWindowSizeInPoints: sizeInPoints,
         displayScale: displayScale
       ),
-      target != previewRenderTarget
+      target != editorWindowRenderTarget
     else {
       return
     }
+    editorWindowRenderTarget = target
+    guard previewRenderTarget == nil else { return }
     previewRenderTarget = target
     guard
       isRenderingSuspended == false,

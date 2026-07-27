@@ -71,7 +71,7 @@ import Testing
         mainTree: MainTree(features: [])
       )
       model.load(source)
-      model.updateViewport(
+      model.updateEditorWindow(
         sizeInPoints: CGSize(width: 96, height: 64),
         displayScale: 1
       )

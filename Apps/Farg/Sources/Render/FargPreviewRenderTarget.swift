@@ -4,38 +4,61 @@
 
 import Foundation
 
-/// The pixel-space ceiling for one live editor preview.
+/// The pixel-space ceiling locked for one live editor preview.
 ///
-/// This value describes the display environment, not an authored edit. It is
-/// carried only by `FargVideoRenderPurpose.preview`, so exports cannot
-/// accidentally inherit the device viewport resolution.
+/// This value describes the Editor window environment, not an authored edit.
+/// It is carried only by `FargVideoRenderPurpose.preview`, so exports cannot
+/// accidentally inherit the device viewport resolution. The Editor measures
+/// its stable parent content rather than its player surface: effect controls
+/// may resize the latter without changing the custom compositor's render size.
 nonisolated struct FargPreviewRenderTarget: Equatable, Sendable {
+
+  /// The per-axis cap that bounds Preview's Optical Flow working set.
+  ///
+  /// A current iPhone editor is expected to display no more than this detail,
+  /// while the independent width and height limits retain useful quality in a
+  /// narrow window. Source frames are still never upscaled.
+  private static let maximumPreviewPixelDimension: CGFloat = 1_080
 
   /// The largest display-oriented frame the visible preview can consume.
   let maximumPixelSize: CGSize
 
-  /// Converts a SwiftUI layout measurement into an integer pixel ceiling.
+  /// Converts the Editor's stable window content measurement into a bounded
+  /// pixel ceiling.
   ///
+  /// This deliberately does not accept the live player surface measurement.
+  /// The player may become shorter when a tab changes, but that is a display
+  /// concern and must not replace a running custom-compositor render context.
   /// Invalid transient geometry is rejected so a zero-size layout pass never
   /// tears down the last usable preview.
   init?(
-    viewportSizeInPoints: CGSize,
+    editorWindowSizeInPoints: CGSize,
     displayScale: CGFloat
   ) {
     guard
-      viewportSizeInPoints.width.isFinite,
-      viewportSizeInPoints.height.isFinite,
+      editorWindowSizeInPoints.width.isFinite,
+      editorWindowSizeInPoints.height.isFinite,
       displayScale.isFinite,
-      viewportSizeInPoints.width > 0,
-      viewportSizeInPoints.height > 0,
+      editorWindowSizeInPoints.width > 0,
+      editorWindowSizeInPoints.height > 0,
       displayScale > 0
     else {
       return nil
     }
+    let windowPixelSize = CGSize(
+      width: floor(editorWindowSizeInPoints.width * displayScale),
+      height: floor(editorWindowSizeInPoints.height * displayScale)
+    )
     self.init(
       maximumPixelSize: CGSize(
-        width: floor(viewportSizeInPoints.width * displayScale),
-        height: floor(viewportSizeInPoints.height * displayScale)
+        width: min(
+          windowPixelSize.width,
+          Self.maximumPreviewPixelDimension
+        ),
+        height: min(
+          windowPixelSize.height,
+          Self.maximumPreviewPixelDimension
+        )
       )
     )
   }

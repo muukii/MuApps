@@ -28,6 +28,7 @@ struct RootView: View {
   @State private var videoLoadRequestID: UUID?
   @State private var videoLoadTask: Task<Void, Never>?
   @Environment(\.scenePhase) private var scenePhase
+  @Namespace var namespace
   private let shortcutImports = ShortcutVideoImportCenter.shared
 
   var body: some View {
@@ -38,7 +39,8 @@ struct RootView: View {
         onStartEditing: { startEditing() },
         onCancelLoading: { cancelInitialVideoImport() },
         onSelectFiles: { isVideoFileImporterPresented = true },
-        onShowSettings: { isShowingSettings = true }
+        onShowSettings: { isShowingSettings = true },
+        namespace: namespace
       )
     }
     .appBlockingOverlayTarget()
@@ -53,6 +55,7 @@ struct RootView: View {
         .navigationBarTitleDisplayMode(.inline)
       }
       .interactiveDismissDisabled()
+      .navigationTransition(.zoom(sourceID: "editor", in: namespace))
     }
     .sheet(isPresented: $isShowingSettings) {
       FargSettingsView(
@@ -128,7 +131,9 @@ struct RootView: View {
 
   /// Resolves the committed Photos/Files selection before exposing the editor.
   private func startEditing(fileURLs: [URL] = []) {
-    guard pickerItems.isEmpty == false || fileURLs.isEmpty == false else { return }
+    guard pickerItems.isEmpty == false || fileURLs.isEmpty == false else {
+      return
+    }
     videoLoadTask?.cancel()
 
     let selectedItems = pickerItems
@@ -231,6 +236,7 @@ private struct FargMediaPickerView: View {
   let onCancelLoading: @MainActor @Sendable () -> Void
   let onSelectFiles: @MainActor @Sendable () -> Void
   let onShowSettings: @MainActor @Sendable () -> Void
+  let namespace: Namespace.ID
 
   var body: some View {
     PhotosPicker(
@@ -252,6 +258,7 @@ private struct FargMediaPickerView: View {
         selectionCount: pickerItems.count,
         onStartEditing: onStartEditing
       )
+      .matchedTransitionSource(id: "editor", in: namespace)
     }
     .appBlockingOverlay(isPresented: loadingProgress != nil) {
       if let loadingProgress {
@@ -271,8 +278,8 @@ private struct FargMediaPickerView: View {
         .disabled(loadingProgress != nil)
         .accessibilityLabel("Settings")
       }
-      
-      ToolbarItem(placement: .principal) { 
+
+      ToolbarItem(placement: .principal) {
         Image("logo")
           .resizable()
           .aspectRatio(contentMode: .fit)
@@ -281,7 +288,7 @@ private struct FargMediaPickerView: View {
 
       ToolbarItem(placement: .topBarTrailing) {
         Button(action: onSelectFiles) {
-//          Image(systemName: "externaldrive")
+          //          Image(systemName: "externaldrive")
           Image(systemName: "folder")
         }
         .disabled(loadingProgress != nil)

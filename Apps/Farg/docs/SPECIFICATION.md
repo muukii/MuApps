@@ -5,9 +5,10 @@
 Färg is an iPhone video editor for applying one color lookup table (LUT) recipe
 to one or more videos. Preview and export evaluate the same Brightroom
 parametric feature document and temporal recipe for every video in the
-collection. Preview evaluates that recipe at the visible viewport's pixel
-resolution, while export preserves each source's display resolution. The app
-uses its dedicated Färg icon and supports portrait orientation only.
+collection. Preview evaluates that recipe at a bounded pixel target derived
+from the Editor window, while export preserves each source's display
+resolution. The app uses its dedicated Färg icon and supports portrait
+orientation only.
 The visible app name remains **Färg**, while Spotlight can also find the app
 when a person searches for **Farg** without the diacritic.
 
@@ -99,18 +100,20 @@ when a person searches for **Farg** without the diacritic.
 - The video surface is centered and fitted to the selected movie's presentation
   aspect ratio. Any remaining letterbox area belongs to the neutral editor
   stage instead of enlarging the player layer beyond the movie.
-- Live Preview resolves its processing ceiling from the player area above the
-  transport controls multiplied by the current display scale. The
-  display-oriented source is uniformly fitted to that pixel ceiling, never
-  upscaled, and rounded down to hardware-compatible even dimensions.
-- The first valid viewport prepares immediately. Later layout changes are
-  coalesced briefly, preserve the current playhead and playback intent, and
-  replace only the latest requested Preview target. A transient zero-size
-  layout never replaces the last valid target with a full-resolution fallback.
-- Preview prepares one temporal source topology per selected movie. Viewport,
-  LUT, and Motion Blur enablement changes replace only the video composition on
-  the existing player item, while Strength changes update a live frame
-  parameter. These edits do not seek or reset the current playback position.
+- Live Preview resolves its processing ceiling from the Editor window content
+  bounds multiplied by the current display scale, capping each dimension at
+  1080 pixels. The display-oriented source is uniformly fitted to that pixel
+  ceiling, never upscaled, and rounded down to hardware-compatible even
+  dimensions.
+- The first valid Editor-window measurement prepares immediately. That target
+  remains locked for the selected clip: changing an effect tab can resize the
+  visible player but cannot replace the custom compositor's render context. A
+  later selected clip adopts the latest valid Editor-window target; a transient
+  zero-size measurement never replaces it with a full-resolution fallback.
+- Preview prepares one temporal source topology per selected movie. LUT and
+  Motion Blur enablement changes replace only the video composition on the
+  existing player item, while Strength changes update a live frame parameter.
+  These edits do not seek or reset the current playback position.
 - Preview audio mixes with music, podcasts, or other audio already playing
   outside Färg instead of interrupting it.
 - The editor navigation bar places its close menu and **Settings** at the
@@ -237,8 +240,8 @@ when a person searches for **Farg** without the diacritic.
   composition must not convert an Apple Log or wide-gamut source to Rec.709
   before the LUT evaluates it.
 - Preview and export use the same temporal samples, ordering, and `Strength`
-  value. Preview runs Optical Flow at its viewport-fitted working resolution;
-  export runs at the source display resolution. `Strength` follows
+  value. Preview runs Optical Flow at its Editor-window-fitted working
+  resolution; export runs at the source display resolution. `Strength` follows
   VideoToolbox's 1–100 range; Färg does not present it as a shutter angle
   because Apple defines no physical angle conversion.
 - Disabled Motion Blur is Preview's semantic strength zero: it keeps the
@@ -256,7 +259,7 @@ when a person searches for **Farg** without the diacritic.
   portrait movies and physically portrait-encoded movies therefore produce the
   same upright Preview without treating display width and processor width as
   interchangeable.
-- When viewport fitting or portrait canonicalization is required, Preview
+- When Editor-window fitting or portrait canonicalization is required, Preview
   transforms all three temporal source buffers into bounded, IOSurface-backed
   pools before Optical Flow. A source-sized buffer that already matches the
   processor geometry is passed through directly. Pool allocation is capped and

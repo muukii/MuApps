@@ -12,15 +12,27 @@ import Testing
 struct PreviewRenderTargetTests {
 
   @Test
-  func viewportPointsBecomeIntegerPixels() throws {
+  func editorWindowPointsBecomeBoundedPixelCeiling() throws {
     let target = try #require(
       FargPreviewRenderTarget(
-        viewportSizeInPoints: CGSize(width: 390.75, height: 277.5),
+        editorWindowSizeInPoints: CGSize(width: 390.75, height: 844),
         displayScale: 3
       )
     )
 
-    #expect(target.maximumPixelSize == CGSize(width: 1_172, height: 832))
+    #expect(target.maximumPixelSize == CGSize(width: 1_080, height: 1_080))
+  }
+
+  @Test
+  func narrowEditorWindowKeepsItsNarrowPixelBound() throws {
+    let target = try #require(
+      FargPreviewRenderTarget(
+        editorWindowSizeInPoints: CGSize(width: 150, height: 700),
+        displayScale: 2
+      )
+    )
+
+    #expect(target.maximumPixelSize == CGSize(width: 300, height: 1_080))
   }
 
   @Test
@@ -54,10 +66,10 @@ struct PreviewRenderTargetTests {
   }
 
   @Test
-  func invalidTransientViewportIsIgnored() {
+  func invalidTransientEditorWindowIsIgnored() {
     #expect(
       FargPreviewRenderTarget(
-        viewportSizeInPoints: .zero,
+        editorWindowSizeInPoints: .zero,
         displayScale: 3
       ) == nil
     )

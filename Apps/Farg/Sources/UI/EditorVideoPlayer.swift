@@ -14,13 +14,9 @@ import UIKit
 /// evolve independently from AVKit's standard player interface.
 struct EditorVideoPlayer: View {
 
-  @Environment(\.displayScale) private var displayScale
-
   let model: VideoPreviewModel
 
   var body: some View {
-    let currentDisplayScale = displayScale
-
     ZStack {
       VStack(spacing: Self.controlsSpacing) {
         PlayerLayerSurface(player: model.player)
@@ -28,17 +24,6 @@ struct EditorVideoPlayer: View {
           .clipShape(.rect(cornerRadius: 8))
           .accessibilityHidden(true)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .onGeometryChange(for: PreviewViewportMeasurement.self) { proxy in
-            PreviewViewportMeasurement(
-              sizeInPoints: proxy.size,
-              displayScale: currentDisplayScale
-            )
-          } action: { measurement in
-            model.updateViewport(
-              sizeInPoints: measurement.sizeInPoints,
-              displayScale: measurement.displayScale
-            )
-          }
 
         EditorPlaybackControls(model: model)
           .padding(.horizontal, 16)
@@ -67,13 +52,6 @@ struct EditorVideoPlayer: View {
         EmptyView()
       }
     }
-  }
-
-  /// A normalized SwiftUI layout measurement used to suppress duplicate
-  /// viewport notifications.
-  private nonisolated struct PreviewViewportMeasurement: Equatable, Sendable {
-    let sizeInPoints: CGSize
-    let displayScale: CGFloat
   }
 
   private static let controlsSpacing: CGFloat = 8
@@ -213,7 +191,7 @@ private struct EditorPlaybackControlsComponent: View {
     .padding(.vertical, 8)
     .background(
       Capsule()
-        .foregroundStyle(.foreground.quinary)
+        .foregroundStyle(.background.secondary)
     )
     .onAppear {
       scrubberProgress = playbackProgress

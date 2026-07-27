@@ -10,6 +10,8 @@ import SwiftUI
 /// Authors one shared LUT recipe over an ordered collection of videos.
 struct EditorView: View {
 
+  @Environment(\.displayScale) private var displayScale
+
   let library: LUTLibrary
   let previewSamples: LUTPreviewSampleLibrary
   @Bindable var editState: EditState
@@ -26,7 +28,19 @@ struct EditorView: View {
   @State private var videoLoadRequestID: UUID?
   @State private var videoLoadTask: Task<Void, Never>?
 
+  /// The stable content size of the Editor's hosting window.
+  ///
+  /// Unlike the player surface, this does not shrink when LUT and Motion Blur
+  /// controls change height. It is therefore safe to use as a Preview-quality
+  /// input without coupling the compositor to tab animation.
+  private nonisolated struct EditorWindowMeasurement: Equatable, Sendable {
+    let sizeInPoints: CGSize
+    let displayScale: CGFloat
+  }
+
   var body: some View {
+    let currentDisplayScale = displayScale
+
     EditorLayout(
       preview: preview,
       lutPreviewSource: preview.lutPreviewSource,
@@ -42,6 +56,17 @@ struct EditorView: View {
       onRemoveClip: removeClip,
       onPickFileURLs: loadPickedVideoFiles
     )
+    .onGeometryChange(for: EditorWindowMeasurement.self) { proxy in
+      EditorWindowMeasurement(
+        sizeInPoints: proxy.size,
+        displayScale: currentDisplayScale
+      )
+    } action: { measurement in
+      preview.updateEditorWindow(
+        sizeInPoints: measurement.sizeInPoints,
+        displayScale: measurement.displayScale
+      )
+    }
     .environment(lutPreviewModels)
     .background(
       Rectangle()
@@ -564,10 +589,9 @@ private struct EditorLowerPanel: View {
             EditorMotionBlurControls(settings: $motionBlur)
               .padding(.horizontal, contentPadding)
               .transition(.opacity)
-              .frame(height: 200)
           }
         }       
-        .animation(.snappy, value: selectedEffect)
+        .animation(.smooth, value: selectedEffect)
       }
     }
   
@@ -595,7 +619,7 @@ private struct EditorLowerPanel: View {
         VStack(alignment: .leading, spacing: 10) {
           HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-              Text("MOTION BLUR")
+              Text("Motion Blur")
                 .font(.caption.weight(.semibold))
                 .tracking(0.8)
                 .foregroundStyle(.secondary)
