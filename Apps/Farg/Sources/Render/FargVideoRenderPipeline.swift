@@ -25,10 +25,27 @@ nonisolated enum FargLUTOutputColorSpace: Equatable, Sendable {
     }
   }
 
-  var cgColorSpace: CGColorSpace {
+  /// The mastering space used to interpret the LUT-authored result.
+  ///
+  /// Keep this separate from the final delivery space so Resolve comparisons
+  /// remain grounded in the Rec.709 / Gamma 2.4 mastering intent.
+  var lutResultColorSpace: CGColorSpace {
     switch self {
     case .rec709:
       return CGColorSpace(name: CGColorSpace.itur_709)!
+    }
+  }
+
+  /// The destination space used when final pixels are materialized.
+  ///
+  /// Core Media's Rec.709 encoding compensates the Gamma 2.4 mastering intent
+  /// for Apple's standard 1-1-1 playback while retaining Rec.709 metadata.
+  /// Apply this only at the final render destination, never to the LUT input
+  /// or to temporal-effect intermediate buffers.
+  var coreMediaDeliveryColorSpace: CGColorSpace {
+    switch self {
+    case .rec709:
+      return CGColorSpace(name: CGColorSpace.coreMedia709)!
     }
   }
 }
@@ -157,7 +174,8 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
       source: source,
       mode: mode,
       renderTarget: .fitWithin(target.maximumPixelSize),
-      outputColorSpace: recipe.lutOutputColorSpace?.cgColorSpace
+      outputColorSpace:
+        recipe.lutOutputColorSpace?.coreMediaDeliveryColorSpace
     ) { image, renderExtent in
       try parametricRenderer.makeFrameImage(
         from: image,
@@ -202,7 +220,8 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
       source: source,
       mode: mode,
       renderTarget: purpose.motionBlurRenderTarget,
-      outputColorSpace: recipe.lutOutputColorSpace?.cgColorSpace
+      outputColorSpace:
+        recipe.lutOutputColorSpace?.coreMediaDeliveryColorSpace
     ) { image, renderExtent in
       try parametricRenderer.makeFrameImage(
         from: image,

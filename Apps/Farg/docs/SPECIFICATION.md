@@ -158,6 +158,11 @@ when a person searches for **Farg** without the diacritic.
   standardized output-color-space declaration, every imported and bundled LUT
   is interpreted under that contract; LUTs authored for another output color
   space are not supported.
+- Färg treats the authored Rec.709 result as a Gamma 2.4 mastering intent, then
+  materializes Preview, LUT thumbnails, and Export through Core Media's Rec.709
+  delivery color space. This compensates the final pixel values for standard
+  Apple 1-1-1 playback without adding an Apple Log-specific processing branch
+  or changing the LUT's source-input contract.
 - Färg installs **AppleLog1 Example** from its app bundle into the private LUT
   library on launch when that initial LUT record or stored copy is absent.
   The starter LUT uses the same validation and Application Support storage as
@@ -276,8 +281,9 @@ when a person searches for **Farg** without the diacritic.
   completed file's measured bitrate can vary slightly with its content.
 - An export with a selected LUT carries Rec.709 primaries, transfer, and matrix
   metadata from the video-composition output through the asset reader and HEVC
-  writer. The output contract is determined by the LUT rather than copied from
-  the source movie.
+  writer as NCLC 1-1-1. The output contract is determined by the LUT rather than
+  copied from the source movie; the Core Media delivery transform changes the
+  materialized pixel values, not these tags.
 - Before a rendered video sample reaches the HEVC writer, its format dimensions
   must exactly match the composition's source-resolution encoder dimensions.
   A portrait geometry mismatch fails at this boundary with expected and actual

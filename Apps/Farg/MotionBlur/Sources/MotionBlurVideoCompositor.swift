@@ -56,11 +56,12 @@ final class MotionBlurCompositionInstruction:
   let geometry: MotionBlurFrameGeometry
   let ciContext: CIContext
 
-  /// The display color space produced after `postProcessor`, when known.
+  /// The destination color space for materializing the final pixel buffer.
   ///
-  /// This is intentionally independent of the decoded source frame's color
-  /// space. A LUT may consume Apple Log or wide-gamut pixels while producing
-  /// display-referred Rec.709.
+  /// This is intentionally independent of both the decoded source frame and
+  /// the mastering space used to interpret `postProcessor` output. A caller
+  /// can therefore preserve source delivery or encode a separate display
+  /// delivery transform after its LUT has evaluated wide-gamut source pixels.
   let outputColorSpace: CGColorSpace?
 
   let postProcessor: PostProcessor

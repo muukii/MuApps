@@ -170,7 +170,8 @@ actor LUTPreviewRenderer {
           output,
           from: output.extent,
           format: .RGBA8,
-          colorSpace: FargLUTOutputColorSpace.rec709.cgColorSpace,
+          colorSpace:
+            FargLUTOutputColorSpace.rec709.coreMediaDeliveryColorSpace,
           deferred: false
         )
       else {

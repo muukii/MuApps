@@ -21,6 +21,11 @@ nonisolated struct VideoColorInfo: Sendable, Equatable {
   /// Whether the source uses an HDR transfer function (HLG or PQ).
   var isHDR: Bool
 
+  /// SDR Rec.709 NCLC metadata used by compositions and encoded outputs.
+  ///
+  /// Keep these 1-1-1 tags even when LUT pixels are materialized through
+  /// `CGColorSpace.coreMedia709`: delivery pixel compensation and encoded-file
+  /// metadata are separate contracts.
   static let sdrRec709 = VideoColorInfo(
     colorPrimaries: AVVideoColorPrimaries_ITU_R_709_2,
     transferFunction: AVVideoTransferFunction_ITU_R_709_2,

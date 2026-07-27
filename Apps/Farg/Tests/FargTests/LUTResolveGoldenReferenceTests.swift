@@ -27,10 +27,8 @@ struct LUTResolveGoldenReferenceTests {
     let fixture = try ResolveLUTReferenceFixture.load()
     try fixture.validateProvenance()
 
-    let colorSpace = try #require(
-      CGColorSpace(name: CGColorSpace.itur_709),
-      "The system ITU-R BT.709 color space is unavailable."
-    )
+    let colorSpace =
+      FargLUTOutputColorSpace.rec709.lutResultColorSpace
     let sourceCGImage = try fixture.loadSourceImage()
     let goldenCGImage = try fixture.loadGoldenImage()
     try Self.validateFixtureImage(sourceCGImage, named: fixture.sourceFileName)
