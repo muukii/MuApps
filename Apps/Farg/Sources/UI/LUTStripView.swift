@@ -54,7 +54,7 @@ struct LUTStripView: View {
         }
       }
     }
-    .frame(height: 70)
+    .frame(height: 80)
   }
 
   private var selectedItemID: LUTStripItemID {
@@ -102,19 +102,16 @@ private struct OriginalCell: View {
               Image(decorative: source.image, scale: 1)
                 .resizable()
                 .scaledToFill()
-                .aspectRatio(1, contentMode: .fit)
             }
           }
           .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
           .selectionOverlay(isSelected: isSelected)
-          .aspectRatio(1, contentMode: .fit)
+          .aspectRatio(1, contentMode: .fill)
 
-        VStack(alignment: .leading, spacing: 1) {
-          Text(title)
-            .font(.caption.weight(isSelected ? .semibold : .regular))
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-        }
+        Text(title)
+          .font(.caption.weight(isSelected ? .semibold : .regular))
+          .foregroundStyle(.primary)
+          .lineLimit(1)
       }
       .frame(width: 64)
       .contentShape(Rectangle())
@@ -150,7 +147,7 @@ private struct LUTPreviewCell: View {
           }
           .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
           .selectionOverlay(isSelected: isSelected)
-          .aspectRatio(1, contentMode: .fit)
+          .aspectRatio(1, contentMode: .fill)
 
         VStack(alignment: .leading, spacing: 1) {
           Text(title)
