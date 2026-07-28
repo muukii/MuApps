@@ -111,6 +111,12 @@ final class VideoItem: TypedIdentifiable {
   @Relationship(deleteRule: .cascade, inverse: \DownloadStateEntity.videoItem)
   var downloadState: DownloadStateEntity?
 
+  // MARK: - Subtitle Bookmark Relationship
+
+  /// Bookmarked subtitle cues for this video
+  @Relationship(deleteRule: .cascade, inverse: \SubtitleBookmark.video)
+  var subtitleBookmarks: [SubtitleBookmark] = []
+
   // MARK: - Playlist Relationship
 
   /// Playlist entries that include this video

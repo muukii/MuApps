@@ -27,6 +27,7 @@ struct YouTubeSubtitleApp: App {
       TranscriptionEntry.self,
       Playlist.self,
       PlaylistEntry.self,
+      SubtitleBookmark.self,
     ])
 
     do {

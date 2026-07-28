@@ -199,6 +199,27 @@ final class VideoItemService {
     try modelContext.save()
   }
 
+  // MARK: - Subtitle Bookmarks
+
+  /// Toggle a bookmark for a subtitle cue.
+  /// Removes the existing bookmark when the cue is already bookmarked; adds one otherwise.
+  func toggleSubtitleBookmark(video: VideoItem, cue: Subtitle.Cue) throws {
+    if let existing = video.subtitleBookmarks.first(where: { $0.matches(cue) }) {
+      modelContext.delete(existing)
+    } else {
+      let bookmark = SubtitleBookmark(cue: cue, video: video)
+      modelContext.insert(bookmark)
+    }
+
+    try modelContext.save()
+  }
+
+  /// Delete a subtitle bookmark.
+  func deleteSubtitleBookmark(_ bookmark: SubtitleBookmark) throws {
+    modelContext.delete(bookmark)
+    try modelContext.save()
+  }
+
   // MARK: - Update Playback Position
 
   /// Update playback position and duration for a video to enable resume functionality.

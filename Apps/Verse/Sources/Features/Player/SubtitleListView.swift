@@ -22,6 +22,8 @@ struct SubtitleListViewContainer: View {
   let cues: [Subtitle.Cue]
   let isLoading: Bool
   let error: String?
+  let bookmarkedCueIDs: Set<Subtitle.Cue.ID>
+  @Binding var isTrackingEnabled: Bool
   let onAction: (SubtitleAction) -> Void
 
   var body: some View {
@@ -31,6 +33,8 @@ struct SubtitleListViewContainer: View {
       currentCueID: model.currentCueID,  // Use shared logic from PlayerModel
       isLoading: isLoading,
       error: error,
+      bookmarkedCueIDs: bookmarkedCueIDs,
+      isTrackingEnabled: $isTrackingEnabled,
       onAction: onAction
     )
   }
@@ -44,9 +48,11 @@ struct SubtitleListView: View {
   let currentCueID: Subtitle.Cue.ID?
   let isLoading: Bool
   let error: String?
+  /// IDs of bookmarked cues in the current transcript, used to mark rows
+  let bookmarkedCueIDs: Set<Subtitle.Cue.ID>
+  /// Owned by the presenter so jumps (search, bookmarks) can re-enable tracking
+  @Binding var isTrackingEnabled: Bool
   let onAction: (SubtitleAction) -> Void
-
-  @State var isTrackingEnabled: Bool = true
 
   var body: some View {
     Group {
@@ -118,6 +124,7 @@ struct SubtitleListView: View {
         cues: cues,
         currentTime: currentTime,
         currentCueID: currentCueID,
+        bookmarkedCueIDs: bookmarkedCueIDs,
         onAction: onAction,
         onSelectionChanged: { hasSelection in
           if hasSelection {
@@ -158,6 +165,8 @@ enum SubtitleAction {
   /// Opens ChatGPT with the explanation prompt for a selected part of the cue.
   case askChatGPTSelection(text: String, context: String)
   case translate(cue: Subtitle.Cue)
+  /// Adds a bookmark for the cue, or removes the existing one.
+  case toggleBookmark(cue: Subtitle.Cue)
 }
 
 // MARK: - Subtitle Scroll Content
@@ -169,6 +178,7 @@ private struct SubtitleScrollContent: View {
   let cues: [Subtitle.Cue]
   let currentTime: CurrentTime
   let currentCueID: Subtitle.Cue.ID?
+  let bookmarkedCueIDs: Set<Subtitle.Cue.ID>
   let onAction: (SubtitleAction) -> Void
   var onSelectionChanged: ((Bool) -> Void)?
 
@@ -179,6 +189,7 @@ private struct SubtitleScrollContent: View {
           cue: cue,
           currentTime: currentTime,
           isCurrent: cue.id == currentCueID,
+          isBookmarked: bookmarkedCueIDs.contains(cue.id),
           onAction: { action in
             switch action {
             case .tap:
@@ -198,6 +209,8 @@ private struct SubtitleScrollContent: View {
             case .askChatGPTSelection(let selectedText):
               onSelectionChanged?(true)
               onAction(.askChatGPTSelection(text: selectedText, context: cue.decodedText))
+            case .toggleBookmark:
+              onAction(.toggleBookmark(cue: cue))
             }
           }
         )
@@ -211,6 +224,17 @@ private struct SubtitleScrollContent: View {
             Label("Translate", systemImage: "character.book.closed")
           }
           .tint(.blue)
+
+          Button {
+            onAction(.toggleBookmark(cue: cue))
+          } label: {
+            Label(
+              "Bookmark",
+              systemImage: bookmarkedCueIDs.contains(cue.id)
+                ? "bookmark.slash" : "bookmark"
+            )
+          }
+          .tint(.orange)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
           Button {
@@ -282,6 +306,8 @@ extension String {
       return time
     }()
 
+    @State private var isTrackingEnabled: Bool = true
+
     var body: some View {
       SubtitleListView(
         cues: [
@@ -311,6 +337,8 @@ extension String {
         currentCueID: nil,
         isLoading: false,
         error: nil,
+        bookmarkedCueIDs: [2],
+        isTrackingEnabled: $isTrackingEnabled,
         onAction: { _ in }
       )
     }

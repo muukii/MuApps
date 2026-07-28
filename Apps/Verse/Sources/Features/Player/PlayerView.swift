@@ -32,6 +32,15 @@ struct PlayerView: View {
 
   // Sheet state
   @State private var showDownloadView: Bool = false
+  @State private var showBookmarkList: Bool = false
+  @State private var showSubtitleSearch: Bool = false
+
+  /// Retained across search sheet presentations so results are preserved
+  @State private var subtitleSearchQuery: String = ""
+
+  /// Auto-scroll tracking for the subtitle display.
+  /// Owned here so jumps (search, bookmarks) can re-enable it.
+  @State private var isSubtitleTrackingEnabled: Bool = true
 
   // UI state
   @State private var height: CGFloat = 0
@@ -50,7 +59,6 @@ struct PlayerView: View {
 
   // Settings
   @AppStorage("autoTranscribeEnabled") private var autoTranscribeEnabled: Bool = true
-  @AppStorage("subtitleDisplayType") private var subtitleDisplayType: SubtitleDisplayType = .cellBased
 
   // Playback position state
   @State private var savePositionTask: Task<Void, Never>?
@@ -58,6 +66,19 @@ struct PlayerView: View {
 
   // Computed property to access videoID from the entity
   private var videoID: YouTubeContentID { videoItem.videoID }
+
+  /// IDs of cues in the current transcript that have a bookmark, used to mark
+  /// subtitle rows as bookmarked. Matching is time-based (see
+  /// `SubtitleBookmark.matches`) so it survives re-transcription.
+  private var bookmarkedCueIDs: Set<Subtitle.Cue.ID> {
+    let bookmarks = videoItem.subtitleBookmarks
+    guard !bookmarks.isEmpty, let cues = currentSubtitles?.cues else { return [] }
+    return Set(
+      cues
+        .filter { cue in bookmarks.contains { $0.matches(cue) } }
+        .map(\.id)
+    )
+  }
 
   private var usesWideLayout: Bool {
     horizontalSizeClass == .regular && verticalSizeClass == .regular
@@ -185,6 +206,35 @@ struct PlayerView: View {
           DownloadView(videoID: videoID)
         }
       }
+      .sheet(isPresented: $showBookmarkList) {
+        NavigationStack {
+          BookmarkListView(
+            videoItem: videoItem,
+            onSelect: { bookmark in
+              isSubtitleTrackingEnabled = true
+              model.seek(to: bookmark.startTime)
+              showBookmarkList = false
+            },
+            onDelete: { bookmark in
+              try? historyService.deleteSubtitleBookmark(bookmark)
+            }
+          )
+        }
+        .presentationDetents([.medium, .large])
+      }
+      .sheet(isPresented: $showSubtitleSearch) {
+        NavigationStack {
+          SubtitleSearchView(
+            cues: currentSubtitles?.cues ?? [],
+            query: $subtitleSearchQuery,
+            onSelect: { cue in
+              isSubtitleTrackingEnabled = true
+              model.seek(to: cue.startTime)
+              showSubtitleSearch = false
+            }
+          )
+        }
+      }
       .sheet(isPresented: $showTranscriptionSheet) {
         TranscriptionProgressSheet(
           transcriptionState: transcriptionState,
@@ -260,6 +310,19 @@ struct PlayerView: View {
           .popoverTip(TranscribeTip())
         }
 
+        Button {
+          showSubtitleSearch = true
+        } label: {
+          Label("Search Subtitles", systemImage: "magnifyingglass")
+        }
+        .disabled(currentSubtitles?.cues.isEmpty ?? true)
+
+        Button {
+          showBookmarkList = true
+        } label: {
+          Label("Bookmarks", systemImage: "bookmark")
+        }
+
         SubtitleManagementView(
           videoID: videoID,
           hasYouTubeSource: videoItem.isYouTubeSource,
@@ -299,12 +362,13 @@ struct PlayerView: View {
 
   private var subtitleSection: some View {
     VStack(alignment: .leading, spacing: 0) {
-      SubtitleDisplayView(
-        displayType: subtitleDisplayType,
+      SubtitleListViewContainer(
         model: model,
         cues: currentSubtitles?.cues ?? [],
         isLoading: isLoadingSubtitles,
         error: subtitleError,
+        bookmarkedCueIDs: bookmarkedCueIDs,
+        isTrackingEnabled: $isSubtitleTrackingEnabled,
         onAction: { action in
           switch action {
           case .tap(let time):
@@ -322,6 +386,8 @@ struct PlayerView: View {
             askChatGPT(text: text, context: context)
           case .translate(let cue):
             selectedCueForTranslation = cue
+          case .toggleBookmark(let cue):
+            try? historyService.toggleSubtitleBookmark(video: videoItem, cue: cue)
           }
         }
       )

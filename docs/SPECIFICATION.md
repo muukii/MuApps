@@ -165,7 +165,6 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 
 #### 2.2 Display
 - List of cues with timestamps
-- Continuous TextKit 2 reader that renders all cues in one scrollable text view
 - Top and bottom edge fades mask scrollable subtitle content when more content is available offscreen
 - Current cue highlight
 - Word-level highlight when timing data is available (transcription)
@@ -176,12 +175,14 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Tracking toggle (arrow-up-left icon):
   - Auto-disables on manual scroll or text selection
   - Tap to re-enable and jump to current cue
+- Jumping from search results or the bookmark list re-enables tracking so the subtitle display follows the new position
 
 #### 2.4 Subtitle Actions
 - Swipe actions:
-  - Translate (leading)
+  - Translate, Bookmark (leading)
   - Ask ChatGPT (trailing) — opens the default browser with the explanation prompt pre-filled (surrounding cues included as context)
 - Context menu per cue:
+  - Bookmark / Remove Bookmark
   - Copy
   - Ask ChatGPT
   - Translate
@@ -195,6 +196,27 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
   - Switch playback source (YouTube / Local)
   - Transcribe audio to subtitles
   - Delete local video
+
+#### 2.6 Subtitle Bookmarks
+- Bookmark a subtitle cue from the row's context menu or the leading swipe action; both toggle (re-invoking removes the bookmark)
+- Bookmarked rows show a small filled bookmark icon on the leading seek area
+- Bookmarks store a snapshot of the cue's text and time range, so they survive transcript regeneration; a row is considered bookmarked when the cue's time range contains the bookmarked range's midpoint (robust to re-transcription shifting cue timings)
+- Bookmark list (bookmark icon in the player toolbar) opens a medium/large-detent sheet:
+  - Rows show a timestamp pill and the bookmarked text, sorted by time
+  - Tap to seek playback to the cue's start and dismiss the sheet
+  - Swipe to delete
+  - Empty state explains how to add bookmarks
+- Bookmarks are stored per video (SwiftData) and deleted together with the history item
+
+#### 2.7 Subtitle Search
+- Search sheet (magnifying-glass icon in the player toolbar; disabled while no subtitles are loaded)
+- Custom search field at the top, auto-focused on open, with a clear (x) button
+- Locale-aware, case- and diacritic-insensitive full-text matching over the current transcript's cues
+- Result rows show a timestamp pill and the cue text with every query match highlighted (bold, accent color)
+- Section header shows the match count ("N Matches")
+- Tap a result to close the sheet and seek playback to the cue's start (tracking re-enabled)
+- The query is retained while the player stays open, so reopening the sheet restores the previous results
+- Empty states: prompt before typing; "no results" for unmatched queries; scrolling results dismisses the keyboard
 
 ### 3. AI and Language Tools
 - Word/phrase explanations are delegated to ChatGPT; the app builds the prompt and opens it externally
@@ -277,7 +299,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Collapsible player area
 - Subtitle list with tracking toggle
 - Playback controls: scrubber, speed, seek, loop, A-B setup
-- Toolbar: subtitle management, on-device transcribe, download (if enabled)
+- Toolbar: subtitle search, bookmarks, subtitle management, on-device transcribe, download (if enabled)
 - On iPad, the player, subtitle reader, and controls stay centered within a readable-width column
 
 ### Settings (SettingsView)
@@ -304,6 +326,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 ## Data and Storage
 - SwiftData local storage only (no cloud sync)
 - Cached subtitles stored in history items
+- Subtitle bookmarks stored per history item (cascade-deleted with the item)
 - Downloaded videos and imported audio/video files stored in Documents
 - Imported Files URLs are used only while copying; persistent playback uses the app-managed copy
 - Subtitle import/export via Files
@@ -318,7 +341,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 ## Future Enhancements
 - CloudKit sync for history and playlists
 - Subtitle language selection and multi-language support
-- Subtitle search and filtering
+- Subtitle filtering
 - Improved channel/author metadata
 - Dedicated subtitle library management
 - Additional iPad and macOS large-screen layout refinements

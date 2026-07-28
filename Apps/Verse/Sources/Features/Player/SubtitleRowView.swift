@@ -21,12 +21,14 @@ struct SubtitleRowView: View {
     case askChatGPT
     case translate
     case askChatGPTSelection(String)
+    case toggleBookmark
   }
 
   let cue: Subtitle.Cue
   /// Current playback time (reads .value only when isCurrent, so only this row re-renders)
   let currentTime: CurrentTime
   let isCurrent: Bool
+  let isBookmarked: Bool
   let onAction: (Action) -> Void
 
   /// Computed highlight time - only reads currentTime.value when this row is current
@@ -46,7 +48,15 @@ struct SubtitleRowView: View {
           RoundedRectangle(cornerRadius: 8)
             .frame(minHeight: 0)
             .frame(width: 30)
-            .foregroundStyle(.quinary)          
+            .foregroundStyle(.quinary)
+            .overlay(alignment: .top) {
+              if isBookmarked {
+                Image(systemName: "bookmark.fill")
+                  .font(.system(size: 10))
+                  .foregroundStyle(.tint)
+                  .padding(.top, 6)
+              }
+            }
         }
         .buttonStyle(.plain)
 
@@ -85,6 +95,15 @@ struct SubtitleRowView: View {
   private var menu: some View {
     // Menu button for actions
     Menu {
+      Button {
+        onAction(.toggleBookmark)
+      } label: {
+        Label(
+          isBookmarked ? "Remove Bookmark" : "Bookmark",
+          systemImage: isBookmarked ? "bookmark.slash" : "bookmark"
+        )
+      }
+
       Button {
         #if os(iOS)
           UIPasteboard.general.string = cue.decodedText
@@ -174,6 +193,7 @@ struct SubtitleRowView: View {
           ),
           currentTime: currentTime,
           isCurrent: true,
+          isBookmarked: true,
           onAction: { _ in }
         )
         .padding()
@@ -188,6 +208,7 @@ struct SubtitleRowView: View {
           ),
           currentTime: currentTime,
           isCurrent: false,
+          isBookmarked: false,
           onAction: { _ in }
         )
         .padding()
@@ -231,6 +252,7 @@ struct SubtitleRowView: View {
           ),
           currentTime: currentTime,
           isCurrent: true,
+          isBookmarked: false,
           onAction: { action in
             print("Action: \(action)")
           }

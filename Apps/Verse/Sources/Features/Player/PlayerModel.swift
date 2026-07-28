@@ -480,12 +480,23 @@ final class PlayerModel {
 
   /// Commits the seek bar position to the underlying player once dragging ends.
   func commitSliderSeek(to time: Double) {
-    let seekTime = clampedPlaybackTime(time)
-    dragTime = seekTime
+    dragTime = clampedPlaybackTime(time)
     isDraggingSlider = false
-    currentTime.value = seekTime
+    seek(to: dragTime)
+  }
 
+  /// Seeks to the specified time.
+  ///
+  /// Updates `currentTime` optimistically so time-derived UI (current cue
+  /// highlight, tracking auto-scroll) responds immediately instead of waiting
+  /// for the next polling cycle. `isApplyingSliderSeek` keeps the polling loop
+  /// from writing back a stale pre-seek time while the controller is still
+  /// seeking.
+  func seek(to time: Double) {
     guard let controller else { return }
+
+    let seekTime = clampedPlaybackTime(time)
+    currentTime.value = seekTime
     isApplyingSliderSeek = true
 
     sliderSeekTask?.cancel()
@@ -502,22 +513,13 @@ final class PlayerModel {
     }
   }
 
-  /// Seeks to the specified time
-  func seek(to time: Double) {
-    guard let controller else { return }
-    Task {
-      await controller.seek(to: time)
-    }
-  }
-
 
   /// Seeks backward by the specified interval
   func seekBackward(interval: Double) {
     guard let controller else { return }
     Task {
       let currentSeconds = await controller.currentTime
-      let newSeconds = max(0, currentSeconds - interval)
-      await controller.seek(to: newSeconds)
+      seek(to: max(0, currentSeconds - interval))
     }
   }
 
@@ -527,48 +529,35 @@ final class PlayerModel {
     guard let controller else { return }
     Task {
       let currentSeconds = await controller.currentTime
-      let newSeconds = currentSeconds + interval
-      await controller.seek(to: newSeconds)
+      seek(to: currentSeconds + interval)
     }
   }
 
   /// Seeks to the previous subtitle
   func seekToPreviousSubtitle() {
-    guard let controller else { return }
-    Task {
-      if let previousTime = previousSubtitleTime() {
-        await controller.seek(to: previousTime)
-      }
+    if let previousTime = previousSubtitleTime() {
+      seek(to: previousTime)
     }
   }
 
   /// Seeks to the next subtitle
   func seekToNextSubtitle() {
-    guard let controller else { return }
-    Task {
-      if let nextTime = nextSubtitleTime() {
-        await controller.seek(to: nextTime)
-      }
+    if let nextTime = nextSubtitleTime() {
+      seek(to: nextTime)
     }
   }
 
   /// Seeks to the previous subtitle (skip mode - always skip current)
   func seekToPreviousSubtitleSkip() {
-    guard let controller else { return }
-    Task {
-      if let previousTime = previousSubtitleTimeSkip() {
-        await controller.seek(to: previousTime)
-      }
+    if let previousTime = previousSubtitleTimeSkip() {
+      seek(to: previousTime)
     }
   }
 
   /// Seeks to the next subtitle (skip mode)
   func seekToNextSubtitleSkip() {
-    guard let controller else { return }
-    Task {
-      if let nextTime = nextSubtitleTimeSkip() {
-        await controller.seek(to: nextTime)
-      }
+    if let nextTime = nextSubtitleTimeSkip() {
+      seek(to: nextTime)
     }
   }
 
