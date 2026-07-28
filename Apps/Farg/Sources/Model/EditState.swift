@@ -31,6 +31,9 @@ final class EditState {
   /// Optical Flow motion blur shared by every clip in the current collection.
   var motionBlur = MotionBlurSettings.disabled
 
+  /// Film grain shared by every clip in the current collection.
+  var grain = GrainSettings.disabled
+
   /// Intensities at or below this are treated as "no effect".
   private static let minimumAmount = 0.001
 
@@ -136,6 +139,7 @@ final class EditState {
     return FargVideoRenderRecipe(
       document: try makeDocument(using: library),
       motionBlur: motionBlur,
+      grain: grain,
       lutOutputColorSpace: lutOutputColorSpace
     )
   }

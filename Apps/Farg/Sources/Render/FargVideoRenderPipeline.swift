@@ -58,6 +58,7 @@ nonisolated enum FargLUTOutputColorSpace: Equatable, Sendable {
 nonisolated struct FargVideoRenderRecipe: Sendable {
   let document: EditingDocument
   let motionBlur: MotionBlurSettings
+  let grain: GrainSettings
 
   /// The color space produced by the recipe's LUT, or `nil` for pass-through.
   let lutOutputColorSpace: FargLUTOutputColorSpace?
@@ -65,10 +66,12 @@ nonisolated struct FargVideoRenderRecipe: Sendable {
   init(
     document: EditingDocument,
     motionBlur: MotionBlurSettings,
+    grain: GrainSettings = .disabled,
     lutOutputColorSpace: FargLUTOutputColorSpace? = nil
   ) {
     self.document = document
     self.motionBlur = motionBlur
+    self.grain = grain
     self.lutOutputColorSpace = lutOutputColorSpace
   }
 
@@ -143,19 +146,22 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
   ///
   /// Disabled Motion Blur still uses the temporal source asset, but its
   /// current-frame mode avoids requesting temporal neighbors or starting
-  /// VideoToolbox. Enabled mode shares a live strength source so slider changes
-  /// do not require another composition or player-item replacement.
+  /// VideoToolbox. Enabled mode shares a live strength source, and grain shares
+  /// a live parameter source, so slider changes do not require another
+  /// composition or player-item replacement.
   func makeTemporalPreview(
     source: PreparedMotionBlurSource,
     recipe: FargVideoRenderRecipe,
     colorInfo: VideoColorInfo,
     target: FargPreviewRenderTarget,
-    strengthSource: MotionBlurStrengthSource
+    strengthSource: MotionBlurStrengthSource,
+    grainSource: GrainParameterSource
   ) throws -> PreparedFargVideoRender {
     strengthSource.update(strength: recipe.motionBlur.strength)
     if recipe.motionBlur.isEnabled == false {
       strengthSource.requestProcessorSessionReset()
     }
+    grainSource.update(settings: recipe.grain)
     let outputColorInfo = recipe.resolveOutputColorInfo(
       sourceColorInfo: colorInfo
     )
@@ -164,7 +170,6 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
       recipe.motionBlur.isEnabled
       ? .opticalFlow(strength: strengthSource)
       : .currentFrame
-    let parametricRenderer = ParametricVideoRenderer()
     let composition = try MotionBlurVideoCompositionBuilder(
       quality: .normal,
       ciContext: ciContext,
@@ -175,14 +180,12 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
       mode: mode,
       renderTarget: .fitWithin(target.maximumPixelSize),
       outputColorSpace:
-        recipe.lutOutputColorSpace?.coreMediaDeliveryColorSpace
-    ) { image, renderExtent in
-      try parametricRenderer.makeFrameImage(
-        from: image,
-        document: recipe.document,
-        renderExtent: renderExtent
+        recipe.lutOutputColorSpace?.coreMediaDeliveryColorSpace,
+      postProcessor: Self.makePostProcessor(
+        recipe: recipe,
+        grainSource: grainSource
       )
-    }
+    )
     outputColorInfo.apply(to: composition)
 
     return PreparedFargVideoRender(
@@ -198,7 +201,6 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
     colorInfo: VideoColorInfo,
     purpose: FargVideoRenderPurpose
   ) async throws -> PreparedFargVideoRender {
-    let parametricRenderer = ParametricVideoRenderer()
     let outputColorInfo = recipe.resolveOutputColorInfo(
       sourceColorInfo: colorInfo
     )
@@ -221,14 +223,12 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
       mode: mode,
       renderTarget: purpose.motionBlurRenderTarget,
       outputColorSpace:
-        recipe.lutOutputColorSpace?.coreMediaDeliveryColorSpace
-    ) { image, renderExtent in
-      try parametricRenderer.makeFrameImage(
-        from: image,
-        document: recipe.document,
-        renderExtent: renderExtent
+        recipe.lutOutputColorSpace?.coreMediaDeliveryColorSpace,
+      postProcessor: Self.makePostProcessor(
+        recipe: recipe,
+        grainSource: GrainParameterSource(settings: recipe.grain)
       )
-    }
+    )
     outputColorInfo.apply(to: composition)
 
     return PreparedFargVideoRender(
@@ -236,6 +236,40 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
       videoComposition: composition,
       outputColorInfo: outputColorInfo
     )
+  }
+
+  /// Builds the shared frame post-processor: the Brightroom parametric LUT
+  /// first, then the film-grain overlay on the graded result.
+  ///
+  /// Grain follows the LUT because it models a post-grade film-emulation
+  /// stage; motion blur has already run before this closure. Enablement is
+  /// baked into the composition while intensity and size are read live from
+  /// `grainSource` for each frame.
+  private static func makePostProcessor(
+    recipe: FargVideoRenderRecipe,
+    grainSource: GrainParameterSource
+  ) -> MotionBlurVideoCompositionBuilder.PostProcessor {
+    let parametricRenderer = ParametricVideoRenderer()
+    let document = recipe.document
+    let isGrainEnabled = recipe.grain.isEnabled
+    return { image, renderExtent, compositionTime in
+      let gradedImage = try parametricRenderer.makeFrameImage(
+        from: image,
+        document: document,
+        renderExtent: renderExtent
+      )
+      guard isGrainEnabled else {
+        return gradedImage
+      }
+      let grain = grainSource.snapshot()
+      return try FilmGrainRenderer.apply(
+        to: gradedImage,
+        renderExtent: renderExtent,
+        compositionTime: compositionTime,
+        intensity: grain.intensity,
+        size: grain.size
+      )
+    }
   }
 
   /// Normalizes and downsamples AVFoundation's display-oriented frame before

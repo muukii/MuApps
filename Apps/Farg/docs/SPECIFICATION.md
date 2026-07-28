@@ -90,9 +90,9 @@ when a person searches for **Farg** without the diacritic.
   among clips, and exposes **Delete Video** in each ready clip's context menu.
   Removing the last clip returns to the picker instead of showing an empty
   editor.
-- The selected video plays in the editor preview. LUT and motion-blur settings
-  remain shared across the collection; changing the preview does not change
-  the recipe.
+- The selected video plays in the editor preview. LUT, motion-blur, and grain
+  settings remain shared across the collection; changing the preview does not
+  change the recipe.
 - The preview uses Färg-owned playback controls instead of the system video
   player interface. Preview audio starts muted. The controls provide play/pause,
   mute/unmute, current time, duration, and a timeline for seeking while keeping
@@ -110,10 +110,11 @@ when a person searches for **Farg** without the diacritic.
   visible player but cannot replace the custom compositor's render context. A
   later selected clip adopts the latest valid Editor-window target; a transient
   zero-size measurement never replaces it with a full-resolution fallback.
-- Preview prepares one temporal source topology per selected movie. LUT and
-  Motion Blur enablement changes replace only the video composition on the
-  existing player item, while Strength changes update a live frame parameter.
-  These edits do not seek or reset the current playback position.
+- Preview prepares one temporal source topology per selected movie. LUT,
+  Motion Blur, and Grain enablement changes replace only the video composition
+  on the existing player item, while Strength and grain Intensity/Size changes
+  update live frame parameters. These edits do not seek or reset the current
+  playback position.
 - Preview audio mixes with music, podcasts, or other audio already playing
   outside Färg instead of interrupting it.
 - The editor navigation bar places its close menu and **Settings** at the
@@ -134,9 +135,9 @@ when a person searches for **Farg** without the diacritic.
 - The editor orders its regions as video player, **Videos** filmstrip, then
   editing controls. **Videos** stays outside the editing controls' vertical
   scroll view while its own filmstrip remains horizontally scrollable.
-- Below **Videos**, a fixed bottom tab bar switches the editing controls between
-  **LUT** and **Motion Blur**. Switching tabs does not change the current video
-  or recipe.
+- Below **Videos**, a fixed bottom tab bar switches the editing controls among
+  **LUT**, **Motion Blur**, and **Grain**. Switching tabs does not change the
+  current video or recipe.
 
 ## Shortcuts
 
@@ -152,8 +153,8 @@ when a person searches for **Farg** without the diacritic.
   the supplied movie with the selected LUT at 100% intensity, and returns a
   QuickTime movie to the next Shortcuts action.
 - Both Shortcuts actions remain LUT-specific and explicitly start with motion
-  blur disabled. An earlier interactive edit cannot leak its temporal settings
-  into a Shortcut request.
+  blur and grain disabled. An earlier interactive edit cannot leak its
+  temporal or grain settings into a Shortcut request.
 - On iOS 26, background App Intent runtime is system-bounded, so sufficiently
   long renders may be cancelled. The action's rendering boundary is prepared
   to adopt iOS 27 long-running intent execution when that SDK is used.
@@ -277,6 +278,33 @@ when a person searches for **Farg** without the diacritic.
 - LUT still thumbnails remain single-frame previews and do not attempt to
   display motion blur.
 
+## Film grain
+
+- Grain is an optional shared part of the current video collection's recipe.
+  Its enable switch and the **Intensity** and **Size** controls appear in the
+  dedicated **Grain** tab.
+- Grain is rendered by a custom Metal Core Image kernel from deterministic
+  band-limited value noise, producing round organic clumps rather than
+  per-pixel digital noise. Each output frame samples a different noise region
+  derived from its frame time, so the texture animates during playback while
+  the same frame time renders identical grain in preview and export.
+- The grain follows a negative-film luminance response: it peaks just below
+  middle gray, rolls off through the toe and shoulder, and leaves pure black
+  and pure white clean. It is composited additively in gamma-encoded space and
+  carries a subtle per-channel decorrelation so color footage shows organic
+  dye-layer texture instead of purely monochrome speckle.
+- Grain is applied after the Brightroom parametric LUT, modeling a post-grade
+  film-emulation stage; Optical Flow motion blur, when enabled, runs before
+  both.
+- **Intensity** (1–100) controls the grain contrast. **Size** (1–100) controls
+  the grain pitch relative to the output height, so the viewport-fitted
+  preview and the source-resolution export show the same texture scale.
+- Grain has no device-support requirement and remains available in Simulator.
+  It does not change export background eligibility; only Motion Blur restricts
+  an export to the foreground.
+- LUT still thumbnails remain single-frame previews and do not attempt to
+  display grain.
+
 ## Export
 
 - The top-right **Export** action snapshots the shared LUT and motion-blur
@@ -371,4 +399,7 @@ and export orchestration. LUT parsing and single-frame feature evaluation are
 provided by the `BrightroomParametric` product from the Brightroom git
 submodule. Färg's sibling `FargMotionBlur` framework owns temporal-neighbor
 composition and the VideoToolbox Optical Flow processor; the app-level render
-pipeline combines both modules in one preview/export pass.
+pipeline combines both modules in one preview/export pass. The film-grain
+overlay is an app-owned stage evaluated in that same pass after the parametric
+LUT; its stitchable Metal Core Image kernel is compiled into the app's
+ordinary `default.metallib`.

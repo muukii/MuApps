@@ -198,11 +198,17 @@ struct MotionBlurFrameGeometry: Equatable, Sendable {
 /// offsets around each output frame. A fixed nominal cadence gives VideoToolbox
 /// honest t-d, t, and t+d timestamps even when the source movie is variable
 /// frame rate. The caller's `postProcessor` runs after motion blur, which lets
-/// Färg apply its Brightroom parametric LUT in the same composition pass.
+/// Färg apply its Brightroom parametric LUT in the same composition pass. The
+/// frame's composition time is supplied so a time-seeded spatial effect such as
+/// film grain can vary per frame while staying reproducible across renders.
 public struct MotionBlurVideoCompositionBuilder: Sendable {
 
   public typealias PostProcessor =
-    @Sendable (_ motionBlurredImage: CIImage, _ renderExtent: CGRect) throws -> CIImage
+    @Sendable (
+      _ motionBlurredImage: CIImage,
+      _ renderExtent: CGRect,
+      _ compositionTime: CMTime
+    ) throws -> CIImage
 
   public var quality: MotionBlurQuality
   public var ciContext: CIContext

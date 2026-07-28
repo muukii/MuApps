@@ -42,7 +42,7 @@ import Testing
         asset: AVURLAsset(url: fixtureURL),
         settings: MotionBlurSettings(isEnabled: true),
         renderTarget: .fitWithin(CGSize(width: 96, height: 64)),
-        postProcessor: { image, _ in image }
+        postProcessor: { image, _, _ in image }
       )
       let renderedFrameCount = try await prepared.renderedFrameCount()
 

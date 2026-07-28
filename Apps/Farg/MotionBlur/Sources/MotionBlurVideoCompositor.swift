@@ -525,7 +525,8 @@ public final class MotionBlurVideoCompositor:
       .transformed(by: imageTransform)
     let outputImage = try instruction.postProcessor(
       motionBlurredImage,
-      instruction.renderExtent
+      instruction.renderExtent,
+      request.compositionTime
     )
     let renderColorSpace =
       instruction.outputColorSpace

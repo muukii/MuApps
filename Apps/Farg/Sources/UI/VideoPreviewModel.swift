@@ -26,11 +26,12 @@ enum VideoPreviewRenderState: Equatable {
 
 /// Identifies how narrowly the editor may update an existing Preview recipe.
 ///
-/// Motion-blur-only edits can preserve both the current video composition and
-/// player item when only the live Strength value changed.
+/// Motion-blur-only and grain-only edits can preserve both the current video
+/// composition and player item when only live frame parameters changed.
 enum VideoPreviewRecipeChange: Equatable, Sendable {
   case complete
   case motionBlur
+  case grain
 }
 
 /// Owns the preview `AVPlayer` and rebuilds it from the same complete render
@@ -52,12 +53,13 @@ final class VideoPreviewModel {
   /// Source-owned temporal topology reused by every Preview presentation mode.
   ///
   /// The three-track asset is independent of editor layout, LUT, enablement,
-  /// and Strength. Those values change only the composition installed on this
-  /// source or the live value read by its compositor.
+  /// Strength, and grain parameters. Those values change only the composition
+  /// installed on this source or the live values read by its compositor.
   private struct TemporalPreviewState {
     let sourceID: VideoSource.ID
     let source: PreparedMotionBlurSource
     let strength: MotionBlurStrengthSource
+    let grain: GrainParameterSource
   }
 
   let player = AVPlayer()
@@ -261,6 +263,7 @@ final class VideoPreviewModel {
     temporalPreviewState.strength.update(
       strength: recipe.motionBlur.strength
     )
+    temporalPreviewState.grain.update(settings: recipe.grain)
 
     if change == .motionBlur,
       previousRequest?.source.id == source.id,
@@ -270,6 +273,16 @@ final class VideoPreviewModel {
     {
       // Strength is sampled once at the start of each compositor request, so
       // this edit neither invalidates queued playback nor resets the playhead.
+      return
+    }
+
+    if change == .grain,
+      previousRequest?.source.id == source.id,
+      previousRequest?.recipe.grain.isEnabled == recipe.grain.isEnabled,
+      player.currentItem?.asset === temporalPreviewState.source.asset
+    {
+      // Grain parameters are sampled once per compositor request, so intensity
+      // and size edits ride the live source without a composition replacement.
       return
     }
 
@@ -346,13 +359,17 @@ final class VideoPreviewModel {
             self.desiredRenderRequest?.recipe.motionBlur.strength
             ?? MotionBlurSettings.disabled.strength
         )
+        let grain = GrainParameterSource(
+          settings: self.desiredRenderRequest?.recipe.grain ?? .disabled
+        )
         self.updatePresentationAspectRatio(
           from: preparedSource.sourceDisplaySize
         )
         self.temporalPreviewState = TemporalPreviewState(
           sourceID: source.id,
           source: preparedSource,
-          strength: strength
+          strength: strength,
+          grain: grain
         )
         self.preparingTemporalSourceID = nil
         self.sourcePreparationTask = nil
@@ -430,6 +447,7 @@ final class VideoPreviewModel {
     temporalPreviewState.strength.update(
       strength: request.recipe.motionBlur.strength
     )
+    temporalPreviewState.grain.update(settings: request.recipe.grain)
 
     do {
       let prepared = try FargVideoRenderPipeline().makeTemporalPreview(
@@ -437,7 +455,8 @@ final class VideoPreviewModel {
         recipe: request.recipe,
         colorInfo: request.colorInfo,
         target: target,
-        strengthSource: temporalPreviewState.strength
+        strengthSource: temporalPreviewState.strength,
+        grainSource: temporalPreviewState.grain
       )
       guard compositionRevision == revision else { return }
       install(prepared: prepared)
