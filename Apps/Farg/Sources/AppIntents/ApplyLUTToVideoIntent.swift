@@ -78,7 +78,6 @@ struct ApplyLUTToVideoIntent: ProgressReportingIntent {
           recipe: FargVideoRenderRecipe(
             document: document,
             motionBlur: .disabled,
-            grain: .disabled,
             lutOutputColorSpace: .rec709
           ),
           colorInfo: colorInfo,

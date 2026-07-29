@@ -110,11 +110,11 @@ when a person searches for **Farg** without the diacritic.
   visible player but cannot replace the custom compositor's render context. A
   later selected clip adopts the latest valid Editor-window target; a transient
   zero-size measurement never replaces it with a full-resolution fallback.
-- Preview prepares one temporal source topology per selected movie. LUT,
-  Motion Blur, and Grain enablement changes replace only the video composition
-  on the existing player item, while Strength and grain Intensity/Size changes
-  update live frame parameters. These edits do not seek or reset the current
-  playback position.
+- Preview prepares one temporal source topology per selected movie. LUT and
+  Motion Blur enablement changes replace only the video composition on the
+  existing player item. Strength updates its live temporal parameter, while
+  Grain enablement and Intensity/Size changes update the live parametric
+  document. These edits do not seek or reset the current playback position.
 - Preview audio mixes with music, podcasts, or other audio already playing
   outside Färg instead of interrupting it.
 - The editor navigation bar places its close menu and **Settings** at the
@@ -296,6 +296,9 @@ when a person searches for **Farg** without the diacritic.
 - Grain is applied after the Brightroom parametric LUT, modeling a post-grade
   film-emulation stage; Optical Flow motion blur, when enabled, runs before
   both.
+- Grain is a Färg-owned Brightroom parametric feature. Its authored parameters
+  live in the same ordered editing document as the LUT, while the current
+  frame's presentation time arrives separately as a render-time input.
 - **Intensity** (1–100) controls the grain contrast. **Size** (1–100) controls
   the grain pitch relative to the output height, so the viewport-fitted
   preview and the source-resolution export show the same texture scale.
@@ -307,9 +310,9 @@ when a person searches for **Farg** without the diacritic.
 
 ## Export
 
-- The top-right **Export** action snapshots the shared LUT and motion-blur
-  recipe and renders every video in picker order. Each input becomes a separate
-  HEVC QuickTime movie; batch export never joins videos together.
+- The top-right **Export** action snapshots the shared parametric and
+  motion-blur recipe and renders every video in picker order. Each input becomes
+  a separate HEVC QuickTime movie; batch export never joins videos together.
 - Every output uses its own source video's render resolution and average video
   bitrate as the encoder target. Audio tracks are preserved. LUT-only exports
   preserve source frame timing; motion-blur exports use the nominal fixed
@@ -395,11 +398,11 @@ when a person searches for **Farg** without the diacritic.
 ## Rendering dependency
 
 The application owns product UI, LUT-library persistence, Photos integration,
-and export orchestration. LUT parsing and single-frame feature evaluation are
-provided by the `BrightroomParametric` product from the Brightroom git
-submodule. Färg's sibling `FargMotionBlur` framework owns temporal-neighbor
-composition and the VideoToolbox Optical Flow processor; the app-level render
-pipeline combines both modules in one preview/export pass. The film-grain
-overlay is an app-owned stage evaluated in that same pass after the parametric
-LUT; its stitchable Metal Core Image kernel is compiled into the app's
-ordinary `default.metallib`.
+and export orchestration. LUT parsing, the ordered single-frame feature graph,
+and explicit presentation-time propagation are provided by the
+`BrightroomParametric` product from the Brightroom git submodule. Färg's sibling
+`FargMotionBlur` framework owns temporal-neighbor composition and the
+VideoToolbox Optical Flow processor; the app-level render pipeline combines
+both modules in one preview/export pass. Film grain is a Färg-owned host-defined
+parametric feature evaluated after the LUT; its stitchable Metal Core Image
+kernel is compiled into the app's ordinary `default.metallib`.

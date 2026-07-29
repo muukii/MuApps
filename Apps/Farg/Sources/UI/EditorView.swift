@@ -375,7 +375,7 @@ private struct EditorLayout: View {
   @Binding var pickerItems: [PhotosPickerItem]
   @Binding var selectedLUT: LUT?
   @Binding var motionBlur: MotionBlurSettings
-  @Binding var grain: GrainSettings
+  @Binding var grain: FilmGrainFeature
   @Binding var selectedEffect: EditorEffectTab
   let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
@@ -480,7 +480,7 @@ private struct EditorLowerPanel: View {
   @Binding var pickerItems: [PhotosPickerItem]
   @Binding var selectedLUT: LUT?
   @Binding var motionBlur: MotionBlurSettings
-  @Binding var grain: GrainSettings
+  @Binding var grain: FilmGrainFeature
   @Binding var selectedEffect: EditorEffectTab
   let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
@@ -517,7 +517,7 @@ private struct EditorLowerPanel: View {
     @Binding var pickerItems: [PhotosPickerItem]
     @Binding var selectedLUT: LUT?
     @Binding var motionBlur: MotionBlurSettings
-    @Binding var grain: GrainSettings
+    @Binding var grain: FilmGrainFeature
     @Binding var selectedEffect: EditorEffectTab
     let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
     let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
@@ -561,7 +561,7 @@ private struct EditorLowerPanel: View {
     let lutPreviewSource: LUTPreviewSourceImage?
     @Binding var selectedLUT: LUT?
     @Binding var motionBlur: MotionBlurSettings
-    @Binding var grain: GrainSettings
+    @Binding var grain: FilmGrainFeature
     @Binding var selectedEffect: EditorEffectTab
 
     var body: some View {
@@ -594,7 +594,7 @@ private struct EditorLowerPanel: View {
       let lutPreviewSource: LUTPreviewSourceImage?
       @Binding var selectedLUT: LUT?
       @Binding var motionBlur: MotionBlurSettings
-      @Binding var grain: GrainSettings
+      @Binding var grain: FilmGrainFeature
 
       var body: some View {
         ZStack(alignment: .topLeading) {
@@ -709,7 +709,7 @@ private struct EditorLowerPanel: View {
     /// presents no availability state.
     fileprivate struct EditorGrainControls: View {
 
-      @Binding var settings: GrainSettings
+      @Binding var settings: FilmGrainFeature
 
       private var intensity: Binding<Double> {
         Binding(
@@ -727,8 +727,8 @@ private struct EditorLowerPanel: View {
 
       private var valueRange: ClosedRange<Double> {
         Double(
-          GrainSettings.valueRange.lowerBound
-        )...Double(GrainSettings.valueRange.upperBound)
+          FilmGrainFeature.valueRange.lowerBound
+        )...Double(FilmGrainFeature.valueRange.upperBound)
       }
 
       var body: some View {

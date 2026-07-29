@@ -12,7 +12,7 @@ import Foundation
 /// (`FilmGrainKernels.metal`): band-limited value noise whose clumps follow a
 /// height-proportional pitch, shaped by a negative-film luminance response and
 /// composited additively in gamma-encoded space. Each frame samples a
-/// different noise region selected by hashing the frame's composition time, so
+/// different noise region selected by hashing the frame's presentation time, so
 /// playback "boils" while preview and export render identical grain for the
 /// same frame time.
 nonisolated enum FilmGrainRenderer {
@@ -46,12 +46,12 @@ nonisolated enum FilmGrainRenderer {
   static func apply(
     to image: CIImage,
     renderExtent: CGRect,
-    compositionTime: CMTime,
+    presentationTime: CMTime,
     intensity: Int,
     size: Int
   ) throws -> CIImage {
     let kernel = try FilmGrainKernelStore.colorKernel()
-    let fieldOffset = noiseFieldOffset(for: compositionTime)
+    let fieldOffset = noiseFieldOffset(for: presentationTime)
     guard
       let grainedImage = kernel.apply(
         extent: renderExtent,
@@ -92,7 +92,7 @@ nonisolated enum FilmGrainRenderer {
 
   /// Selects the noise region sampled by one frame.
   ///
-  /// The composition time is quantized to a 240 Hz grid, which separates every
+  /// The presentation time is quantized to a 240 Hz grid, which separates every
   /// common frame cadence while remaining identical between preview and export
   /// renders of the same frame. Offsets stay within 2048 pixels so lattice
   /// coordinates keep full float precision inside the kernel's hash.

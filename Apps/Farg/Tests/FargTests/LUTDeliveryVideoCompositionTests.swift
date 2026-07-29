@@ -41,7 +41,7 @@ struct LUTDeliveryVideoCompositionTests {
       colorInfo: .sdrRec709,
       target: previewTarget,
       strengthSource: MotionBlurStrengthSource(strength: 0),
-      grainSource: GrainParameterSource(settings: .disabled)
+      documentSource: ParametricDocumentSource(document: recipe.document)
     )
     let export = try await pipeline.prepare(
       asset: asset,
@@ -98,11 +98,12 @@ struct LUTDeliveryVideoCompositionTests {
       renderTarget: .source,
       outputColorSpace:
         FargLUTOutputColorSpace.rec709.lutResultColorSpace
-    ) { image, renderExtent, _ in
+    ) { image, renderExtent, compositionTime in
       try renderer.makeFrameImage(
         from: image,
         document: recipe.document,
-        renderExtent: renderExtent
+        renderExtent: renderExtent,
+        presentationTime: compositionTime
       )
     }
     VideoColorInfo.sdrRec709.apply(to: composition)

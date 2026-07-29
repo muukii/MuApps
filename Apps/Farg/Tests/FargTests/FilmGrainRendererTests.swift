@@ -1,3 +1,4 @@
+import BrightroomParametric
 import CoreImage
 import CoreMedia
 import Foundation
@@ -5,41 +6,69 @@ import Testing
 
 @testable import Farg
 
-@Suite("Grain settings")
-struct GrainSettingsTests {
+@Suite("Film grain feature")
+struct FilmGrainFeatureTests {
 
   @Test
   func initializerClampsValuesToSupportedRange() {
-    let settings = GrainSettings(isEnabled: true, intensity: 500, size: -3)
-    #expect(settings.intensity == 100)
-    #expect(settings.size == 1)
+    let feature = FilmGrainFeature(isEnabled: true, intensity: 500, size: -3)
+    #expect(feature.intensity == 100)
+    #expect(feature.size == 1)
   }
 
   @Test
   func mutationClampsValuesToSupportedRange() {
-    var settings = GrainSettings(isEnabled: true)
-    settings.intensity = 0
-    settings.size = 101
-    #expect(settings.intensity == 1)
-    #expect(settings.size == 100)
+    var feature = FilmGrainFeature(isEnabled: true)
+    feature.intensity = 0
+    feature.size = 101
+    #expect(feature.intensity == 1)
+    #expect(feature.size == 100)
   }
 
   @Test
-  func disabledKeepsDefaultParameters() {
-    #expect(GrainSettings.disabled.isEnabled == false)
-    #expect(GrainSettings.disabled.intensity == 50)
-    #expect(GrainSettings.disabled.size == 50)
+  func disabledFeatureKeepsDefaultParameters() {
+    let feature = FilmGrainFeature(isEnabled: false)
+    #expect(feature.isEnabled == false)
+    #expect(feature.intensity == 50)
+    #expect(feature.size == 50)
   }
 
   @Test
-  func parameterSourceDeliversUpdatedValues() {
-    let source = GrainParameterSource(
-      settings: GrainSettings(isEnabled: true, intensity: 10, size: 20)
+  func documentSourceDeliversUpdatedDocuments() {
+    let first = EditingDocument(
+      mainTree: MainTree(
+        features: [
+          .effect(
+            FilmGrainFeature(
+              id: FeatureID(rawValue: "first-grain"),
+              isEnabled: true,
+              intensity: 10,
+              size: 20
+            )
+          )
+        ]
+      )
     )
-    #expect(source.snapshot() == .init(intensity: 10, size: 20))
+    let second = EditingDocument(
+      mainTree: MainTree(
+        features: [
+          .effect(
+            FilmGrainFeature(
+              id: FeatureID(rawValue: "second-grain"),
+              isEnabled: true,
+              intensity: 70,
+              size: 90
+            )
+          )
+        ]
+      )
+    )
+    let source = ParametricDocumentSource(document: first)
+    #expect(source.snapshot() == first)
 
-    source.update(settings: GrainSettings(isEnabled: true, intensity: 70, size: 90))
-    #expect(source.snapshot() == .init(intensity: 70, size: 90))
+    source.update(document: second)
+
+    #expect(source.snapshot() == second)
   }
 }
 
@@ -114,6 +143,41 @@ struct FilmGrainRendererTests {
   }
 
   @Test
+  func parametricFeatureUsesTheEvaluationPresentationTime() throws {
+    let document = EditingDocument(
+      mainTree: MainTree(
+        features: [
+          .effect(
+            FilmGrainFeature(
+              id: FeatureID(rawValue: "time-driven-grain"),
+              isEnabled: true,
+              intensity: 100,
+              size: 50
+            )
+          )
+        ]
+      )
+    )
+    let renderer = ParametricVideoRenderer()
+    let first = try renderBytes(
+      renderer.makeFrameImage(
+        from: baseImage(),
+        document: document,
+        presentationTime: CMTime(value: 1, timescale: 30)
+      )
+    )
+    let second = try renderBytes(
+      renderer.makeFrameImage(
+        from: baseImage(),
+        document: document,
+        presentationTime: CMTime(value: 2, timescale: 30)
+      )
+    )
+
+    #expect(first != second)
+  }
+
+  @Test
   func grainVisiblyChangesTheBaseImage() throws {
     let base = try renderBytes(baseImage())
     let grained = try renderBytes(
@@ -150,7 +214,7 @@ struct FilmGrainRendererTests {
     let grained = try FilmGrainRenderer.apply(
       to: black,
       renderExtent: Self.extent,
-      compositionTime: CMTime(value: 1, timescale: 30),
+      presentationTime: CMTime(value: 1, timescale: 30),
       intensity: 100,
       size: 50
     )
@@ -166,7 +230,7 @@ struct FilmGrainRendererTests {
     let grained = try FilmGrainRenderer.apply(
       to: white,
       renderExtent: Self.extent,
-      compositionTime: CMTime(value: 1, timescale: 30),
+      presentationTime: CMTime(value: 1, timescale: 30),
       intensity: 100,
       size: 50
     )
@@ -192,7 +256,7 @@ struct FilmGrainRendererTests {
     try FilmGrainRenderer.apply(
       to: baseImage(),
       renderExtent: Self.extent,
-      compositionTime: time,
+      presentationTime: time,
       intensity: 100,
       size: 50
     )

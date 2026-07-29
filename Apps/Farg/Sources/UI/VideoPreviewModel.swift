@@ -50,16 +50,17 @@ final class VideoPreviewModel {
     let colorInfo: VideoColorInfo
   }
 
-  /// Source-owned temporal topology reused by every Preview presentation mode.
+  /// Source-owned runtime state reused by every Preview presentation mode.
   ///
   /// The three-track asset is independent of editor layout, LUT, enablement,
-  /// Strength, and grain parameters. Those values change only the composition
-  /// installed on this source or the live values read by its compositor.
+  /// Strength, and parametric features. The strength source and installed
+  /// document source expose only changes that are safe for the current
+  /// composition to consume live.
   private struct TemporalPreviewState {
     let sourceID: VideoSource.ID
     let source: PreparedMotionBlurSource
     let strength: MotionBlurStrengthSource
-    let grain: GrainParameterSource
+    var document: ParametricDocumentSource
   }
 
   let player = AVPlayer()
@@ -234,8 +235,8 @@ final class VideoPreviewModel {
   /// Applies one immutable recipe to the source's reusable temporal topology.
   ///
   /// Only a source change creates another topology and player item. Enablement,
-  /// viewport, and LUT changes replace the item's video composition in place;
-  /// a Strength-only edit updates the value consumed by subsequent frames.
+  /// viewport, and LUT changes replace the item's video composition in place.
+  /// Strength and film-grain edits update values consumed by subsequent frames.
   func apply(
     recipe: FargVideoRenderRecipe,
     for source: VideoSource,
@@ -263,7 +264,6 @@ final class VideoPreviewModel {
     temporalPreviewState.strength.update(
       strength: recipe.motionBlur.strength
     )
-    temporalPreviewState.grain.update(settings: recipe.grain)
 
     if change == .motionBlur,
       previousRequest?.source.id == source.id,
@@ -276,14 +276,16 @@ final class VideoPreviewModel {
       return
     }
 
-    if change == .grain,
-      previousRequest?.source.id == source.id,
-      previousRequest?.recipe.grain.isEnabled == recipe.grain.isEnabled,
-      player.currentItem?.asset === temporalPreviewState.source.asset
-    {
-      // Grain parameters are sampled once per compositor request, so intensity
-      // and size edits ride the live source without a composition replacement.
-      return
+    if change == .grain {
+      temporalPreviewState.document.update(document: recipe.document)
+      if previousRequest?.source.id == source.id,
+        player.currentItem?.asset === temporalPreviewState.source.asset
+      {
+        // The complete document is sampled once per compositor request. Grain
+        // enablement and parameters therefore update without replacing the
+        // composition or resetting the playhead.
+        return
+      }
     }
 
     guard previewRenderTarget != nil else {
@@ -359,8 +361,10 @@ final class VideoPreviewModel {
             self.desiredRenderRequest?.recipe.motionBlur.strength
             ?? MotionBlurSettings.disabled.strength
         )
-        let grain = GrainParameterSource(
-          settings: self.desiredRenderRequest?.recipe.grain ?? .disabled
+        let document = ParametricDocumentSource(
+          document:
+            self.desiredRenderRequest?.recipe.document
+            ?? EditingDocument()
         )
         self.updatePresentationAspectRatio(
           from: preparedSource.sourceDisplaySize
@@ -369,7 +373,7 @@ final class VideoPreviewModel {
           sourceID: source.id,
           source: preparedSource,
           strength: strength,
-          grain: grain
+          document: document
         )
         self.preparingTemporalSourceID = nil
         self.sourcePreparationTask = nil
@@ -447,18 +451,23 @@ final class VideoPreviewModel {
     temporalPreviewState.strength.update(
       strength: request.recipe.motionBlur.strength
     )
-    temporalPreviewState.grain.update(settings: request.recipe.grain)
 
     do {
+      let documentSource = ParametricDocumentSource(
+        document: request.recipe.document
+      )
       let prepared = try FargVideoRenderPipeline().makeTemporalPreview(
         source: temporalPreviewState.source,
         recipe: request.recipe,
         colorInfo: request.colorInfo,
         target: target,
         strengthSource: temporalPreviewState.strength,
-        grainSource: temporalPreviewState.grain
+        documentSource: documentSource
       )
       guard compositionRevision == revision else { return }
+      var updatedTemporalPreviewState = temporalPreviewState
+      updatedTemporalPreviewState.document = documentSource
+      self.temporalPreviewState = updatedTemporalPreviewState
       install(prepared: prepared)
     } catch {
       guard compositionRevision == revision else { return }

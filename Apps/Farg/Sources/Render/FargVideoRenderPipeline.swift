@@ -52,13 +52,12 @@ nonisolated enum FargLUTOutputColorSpace: Equatable, Sendable {
 
 /// One immutable video-render recipe shared by preview and export.
 ///
-/// The Brightroom document remains a single-frame feature graph. Temporal
-/// settings live beside it because they require decoded frame neighbors rather
-/// than another `ImageEffectFeatureType`.
+/// The Brightroom document owns every ordered single-frame effect, including
+/// film grain. Temporal settings live beside it because they require decoded
+/// frame neighbors rather than another `ImageEffectFeatureType`.
 nonisolated struct FargVideoRenderRecipe: Sendable {
   let document: EditingDocument
   let motionBlur: MotionBlurSettings
-  let grain: GrainSettings
 
   /// The color space produced by the recipe's LUT, or `nil` for pass-through.
   let lutOutputColorSpace: FargLUTOutputColorSpace?
@@ -66,12 +65,10 @@ nonisolated struct FargVideoRenderRecipe: Sendable {
   init(
     document: EditingDocument,
     motionBlur: MotionBlurSettings,
-    grain: GrainSettings = .disabled,
     lutOutputColorSpace: FargLUTOutputColorSpace? = nil
   ) {
     self.document = document
     self.motionBlur = motionBlur
-    self.grain = grain
     self.lutOutputColorSpace = lutOutputColorSpace
   }
 
@@ -146,22 +143,21 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
   ///
   /// Disabled Motion Blur still uses the temporal source asset, but its
   /// current-frame mode avoids requesting temporal neighbors or starting
-  /// VideoToolbox. Enabled mode shares a live strength source, and grain shares
-  /// a live parameter source, so slider changes do not require another
-  /// composition or player-item replacement.
+  /// VideoToolbox. Enabled mode shares a live strength source, and the
+  /// parametric document source lets grain edits update without replacing the
+  /// composition or player item.
   func makeTemporalPreview(
     source: PreparedMotionBlurSource,
     recipe: FargVideoRenderRecipe,
     colorInfo: VideoColorInfo,
     target: FargPreviewRenderTarget,
     strengthSource: MotionBlurStrengthSource,
-    grainSource: GrainParameterSource
+    documentSource: ParametricDocumentSource
   ) throws -> PreparedFargVideoRender {
     strengthSource.update(strength: recipe.motionBlur.strength)
     if recipe.motionBlur.isEnabled == false {
       strengthSource.requestProcessorSessionReset()
     }
-    grainSource.update(settings: recipe.grain)
     let outputColorInfo = recipe.resolveOutputColorInfo(
       sourceColorInfo: colorInfo
     )
@@ -182,8 +178,7 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
       outputColorSpace:
         recipe.lutOutputColorSpace?.coreMediaDeliveryColorSpace,
       postProcessor: Self.makePostProcessor(
-        recipe: recipe,
-        grainSource: grainSource
+        documentSource: documentSource
       )
     )
     outputColorInfo.apply(to: composition)
@@ -225,8 +220,7 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
       outputColorSpace:
         recipe.lutOutputColorSpace?.coreMediaDeliveryColorSpace,
       postProcessor: Self.makePostProcessor(
-        recipe: recipe,
-        grainSource: GrainParameterSource(settings: recipe.grain)
+        documentSource: ParametricDocumentSource(document: recipe.document)
       )
     )
     outputColorInfo.apply(to: composition)
@@ -238,36 +232,21 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
     )
   }
 
-  /// Builds the shared frame post-processor: the Brightroom parametric LUT
-  /// first, then the film-grain overlay on the graded result.
+  /// Builds the shared frame post-processor for the complete parametric document.
   ///
-  /// Grain follows the LUT because it models a post-grade film-emulation
-  /// stage; motion blur has already run before this closure. Enablement is
-  /// baked into the composition while intensity and size are read live from
-  /// `grainSource` for each frame.
+  /// Motion blur has already run before this closure. The document then
+  /// evaluates its ordered single-frame features, including LUT followed by
+  /// film grain, using the composition time supplied for this frame.
   private static func makePostProcessor(
-    recipe: FargVideoRenderRecipe,
-    grainSource: GrainParameterSource
+    documentSource: ParametricDocumentSource
   ) -> MotionBlurVideoCompositionBuilder.PostProcessor {
     let parametricRenderer = ParametricVideoRenderer()
-    let document = recipe.document
-    let isGrainEnabled = recipe.grain.isEnabled
     return { image, renderExtent, compositionTime in
-      let gradedImage = try parametricRenderer.makeFrameImage(
+      try parametricRenderer.makeFrameImage(
         from: image,
-        document: document,
-        renderExtent: renderExtent
-      )
-      guard isGrainEnabled else {
-        return gradedImage
-      }
-      let grain = grainSource.snapshot()
-      return try FilmGrainRenderer.apply(
-        to: gradedImage,
+        document: documentSource.snapshot(),
         renderExtent: renderExtent,
-        compositionTime: compositionTime,
-        intensity: grain.intensity,
-        size: grain.size
+        presentationTime: compositionTime
       )
     }
   }

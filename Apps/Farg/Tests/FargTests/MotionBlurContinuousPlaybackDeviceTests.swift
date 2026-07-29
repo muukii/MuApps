@@ -49,11 +49,11 @@ import Testing
       #expect(renderedFrameCount == expectedFrameCount)
     }
 
-    /// Verifies that editor control changes do not replace the active item or
-    /// seek away from the current Preview position.
+    /// Verifies that temporal and parametric editor changes do not replace the
+    /// active item or seek away from the current Preview position.
     @Test
     @MainActor
-    func previewModeAndStrengthChangesPreservePlayerItemAndPlayhead() async throws {
+    func previewEffectChangesPreservePlayerItemAndPlayhead() async throws {
       guard MotionBlurAvailability.isSupported else {
         return
       }
@@ -169,6 +169,60 @@ import Testing
       )
       #expect(timeAfterDisable > timeAfterStrength)
       #expect(model.renderState == .ready)
+
+      let currentFrameComposition = try #require(originalItem.videoComposition)
+      let grainID = FeatureID(rawValue: "live-preview-grain")
+      let enabledGrainDocument = EditingDocument(
+        mainTree: MainTree(
+          features: [
+            .effect(
+              FilmGrainFeature(
+                id: grainID,
+                isEnabled: true,
+                intensity: 50,
+                size: 50
+              )
+            )
+          ]
+        )
+      )
+      model.apply(
+        recipe: FargVideoRenderRecipe(
+          document: enabledGrainDocument,
+          motionBlur: .disabled
+        ),
+        for: source,
+        colorInfo: .sdrRec709,
+        change: .grain
+      )
+      #expect(model.player.currentItem === originalItem)
+      #expect(originalItem.videoComposition === currentFrameComposition)
+
+      let adjustedGrainDocument = EditingDocument(
+        mainTree: MainTree(
+          features: [
+            .effect(
+              FilmGrainFeature(
+                id: grainID,
+                isEnabled: true,
+                intensity: 90,
+                size: 75
+              )
+            )
+          ]
+        )
+      )
+      model.apply(
+        recipe: FargVideoRenderRecipe(
+          document: adjustedGrainDocument,
+          motionBlur: .disabled
+        ),
+        for: source,
+        colorInfo: .sdrRec709,
+        change: .grain
+      )
+      #expect(model.player.currentItem === originalItem)
+      #expect(originalItem.videoComposition === currentFrameComposition)
 
       model.pause()
       model.clear()
