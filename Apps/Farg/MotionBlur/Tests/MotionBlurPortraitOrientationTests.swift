@@ -206,7 +206,7 @@ struct MotionBlurPortraitTransformTests {
         asset: sourceAsset,
         settings: MotionBlurSettings(isEnabled: true),
         renderTarget: .source,
-        postProcessor: { image, _ in image }
+        postProcessor: { image, _, _ in image }
       )
       let renderedImage = try await prepared.orientationRenderedImage()
       let sourceSignature = try sourceImage.cornerSignature
@@ -249,7 +249,7 @@ struct MotionBlurPortraitTransformTests {
         asset: sourceAsset,
         settings: MotionBlurSettings(isEnabled: true),
         renderTarget: .fitWithin(CGSize(width: 32, height: 48)),
-        postProcessor: { image, _ in image }
+        postProcessor: { image, _, _ in image }
       )
       let renderedImage = try await prepared.orientationRenderedImage()
 

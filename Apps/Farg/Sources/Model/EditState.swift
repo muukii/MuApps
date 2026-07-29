@@ -31,6 +31,11 @@ final class EditState {
   /// Optical Flow motion blur shared by every clip in the current collection.
   var motionBlur = MotionBlurSettings.disabled
 
+  /// The identity-stable film-grain node shared by every clip in the collection.
+  var grain = FilmGrainFeature(
+    id: FeatureID(rawValue: "farg.film-grain")
+  )
+
   /// Intensities at or below this are treated as "no effect".
   private static let minimumAmount = 0.001
 
@@ -114,8 +119,9 @@ final class EditState {
 
   /// Compiles the current selections into a parametric editing document.
   ///
-  /// Today the main tree holds at most one `ColorCubeFeature`. The shape already
-  /// supports appending domain/effect/local-adjustment features in order.
+  /// The LUT is evaluated first when selected, followed by the identity-stable
+  /// film-grain feature. Keeping both single-frame effects in this ordered tree
+  /// makes the document the complete authored spatial recipe.
   func makeDocument(using library: LUTLibrary) throws -> EditingDocument {
     var features: [MainFeature] = []
     // Below the threshold the LUT contributes nothing, so emit an empty tree —
@@ -124,6 +130,7 @@ final class EditState {
       let feature = try library.feature(for: lut, amount: amount)
       features.append(.effect(feature))
     }
+    features.append(.effect(grain))
     return EditingDocument(mainTree: MainTree(features: features))
   }
 

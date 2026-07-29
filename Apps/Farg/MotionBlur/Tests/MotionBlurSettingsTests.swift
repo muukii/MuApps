@@ -86,7 +86,7 @@ struct MotionBlurSettingsTests {
       frameDuration: CMTime(value: 1, timescale: 30),
       geometry: geometry,
       ciContext: CIContext(),
-      postProcessor: { image, _ in image }
+      postProcessor: { image, _, _ in image }
     )
     let requiredTrackIDs =
       instruction.requiredSourceTrackIDs?

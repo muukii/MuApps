@@ -51,6 +51,7 @@ struct EditorView: View {
       pickerItems: $pickerItems,
       selectedLUT: $editState.selectedLUT,
       motionBlur: $editState.motionBlur,
+      grain: $editState.grain,
       selectedEffect: $selectedEffect,
       onSelectClip: editState.selectClip,
       onRemoveClip: removeClip,
@@ -97,6 +98,9 @@ struct EditorView: View {
     .onChange(of: editState.amount) { _, _ in applyComposition() }
     .onChange(of: editState.motionBlur) { _, _ in
       applyComposition(change: .motionBlur)
+    }
+    .onChange(of: editState.grain) { _, _ in
+      applyComposition(change: .grain)
     }
     .onChange(of: preview.renderingErrorMessage) { _, message in
       if let message {
@@ -371,6 +375,7 @@ private struct EditorLayout: View {
   @Binding var pickerItems: [PhotosPickerItem]
   @Binding var selectedLUT: LUT?
   @Binding var motionBlur: MotionBlurSettings
+  @Binding var grain: FilmGrainFeature
   @Binding var selectedEffect: EditorEffectTab
   let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
@@ -378,7 +383,7 @@ private struct EditorLayout: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      
+
       EditorPreviewStage(preview: preview)
         .frame(
           minWidth: 0,
@@ -397,6 +402,7 @@ private struct EditorLayout: View {
         pickerItems: $pickerItems,
         selectedLUT: $selectedLUT,
         motionBlur: $motionBlur,
+        grain: $grain,
         selectedEffect: $selectedEffect,
         onSelectClip: onSelectClip,
         onRemoveClip: onRemoveClip,
@@ -433,21 +439,31 @@ private struct EditorPreviewStage: View {
 private enum EditorEffectTab {
   case lut
   case motionBlur
+  case grain
 
   var isLUT: Bool {
     switch self {
     case .lut:
       return true
-    case .motionBlur:
+    case .motionBlur, .grain:
       return false
     }
   }
 
   var isMotionBlur: Bool {
     switch self {
-    case .lut:
+    case .lut, .grain:
       return false
     case .motionBlur:
+      return true
+    }
+  }
+
+  var isGrain: Bool {
+    switch self {
+    case .lut, .motionBlur:
+      return false
+    case .grain:
       return true
     }
   }
@@ -464,6 +480,7 @@ private struct EditorLowerPanel: View {
   @Binding var pickerItems: [PhotosPickerItem]
   @Binding var selectedLUT: LUT?
   @Binding var motionBlur: MotionBlurSettings
+  @Binding var grain: FilmGrainFeature
   @Binding var selectedEffect: EditorEffectTab
   let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
@@ -480,6 +497,7 @@ private struct EditorLowerPanel: View {
       pickerItems: $pickerItems,
       selectedLUT: $selectedLUT,
       motionBlur: $motionBlur,
+      grain: $grain,
       selectedEffect: $selectedEffect,
       onSelectClip: onSelectClip,
       onRemoveClip: onRemoveClip,
@@ -499,6 +517,7 @@ private struct EditorLowerPanel: View {
     @Binding var pickerItems: [PhotosPickerItem]
     @Binding var selectedLUT: LUT?
     @Binding var motionBlur: MotionBlurSettings
+    @Binding var grain: FilmGrainFeature
     @Binding var selectedEffect: EditorEffectTab
     let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
     let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
@@ -525,6 +544,7 @@ private struct EditorLowerPanel: View {
           lutPreviewSource: lutPreviewSource,
           selectedLUT: $selectedLUT,
           motionBlur: $motionBlur,
+          grain: $grain,
           selectedEffect: $selectedEffect
         )
       }
@@ -541,6 +561,7 @@ private struct EditorLowerPanel: View {
     let lutPreviewSource: LUTPreviewSourceImage?
     @Binding var selectedLUT: LUT?
     @Binding var motionBlur: MotionBlurSettings
+    @Binding var grain: FilmGrainFeature
     @Binding var selectedEffect: EditorEffectTab
 
     var body: some View {
@@ -553,7 +574,8 @@ private struct EditorLowerPanel: View {
           library: library,
           lutPreviewSource: lutPreviewSource,
           selectedLUT: $selectedLUT,
-          motionBlur: $motionBlur
+          motionBlur: $motionBlur,
+          grain: $grain
         )
         .padding(.vertical, contentPadding)
       }
@@ -572,6 +594,7 @@ private struct EditorLowerPanel: View {
       let lutPreviewSource: LUTPreviewSourceImage?
       @Binding var selectedLUT: LUT?
       @Binding var motionBlur: MotionBlurSettings
+      @Binding var grain: FilmGrainFeature
 
       var body: some View {
         ZStack(alignment: .topLeading) {
@@ -589,8 +612,13 @@ private struct EditorLowerPanel: View {
             EditorMotionBlurControls(settings: $motionBlur)
               .padding(.horizontal, contentPadding)
               .transition(.opacity)
+
+          case .grain:
+            EditorGrainControls(settings: $grain)
+              .padding(.horizontal, contentPadding)
+              .transition(.opacity)
           }
-        }       
+        }
         .animation(.smooth, value: selectedEffect)
       }
     }
@@ -675,6 +703,109 @@ private struct EditorLowerPanel: View {
         .animation(.snappy, value: settings.isEnabled)
       }
     }
+
+    /// Exposes the Core Image film-grain overlay applied after the selected
+    /// LUT. Grain has no device-support requirement, so unlike Motion Blur it
+    /// presents no availability state.
+    fileprivate struct EditorGrainControls: View {
+
+      @Binding var settings: FilmGrainFeature
+
+      private var intensity: Binding<Double> {
+        Binding(
+          get: { Double(settings.intensity) },
+          set: { settings.intensity = Int($0.rounded()) }
+        )
+      }
+
+      private var size: Binding<Double> {
+        Binding(
+          get: { Double(settings.size) },
+          set: { settings.size = Int($0.rounded()) }
+        )
+      }
+
+      private var valueRange: ClosedRange<Double> {
+        Double(
+          FilmGrainFeature.valueRange.lowerBound
+        )...Double(FilmGrainFeature.valueRange.upperBound)
+      }
+
+      var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+          HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+              Text("Grain")
+                .font(.caption.weight(.semibold))
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
+
+              Text("Film Grain")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            Toggle("Grain", isOn: $settings.isEnabled)
+              .labelsHidden()
+              .tint(.primary)
+              .accessibilityIdentifier("grain-toggle")
+          }
+
+          if settings.isEnabled {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+              Text("Intensity")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+              Spacer(minLength: 12)
+
+              Text(settings.intensity, format: .number)
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+            }
+
+            Slider(
+              value: intensity,
+              in: valueRange,
+              step: 1
+            )
+            .tint(.primary)
+            .accessibilityLabel("Grain intensity")
+            .accessibilityValue(settings.intensity.formatted())
+
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+              Text("Size")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+              Spacer(minLength: 12)
+
+              Text(settings.size, format: .number)
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+            }
+
+            Slider(
+              value: size,
+              in: valueRange,
+              step: 1
+            )
+            .tint(.primary)
+            .accessibilityLabel("Grain size")
+            .accessibilityValue(settings.size.formatted())
+          } else {
+            Text("Adds film-like grain texture over the graded image.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+        .animation(.snappy, value: settings.isEnabled)
+      }
+    }
   }
 
 }
@@ -704,6 +835,15 @@ private struct EditorEffectTabBar: View {
           isSelected: selection.isMotionBlur
         ) {
           selection = .motionBlur
+        }
+
+        EditorEffectTabButton(
+          title: "Grain",
+          systemImage: "water.waves",
+          accessibilityIdentifier: "editor-effect-tab-grain",
+          isSelected: selection.isGrain
+        ) {
+          selection = .grain
         }
       }
       .frame(width: 44)
