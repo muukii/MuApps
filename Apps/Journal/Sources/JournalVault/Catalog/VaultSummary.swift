@@ -12,9 +12,10 @@ public enum VaultPermissionSummary: String, Codable, Sendable {
 /// widgets, and Shared with You presentation — so none of them have to open the
 /// vault's content store.
 ///
-/// Share-related fields are maintained by the sharing flows
-/// (`CKSystemSharingUIObserver` observation updates them when the user saves or
-/// stops a share through system UI); this milestone only persists the shape.
+/// Share-related fields are maintained by the sync boundary: local sharing
+/// flows (`prepareShare` / stop-sharing callbacks) and every remote path that
+/// sees the zone-wide `CKShare` (initial discovery, engine record fetches,
+/// invite acceptance) mirror the share into this row via `applyShareInfo`.
 @Model
 public final class VaultSummary {
 

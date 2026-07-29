@@ -214,6 +214,14 @@ public protocol VaultSyncEngine: Sendable {
   /// Creates or reuses the saved zone-wide share for an owned vault.
   func prepareShare(for vaultID: VaultID) async throws -> VaultSharePreparation
 
+  /// Fetches the saved zone-wide share for a vault, or `nil` when the vault is
+  /// not currently shared.
+  ///
+  /// Unlike `prepareShare`, this never creates a share, and it works for
+  /// participant vaults too. Implementations also mirror what they find into
+  /// the catalog's share summary so display state self-corrects.
+  func existingShare(for vaultID: VaultID) async throws -> CKShare?
+
   /// Accepts a zone-wide CloudKit vault share and imports its shared database
   /// changes into the local vault stores.
   func acceptShare(metadata: CKShare.Metadata) async throws -> VaultShareAcceptance
@@ -269,6 +277,11 @@ public actor LoggingVaultSyncEngine: VaultSyncEngine {
 
   public func prepareShare(for vaultID: VaultID) async throws -> VaultSharePreparation {
     throw VaultSharePreparationError.unsupportedBySyncEngine
+  }
+
+  public func existingShare(for vaultID: VaultID) async throws -> CKShare? {
+    log.info("existing share for vault \(vaultID.uuidString, privacy: .public) — no transport")
+    return nil
   }
 
   public func acceptShare(metadata: CKShare.Metadata) async throws -> VaultShareAcceptance {

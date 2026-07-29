@@ -68,6 +68,15 @@ final class JournalVaultRuntime {
   /// The selected vault instance exposed to app screens.
   private(set) var selectedVault: VaultInstance?
 
+  /// Latest fetched zone-wide `CKShare` per shared vault.
+  ///
+  /// `SWCollaborationView` must have the existing share registered on its
+  /// `NSItemProvider` synchronously at construction — a lazily prepared share
+  /// makes the system treat the vault as not-yet-shared and hides the
+  /// participant list. This cache lets collaboration UI mount from a live
+  /// share without awaiting CloudKit.
+  private(set) var collaborationShares: [VaultID: CKShare] = [:]
+
   @ObservationIgnored private let catalogStore: VaultCatalogStore
   @ObservationIgnored private let registry: VaultStoreRegistry
   @ObservationIgnored private let instanceRegistry: VaultInstanceRegistry
@@ -270,10 +279,41 @@ final class JournalVaultRuntime {
   /// zone-wide share.
   func prepareShare(for vaultID: VaultID) async throws -> VaultSharePreparation {
     let preparation = try await syncEngine.prepareShare(for: vaultID)
+    collaborationShares[vaultID] = preparation.share
     try reloadCatalog()
     refreshSelectedVaultDescriptor()
     lastMessage = "Prepared vault invite."
     return preparation
+  }
+
+  /// Re-fetches the zone-wide share for every shared vault in the catalog.
+  ///
+  /// The sync boundary corrects the catalog summary while fetching, so this is
+  /// also what heals stale sharing state (participants added or the share
+  /// stopped on another device) behind the collaboration UI.
+  func refreshCollaborationShares() async {
+    let sharedVaultIDs = vaults.filter(\.isShared).map(\.vaultID)
+
+    for vaultID in sharedVaultIDs {
+      do {
+        if let share = try await syncEngine.existingShare(for: vaultID) {
+          collaborationShares[vaultID] = share
+        } else {
+          collaborationShares.removeValue(forKey: vaultID)
+        }
+      } catch {
+        // Keep any previously cached share; a transient fetch failure should
+        // not tear down a working collaboration button.
+        lastMessage = error.localizedDescription
+      }
+    }
+
+    do {
+      try reloadCatalog()
+      refreshSelectedVaultDescriptor()
+    } catch {
+      lastMessage = error.localizedDescription
+    }
   }
 
   /// Accepts a CloudKit vault invite and refreshes local runtime state.
@@ -283,6 +323,9 @@ final class JournalVaultRuntime {
   func acceptShare(metadata: CKShare.Metadata) async throws {
     await start()
     let acceptance = try await syncEngine.acceptShare(metadata: metadata)
+    if let vaultID = acceptance.vaultID {
+      collaborationShares[vaultID] = acceptance.share
+    }
     try reloadCatalog()
     refreshSelectedVaultDescriptor()
     refreshSelectedVaultPendingMutationCount()
@@ -303,6 +346,7 @@ final class JournalVaultRuntime {
 
   /// Clears local share summary after the system sharing UI stops sharing.
   func noteSharingStopped(for vaultID: VaultID) async {
+    collaborationShares.removeValue(forKey: vaultID)
     do {
       try catalogStore.applyShareInfo(
         vaultID: vaultID,
@@ -441,6 +485,7 @@ final class JournalVaultRuntime {
 
       instanceRegistry.discardInstance(for: descriptor.vaultID)
       registry.discardStore(for: descriptor.vaultID)
+      collaborationShares.removeValue(forKey: descriptor.vaultID)
       try catalogStore.layout.removeVaultDirectory(for: descriptor.vaultID)
       try catalogStore.deleteVault(vaultID: descriptor.vaultID)
       try reloadCatalog()

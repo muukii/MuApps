@@ -740,15 +740,26 @@ the gallery's **Lab** section).
   `JournalVaultRuntime.createVault(title:icon:)`, seeds the local vault store,
   reloads the catalog, opens the new vault, and then dismisses the Vault sheet.
   Owned vault rows always show a separate share button inside
-  the cell; once the catalog knows the vault has a CloudKit share, the row also
-  shows a system `SWCollaborationView` control. This matches the Notes-style
+  the cell; once the catalog knows the vault has a CloudKit share and the
+  runtime has fetched that share, the row also shows a system
+  `SWCollaborationView` control. This matches the Notes-style
   split between explicit invite issuance and collaboration state/management. The
-  collaboration control registers an `NSItemProvider` for the vault's zone-wide
-  `CKShare`, resolves that share only when the user opens the system
-  collaboration UI, and limits sharing to specified recipients with read-write
-  permission. The share button and row context menu both present the direct
+  collaboration control registers the saved zone-wide `CKShare` on its
+  `NSItemProvider` (an existing-share registration, not a lazy preparation
+  handler), so the system treats the vault as already collaborated and its
+  popover lists the current participants with the manage action. Sharing stays
+  limited to specified recipients with read-write permission. Opening the Vault
+  sheet re-fetches the zone-wide share for every shared vault; that fetch also
+  self-corrects the catalog summary (participants accepted or the share stopped
+  on another device). Sharing state itself is discovered from CloudKit: initial
+  vault discovery, sync-engine record fetches, and invite acceptance all mirror
+  the zone-wide `CKShare` (shared flag, participant count, this user's
+  permission) into the catalog, so a reinstall or the user's second device shows
+  correct status without opening the share sheet. The share button and row
+  context menu both present the direct
   `UICloudSharingController` invite sheet; participant vault rows do not offer
-  invite issuance. New vault creation keeps icon selection to one compact row
+  invite issuance but do show the collaboration control for their accepted
+  share. New vault creation keeps icon selection to one compact row
   in the form and drills into one **Icon** browser. Curated SF Symbols and the
   Unicode fully-qualified Emoji catalog share a single lazy-scrolling grid with
   no family tabs or section split. The always-visible search field filters both
@@ -811,10 +822,12 @@ the gallery's **Lab** section).
   day, and rendered independently with content-specific saved-grid styles,
   refresh, navigation, edit, share, and delete behavior. Posting targets the new
   root edge in this list so the newly created entry is brought into view.
-  When the selected owned vault is already shared, the navigation toolbar also
+  When the selected vault is shared — owned or joined as a participant — the
+  navigation toolbar also
   shows the same system `SWCollaborationView` control used by the vault picker,
-  keeping collaboration management available from Home. The control is derived
-  from the refreshed catalog row, so it disappears after sharing is stopped and
+  keeping collaboration management available from Home. The control registers
+  the runtime's fetched zone-wide `CKShare` and appears once that share is
+  loaded; it disappears after sharing is stopped and
   the runtime refreshes.
 
   Creation lives in a Book-style glass input bar inset at the bottom of the
