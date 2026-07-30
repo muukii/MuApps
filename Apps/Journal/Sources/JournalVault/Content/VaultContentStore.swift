@@ -390,7 +390,8 @@ extension VaultContentStore {
           rootEdge = edge
         }
 
-        if let stagedAttachment = try stageAttachment(from: draft, card: card, in: context) {
+        if let stagedAttachment = try stageAttachmentFiles(from: draft, cardID: card.id) {
+          insert(stagedAttachment, for: card, in: context)
           destinationFileURLs.append(contentsOf: stagedAttachment.destinationFileURLs)
           sourceFileURLsToDeleteAfterCommit.append(
             contentsOf: stagedAttachment.sourceFileURLsToDeleteAfterCommit
@@ -426,6 +427,14 @@ extension VaultContentStore {
   /// the modality carries media. Removing old attachment rows and inserting the
   /// new row in the same transaction keeps CloudKit outbox state aligned with
   /// the visible card; old files are deleted only after the transaction commits.
+  ///
+  /// Replacement files are staged before any row is touched. Unlike
+  /// `createThread`, this transaction mutates *fetched* models, and
+  /// `ModelContext.rollback()` cannot reliably restore those: restoring a
+  /// to-many relationship from a lazily materialized snapshot value crashes
+  /// (`DefaultStoreSnapshotValueFuture` force-cast, iOS 26 SwiftData). Staging
+  /// first keeps the context untouched through every file failure, leaving
+  /// `rollback()` to guard only the save itself.
   @MainActor
   public func updateCard(cardID: UUID, with draft: CardDraft) throws {
     try validateAttachmentPayloadIfNeeded(draft)
@@ -435,10 +444,9 @@ extension VaultContentStore {
       throw Error.cardNotFound(cardID)
     }
 
-    var deletedMediaFileURLs: [URL] = []
-    var destinationFileURLs: [URL] = []
-    var sourceFileURLsToDeleteAfterCommit: [URL] = []
+    let stagedAttachment = try stageAttachmentFiles(from: draft, cardID: card.id)
 
+    var deletedMediaFileURLs: [URL] = []
     do {
       deletedMediaFileURLs = try deleteAttachments(for: card.id, in: context)
 
@@ -448,9 +456,8 @@ extension VaultContentStore {
       card.updatedAt = Date()
       try noteSave(.card, recordName: card.id.uuidString, in: context)
 
-      if let stagedAttachment = try stageAttachment(from: draft, card: card, in: context) {
-        destinationFileURLs = stagedAttachment.destinationFileURLs
-        sourceFileURLsToDeleteAfterCommit = stagedAttachment.sourceFileURLsToDeleteAfterCommit
+      if let stagedAttachment {
+        insert(stagedAttachment, for: card, in: context)
         try noteSave(.attachment, recordName: stagedAttachment.attachment.id.uuidString, in: context)
         for resource in stagedAttachment.resources {
           try noteSave(.attachmentResource, recordName: resource.id.uuidString, in: context)
@@ -460,8 +467,10 @@ extension VaultContentStore {
       try context.save()
     } catch {
       context.rollback()
-      for fileURL in destinationFileURLs {
-        try? FileManager.default.removeItem(at: fileURL)
+      if let stagedAttachment {
+        for fileURL in stagedAttachment.destinationFileURLs {
+          try? FileManager.default.removeItem(at: fileURL)
+        }
       }
       throw error
     }
@@ -469,8 +478,10 @@ extension VaultContentStore {
     for url in deletedMediaFileURLs {
       try? FileManager.default.removeItem(at: url)
     }
-    for fileURL in Set(sourceFileURLsToDeleteAfterCommit) {
-      try? FileManager.default.removeItem(at: fileURL)
+    if let stagedAttachment {
+      for fileURL in Set(stagedAttachment.sourceFileURLsToDeleteAfterCommit) {
+        try? FileManager.default.removeItem(at: fileURL)
+      }
     }
     onLocalMutation()
   }
@@ -556,17 +567,17 @@ extension VaultContentStore {
     var resources: [AttachmentResource]
     var destinationFileURLs: [URL]
     var sourceFileURLsToDeleteAfterCommit: [URL]
-
-    var primaryResource: AttachmentResource {
-      resources[0]
-    }
   }
 
+  /// Builds the attachment rows and stages their files in the vault media
+  /// directory. Touches neither the context nor any registered model, so a
+  /// staging failure leaves SwiftData state untouched; already-written
+  /// destinations are removed before rethrowing. The rows join the transaction
+  /// via `insert(_:for:in:)`.
   @MainActor
-  private func stageAttachment(
+  private func stageAttachmentFiles(
     from draft: CardDraft,
-    card: Card,
-    in context: ModelContext
+    cardID: UUID
   ) throws -> StagedAttachment? {
     guard let attachmentKind = Self.attachmentKind(for: draft.kind) else {
       return nil
@@ -579,13 +590,12 @@ extension VaultContentStore {
 
     let primaryResourceID = resourceDrafts[0].id ?? UUID()
     let attachment = Attachment(
-      cardID: card.id,
+      cardID: cardID,
       kind: attachmentKind,
       byteSize: Self.byteSize(for: resourceDrafts[0]),
       primaryResourceID: primaryResourceID,
       thumbnail: draft.thumbnail
     )
-    attachment.connect(to: card)
 
     var stagedResources: [AttachmentResource] = []
     var destinationFileURLs: [URL] = []
@@ -612,7 +622,7 @@ extension VaultContentStore {
         guard FileManager.default.fileExists(atPath: destinationURL.path) == false else {
           throw CocoaError(.fileWriteFileExists)
         }
-        // Registration precedes I/O so rollback also removes a partially
+        // Registration precedes I/O so cleanup also removes a partially
         // written destination when the file operation itself throws.
         destinationFileURLs.append(destinationURL)
 
@@ -632,7 +642,6 @@ extension VaultContentStore {
         }
         resource.noteLocalFileChange()
 
-        context.insert(resource)
         stagedResources.append(resource)
       }
     } catch {
@@ -642,13 +651,27 @@ extension VaultContentStore {
       throw error
     }
 
-    context.insert(attachment)
     return StagedAttachment(
       attachment: attachment,
       resources: stagedResources,
       destinationFileURLs: destinationFileURLs,
       sourceFileURLsToDeleteAfterCommit: sourceFileURLsToDeleteAfterCommit
     )
+  }
+
+  /// Connects staged attachment rows to their card and registers them with the
+  /// context — the first point where staging touches SwiftData state.
+  @MainActor
+  private func insert(
+    _ staged: StagedAttachment,
+    for card: Card,
+    in context: ModelContext
+  ) {
+    staged.attachment.connect(to: card)
+    for resource in staged.resources {
+      context.insert(resource)
+    }
+    context.insert(staged.attachment)
   }
 
   @MainActor
