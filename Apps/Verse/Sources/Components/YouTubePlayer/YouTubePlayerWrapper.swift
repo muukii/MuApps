@@ -101,7 +101,7 @@ final class YouTubeVideoPlayerController: VideoPlayerController {
     setupEventHandling()
 
     // Activate audio session before video playback so background music continues
-    AudioSessionManager.shared.activate()
+    AudioSessionManager.shared.activate(mode: .mixesWithOthers)
 
     // Load the video
     webView.loadVideo(videoID: videoID, autoplay: false, controls: true)

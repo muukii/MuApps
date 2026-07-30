@@ -249,6 +249,15 @@ final class PlayerModel {
   /// Local video file URL (when downloaded)
   var localFileURL: URL?
 
+  // MARK: - Now Playing (local playback)
+
+  /// System Now Playing integration (Lock Screen / Control Center), active
+  /// only during local playback where background audio continues.
+  private let nowPlayingSession = NowPlayingSession()
+
+  /// Metadata for the system player UI, captured from the loaded video item.
+  private var nowPlayingMetadata: NowPlayingSession.Metadata?
+
   /// Whether the controller is ready (including priming for YouTube)
   var isControllerReady: Bool {
     controller?.isReady ?? false
@@ -430,6 +439,22 @@ final class PlayerModel {
     // Prevent multiple loads
     guard controller == nil, loadErrorMessage == nil else { return }
 
+    do {
+      let isAudioOnly: Bool = {
+        switch videoItem.importedMediaKind {
+        case .audio: return true
+        case .video: return false
+        case nil: return false
+        }
+      }()
+      nowPlayingMetadata = NowPlayingSession.Metadata(
+        title: videoItem.title ?? "Verse",
+        artist: videoItem.author,
+        isAudioOnly: isAudioOnly,
+        thumbnailURL: videoItem.thumbnailURL.flatMap(URL.init(string:))
+      )
+    }
+
     if videoItem.source == .importedFile {
       guard let fileURL = videoItem.downloadedFileURL,
             FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -454,6 +479,13 @@ final class PlayerModel {
       playbackSource = .youtube
     }
 
+    switch playbackSource {
+    case .local:
+      startLocalPlaybackSession()
+    case .youtube:
+      break
+    }
+
     startTrackingTime()
   }
 
@@ -462,12 +494,107 @@ final class PlayerModel {
     trackingTask?.cancel()
     trackingTask = nil
     cancelPendingSliderSeek()
+    nowPlayingSession.end()
+
+    // Releasing the exclusive audio session lets other apps' audio resume
+    // (notifyOthersOnDeactivation). YouTube playback keeps the shared mixed
+    // session untouched, as before.
+    let releasesAudioSession: Bool = {
+      switch playbackSource {
+      case .local: return true
+      case .youtube: return false
+      }
+    }()
 
     if let controller {
       Task {
         await controller.pause()
+        if releasesAudioSession {
+          AudioSessionManager.shared.deactivate()
+        }
       }
     }
+  }
+
+  // MARK: - Now Playing / Background Audio
+
+  /// Starts system integration for local playback: takes over the audio
+  /// session so audio continues when the app moves to the background, and
+  /// publishes Lock Screen / Control Center playback controls.
+  private func startLocalPlaybackSession() {
+    AudioSessionManager.shared.activate(mode: .exclusivePlayback)
+
+    guard let metadata = nowPlayingMetadata else { return }
+
+    nowPlayingSession.begin(
+      metadata: metadata,
+      handlers: .init(
+        onPlay: { [weak self] in
+          self?.resumePlaybackFromRemoteCommand()
+        },
+        onPause: { [weak self] in
+          self?.pausePlaybackFromRemoteCommand()
+        },
+        onTogglePlayPause: { [weak self] in
+          self?.togglePlayPauseFromRemoteCommand()
+        },
+        onSkipBackward: { [weak self] interval in
+          self?.seekBackward(interval: interval)
+        },
+        onSkipForward: { [weak self] interval in
+          self?.seekForward(interval: interval)
+        },
+        onSeek: { [weak self] time in
+          self?.seek(to: time)
+        }
+      )
+    )
+  }
+
+  /// Resumes playback in response to a system remote command.
+  ///
+  /// Updates the Now Playing state directly instead of relying on the polling
+  /// loop — in the background the app may be suspended right after handling
+  /// the command, before the next polling tick runs.
+  private func resumePlaybackFromRemoteCommand() {
+    guard let controller else { return }
+    Task {
+      await controller.play()
+      isPlaying = controller.isPlaying
+      await refreshNowPlayingPlaybackState()
+    }
+  }
+
+  /// Pauses playback in response to a system remote command.
+  private func pausePlaybackFromRemoteCommand() {
+    guard let controller else { return }
+    Task {
+      await controller.pause()
+      isPlaying = controller.isPlaying
+      await refreshNowPlayingPlaybackState()
+    }
+  }
+
+  private func togglePlayPauseFromRemoteCommand() {
+    guard let controller else { return }
+    if controller.isPlaying {
+      pausePlaybackFromRemoteCommand()
+    } else {
+      resumePlaybackFromRemoteCommand()
+    }
+  }
+
+  /// Pushes current timing to the system player UI. The system interpolates
+  /// elapsed time from the rate, so this only needs to run on discontinuities
+  /// (play / pause / seek / rate change) — not every polling tick.
+  private func refreshNowPlayingPlaybackState() async {
+    guard nowPlayingSession.isActive, let controller else { return }
+    let elapsed = await controller.currentTime
+    nowPlayingSession.updatePlayback(
+      duration: duration,
+      elapsedTime: elapsed,
+      rate: controller.isPlaying ? playbackRate : 0
+    )
   }
 
   // MARK: - Playback Control
@@ -510,6 +637,7 @@ final class PlayerModel {
         self.isApplyingSliderSeek = false
         self.sliderSeekTask = nil
       }
+      await self?.refreshNowPlayingPlaybackState()
     }
   }
 
@@ -601,6 +729,7 @@ final class PlayerModel {
     Task {
       await controller.setPlaybackRate(rate)
       playbackRate = rate
+      await refreshNowPlayingPlaybackState()
     }
   }
 
@@ -634,6 +763,13 @@ final class PlayerModel {
 
     playbackSource = source
 
+    switch source {
+    case .youtube:
+      nowPlayingSession.end()
+    case .local:
+      startLocalPlaybackSession()
+    }
+
     // Start new time tracking
     startTrackingTime()
   }
@@ -644,6 +780,7 @@ final class PlayerModel {
 
     trackingTask?.cancel()
     cancelPendingSliderSeek()
+    nowPlayingSession.end()
 
     if let currentController = controller {
       Task {
@@ -671,6 +808,7 @@ final class PlayerModel {
 
     controller = .local(LocalVideoPlayerController(url: fileURL))
     playbackSource = .local
+    startLocalPlaybackSession()
     startTrackingTime()
   }
 
@@ -724,6 +862,7 @@ final class PlayerModel {
       if let controller = self.controller {
         let videoDuration = await controller.duration
         self.duration = videoDuration
+        await self.refreshNowPlayingPlaybackState()
       }
 
       // Main tracking loop
@@ -733,29 +872,39 @@ final class PlayerModel {
           if !self.isDraggingSlider && !self.isApplyingSliderSeek {
             self.currentTime.value = timeValue
           }
-          self.isPlaying = controller.isPlaying
+          let isPlayingNow = controller.isPlaying
+          if isPlayingNow != self.isPlaying {
+            self.isPlaying = isPlayingNow
+            // Play/pause happened outside our control paths (e.g. system
+            // video controls, interruptions) — keep the Lock Screen in sync.
+            await self.refreshNowPlayingPlaybackState()
+          }
         }
 
         if !self.isDraggingSlider && !self.isApplyingSliderSeek {
           // Check A-B repeat loop
           if let loopStartTime = self.checkRepeatLoop() {
             await self.controller?.seek(to: loopStartTime)
+            await self.refreshNowPlayingPlaybackState()
           }
           // Check if should stop at repeat end (when looping disabled)
           else if let startTime = self.checkRepeatEndAndStop() {
             await self.controller?.seek(to: startTime)
             await self.controller?.pause()
             self.isPlaying = false
+            await self.refreshNowPlayingPlaybackState()
           }
           // Check end-of-video loop
           else if let loopStartTime = self.checkEndOfVideoLoop() {
             await self.controller?.seek(to: loopStartTime)
+            await self.refreshNowPlayingPlaybackState()
           }
           // Check step mode stop
           else if let cue = self.checkStepModeStop() {
             self.lastStoppedCueID = cue.id
             await self.controller?.pause()
             self.isPlaying = false
+            await self.refreshNowPlayingPlaybackState()
           }
         }
 
