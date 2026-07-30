@@ -8,10 +8,24 @@
 import AVFoundation
 
 /// Manages AVAudioSession configuration for the app.
-/// Configures audio session to allow video playback even when device is in silent mode,
-/// and enables mixing with other audio (background music).
+/// Configures audio session to allow video playback even when device is in silent mode.
+/// Activation supports two modes: mixing with other audio (YouTube streaming) and
+/// exclusive playback (local media that continues in the background with system controls).
 @Observable
 final class AudioSessionManager: Sendable {
+
+  /// How the app's audio should coexist with other apps' audio while playing.
+  enum Mode {
+    /// Keeps other apps' audio (e.g. background music) playing alongside.
+    /// Used for YouTube streaming, which never plays in the background.
+    case mixesWithOthers
+
+    /// Takes over audio output as the device's primary playback app.
+    /// Required for background audio to be accompanied by Now Playing
+    /// (Lock Screen / Control Center) controls. Used for local media playback.
+    case exclusivePlayback
+  }
+
   static let shared = AudioSessionManager()
 
   /// Whether the audio session has been configured at least once.
@@ -53,22 +67,30 @@ final class AudioSessionManager: Sendable {
   /// Activates the audio session with video playback settings.
   ///
   /// Call this before starting video playback (YouTube or local). It reconfigures the
-  /// category and activates the session, ensuring that background music continues playing
-  /// alongside the video audio.
-  func activate() {
+  /// category for the requested mode and activates the session.
+  func activate(mode: Mode) {
     let audioSession = AVAudioSession.sharedInstance()
+
+    let options: AVAudioSession.CategoryOptions = {
+      switch mode {
+      case .mixesWithOthers:
+        return [.mixWithOthers]
+      case .exclusivePlayback:
+        return []
+      }
+    }()
 
     do {
       // Reconfigure category first (may change if settings were modified externally)
       try audioSession.setCategory(
         .playback,
         mode: .moviePlayback,
-        options: [.mixWithOthers]
+        options: options
       )
       // Activate with notifyOthersOnDeactivation so other audio apps can resume when this ends
       try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
       isActive = true
-      print("[AudioSessionManager] Audio session activated for video playback")
+      print("[AudioSessionManager] Audio session activated for video playback (\(mode))")
     } catch {
       print("[AudioSessionManager] Failed to activate audio session: \(error.localizedDescription)")
     }
