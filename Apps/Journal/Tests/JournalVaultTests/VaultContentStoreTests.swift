@@ -340,8 +340,8 @@ struct VaultContentStoreTests {
     defer { try? FileManager.default.removeItem(at: pairedVideoURL) }
 
     // Both inputs pass preflight validation. Reusing one resource id makes the
-    // second staged destination collide after the old attachment and card have
-    // already been mutated, exercising the transactional rollback path.
+    // second staged destination collide during file staging, which must fail
+    // the update before the saved card, attachment rows, or media are touched.
     let collidingResourceID = UUID()
 
     var didFail = false
