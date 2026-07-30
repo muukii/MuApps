@@ -179,16 +179,37 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
       share = try await saveShare(newShare, database: database)
     }
 
-    try await catalog.applyShareInfo(
-      vaultID: descriptor.vaultID,
-      isShared: true,
-      shareURL: share.url,
-      shareRecordName: share.recordID.recordName,
-      participantCount: max(1, share.participants.count),
-      permission: .owner
-    )
+    await applyFetchedShareSummary(share, descriptor: descriptor)
 
     return VaultSharePreparation(share: share, container: container)
+  }
+
+  public func existingShare(for vaultID: VaultID) async throws -> CKShare? {
+    await ensureDescriptorsLoaded()
+    await refreshDescriptorsIfUnknown(vaultID)
+
+    guard let descriptor = descriptors[vaultID] else {
+      throw VaultSharePreparationError.vaultNotFound(vaultID)
+    }
+
+    let database = cloudDatabase(for: databaseScope(for: descriptor))
+    let share = try await fetchZoneWideShare(zoneID: descriptor.zoneID, database: database)
+
+    if let share {
+      await applyFetchedShareSummary(share, descriptor: descriptor)
+    } else {
+      switch descriptor.ownership {
+      case .owned:
+        // The catalog believed the vault was shared but no share exists
+        // remotely (stopped from another device); self-correct the summary.
+        await clearShareSummary(for: descriptor)
+      case .participant:
+        // A participant vault without a reachable share is about to disappear
+        // through the zone-deletion path; don't touch the summary here.
+        break
+      }
+    }
+    return share
   }
 
   public func acceptShare(metadata: CKShare.Metadata) async throws -> VaultShareAcceptance {
@@ -202,6 +223,13 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
 
     try await fetchAcceptedSharedVaultChanges(acceptedZoneID: acceptedZoneID)
     await refreshDescriptors()
+
+    // The accepted share carries the participant roster and this user's real
+    // permission; without this the catalog would keep the materialized
+    // read-write default even for read-only invites.
+    if let acceptedVaultID, let descriptor = descriptors[acceptedVaultID] {
+      await applyFetchedShareSummary(acceptedShare, descriptor: descriptor)
+    }
 
     return VaultShareAcceptance(share: acceptedShare, vaultID: acceptedVaultID)
   }
@@ -431,50 +459,80 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     _ changes: CKSyncEngine.Event.FetchedRecordZoneChanges,
     scope: CKDatabase.Scope
   ) async {
+    // The zone-wide `CKShare` is catalog metadata, not vault content: split it
+    // out before import so share creation, participant changes, and share
+    // deletion on other devices reach the share summary instead of being
+    // dropped by the content record-type filter.
+    var fetchedSharesByZone: [CKRecordZone.ID: CKShare] = [:]
     var modificationsByZone: [CKRecordZone.ID: [CKRecord]] = [:]
     for modification in changes.modifications {
-      modificationsByZone[modification.record.recordID.zoneID, default: []]
-        .append(modification.record)
+      let record = modification.record
+      if let share = record as? CKShare {
+        fetchedSharesByZone[record.recordID.zoneID] = share
+        continue
+      }
+      modificationsByZone[record.recordID.zoneID, default: []].append(record)
     }
 
+    var deletedShareZoneIDs: Set<CKRecordZone.ID> = []
     var deletionsByZone: [CKRecordZone.ID: [RecordDeletion]] = [:]
     for deletion in changes.deletions {
+      if deletion.recordType == CKRecord.SystemType.share {
+        deletedShareZoneIDs.insert(deletion.recordID.zoneID)
+        continue
+      }
       deletionsByZone[deletion.recordID.zoneID, default: []].append(
         RecordDeletion(recordName: deletion.recordID.recordName, recordType: deletion.recordType)
       )
     }
 
-    let zoneIDs = Set(modificationsByZone.keys).union(deletionsByZone.keys)
+    let zoneIDs = Set(modificationsByZone.keys)
+      .union(deletionsByZone.keys)
+      .union(fetchedSharesByZone.keys)
+      .union(deletedShareZoneIDs)
     for zoneID in zoneIDs {
       guard let vaultID = VaultID(zoneName: zoneID.zoneName) else { continue }
       await materializeVaultIfNeeded(vaultID: vaultID, zoneID: zoneID, scope: scope)
       guard let descriptor = descriptors[vaultID] else { continue }
 
-      do {
-        let database = try syncDatabase(for: descriptor)
-        let outcome = try await database.importChanges(
-          modifications: modificationsByZone[zoneID] ?? [],
-          deletions: deletionsByZone[zoneID] ?? []
-        )
-
-        if let title = outcome.importedVaultTitle {
-          try? await catalog.applyImportedVaultInfo(
-            vaultID: vaultID,
-            title: title,
-            icon: outcome.importedVaultIcon
+      let modifications = modificationsByZone[zoneID] ?? []
+      let deletions = deletionsByZone[zoneID] ?? []
+      if modifications.isEmpty == false || deletions.isEmpty == false {
+        do {
+          let database = try syncDatabase(for: descriptor)
+          let outcome = try await database.importChanges(
+            modifications: modifications,
+            deletions: deletions
           )
-        }
-        try? await catalog.noteVaultSynced(vaultID)
 
-        log.info(
-          """
-          vault \(vaultID.uuidString, privacy: .public): imported \
-          \(outcome.importedRecordCount) modified / \(outcome.deletedRecordCount) deleted, \
-          \(outcome.skippedConflictCount) held for local edits
-          """
-        )
-      } catch {
-        log.error("import failed for vault \(vaultID.uuidString, privacy: .public): \(error)")
+          if let title = outcome.importedVaultTitle {
+            try? await catalog.applyImportedVaultInfo(
+              vaultID: vaultID,
+              title: title,
+              icon: outcome.importedVaultIcon
+            )
+          }
+          try? await catalog.noteVaultSynced(vaultID)
+
+          log.info(
+            """
+            vault \(vaultID.uuidString, privacy: .public): imported \
+            \(outcome.importedRecordCount) modified / \(outcome.deletedRecordCount) deleted, \
+            \(outcome.skippedConflictCount) held for local edits
+            """
+          )
+        } catch {
+          log.error("import failed for vault \(vaultID.uuidString, privacy: .public): \(error)")
+        }
+      }
+
+      if let share = fetchedSharesByZone[zoneID] {
+        await applyFetchedShareSummary(share, descriptor: descriptor)
+      } else if deletedShareZoneIDs.contains(zoneID), descriptor.ownership == .owned {
+        // The owner stopped sharing, possibly on another device. Participants
+        // never see this record deletion — their whole zone disappears via the
+        // database-change path instead.
+        await clearShareSummary(for: descriptor)
       }
     }
   }
@@ -665,8 +723,68 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
         throw VaultSharePreparationError.shareRecordTypeMismatch
       }
       return share
-    } catch let error as CKError where error.isUnknownItem(for: recordID) {
+    } catch let error as CKError where error.isUnknownItem(for: recordID) || error.isMissingZone {
+      // No share record, or the zone itself doesn't exist yet (a local-only
+      // vault whose first upload hasn't created it). Either way: not shared.
       return nil
+    }
+  }
+
+  /// Mirrors a fetched zone-wide share into the catalog's lightweight summary.
+  ///
+  /// This is the single write path from a live `CKShare` to display state, so
+  /// every discovery/fetch/accept route reports participants the same way.
+  private func applyFetchedShareSummary(_ share: CKShare, descriptor: VaultDescriptor) async {
+    let permission: VaultPermissionSummary
+    switch descriptor.ownership {
+    case .owned:
+      permission = .owner
+    case .participant:
+      // `.unknown` / `.none` should not appear on an accepted participant's
+      // own entry; degrade to the materialized read-write default if they do.
+      let participantPermission = share.currentUserParticipant?.permission ?? .readWrite
+      switch participantPermission {
+      case .readOnly:
+        permission = .readOnly
+      case .readWrite, .none, .unknown:
+        permission = .readWrite
+      @unknown default:
+        permission = .readWrite
+      }
+    }
+
+    do {
+      try await catalog.applyShareInfo(
+        vaultID: descriptor.vaultID,
+        isShared: true,
+        shareURL: share.url,
+        shareRecordName: share.recordID.recordName,
+        participantCount: max(1, share.participants.count),
+        permission: permission
+      )
+    } catch {
+      log.error(
+        "apply share summary failed \(descriptor.vaultID.uuidString, privacy: .public): \(error)"
+      )
+    }
+  }
+
+  /// Resets an owned vault's summary to the unshared state after the share
+  /// record disappeared remotely.
+  private func clearShareSummary(for descriptor: VaultDescriptor) async {
+    do {
+      try await catalog.applyShareInfo(
+        vaultID: descriptor.vaultID,
+        isShared: false,
+        shareURL: nil,
+        shareRecordName: nil,
+        participantCount: 1,
+        permission: .owner
+      )
+    } catch {
+      log.error(
+        "clear share summary failed \(descriptor.vaultID.uuidString, privacy: .public): \(error)"
+      )
     }
   }
 
@@ -745,6 +863,28 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
         zoneID: zoneID,
         database: database
       )
+      try await applyInitialShareSummary(
+        vaultID: vaultID,
+        zoneID: zoneID,
+        database: database
+      )
+    }
+  }
+
+  /// Rediscovers the zone-wide share during initial discovery so a reinstall or
+  /// the user's other device shows correct sharing state before the first
+  /// engine fetch delivers the share record.
+  private func applyInitialShareSummary(
+    vaultID: VaultID,
+    zoneID: CKRecordZone.ID,
+    database: CKDatabase
+  ) async throws {
+    guard let descriptor = descriptors[vaultID] else { return }
+
+    if let share = try await fetchZoneWideShare(zoneID: zoneID, database: database) {
+      await applyFetchedShareSummary(share, descriptor: descriptor)
+    } else if descriptor.ownership == .owned {
+      await clearShareSummary(for: descriptor)
     }
   }
 

@@ -1,6 +1,7 @@
 import AVFoundation
 import AppUIComponents
 import CaptureAudio
+import CloudKit
 import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
@@ -132,16 +133,24 @@ struct CreationView: View {
           }
         }
 
-        if let collaborationVault = selectedCollaborationVault {
+        if let collaborationVault = selectedCollaborationVault,
+          let collaborationShare = vaultRuntime.collaborationShares[collaborationVault.vaultID]
+        {
           ToolbarItem(placement: .appTrailingAction) {
             VaultCollaborationControl(
               vaultID: collaborationVault.vaultID,
               title: collaborationVault.title,
-              prepareShare: prepareCollaborationShare,
+              share: collaborationShare,
+              onShareUpdated: noteCollaborationShareUpdated,
               onSharingStopped: noteCollaborationSharingStopped,
               onError: presentCollaborationError
             )
-            .id(collaborationVault.vaultID)
+            .id(
+              VaultCollaborationControl.viewIdentity(
+                vaultID: collaborationVault.vaultID,
+                share: collaborationShare
+              )
+            )
             .frame(width: 36, height: 36)
           }
         }
@@ -307,6 +316,12 @@ struct CreationView: View {
     .task(id: systemCaptureRequest?.id) {
       await routeSystemCaptureRequestIfNeeded()
     }
+    .task(id: selectedCollaborationVault?.vaultID) {
+      // The toolbar collaboration control needs the live zone-wide share; this
+      // also runs when a sync/catalog correction newly marks the vault shared.
+      guard selectedCollaborationVault != nil else { return }
+      await vaultRuntime.refreshCollaborationShares()
+    }
     .onChange(of: selectedLibraryMediaItem) { _, item in
       guard let item else { return }
       selectedLibraryMediaItem = nil
@@ -351,7 +366,6 @@ struct CreationView: View {
 
   private var selectedCollaborationVault: VaultDescriptor? {
     guard let descriptor = selectedVaultDescriptor,
-      descriptor.ownership == .owned,
       descriptor.isShared
     else {
       return nil
@@ -679,8 +693,8 @@ struct CreationView: View {
     composerDraft.location = nil
   }
 
-  private func prepareCollaborationShare(_ vaultID: VaultID) async throws -> VaultSharePreparation {
-    try await vaultRuntime.prepareShare(for: vaultID)
+  private func noteCollaborationShareUpdated(_ vaultID: VaultID) async {
+    await vaultRuntime.refreshCollaborationShares()
   }
 
   private func noteCollaborationSharingStopped(_ vaultID: VaultID) async {

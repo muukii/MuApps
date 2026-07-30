@@ -10,10 +10,15 @@ import AppKit
 
 /// SwiftUI bridge for the system collaboration control shown for a shared vault.
 ///
-/// The control resolves the current zone-wide `CKShare` lazily through an
-/// `NSItemProvider`, so mounting it in a row or toolbar does not perform
-/// CloudKit transport work. Journal does not set `activeParticipantCount`
-/// because the catalog tracks total participants, not live presence.
+/// The saved zone-wide `CKShare` is registered on the `NSItemProvider`
+/// synchronously — that registration is what makes `SWCollaborationView` treat
+/// the vault as already collaborated, so its popover shows the current
+/// participants and the manage action instead of the pre-share options UI.
+/// Hosts therefore mount this control only once the share has been fetched, and
+/// re-identify it (`viewIdentity`) when the share changes because the view
+/// cannot swap its item provider after creation. Journal does not set
+/// `activeParticipantCount` because the catalog tracks total participants, not
+/// live presence.
 #if canImport(UIKit)
 /// SwiftUI representable protocol used by the collaboration control on iOS.
 public typealias VaultCollaborationViewRepresentable = UIViewRepresentable
@@ -30,22 +35,34 @@ public struct VaultCollaborationControl: VaultCollaborationViewRepresentable {
 
   let vaultID: VaultID
   let title: String
-  let prepareShare: @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
+  let share: CKShare
+  let onShareUpdated: @MainActor @Sendable (VaultID) async -> Void
   let onSharingStopped: @MainActor @Sendable (VaultID) async -> Void
   let onError: @MainActor @Sendable (any Error) -> Void
 
   public init(
     vaultID: VaultID,
     title: String,
-    prepareShare: @escaping @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation,
+    share: CKShare,
+    onShareUpdated: @escaping @MainActor @Sendable (VaultID) async -> Void,
     onSharingStopped: @escaping @MainActor @Sendable (VaultID) async -> Void,
     onError: @escaping @MainActor @Sendable (any Error) -> Void
   ) {
     self.vaultID = vaultID
     self.title = title
-    self.prepareShare = prepareShare
+    self.share = share
+    self.onShareUpdated = onShareUpdated
     self.onSharingStopped = onSharingStopped
     self.onError = onError
+  }
+
+  /// SwiftUI identity for one saved share state.
+  ///
+  /// `SWCollaborationView` reads its `NSItemProvider` only at creation, so
+  /// hosts pass this to `.id(_:)` to rebuild the view when the share record
+  /// itself changes (participants added, share re-created).
+  public static func viewIdentity(vaultID: VaultID, share: CKShare) -> String {
+    "\(vaultID.uuidString)-\(share.recordChangeTag ?? "")"
   }
 
   #if canImport(UIKit)
@@ -74,7 +91,7 @@ public struct VaultCollaborationControl: VaultCollaborationViewRepresentable {
     Coordinator(
       vaultID: vaultID,
       title: title,
-      prepareShare: prepareShare,
+      onShareUpdated: onShareUpdated,
       onSharingStopped: onSharingStopped,
       onError: onError
     )
@@ -87,16 +104,12 @@ public struct VaultCollaborationControl: VaultCollaborationViewRepresentable {
       allowedParticipantPermissionOptions: .readWrite,
       allowedParticipantAccessOptions: .specifiedRecipientsOnly
     )
-    let vaultID = vaultID
-    let prepareShare = prepareShare
 
     itemProvider.registerCKShare(
+      share,
       container: container,
       allowedSharingOptions: options
-    ) {
-      let preparation = try await prepareShare(vaultID)
-      return preparation.share
-    }
+    )
 
     return itemProvider
   }
@@ -117,20 +130,20 @@ public struct VaultCollaborationControl: VaultCollaborationViewRepresentable {
 
     private let vaultID: VaultID
     var title: String
-    private let prepareShare: @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
+    private let onShareUpdated: @MainActor @Sendable (VaultID) async -> Void
     private let onSharingStopped: @MainActor @Sendable (VaultID) async -> Void
     private let onError: @MainActor @Sendable (any Error) -> Void
 
     init(
       vaultID: VaultID,
       title: String,
-      prepareShare: @escaping @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation,
+      onShareUpdated: @escaping @MainActor @Sendable (VaultID) async -> Void,
       onSharingStopped: @escaping @MainActor @Sendable (VaultID) async -> Void,
       onError: @escaping @MainActor @Sendable (any Error) -> Void
     ) {
       self.vaultID = vaultID
       self.title = title
-      self.prepareShare = prepareShare
+      self.onShareUpdated = onShareUpdated
       self.onSharingStopped = onSharingStopped
       self.onError = onError
     }
@@ -142,11 +155,7 @@ public struct VaultCollaborationControl: VaultCollaborationViewRepresentable {
 
     public func cloudSharingControllerDidSaveShare(_ cloudSharingController: UICloudSharingController) {
       Task { @MainActor in
-        do {
-          _ = try await prepareShare(vaultID)
-        } catch {
-          onError(error)
-        }
+        await onShareUpdated(vaultID)
       }
     }
 
@@ -166,15 +175,10 @@ public struct VaultCollaborationControl: VaultCollaborationViewRepresentable {
     }
     #else
     public func sharingService(_ sharingService: NSSharingService, didSave share: CKShare) {
-      let prepareShare = prepareShare
+      let onShareUpdated = onShareUpdated
       let vaultID = vaultID
-      let onError = onError
-      Task { @MainActor [prepareShare, vaultID, onError] in
-        do {
-          _ = try await prepareShare(vaultID)
-        } catch {
-          onError(error)
-        }
+      Task { @MainActor [onShareUpdated, vaultID] in
+        await onShareUpdated(vaultID)
       }
     }
 

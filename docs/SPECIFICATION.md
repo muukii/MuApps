@@ -132,7 +132,12 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
   - Add the imported file to history and open it in the local player
   - Show dedicated waveform artwork for audio-only files
 - Local playback when a video has been downloaded (feature-flagged)
-- Downloaded local videos continue audio playback when the app moves to the background or the screen is locked
+- Background audio for local media (downloaded videos and imported audio/video files):
+  - Audio continues when the app moves to the background or the screen is locked
+  - Local playback becomes the device's primary audio (takes over other apps' audio); leaving the player releases the audio session so other apps can resume
+  - Lock Screen / Control Center shows Now Playing info (title, author, thumbnail artwork; waveform-less audio imports show as audio type)
+  - Remote commands: play/pause, skip backward/forward 10 seconds, and scrubbing from the system player
+  - YouTube streaming is excluded: it pauses when the app leaves the foreground and mixes with other apps' audio while in the foreground
 
 #### 1.2 Playback Controls
 - Play/pause, time display, and scrubber

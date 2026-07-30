@@ -56,6 +56,7 @@ struct VaultSelectionView: View {
         runtimeState: vaultRuntime.state,
         initialAvailabilityResolution: vaultRuntime.lastInitialAvailabilityResolution,
         vaults: vaultRuntime.vaults,
+        collaborationShares: vaultRuntime.collaborationShares,
         selectedVaultID: vaultRuntime.selectedVault?.vaultID,
         selectingVaultID: selectingVaultID,
         preparingShareVaultID: preparingShareVaultID,
@@ -63,7 +64,7 @@ struct VaultSelectionView: View {
         deletingVaultID: deletingVaultID,
         onSelectVault: selectVault,
         onShareVault: shareVault,
-        onPrepareCollaborationShare: prepareCollaborationShare,
+        onCollaborationShareUpdated: noteCollaborationShareUpdated,
         onCollaborationSharingStopped: noteCollaborationSharingStopped,
         onCollaborationError: presentShareError,
         onRenameVault: presentRenameEditor,
@@ -90,6 +91,10 @@ struct VaultSelectionView: View {
           .disabled(vaultRuntime.state != .ready || isVaultOperationInProgress)
         }
       }
+    }
+    .task(id: sharedVaultIDs) {
+      guard sharedVaultIDs.isEmpty == false else { return }
+      await vaultRuntime.refreshCollaborationShares()
     }
     .sheet(isPresented: $isVaultCreationPresented) {
       VaultCreationSheet(
@@ -184,6 +189,12 @@ struct VaultSelectionView: View {
       || deletingVaultID != nil
   }
 
+  /// Task identity for the collaboration-share refresh: re-fetch when the set
+  /// of shared vaults changes (a vault became shared, or one was removed).
+  private var sharedVaultIDs: [VaultID] {
+    vaultRuntime.vaults.filter(\.isShared).map(\.vaultID)
+  }
+
   private func selectVault(_ descriptor: VaultDescriptor) {
     guard selectingVaultID == nil, renamingVaultID == nil, deletingVaultID == nil else { return }
 
@@ -243,8 +254,8 @@ struct VaultSelectionView: View {
     }
   }
 
-  private func prepareCollaborationShare(_ vaultID: VaultID) async throws -> VaultSharePreparation {
-    try await vaultRuntime.prepareShare(for: vaultID)
+  private func noteCollaborationShareUpdated(_ vaultID: VaultID) async {
+    await vaultRuntime.refreshCollaborationShares()
   }
 
   private func noteCollaborationSharingStopped(_ vaultID: VaultID) async {
@@ -343,6 +354,7 @@ private struct VaultSelectionContent: View {
   let runtimeState: JournalVaultRuntime.State
   let initialAvailabilityResolution: VaultInitialAvailabilityResolution?
   let vaults: [VaultDescriptor]
+  let collaborationShares: [VaultID: CKShare]
   let selectedVaultID: VaultID?
   let selectingVaultID: VaultID?
   let preparingShareVaultID: VaultID?
@@ -350,8 +362,7 @@ private struct VaultSelectionContent: View {
   let deletingVaultID: VaultID?
   let onSelectVault: @MainActor @Sendable (VaultDescriptor) -> Void
   let onShareVault: @MainActor @Sendable (VaultDescriptor) -> Void
-  let onPrepareCollaborationShare:
-    @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
+  let onCollaborationShareUpdated: @MainActor @Sendable (VaultID) async -> Void
   let onCollaborationSharingStopped: @MainActor @Sendable (VaultID) async -> Void
   let onCollaborationError: @MainActor @Sendable (any Error) -> Void
   let onRenameVault: @MainActor @Sendable (VaultDescriptor) -> Void
@@ -375,6 +386,7 @@ private struct VaultSelectionContent: View {
         VaultSelectionList(
           initialAvailabilityResolution: initialAvailabilityResolution,
           vaults: vaults,
+          collaborationShares: collaborationShares,
           selectedVaultID: selectedVaultID,
           selectingVaultID: selectingVaultID,
           preparingShareVaultID: preparingShareVaultID,
@@ -382,7 +394,7 @@ private struct VaultSelectionContent: View {
           deletingVaultID: deletingVaultID,
           onSelectVault: onSelectVault,
           onShareVault: onShareVault,
-          onPrepareCollaborationShare: onPrepareCollaborationShare,
+          onCollaborationShareUpdated: onCollaborationShareUpdated,
           onCollaborationSharingStopped: onCollaborationSharingStopped,
           onCollaborationError: onCollaborationError,
           onRenameVault: onRenameVault,
@@ -400,6 +412,7 @@ private struct VaultSelectionList: View {
 
   let initialAvailabilityResolution: VaultInitialAvailabilityResolution?
   let vaults: [VaultDescriptor]
+  let collaborationShares: [VaultID: CKShare]
   let selectedVaultID: VaultID?
   let selectingVaultID: VaultID?
   let preparingShareVaultID: VaultID?
@@ -407,8 +420,7 @@ private struct VaultSelectionList: View {
   let deletingVaultID: VaultID?
   let onSelectVault: @MainActor @Sendable (VaultDescriptor) -> Void
   let onShareVault: @MainActor @Sendable (VaultDescriptor) -> Void
-  let onPrepareCollaborationShare:
-    @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
+  let onCollaborationShareUpdated: @MainActor @Sendable (VaultID) async -> Void
   let onCollaborationSharingStopped: @MainActor @Sendable (VaultID) async -> Void
   let onCollaborationError: @MainActor @Sendable (any Error) -> Void
   let onRenameVault: @MainActor @Sendable (VaultDescriptor) -> Void
@@ -444,11 +456,11 @@ private struct VaultSelectionList: View {
             isPreparingShare: isPreparingShare,
             isRenaming: isRenaming,
             isDeleting: isDeleting,
-            isShared: vault.isShared,
+            collaborationShare: vault.isShared ? collaborationShares[vault.vaultID] : nil,
             canShare: vault.ownership == .owned,
             onSelect: { onSelectVault(vault) },
             onShare: { onShareVault(vault) },
-            onPrepareCollaborationShare: onPrepareCollaborationShare,
+            onCollaborationShareUpdated: onCollaborationShareUpdated,
             onCollaborationSharingStopped: onCollaborationSharingStopped,
             onCollaborationError: onCollaborationError
           )
@@ -508,12 +520,13 @@ private struct VaultSelectionRow: View {
   let isPreparingShare: Bool
   let isRenaming: Bool
   let isDeleting: Bool
-  let isShared: Bool
+  /// Saved zone-wide share when the vault is shared and its share has been
+  /// fetched; `nil` hides the collaboration control.
+  let collaborationShare: CKShare?
   let canShare: Bool
   let onSelect: @MainActor @Sendable () -> Void
   let onShare: @MainActor @Sendable () -> Void
-  let onPrepareCollaborationShare:
-    @MainActor @Sendable (VaultID) async throws -> VaultSharePreparation
+  let onCollaborationShareUpdated: @MainActor @Sendable (VaultID) async -> Void
   let onCollaborationSharingStopped: @MainActor @Sendable (VaultID) async -> Void
   let onCollaborationError: @MainActor @Sendable (any Error) -> Void
 
@@ -552,24 +565,27 @@ private struct VaultSelectionRow: View {
       .buttonStyle(.plain)
       .accessibilityAddTraits(isSelected ? .isSelected : [])
 
-      if canShare {
+      if canShare || collaborationShare != nil {
         HStack(spacing: 6) {
-          if isShared {
+          if let collaborationShare {
             VaultCollaborationControl(
               vaultID: vaultID,
               title: title,
-              prepareShare: onPrepareCollaborationShare,
+              share: collaborationShare,
+              onShareUpdated: onCollaborationShareUpdated,
               onSharingStopped: onCollaborationSharingStopped,
               onError: onCollaborationError
             )
-            .id(vaultID)
+            .id(VaultCollaborationControl.viewIdentity(vaultID: vaultID, share: collaborationShare))
             .frame(width: 36, height: 36)
           }
 
-          VaultShareButton(
-            isPreparing: isPreparingShare,
-            onShare: onShare
-          )
+          if canShare {
+            VaultShareButton(
+              isPreparing: isPreparingShare,
+              onShare: onShare
+            )
+          }
         }
         .fixedSize()
       }
@@ -653,11 +669,11 @@ private struct VaultSelectionRowPreview: View {
       isPreparingShare: isPreparingShare,
       isRenaming: isRenaming,
       isDeleting: isDeleting,
-      isShared: false,
+      collaborationShare: nil,
       canShare: canShare,
       onSelect: {},
       onShare: {},
-      onPrepareCollaborationShare: { _ in throw CancellationError() },
+      onCollaborationShareUpdated: { _ in },
       onCollaborationSharingStopped: { _ in },
       onCollaborationError: { _ in }
     )

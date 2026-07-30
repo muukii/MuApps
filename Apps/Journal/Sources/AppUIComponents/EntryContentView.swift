@@ -38,6 +38,7 @@ public struct EntryContentView: View {
       .frame(minHeight: style.text.minimumHeight)
     case .link(let urlString):
       LinkContentView(urlString: urlString, style: style.link)
+        .frame(minHeight: style.link.minimumHeight)
     case .file(let file):
       FileContentView(file: file, style: style.file)
         .frame(minHeight: style.file.minimumHeight)
@@ -538,6 +539,23 @@ private struct LinkContentView: View {
       self.preset = preset
     }
 
+    /// Finite native-preview height for placements that do not size the
+    /// `LPLinkView` host themselves.
+    ///
+    /// The host intentionally has no intrinsic size because its native width
+    /// can exceed a SwiftUI grid column. The saved-grid and detail styles must
+    /// therefore provide the vertical proposal at their content boundary.
+    var previewHeight: CGFloat? {
+      switch preset {
+      case .savedGrid:
+        return 112
+      case .detail:
+        return 240
+      case .composer, .share:
+        return nil
+      }
+    }
+
     var allowsInteraction: Bool {
       preset == .detail
     }
@@ -547,6 +565,10 @@ private struct LinkContentView: View {
         preset,
         emptyTitle: preset == .composer ? "Link" : "Empty link"
       )
+    }
+
+    var minimumHeight: CGFloat? {
+      previewHeight
     }
   }
 
@@ -558,7 +580,7 @@ private struct LinkContentView: View {
       JournalLinkPreview(
         url: linkURL.url,
       )
-      //      .frame(height: style.previewHeight)
+      .frame(height: style.previewHeight)
       .allowsHitTesting(style.allowsInteraction)
     } else {
       TextContentView(
