@@ -26,12 +26,12 @@ enum VideoPreviewRenderState: Equatable {
 
 /// Identifies how narrowly the editor may update an existing Preview recipe.
 ///
-/// Motion-blur-only and grain-only edits can preserve both the current video
-/// composition and player item when only live frame parameters changed.
+/// Motion-blur-only and parametric-document edits can preserve both the current
+/// video composition and player item when only live frame parameters changed.
 enum VideoPreviewRecipeChange: Equatable, Sendable {
   case complete
   case motionBlur
-  case grain
+  case parametricDocument
 }
 
 /// Owns the preview `AVPlayer` and rebuilds it from the same complete render
@@ -276,14 +276,14 @@ final class VideoPreviewModel {
       return
     }
 
-    if change == .grain {
+    if change == .parametricDocument {
       temporalPreviewState.document.update(document: recipe.document)
       if previousRequest?.source.id == source.id,
         player.currentItem?.asset === temporalPreviewState.source.asset
       {
-        // The complete document is sampled once per compositor request. Grain
-        // enablement and parameters therefore update without replacing the
-        // composition or resetting the playhead.
+        // The complete document is sampled once per compositor request.
+        // Exposure and Grain therefore update without replacing the composition
+        // or resetting the playhead.
         return
       }
     }

@@ -8,6 +8,33 @@ import JournalVault
 import MuColor
 import SwiftUI
 
+/// Meaning of the currently visible composer.
+///
+/// Root composition creates a Home card. Continuation composition appends to
+/// the card represented by the active detail destination.
+enum CreationComposerPlacement {
+  case root
+  case continuation
+
+  var prompt: LocalizedStringKey {
+    switch self {
+    case .root:
+      "Write something"
+    case .continuation:
+      "Add to this card"
+    }
+  }
+
+  var postAccessibilityLabel: LocalizedStringKey {
+    switch self {
+    case .root:
+      "Post Entry"
+    case .continuation:
+      "Add Entry"
+    }
+  }
+}
+
 /// Presentation container for the Journal creation surface.
 ///
 /// The container owns the bottom input bar and its standard SwiftUI `Menu`.
@@ -15,6 +42,8 @@ import SwiftUI
 struct CreationContainer<Content: View, MenuContent: View>: View {
 
   private let draft: ThreadDraftCard
+  private let isPresented: Bool
+  private let placement: CreationComposerPlacement
   private let isProcessing: Bool
   private let onOpenDraft: @MainActor @Sendable () -> Void
   private let onDiscardDraft: @MainActor @Sendable () -> Void
@@ -24,6 +53,8 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
 
   init(
     draft: ThreadDraftCard,
+    isPresented: Bool = true,
+    placement: CreationComposerPlacement = .root,
     isProcessing: Bool,
     onOpenDraft: @escaping @MainActor @Sendable () -> Void,
     onDiscardDraft: @escaping @MainActor @Sendable () -> Void,
@@ -32,6 +63,8 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
     @ViewBuilder menuContent: () -> MenuContent
   ) {
     self.draft = draft
+    self.isPresented = isPresented
+    self.placement = placement
     self.isProcessing = isProcessing
     self.onOpenDraft = onOpenDraft
     self.onDiscardDraft = onDiscardDraft
@@ -40,24 +73,51 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
     self.menuContent = menuContent()
   }
 
+  @State private var composerHeight: CGFloat = 0
+
   var body: some View {
     content
+      .environment(\.composerOverlayHeight, composerHeight)
       .safeAreaInset(edge: .bottom) {
-        CreationComposerInputBar(
-          draft: draft,
-          isProcessing: isProcessing,
-          onOpenDraft: onOpenDraft,
-          onDiscardDraft: onDiscardDraft,
-          onPost: onPost
-        ) {
-          menuContent
+        // The composer covers the whole navigation stack, so its height is
+        // published rather than relied upon as a safe-area inset. An empty group
+        // measures as zero, which clears the reservation with the composer.
+        Group {
+          if isPresented {
+            CreationComposerInputBar(
+              draft: draft,
+              placement: placement,
+              isProcessing: isProcessing,
+              onOpenDraft: onOpenDraft,
+              onDiscardDraft: onDiscardDraft,
+              onPost: onPost
+            ) {
+              menuContent
+            }
+            .frame(maxWidth: CreationContainerMetrics.maximumComposerWidth)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, CreationContainerMetrics.horizontalPadding)
+            .padding(.bottom, 8)
+          }
         }
-        .frame(maxWidth: CreationContainerMetrics.maximumComposerWidth)
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, CreationContainerMetrics.horizontalPadding)
-        .padding(.bottom, 8)
+        .onGeometryChange(for: CGFloat.self) { proxy in
+          proxy.size.height
+        } action: { height in
+          composerHeight = height
+        }
       }
   }
+}
+
+extension EnvironmentValues {
+
+  /// Height the floating composer covers at the bottom of every screen below it.
+  ///
+  /// The composer is installed outside the navigation stack so a single bar can
+  /// follow every pushed screen. A `safeAreaInset` does not cross that boundary,
+  /// so scrolling screens read this value and inset their own scroll content
+  /// instead. Without it a list's last row can never be scrolled clear of the bar.
+  @Entry var composerOverlayHeight: CGFloat = 0
 }
 
 /// Visual constants for the creation composer bar.
@@ -99,6 +159,7 @@ private enum CreationContainerMetrics {
 private struct CreationComposerInputBar<MenuContent: View>: View {
 
   @Bindable var draft: ThreadDraftCard
+  let placement: CreationComposerPlacement
   let isProcessing: Bool
   let onOpenDraft: @MainActor @Sendable () -> Void
   let onDiscardDraft: @MainActor @Sendable () -> Void
@@ -107,6 +168,7 @@ private struct CreationComposerInputBar<MenuContent: View>: View {
 
   init(
     draft: ThreadDraftCard,
+    placement: CreationComposerPlacement = .root,
     isProcessing: Bool,
     onOpenDraft: @escaping @MainActor @Sendable () -> Void,
     onDiscardDraft: @escaping @MainActor @Sendable () -> Void,
@@ -114,6 +176,7 @@ private struct CreationComposerInputBar<MenuContent: View>: View {
     @ViewBuilder menuContent: () -> MenuContent
   ) {
     self.draft = draft
+    self.placement = placement
     self.isProcessing = isProcessing
     self.onOpenDraft = onOpenDraft
     self.onDiscardDraft = onDiscardDraft
@@ -125,6 +188,7 @@ private struct CreationComposerInputBar<MenuContent: View>: View {
     if draft.usesExpandedComposerPreview {
       CreationComposerExpandedPreviewInputBar(
         draft: draft,
+        placement: placement,
         isProcessing: isProcessing,
         onOpenDraft: onOpenDraft,
         onDiscardDraft: onDiscardDraft,
@@ -133,6 +197,7 @@ private struct CreationComposerInputBar<MenuContent: View>: View {
     } else {
       CreationComposerCompactInputBar(
         draft: draft,
+        placement: placement,
         isProcessing: isProcessing,
         onOpenDraft: onOpenDraft,
         onDiscardDraft: onDiscardDraft,
@@ -148,6 +213,7 @@ private struct CreationComposerInputBar<MenuContent: View>: View {
 private struct CreationComposerCompactInputBar<MenuContent: View>: View {
 
   @Bindable var draft: ThreadDraftCard
+  let placement: CreationComposerPlacement
   let isProcessing: Bool
   let onOpenDraft: @MainActor @Sendable () -> Void
   let onDiscardDraft: @MainActor @Sendable () -> Void
@@ -156,6 +222,7 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
 
   init(
     draft: ThreadDraftCard,
+    placement: CreationComposerPlacement,
     isProcessing: Bool,
     onOpenDraft: @escaping @MainActor @Sendable () -> Void,
     onDiscardDraft: @escaping @MainActor @Sendable () -> Void,
@@ -163,6 +230,7 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
     @ViewBuilder menuContent: () -> MenuContent
   ) {
     self.draft = draft
+    self.placement = placement
     self.isProcessing = isProcessing
     self.onOpenDraft = onOpenDraft
     self.onDiscardDraft = onDiscardDraft
@@ -182,12 +250,14 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
 
       CreationComposerDraftContent(
         draft: draft,
+        placement: placement,
         isProcessing: isProcessing,
         onOpenDraft: onOpenDraft
       )
 
       CreationComposerPostButton(
         canPost: draft.canSave,
+        placement: placement,
         isProcessing: isProcessing,
         onPost: onPost
       )
@@ -205,6 +275,7 @@ private struct CreationComposerExpandedPreviewInputBar: View {
   @Environment(\.verticalSizeClass) private var verticalSizeClass
 
   let draft: ThreadDraftCard
+  let placement: CreationComposerPlacement
   let isProcessing: Bool
   let onOpenDraft: @MainActor @Sendable () -> Void
   let onDiscardDraft: @MainActor @Sendable () -> Void
@@ -233,6 +304,7 @@ private struct CreationComposerExpandedPreviewInputBar: View {
 
       CreationComposerPostButton(
         canPost: draft.canSave,
+        placement: placement,
         isProcessing: isProcessing,
         onPost: onPost
       )
@@ -373,13 +445,14 @@ private struct CreationComposerLeadingAction<MenuContent: View>: View {
 private struct CreationComposerDraftContent: View {
 
   @Bindable var draft: ThreadDraftCard
+  let placement: CreationComposerPlacement
   let isProcessing: Bool
   let onOpenDraft: @MainActor @Sendable () -> Void
 
   var body: some View {
     switch draft.kind {
     case .text:
-      TextField("Write something", text: $draft.text, axis: .vertical)
+      TextField(placement.prompt, text: $draft.text, axis: .vertical)
         .textFieldStyle(.plain)
         .lineLimit(1...5)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -457,6 +530,7 @@ private struct CreationComposerPostButton: View {
   @Environment(\.appPalette) private var palette
 
   let canPost: Bool
+  let placement: CreationComposerPlacement
   let isProcessing: Bool
   let onPost: @MainActor @Sendable () -> Void
 
@@ -480,7 +554,7 @@ private struct CreationComposerPostButton: View {
     }
     .buttonStyle(.plain)
     .disabled(canPost == false || isProcessing)
-    .accessibilityLabel("Post Entry")
+    .accessibilityLabel(placement.postAccessibilityLabel)
     .keyboardShortcut(.return, modifiers: .command)
   }
 

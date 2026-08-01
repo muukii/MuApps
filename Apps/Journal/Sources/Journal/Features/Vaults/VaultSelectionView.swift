@@ -456,6 +456,7 @@ private struct VaultSelectionList: View {
             isPreparingShare: isPreparingShare,
             isRenaming: isRenaming,
             isDeleting: isDeleting,
+            isShared: vault.isShared,
             collaborationShare: vault.isShared ? collaborationShares[vault.vaultID] : nil,
             canShare: vault.ownership == .owned,
             onSelect: { onSelectVault(vault) },
@@ -520,6 +521,9 @@ private struct VaultSelectionRow: View {
   let isPreparingShare: Bool
   let isRenaming: Bool
   let isDeleting: Bool
+  /// Whether the catalog knows the vault has a CloudKit share. Drives the
+  /// share button's state icon even before the live share has been fetched.
+  let isShared: Bool
   /// Saved zone-wide share when the vault is shared and its share has been
   /// fetched; `nil` hides the collaboration control.
   let collaborationShare: CKShare?
@@ -582,6 +586,7 @@ private struct VaultSelectionRow: View {
 
           if canShare {
             VaultShareButton(
+              isShared: isShared,
               isPreparing: isPreparingShare,
               onShare: onShare
             )
@@ -622,6 +627,14 @@ private struct VaultSelectionRowPreview: View {
         )
 
         previewRow(
+          title: "Family Journal",
+          subtitle: "Owned by you",
+          icon: .emoji("🏠"),
+          isShared: true,
+          canShare: true
+        )
+
+        previewRow(
           title: "Travel Archive",
           subtitle: "Owned by you",
           icon: .emoji("🌿"),
@@ -657,6 +670,7 @@ private struct VaultSelectionRowPreview: View {
     isPreparingShare: Bool = false,
     isRenaming: Bool = false,
     isDeleting: Bool = false,
+    isShared: Bool = false,
     canShare: Bool = true
   ) -> some View {
     VaultSelectionRow(
@@ -669,6 +683,7 @@ private struct VaultSelectionRowPreview: View {
       isPreparingShare: isPreparingShare,
       isRenaming: isRenaming,
       isDeleting: isDeleting,
+      isShared: isShared,
       collaborationShare: nil,
       canShare: canShare,
       onSelect: {},
@@ -682,8 +697,14 @@ private struct VaultSelectionRowPreview: View {
 }
 
 /// Explicit vault invite button shown next to the system collaboration control.
+///
+/// The icon carries the sharing state: an unshared vault offers the share
+/// glyph, a shared vault switches to a people glyph. Both states open the same
+/// `UICloudSharingController` sheet, which manages the existing share once one
+/// exists.
 private struct VaultShareButton: View {
 
+  let isShared: Bool
   let isPreparing: Bool
   let onShare: @MainActor @Sendable () -> Void
 
@@ -694,14 +715,14 @@ private struct VaultShareButton: View {
           ProgressView()
             .controlSize(.small)
         } else {
-          Image(systemName: "square.and.arrow.up")
+          Image(systemName: isShared ? "personalhotspot.circle.fill" : "personalhotspot.circle")
             .font(.title3)
         }
       }
       .frame(width: 36, height: 36)
     }
     .buttonStyle(.borderless)
-    .accessibilityLabel("Invite People")
+    .accessibilityLabel(isShared ? Text("Manage Sharing") : Text("Invite People"))
   }
 }
 

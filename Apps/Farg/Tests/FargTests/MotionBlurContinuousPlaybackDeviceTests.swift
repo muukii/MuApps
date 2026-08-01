@@ -193,7 +193,7 @@ import Testing
         ),
         for: source,
         colorInfo: .sdrRec709,
-        change: .grain
+        change: .parametricDocument
       )
       #expect(model.player.currentItem === originalItem)
       #expect(originalItem.videoComposition === currentFrameComposition)
@@ -219,7 +219,7 @@ import Testing
         ),
         for: source,
         colorInfo: .sdrRec709,
-        change: .grain
+        change: .parametricDocument
       )
       #expect(model.player.currentItem === originalItem)
       #expect(originalItem.videoComposition === currentFrameComposition)

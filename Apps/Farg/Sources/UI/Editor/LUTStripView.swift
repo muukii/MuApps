@@ -13,6 +13,7 @@ struct LUTStripView: View {
   let contentPadding: CGFloat
   let library: LUTLibrary
   let source: LUTPreviewSourceImage?
+  let exposure: ExposureAdjustment
   @Binding var selected: LUT?
 
   var body: some View {
@@ -20,8 +21,10 @@ struct LUTStripView: View {
       ScrollView(.horizontal, showsIndicators: false) {
         LazyHStack(alignment: .top, spacing: 10) {
           OriginalCell(
-            title: "Original",
+            title: "No LUT",
             source: source,
+            library: library,
+            exposure: exposure,
             isSelected: selected == nil
           ) {
             selected = nil
@@ -35,6 +38,7 @@ struct LUTStripView: View {
               source: source,
               lut: lut,
               library: library,
+              exposure: exposure,
               isSelected: selected?.id == lut.id
             ) {
               selected = lut
@@ -89,20 +93,22 @@ private struct OriginalCell: View {
 
   let title: String
   let source: LUTPreviewSourceImage?
+  let library: LUTLibrary
+  let exposure: ExposureAdjustment
   let isSelected: Bool
   let action: @MainActor @Sendable () -> Void
 
   var body: some View {
     Button(action: action) {
       VStack(alignment: .leading, spacing: 7) {
-        
         Color.clear
           .overlay {
-            if let source {
-              Image(decorative: source.image, scale: 1)
-                .resizable()
-                .scaledToFill()
-            }
+            LUTPreviewImageView(
+              source: source,
+              lut: nil,
+              library: library,
+              exposure: exposure
+            )
           }
           .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
           .selectionOverlay(isSelected: isSelected)
@@ -131,6 +137,7 @@ private struct LUTPreviewCell: View {
   let lut: LUT?
   // TODO: shold not have this directly
   let library: LUTLibrary
+  let exposure: ExposureAdjustment
   let isSelected: Bool
   let action: @MainActor @Sendable () -> Void
 
@@ -142,7 +149,8 @@ private struct LUTPreviewCell: View {
             LUTPreviewImageView(
               source: source,
               lut: lut,
-              library: library
+              library: library,
+              exposure: exposure
             )
           }
           .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -188,6 +196,7 @@ private struct LUTPreviewCell: View {
     contentPadding: 16,
     library: library,
     source: source,
+    exposure: .neutral,
     selected: $selected
   )
   .environment(previewModels)

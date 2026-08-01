@@ -127,6 +127,115 @@ struct VaultContentStoreTests {
     #expect(edges[1].createdAt < edges[2].createdAt)
   }
 
+  // MARK: - appendCard
+
+  @Test
+  func appendCard_buildsOrderedChildrenAndSupportsEveryDepth() throws {
+    let store = try makeStore()
+    let root = try #require(
+      try store.createThread(cards: [.init(kind: .text, text: "root")]).first
+    )
+
+    let firstChild = try store.appendCard(
+      .init(kind: .text, text: "first child"),
+      to: root.id
+    )
+    let secondChild = try store.appendCard(
+      .init(kind: .text, text: "second child"),
+      to: root.id
+    )
+    let grandchild = try store.appendCard(
+      .init(kind: .text, text: "grandchild"),
+      to: firstChild.id
+    )
+
+    #expect(firstChild.parentEdgeID == root.id)
+    #expect(firstChild.sortIndex == 0)
+    #expect(secondChild.parentEdgeID == root.id)
+    #expect(secondChild.sortIndex == 1)
+    #expect(grandchild.parentEdgeID == firstChild.id)
+    #expect(grandchild.sortIndex == 0)
+
+    let context = store.container.mainContext
+    let cards = try context.fetch(FetchDescriptor<Card>())
+    #expect(cards.count == 4)
+    #expect(cards.first(where: { $0.id == grandchild.cardID })?.body == "grandchild")
+
+    // Every appended text card contributes one card save and one edge save.
+    let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
+    #expect(outbox.count == 8)
+  }
+
+  @Test
+  func appendCard_missingParent_rollsBackWithoutRows() throws {
+    let store = try makeStore()
+    let missingParentID = UUID()
+
+    #expect(throws: VaultContentStore.Error.self) {
+      try store.appendCard(
+        .init(kind: .text, text: "orphan"),
+        to: missingParentID
+      )
+    }
+
+    let context = store.container.mainContext
+    #expect(try context.fetchCount(FetchDescriptor<Card>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 0)
+  }
+
+  @Test
+  func appendCard_mediaDraft_writesAttachmentAndResource() throws {
+    let store = try makeStore()
+    let root = try #require(
+      try store.createThread(cards: [.init(kind: .text, text: "root")]).first
+    )
+    let bytes = Data([0xFF, 0x01, 0x02, 0x03])
+
+    let child = try store.appendCard(
+      .init(kind: .photo, mediaData: bytes, thumbnail: Data([0x00])),
+      to: root.id
+    )
+
+    let context = store.container.mainContext
+    let attachment = try #require(
+      try context.fetch(FetchDescriptor<JournalVault.Attachment>()).first
+    )
+    let resource = try #require(
+      try context.fetch(FetchDescriptor<JournalVault.AttachmentResource>()).first
+    )
+    #expect(child.parentEdgeID == root.id)
+    #expect(attachment.cardID == child.cardID)
+    #expect(resource.attachmentID == attachment.id)
+    #expect(try Data(contentsOf: store.fileURL(for: resource)) == bytes)
+    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 6)
+  }
+
+  @Test
+  func latestRootCard_ignoresNewerContinuations() throws {
+    let store = try makeStore()
+    _ = try store.createThread(cards: [.init(kind: .text, text: "older root")])
+    let newestRoot = try #require(
+      try store.createThread(cards: [.init(kind: .text, text: "newest root")]).first
+    )
+    let olderRoot = try #require(
+      try store.container.mainContext.fetch(FetchDescriptor<CardEdge>())
+        .first(where: { $0.parentEdgeID == nil && $0.id != newestRoot.id })
+    )
+    olderRoot.createdAt = .distantPast
+    newestRoot.createdAt = .now
+    try store.container.mainContext.save()
+    _ = try store.appendCard(
+      .init(kind: .text, text: "newest authored child"),
+      to: olderRoot.id
+    )
+
+    let latestRoot = try #require(try store.latestRootCard())
+
+    #expect(latestRoot.id == newestRoot.cardID)
+    #expect(latestRoot.body == "newest root")
+  }
+
   @Test
   func createThread_mediaDraft_writesFileAndAttachmentRow() throws {
     let store = try makeStore()
@@ -221,7 +330,8 @@ struct VaultContentStoreTests {
 
     let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
     #expect(outbox.count == 5)  // card + edge + attachment + 2 resources
-    #expect(outbox.filter { $0.recordType == VaultRecordType.attachmentResource.rawValue }.count == 2)
+    #expect(
+      outbox.filter { $0.recordType == VaultRecordType.attachmentResource.rawValue }.count == 2)
   }
 
   @Test
@@ -458,7 +568,7 @@ struct VaultContentStoreTests {
       switch error {
       case .missingMediaPayload(let kind):
         #expect(kind == .file)
-      case .cardNotFound:
+      case .cardNotFound, .cardEdgeNotFound:
         Issue.record("Expected missingMediaPayload, received \(error)")
       }
     }
@@ -703,10 +813,13 @@ struct VaultContentStoreTests {
     let root = try #require(try store.createThread(cards: [.init(kind: .text, text: "a")]).first)
     #expect(mutationCount.withLock { $0 } == 1)
 
-    try store.updateCardBody(cardID: root.cardID, body: "b")
+    let child = try store.appendCard(.init(kind: .text, text: "child"), to: root.id)
     #expect(mutationCount.withLock { $0 } == 2)
 
-    try store.deleteCardEdge(edgeID: root.id)
+    try store.updateCardBody(cardID: root.cardID, body: "b")
     #expect(mutationCount.withLock { $0 } == 3)
+
+    try store.deleteCardEdge(edgeID: child.id)
+    #expect(mutationCount.withLock { $0 } == 4)
   }
 }

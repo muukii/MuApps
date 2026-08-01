@@ -94,6 +94,7 @@ extension VaultContentStore {
 
   public enum Error: Swift.Error {
     case cardNotFound(UUID)
+    case cardEdgeNotFound(UUID)
     case missingMediaPayload(Card.Kind)
   }
 }
@@ -364,44 +365,21 @@ extension VaultContentStore {
     do {
       for (offset, draft) in drafts.enumerated() {
         let createdAt = threadCreatedAt.addingTimeInterval(TimeInterval(offset) / 1000)
-
-        let card = Card(
-          kind: draft.kind,
-          body: Self.body(for: draft),
-          createdAt: createdAt,
-          updatedAt: createdAt,
-          location: draft.location
-        )
-        context.insert(card)
-        try noteSave(.card, recordName: card.id.uuidString, in: context)
-
-        let edge = CardEdge(
-          cardID: card.id,
-          parentEdgeID: rootEdge?.id,
+        let stagedCardEdge = try stageCardEdge(
+          from: draft,
+          parent: rootEdge,
           sortIndex: rootEdge == nil ? 0 : offset - 1,
           createdAt: createdAt,
-          updatedAt: createdAt
+          in: context
         )
-        edge.connect(to: card)
-        edge.connect(parent: rootEdge)
-        context.insert(edge)
-        try noteSave(.cardEdge, recordName: edge.id.uuidString, in: context)
         if rootEdge == nil {
-          rootEdge = edge
+          rootEdge = stagedCardEdge.edge
         }
-
-        if let stagedAttachment = try stageAttachment(from: draft, card: card, in: context) {
-          destinationFileURLs.append(contentsOf: stagedAttachment.destinationFileURLs)
-          sourceFileURLsToDeleteAfterCommit.append(
-            contentsOf: stagedAttachment.sourceFileURLsToDeleteAfterCommit
-          )
-          try noteSave(.attachment, recordName: stagedAttachment.attachment.id.uuidString, in: context)
-          for resource in stagedAttachment.resources {
-            try noteSave(.attachmentResource, recordName: resource.id.uuidString, in: context)
-          }
-        }
-
-        edges.append(edge)
+        destinationFileURLs.append(contentsOf: stagedCardEdge.destinationFileURLs)
+        sourceFileURLsToDeleteAfterCommit.append(
+          contentsOf: stagedCardEdge.sourceFileURLsToDeleteAfterCommit
+        )
+        edges.append(stagedCardEdge.edge)
       }
 
       try context.save()
@@ -418,6 +396,88 @@ extension VaultContentStore {
     }
     onLocalMutation()
     return edges
+  }
+
+  /// Appends one authored card directly below an existing placement.
+  ///
+  /// The parent lookup, sibling order, content rows, attachment files, and
+  /// CloudKit outbox rows commit as one transaction. This keeps every detail
+  /// level fractal without ever exposing a temporary root placement to sync.
+  @MainActor
+  @discardableResult
+  public func appendCard(_ draft: CardDraft, to parentEdgeID: UUID) throws -> CardEdge {
+    try validateAttachmentPayloadIfNeeded(draft)
+
+    let context = container.mainContext
+    let allEdges = try context.fetch(FetchDescriptor<CardEdge>())
+    guard let parentEdge = allEdges.first(where: { $0.id == parentEdgeID }) else {
+      throw Error.cardEdgeNotFound(parentEdgeID)
+    }
+
+    let nextSortIndex =
+      allEdges
+      .lazy
+      .filter { $0.parentEdgeID == parentEdgeID }
+      .map(\.sortIndex)
+      .max()
+      .map { $0 + 1 }
+      ?? 0
+    var destinationFileURLs: [URL] = []
+    var sourceFileURLsToDeleteAfterCommit: [URL] = []
+
+    do {
+      let stagedCardEdge = try stageCardEdge(
+        from: draft,
+        parent: parentEdge,
+        sortIndex: nextSortIndex,
+        createdAt: Date(),
+        in: context
+      )
+      destinationFileURLs = stagedCardEdge.destinationFileURLs
+      sourceFileURLsToDeleteAfterCommit =
+        stagedCardEdge.sourceFileURLsToDeleteAfterCommit
+      try context.save()
+
+      for fileURL in Set(sourceFileURLsToDeleteAfterCommit) {
+        try? FileManager.default.removeItem(at: fileURL)
+      }
+      onLocalMutation()
+      return stagedCardEdge.edge
+    } catch {
+      context.rollback()
+      for fileURL in destinationFileURLs {
+        try? FileManager.default.removeItem(at: fileURL)
+      }
+      throw error
+    }
+  }
+
+  /// Returns the newest top-level card, ignoring every continuation depth.
+  ///
+  /// Widget and Home overview semantics are root-only. Root resolution uses the
+  /// stable edge reference so a temporarily unrepaired relationship cannot make
+  /// a child appear as top-level content.
+  @MainActor
+  public func latestRootCard() throws -> Card? {
+    let context = container.mainContext
+    let edges = try context.fetch(
+      FetchDescriptor<CardEdge>(
+        sortBy: [
+          SortDescriptor(\.createdAt, order: .reverse),
+          SortDescriptor(\.id),
+        ]
+      )
+    )
+
+    for edge in edges where edge.parentEdgeID == nil {
+      if let card = edge.card, card.id == edge.cardID {
+        return card
+      }
+      if let card = try fetchCard(id: edge.cardID, in: context) {
+        return card
+      }
+    }
+    return nil
   }
 
   /// Replaces the editable payload of an existing card.
@@ -451,7 +511,8 @@ extension VaultContentStore {
       if let stagedAttachment = try stageAttachment(from: draft, card: card, in: context) {
         destinationFileURLs = stagedAttachment.destinationFileURLs
         sourceFileURLsToDeleteAfterCommit = stagedAttachment.sourceFileURLsToDeleteAfterCommit
-        try noteSave(.attachment, recordName: stagedAttachment.attachment.id.uuidString, in: context)
+        try noteSave(
+          .attachment, recordName: stagedAttachment.attachment.id.uuidString, in: context)
         for resource in stagedAttachment.resources {
           try noteSave(.attachmentResource, recordName: resource.id.uuidString, in: context)
         }
@@ -517,7 +578,9 @@ extension VaultContentStore {
 
     let cardIDs = Set(subtree.map(\.cardID))
     let cards = try context.fetch(FetchDescriptor<Card>()).filter { cardIDs.contains($0.id) }
-    let attachments = try context.fetch(FetchDescriptor<Attachment>()).filter { cardIDs.contains($0.cardID) }
+    let attachments = try context.fetch(FetchDescriptor<Attachment>()).filter {
+      cardIDs.contains($0.cardID)
+    }
     let attachmentIDs = Set(attachments.map(\.id))
     let resources = try context.fetch(FetchDescriptor<AttachmentResource>())
       .filter { attachmentIDs.contains($0.attachmentID) }
@@ -560,6 +623,71 @@ extension VaultContentStore {
     var primaryResource: AttachmentResource {
       resources[0]
     }
+  }
+
+  private struct StagedCardEdge {
+    var edge: CardEdge
+    var destinationFileURLs: [URL]
+    var sourceFileURLsToDeleteAfterCommit: [URL]
+  }
+
+  /// Inserts one card placement and stages its optional attachment without
+  /// committing. Callers own the surrounding transaction and file cleanup.
+  @MainActor
+  private func stageCardEdge(
+    from draft: CardDraft,
+    parent: CardEdge?,
+    sortIndex: Int,
+    createdAt: Date,
+    in context: ModelContext
+  ) throws -> StagedCardEdge {
+    let card = Card(
+      kind: draft.kind,
+      body: Self.body(for: draft),
+      createdAt: createdAt,
+      updatedAt: createdAt,
+      location: draft.location
+    )
+    context.insert(card)
+    try noteSave(.card, recordName: card.id.uuidString, in: context)
+
+    let edge = CardEdge(
+      cardID: card.id,
+      parentEdgeID: parent?.id,
+      sortIndex: sortIndex,
+      createdAt: createdAt,
+      updatedAt: createdAt
+    )
+    edge.connect(to: card)
+    edge.connect(parent: parent)
+    context.insert(edge)
+    try noteSave(.cardEdge, recordName: edge.id.uuidString, in: context)
+
+    guard let stagedAttachment = try stageAttachment(from: draft, card: card, in: context) else {
+      return StagedCardEdge(
+        edge: edge,
+        destinationFileURLs: [],
+        sourceFileURLsToDeleteAfterCommit: []
+      )
+    }
+
+    do {
+      try noteSave(.attachment, recordName: stagedAttachment.attachment.id.uuidString, in: context)
+      for resource in stagedAttachment.resources {
+        try noteSave(.attachmentResource, recordName: resource.id.uuidString, in: context)
+      }
+    } catch {
+      for fileURL in stagedAttachment.destinationFileURLs {
+        try? FileManager.default.removeItem(at: fileURL)
+      }
+      throw error
+    }
+    return StagedCardEdge(
+      edge: edge,
+      destinationFileURLs: stagedAttachment.destinationFileURLs,
+      sourceFileURLsToDeleteAfterCommit:
+        stagedAttachment.sourceFileURLsToDeleteAfterCommit
+    )
   }
 
   @MainActor
@@ -665,7 +793,8 @@ extension VaultContentStore {
     for resourceDraft in resourceDrafts {
       guard let sourceURL = resourceDraft.fileURL else { continue }
       guard sourceURL.isFileURL,
-            FileManager.default.fileExists(atPath: sourceURL.path) else {
+        FileManager.default.fileExists(atPath: sourceURL.path)
+      else {
         throw CocoaError(.fileReadNoSuchFile)
       }
       guard FileManager.default.isReadableFile(atPath: sourceURL.path) else {
@@ -762,7 +891,9 @@ extension VaultContentStore {
     (try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
   }
 
-  private static func primaryResourceRole(for attachmentKind: Attachment.Kind) -> AttachmentResource.Role {
+  private static func primaryResourceRole(for attachmentKind: Attachment.Kind)
+    -> AttachmentResource.Role
+  {
     switch attachmentKind {
     case .file:
       return .file

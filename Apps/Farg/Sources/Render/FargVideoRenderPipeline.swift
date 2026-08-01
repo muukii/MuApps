@@ -144,8 +144,8 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
   /// Disabled Motion Blur still uses the temporal source asset, but its
   /// current-frame mode avoids requesting temporal neighbors or starting
   /// VideoToolbox. Enabled mode shares a live strength source, and the
-  /// parametric document source lets grain edits update without replacing the
-  /// composition or player item.
+  /// parametric document source lets Exposure and Grain edits update without
+  /// replacing the composition or player item.
   func makeTemporalPreview(
     source: PreparedMotionBlurSource,
     recipe: FargVideoRenderRecipe,

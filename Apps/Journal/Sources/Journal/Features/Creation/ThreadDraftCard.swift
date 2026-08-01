@@ -495,9 +495,20 @@ struct CardEditDraftSnapshot: Sendable, Codable {
     case .photo:
       guard let photo else { throw CardEditDraftSnapshotError.missingMediaPayload }
       let thumbnail = try? MediaThumbnailGenerator.imageThumbnail(from: photo.imageData).data
+      // Keep display dimensions on the original resource so list placeholders
+      // and CloudKit peers know the photo geometry before decoding its JPEG.
       return VaultContentStore.CardDraft(
         kind: .photo,
-        mediaData: photo.imageData,
+        mediaResources: [
+          VaultContentStore.AttachmentResourceDraft(
+            role: .originalImage,
+            data: photo.imageData,
+            byteSize: photo.imageData.count,
+            contentType: "public.jpeg",
+            pixelWidth: photo.pixelSize.nonZeroPixelWidth,
+            pixelHeight: photo.pixelSize.nonZeroPixelHeight
+          )
+        ],
         thumbnail: thumbnail,
         location: location
       )
@@ -576,9 +587,21 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       )
     case .doodle:
       guard let doodle else { throw CardEditDraftSnapshotError.missingMediaPayload }
+      let doodleData = try JSONEncoder().encode(doodle)
+      // Keep the authored canvas size on the resource so saved-list placeholders
+      // know the drawing's geometry before its JSON decodes.
       return VaultContentStore.CardDraft(
         kind: .doodle,
-        mediaData: try JSONEncoder().encode(doodle),
+        mediaResources: [
+          VaultContentStore.AttachmentResourceDraft(
+            role: .authoredJSON,
+            data: doodleData,
+            byteSize: doodleData.count,
+            contentType: "public.json",
+            pixelWidth: doodle.canvasSize.nonZeroPixelWidth,
+            pixelHeight: doodle.canvasSize.nonZeroPixelHeight
+          )
+        ],
         location: location
       )
     case .bauhaus:

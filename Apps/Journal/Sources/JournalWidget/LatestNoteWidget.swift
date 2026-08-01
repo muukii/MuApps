@@ -149,8 +149,6 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
   /// A thread save can create multiple cards at nearly the same timestamp.
   /// Looking at a small recent window lets the widget prefer the authored thread
   /// tail instead of accidentally showing its parent card.
-  private static let recentCardFetchLimit = 50
-
   /// Requested periodic refresh cadence for relative date labels.
   ///
   /// New card content is refreshed by the app's post-save reload request; this
@@ -200,9 +198,10 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
     }
   }
 
-  /// Reads the latest visible note from one vault. Returns `nil` when the vault
-  /// has no cards or when its store can't be opened; the view shows an empty
-  /// state in both cases.
+  /// Reads the latest root note from one vault.
+  ///
+  /// Returns `nil` when the vault has no roots or when its store can't be
+  /// opened; the view shows an empty state in both cases.
   private func loadLatestNote(in vaultID: VaultID) async throws -> NoteSnapshot? {
     let cardSnapshot: WidgetLatestCardSnapshot? = try await MainActor.run {
       let layout = try VaultStoreLayout.appGroup()
@@ -213,14 +212,7 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
         layout: layout,
         recoveryPolicy: .failWithoutReset
       )
-      let context = store.container.mainContext
-
-      var descriptor = FetchDescriptor<Card>(
-        sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
-      )
-      descriptor.fetchLimit = Self.recentCardFetchLimit
-
-      guard let card = try context.fetch(descriptor).preferredLatestWidgetCard(in: context) else {
+      guard let card = try store.latestRootCard() else {
         return nil
       }
 
@@ -895,30 +887,6 @@ private struct WidgetVaultIconMark: View {
 }
 
 // MARK: - Formatting Helpers
-
-extension Array where Element == Card {
-
-  /// Picks the card the Latest Note widget should render from a date-sorted
-  /// recent window.
-  ///
-  /// For a multi-card thread, this prefers the first visible leaf card, so a
-  /// single thread save displays the authored last item instead of its parent.
-  /// The fallback preserves normal "newest by date" behavior for malformed or
-  /// partially imported edge data.
-  @MainActor
-  fileprivate func preferredLatestWidgetCard(in context: ModelContext) throws -> Card? {
-    let edges = try context.fetch(FetchDescriptor<CardEdge>())
-    let edgeByCardID = edges.reduce(into: [UUID: CardEdge]()) { result, edge in
-      result[edge.cardID] = edge
-    }
-    let parentEdgeIDs = Set(edges.compactMap(\.parentEdgeID))
-
-    return first { card in
-      guard let edge = edgeByCardID[card.id] else { return false }
-      return parentEdgeIDs.contains(edge.id) == false
-    } ?? first { edgeByCardID[$0.id] != nil } ?? first
-  }
-}
 
 extension Card.Kind {
 

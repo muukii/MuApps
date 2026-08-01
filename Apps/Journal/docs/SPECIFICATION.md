@@ -156,17 +156,16 @@ inline / circular / rectangular accessory families. It uses
 the first catalog vault.
 
 The timeline provider opens the configured vault's `VaultContentStore` from the
-App Group and fetches a small recent `Card` window sorted by `createdAt`
-descending. It resolves visibility through `CardEdge`: parent rows that have
-children are skipped so a multi-row thread save displays the authored last
-visible entry instead of its root. It shows kind-aware content: text uses
-`Card.body` (falling back to `Untitled`), links use their stored URL string,
-photos use the save-time raster thumbnail stored on their attachment, files
-show their original name and type/size metadata, and
+App Group and resolves the newest root `CardEdge` (`parentEdgeID == nil`) by
+creation date. Continuations are never eligible for the Latest Note widget,
+including when a child was authored more recently than every root. It shows
+kind-aware content: text uses `Card.body` (falling back to `Untitled`), links use
+their stored URL string, photos use the save-time raster thumbnail stored on
+their attachment, files show their original name and type/size metadata, and
 doodle / Bauhaus content decodes its authored JSON attachment and renders
 `DoodleDrawingView` / `BauhausGridArtworkView`. Audio entries still show a typed
 modality label because there is not yet a visual authored renderer for audio.
-The Home Screen families show the selected vault title, latest-entry body,
+The Home Screen families show the selected vault title, latest-root body,
 rendered visual media, or audio label plus the relative timestamp; the Lock
 Screen accessory families use short labels or symbols that fit the tighter
 surfaces. Native macOS exposes the small / medium / large families; the Lock
@@ -180,7 +179,7 @@ New entry saves and saved-entry edits request
 `WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)` so
 configured widgets refresh promptly. The 15-minute periodic timeline refresh
 remains only for relative-date freshness. Future optimization can denormalize
-latest-entry previews into `VaultSummary`, but current product behavior reads the
+latest-root previews into `VaultSummary`, but current product behavior reads the
 selected vault store directly.
 
 ### System capture extensions
@@ -295,6 +294,10 @@ Journal/
 `VaultContentStore.createThread(cards:)` writes a root `CardEdge` plus child
 edges in one transaction. The same transaction writes `PendingMutation` rows, so
 local content never exists without a pending CloudKit upload.
+`VaultContentStore.appendCard(_:to:)` applies the same transaction boundary to
+one continuation: it validates the parent edge, assigns the next direct-sibling
+order, and writes the Card, child CardEdge, optional attachment/resources, and
+their outbox saves together.
 
 SwiftData relationships are the normal in-app source of truth for vault content:
 `CardEdge` points to its `Card` and parent/child edges, `Card` owns attachments,
@@ -739,15 +742,19 @@ the gallery's **Lab** section).
   **Done** and **New Vault** actions. Creating a vault calls
   `JournalVaultRuntime.createVault(title:icon:)`, seeds the local vault store,
   reloads the catalog, opens the new vault, and then dismisses the Vault sheet.
-  Owned vault rows always show a separate share button inside
-  the cell; once the catalog knows the vault has a CloudKit share and the
-  runtime has fetched that share, the row also shows a system
-  `SWCollaborationView` control. This matches the Notes-style
-  split between explicit invite issuance and collaboration state/management. The
+  Owned vault rows always show a share button inside the cell whose icon
+  carries the sharing state: an unshared vault shows the outline glyph
+  (`personalhotspot.circle`), a shared vault switches to the filled variant
+  (`personalhotspot.circle.fill`). Both states open the same
+  `UICloudSharingController` sheet,
+  which acts as the invite sheet before sharing and as the participant
+  management sheet once a share exists. Once the runtime has fetched the
+  zone-wide share, the row additionally shows a compact (36pt) system
+  `SWCollaborationView` control. The
   collaboration control registers the saved zone-wide `CKShare` on its
   `NSItemProvider` (an existing-share registration, not a lazy preparation
   handler), so the system treats the vault as already collaborated and its
-  popover lists the current participants with the manage action. Sharing stays
+  popover shows the collaboration state with the manage action. Sharing stays
   limited to specified recipients with read-write permission. Opening the Vault
   sheet re-fetches the zone-wide share for every shared vault; that fetch also
   self-corrects the catalog summary (participants accepted or the share stopped
@@ -755,7 +762,7 @@ the gallery's **Lab** section).
   vault discovery, sync-engine record fetches, and invite acceptance all mirror
   the zone-wide `CKShare` (shared flag, participant count, this user's
   permission) into the catalog, so a reinstall or the user's second device shows
-  correct status without opening the share sheet. The share button and row
+  correct status without opening the share sheet. The share button and the row
   context menu both present the direct
   `UICloudSharingController` invite sheet; participant vault rows do not offer
   invite issuance but do show the collaboration control for their accepted
@@ -817,11 +824,10 @@ the gallery's **Lab** section).
   cover).
 - **`CreationView`** — the selected-vault home and compose screen. The main
   surface embeds `SavedListView`, so entries already posted to the active vault
-  remain visible while composing. Root and child placements are read live from
-  the vault's SwiftData store, ordered newest first, grouped by local-calendar
-  day, and rendered independently with content-specific saved-grid styles,
-  refresh, navigation, edit, share, and delete behavior. Posting targets the new
-  root edge in this list so the newly created entry is brought into view.
+  remain visible while composing. Home projects only root placements from the
+  vault's live SwiftData graph, ordered newest first and grouped by
+  local-calendar day. Posting on Home creates a root edge and brings that new
+  root into view; children remain reachable only through detail navigation.
   When the selected vault is shared — owned or joined as a participant — the
   navigation toolbar also
   shows the same system `SWCollaborationView` control used by the vault picker,
@@ -831,9 +837,11 @@ the gallery's **Lab** section).
   the runtime refreshes.
 
   Creation lives in a Book-style glass input bar inset at the bottom of the
-  saved-entry list. Its center is a multiline **Write something** text field that
-  grows from one to five lines; text currently inside this field is the one
-  unpublished entry, rather than a separate draft surface displayed in the list.
+  active Home or card-detail screen. On Home its center is a multiline
+  **Write something** text field; in a card detail it becomes **Add to this
+  card**. It grows from one to five lines. Home and every visited detail
+  placement own separate unpublished drafts, so navigating deeper or back does
+  not retarget or erase another level's input.
   The trailing glass up-arrow posts that entry and is enabled only when the
   current content is persistable: text must contain non-whitespace content, a
   link must resolve to a valid HTTP(S) URL, and capture-backed kinds must contain
@@ -853,11 +861,12 @@ the gallery's **Lab** section).
   entry is discarded. Changing vaults also requires confirmation while the input
   contains an unpublished entry.
 
-  Quick Capture requests use the same draft-preservation rule. With an empty
-  composer they open the focused text editor, camera, voice recorder, doodle
-  canvas, or system Suggestions picker directly. If unpublished input exists,
-  Journal asks before discarding it; cancelling consumes the system request and
-  leaves the draft unchanged.
+  Quick Capture requests always return to Home and create a root card. They use
+  the same draft-preservation rule. With every draft empty,
+  they open the focused text editor, camera, voice recorder, doodle
+  canvas, or system Suggestions picker directly. If unpublished input exists at
+  any visited level, Journal asks before discarding it; cancelling consumes the
+  system request and leaves every draft unchanged.
 
   Link, Camera, Photos, Bauhaus, Doodle, Voice, and Suggestions reuse that same
   single entry rather than appending another draft. Link capture uses URL-keyboard
@@ -906,10 +915,13 @@ the gallery's **Lab** section).
   whose initial camera frames every located entry in the selected vault. Nearby
   or overlapping pins automatically group into a count marker and separate into
   individual pins as the user zooms in. The up-arrow freezes one save snapshot,
-  converts it into one `VaultContentStore.CardDraft`, and calls
-  `createThread(cards:)` with that single value. This immediately persists one
-  root `CardEdge`, clears the input only after success, refreshes the vault and
-  widget, and scrolls the embedded saved-entry list toward the new root. The
+  including its posting destination, and converts it into one
+  `VaultContentStore.CardDraft`. On Home it calls `createThread(cards:)` with
+  that single value, persists one root `CardEdge`, refreshes the Latest Note
+  widget, and scrolls Home toward the new root. In detail it calls
+  `appendCard(_:to:)` with the displayed edge as parent and scrolls that detail
+  level toward the new direct child; continuation posting does not refresh the
+  root-only widget. The matching level's input clears only after success. The
   Photo, Video, and Live Photo write paths generate or carry a bounded
   thumbnail; Doodle, Bauhaus, and Suggestion retain authored payloads, with
   Suggestion media copied alongside its JSON when available.
@@ -917,11 +929,12 @@ the gallery's **Lab** section).
   Successful posting shows a transient **Posted to Journal** notification with
   success haptics. If posting fails, the unpublished entry stays in the input bar
   and a persistent **Could not post** notification states that the input is still
-  present, with failure haptics. Notifications fade, blur, and scale in place
-  with a slight bounce instead of sliding from an edge. Creation-time chains are
-  intentionally not exposed: each press of the up-arrow posts exactly one new
-  root entry. A future continuation flow is planned as a reply to an already
-  saved entry rather than accumulating several unpublished entries before posting.
+  present, with failure haptics. Notifications appear as an app-wide overlay at
+  the top of the screen, then fade, blur, and scale in place with a slight bounce
+  instead of sliding from an edge. Each press of the up-arrow posts exactly one
+  card: a root on Home or one direct child of the currently displayed card in
+  detail. It never accumulates several unpublished entries into one creation-time
+  chain.
   Capture demos remain in the dev gallery rather than Settings.
 - **`CaptureGalleryView`** (dev scaffolding, not currently wired into the app
   root) — a `List` with:
@@ -943,66 +956,73 @@ the gallery's **Lab** section).
 - **`SavedListView`** — a vault-backed entries list over the selected
   `VaultInstance`. It attaches the selected vault's `ModelContainer`, queries
   `CardEdge` rows with SwiftData, follows the `Card` / `Attachment` /
-  `AttachmentResource` relationships, groups every edge into local-calendar day
-  sections, and displays each entry with its content-specific `.savedGrid`
-  style. There is no shared `CardSurface`, card background, border, or shadow.
-  Each grid placement has a finite square boundary; the 1:1 ratio stabilizes row
-  geometry while content loads. Every content type is centered inside that
-  boundary, and saved-grid media uses aspect-fit so the complete image remains
-  visible without crop. This adds no common card surface. Every root and child
-  edge appears as an independent grid item, grouped only by its own creation day;
-  parent-child relationships never collapse items or add a stacked visual
-  treatment. Opening an item can still show its flattened
-  descendant subtree in detail, preserving authored relationships without
-  changing the list presentation. Descendant traversal is resolved only after
-  navigation and stops at an already-visited edge, so ordinary cell layout is
-  independent from thread size and malformed sync cycles cannot recurse forever.
+  `AttachmentResource` relationships, and projects only root placements
+  (`parentEdgeID == nil`) into Home. Roots are grouped into local-calendar day
+  sections by the root card's own creation date and read as one full-width
+  vertical stream; adding a continuation does not move the root to another day
+  or create another Home item. Each root `CardEdge` owns one flat rounded group
+  surface containing only its root card content. The authored content has no
+  separate card background, border, shadow, fixed tile, child preview,
+  continuation count, or other summary label. It uses the natural-height detail
+  content placement so text can expand and media can keep its authored aspect
+  ratio. Opening a root group shows that root and only its direct children.
+  Every child row has an **Open Entry** affordance that pushes the same detail
+  destination again, where that child becomes the current card and only its
+  direct children are shown. This fractal navigation can continue to any depth
+  without exposing descendants as independent Home items. Ancestor edges are
+  filtered at each level, so ordinary stream layout is independent from tree
+  size and malformed sync cycles cannot navigate forever.
   Pull-to-refresh asks the vault runtime to import fresh CloudKit changes;
-  the old toolbar reload icon is not shown in the normal list surface. Grid tiles
-  are matched transition sources so opening a detail view uses the system zoom
-  navigation transition from the tapped entry. Link content uses iOS's
-  LinkPresentation preview in both list and detail styles, fetching
+  the old toolbar reload icon is not shown in the normal list surface. Root
+  groups are matched transition sources so opening a detail view uses the system
+  zoom navigation transition from the tapped group. Link content uses iOS's
+  LinkPresentation preview in both Home groups and detail, fetching
   metadata at display time and caching it in a dedicated device-local SwiftData
   store under the app's Caches directory for up to seven days. The cache is not
   synced or backed up, is bounded to 200 entries / 50 MiB, and may be purged by
   the operating system. Cache access is serialized synchronously on MainActor;
   only remote metadata fetching remains asynchronous.
-  The saved-grid Link style owns a finite height; native metadata updates
+  The natural-height Link placement owns a finite height; native metadata updates
   invalidate intrinsic layout only when the metadata object actually changes.
-  Other media placeholders and loading states also keep finite aspect-ratio
-  geometry instead of requesting an unbounded grid-row height. Photo summary
-  previews use the saved thumbnail to avoid decoding original-size images during
-  scrolling. The pushed detail view presents authored content without a common
+  Media placeholders reserve the same aspect-ratio geometry as their loaded
+  content, so a row keeps one height from its first layout pass through its
+  poster, still image, and inline player. The pushed detail view presents
+  authored content without a common
   shape, rounded clipping, stroke, or fixed height. Text uses its natural height;
   Photo, Video, and Live Photo use the persisted pixel dimensions (falling back
   to decoded media dimensions) and aspect-fit the complete image without crop.
+  Doodle saves its authored canvas size alongside its JSON and reserves that
+  geometry too; doodles saved before those dimensions were recorded still resize
+  from a square once their file decodes.
   When an entry has a location, its detail row shows a slender, non-interactive
   street map centered on the recorded point between the authored content and
   record metadata. The content type, created/updated timestamps, and edit/delete
-  controls sit below it. Detail rows can still read the full vault media file and retain
-  detail-only Link and Live Photo interaction. Video previews
+  controls sit below it. The bottom composer appends a new direct child to the
+  current card at every depth. Detail rows can still read the full vault media
+  file and retain detail-only Link and Live Photo interaction. Video previews
   play as muted inline loops when the media file is local, while keeping the app
   audio session mixed with other audio so external music or podcasts continue.
   Doodle and Bauhaus previews decode the authored JSON attachment file and render
   it with their SwiftUI renderers. When a media file is not local yet, the UI
   shows a modality placeholder; when sync writes the file and bumps the resource
   revision, SwiftData observation re-runs the affected content load. Saved entries
-  can be shared from a grid tile's context menu
+  can be shared from a root group's context menu
   or a detail row's context menu. The share action opens a preview sheet backed
   by a detached `EntryShareSnapshot`, renders the actual temporary PNG artifact
   on a full-bleed branded canvas with the same `.share` leaf styles, and, for
   Doodle or Bauhaus entries with authored replay data, also offers a
   generated mp4 replay before handing the selected file to the system activity
-  sheet. Saved entries can be edited from a grid tile's context menu or from each
+  sheet. Saved entries can be edited from a root group's context menu or from each
   detail row's pencil button. Editing rehydrates the saved entry into
   `EntryDraftEditor`, requires the full media file for media content, and saves
   back through `VaultContentStore.updateCard(cardID:with:)`; thumbnails are not
-  used as lossy edit sources. Saved entries can also be deleted from a grid tile's
+  used as lossy edit sources. Saved entries can also be deleted from a root group's
   context menu or from each detail row's trash button. Deletion is confirmed
   first, then writes through `VaultContentStore.deleteCardEdge(edgeID:)` so the
   selected edge, descendant persisted content rows, attachments, attachment resources, local media
-  files, and CloudKit delete outbox rows stay aligned. Detail deletion dismisses
-  back to the list after a successful delete so the user sees the updated model graph.
+  files, and CloudKit delete outbox rows stay aligned. Deleting the current card
+  dismisses that detail level after success; deleting one of its visible child
+  rows leaves the current detail level open.
 - **`SettingsView`** — an **Accent Color** picker, an **Appearance** picker, a **Location**
   toggle for automatic location attachment, an explicit **Quick Capture Vault**
   picker, a **Storage** section with **Cloud

@@ -157,12 +157,9 @@ private struct AppBlockingOverlayHost: View {
         Button("Cancel") {
           isPresented = false
         }
-      }
+      }    
       .padding(24)
-      .background(
-        .regularMaterial,
-        in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-      )
+      .glassEffect(in: .rect(cornerRadius: 32))
     }
     .navigationTitle("Clipped Content")
   }

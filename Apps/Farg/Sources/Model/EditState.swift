@@ -28,6 +28,9 @@ final class EditState {
   /// The LUT intensity (0 = original, 1 = full LUT).
   var amount: Double = 1.0
 
+  /// The exposure offset applied before the selected LUT.
+  var exposure = ExposureAdjustment.neutral
+
   /// Optical Flow motion blur shared by every clip in the current collection.
   var motionBlur = MotionBlurSettings.disabled
 
@@ -119,13 +122,16 @@ final class EditState {
 
   /// Compiles the current selections into a parametric editing document.
   ///
-  /// The LUT is evaluated first when selected, followed by the identity-stable
-  /// film-grain feature. Keeping both single-frame effects in this ordered tree
-  /// makes the document the complete authored spatial recipe.
+  /// Exposure is evaluated before the selected LUT so it changes the LUT's
+  /// input response. The identity-stable film-grain feature follows both.
+  /// Keeping every single-frame effect in this ordered tree makes the document
+  /// the complete authored spatial recipe.
   func makeDocument(using library: LUTLibrary) throws -> EditingDocument {
-    var features: [MainFeature] = []
-    // Below the threshold the LUT contributes nothing, so emit an empty tree —
-    // a literal source pass-through rather than a null color-cube evaluation.
+    var features: [MainFeature] = [
+      .effect(exposure.feature)
+    ]
+    // Below the threshold the LUT contributes nothing, so omit its node rather
+    // than evaluating a null color cube. Exposure and Grain remain authored.
     if let lut = selectedLUT, amount > Self.minimumAmount {
       let feature = try library.feature(for: lut, amount: amount)
       features.append(.effect(feature))

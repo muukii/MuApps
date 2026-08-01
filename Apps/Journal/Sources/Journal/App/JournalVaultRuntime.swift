@@ -160,7 +160,8 @@ final class JournalVaultRuntime {
     do {
       try reloadCatalog()
 
-      let descriptor = preferredVaultID
+      let descriptor =
+        preferredVaultID
         .flatMap { vaultID in
           vaults.first(where: { $0.vaultID == vaultID })
         } ?? vaults.first
@@ -722,6 +723,20 @@ final class VaultInstance {
     let edges = try contentStore.createThread(cards: drafts)
     refreshPendingMutationCount()
     return edges
+  }
+
+  /// Appends one card directly below an existing placement.
+  ///
+  /// Detail screens use this operation at every navigation depth, so the
+  /// currently displayed card remains the only owner of the new placement.
+  @discardableResult
+  func appendCard(
+    _ draft: VaultContentStore.CardDraft,
+    to parentEdgeID: UUID
+  ) throws -> CardEdge {
+    let edge = try contentStore.appendCard(draft, to: parentEdgeID)
+    refreshPendingMutationCount()
+    return edge
   }
 
   /// Refreshes the cached outbox count used by debug and status surfaces.

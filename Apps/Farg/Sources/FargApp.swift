@@ -42,12 +42,17 @@ private struct FargAppRootView: View {
   /// The shared LUT library is constructed at launch so its bundled starter
   /// import completes before either onboarding or the editor becomes visible.
   @State private var library = LUTLibrary()
+  /// The app-wide Files starting location shared by Home, Editor, and Settings.
+  @State private var defaultVideoFolder = DefaultVideoFolderStore()
 
   var body: some View {
     Group {
       if hasCompletedOnboarding {
-        RootView(library: library)
-          .transition(.opacity)
+        RootView(
+          library: library,
+          defaultVideoFolder: defaultVideoFolder
+        )
+        .transition(.opacity)
       } else {
         FargOnboardingView(
           onComplete: {
@@ -61,12 +66,11 @@ private struct FargAppRootView: View {
   }
 }
 
-
 #Preview {
   RoundedRectangle(cornerRadius: 1)
     .foregroundStyle(.secondary)
-    
-    .overlay { 
+
+    .overlay {
       ConcentricRectangle()
         .foregroundStyle(.quaternary)
         .padding()

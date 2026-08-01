@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 struct FargSettingsView: View {
 
   let library: LUTLibrary
+  let defaultVideoFolder: DefaultVideoFolderStore
   let previewSamples: LUTPreviewSampleLibrary
   @Environment(\.dismiss) private var dismiss
 
@@ -33,10 +34,12 @@ struct FargSettingsView: View {
   /// Creates Settings with an optional deterministic source for visual previews.
   init(
     library: LUTLibrary,
+    defaultVideoFolder: DefaultVideoFolderStore,
     previewSamples: LUTPreviewSampleLibrary,
     initialPreviewSource: LUTPreviewSourceImage? = nil
   ) {
     self.library = library
+    self.defaultVideoFolder = defaultVideoFolder
     self.previewSamples = previewSamples
     _previewSources = State(
       initialValue: initialPreviewSource.map {
@@ -49,12 +52,15 @@ struct FargSettingsView: View {
     let previewSource = previewSources[previewSamples.selectedSampleID]
     let content = FargSettingsList(
       library: library,
+      defaultVideoFolder: defaultVideoFolder,
       previewSamples: previewSamples,
       previewSources: previewSources,
       pickedPreviewItem: $pickedPreviewItem,
       onSelectSample: selectSample,
       onRenameSample: beginRenaming,
       onDeleteSample: beginDeleting,
+      onSetDefaultVideoFolder: setDefaultVideoFolder,
+      onClearDefaultVideoFolder: clearDefaultVideoFolder,
       onUnlinkFolder: beginUnlinking,
       onDeleteLUT: delete
     )
@@ -147,7 +153,7 @@ struct FargSettingsView: View {
 
     return destructivePresentation
       .environment(lutPreviewModels)
-      .alert("LUT Library Error", isPresented: $isShowingError) {
+      .alert("Settings Error", isPresented: $isShowingError) {
         Button("OK", role: .cancel) {}
       } message: {
         Text(errorMessage)
@@ -348,6 +354,22 @@ struct FargSettingsView: View {
     }
   }
 
+  private func setDefaultVideoFolder(_ url: URL) {
+    do {
+      try defaultVideoFolder.setFolder(from: url)
+    } catch {
+      present(error)
+    }
+  }
+
+  private func clearDefaultVideoFolder() {
+    do {
+      try defaultVideoFolder.clearFolder()
+    } catch {
+      present(error)
+    }
+  }
+
   private func beginUnlinking(folderID: String) {
     guard let folder = library.linkedFolders.first(
       where: { $0.id == folderID }
@@ -404,12 +426,15 @@ private struct FargSettingsToolbar: ToolbarContent {
 private struct FargSettingsList: View {
 
   let library: LUTLibrary
+  let defaultVideoFolder: DefaultVideoFolderStore
   let previewSamples: LUTPreviewSampleLibrary
   let previewSources: [LUTPreviewSample.ID: LUTPreviewSourceImage]
   @Binding var pickedPreviewItem: PhotosPickerItem?
   let onSelectSample: @MainActor @Sendable (LUTPreviewSample) -> Void
   let onRenameSample: @MainActor @Sendable (LUTPreviewSample) -> Void
   let onDeleteSample: @MainActor @Sendable (LUTPreviewSample) -> Void
+  let onSetDefaultVideoFolder: @MainActor @Sendable (URL) -> Void
+  let onClearDefaultVideoFolder: @MainActor @Sendable () -> Void
   let onUnlinkFolder: @MainActor @Sendable (String) -> Void
   let onDeleteLUT: @MainActor @Sendable (LUT) -> Void
 
@@ -417,6 +442,12 @@ private struct FargSettingsList: View {
     let previewSource = previewSources[previewSamples.selectedSampleID]
 
     List {
+      DefaultVideoFolderSection(
+        folder: defaultVideoFolder.folder,
+        onSelect: onSetDefaultVideoFolder,
+        onClear: onClearDefaultVideoFolder
+      )
+
       PreviewSamplesSection(
         samples: previewSamples.samples,
         selectedSampleID: previewSamples.selectedSampleID,
@@ -449,6 +480,82 @@ private struct FargSettingsList: View {
           Label("Privacy Policy", systemImage: "hand.raised")
         }
       }
+    }
+  }
+}
+
+/// Configures the Files directory used as the starting point for video import.
+private struct DefaultVideoFolderSection: View {
+
+  let folder: DefaultVideoFolder?
+  let onSelect: @MainActor @Sendable (URL) -> Void
+  let onClear: @MainActor @Sendable () -> Void
+
+  @State private var isSelectingFolder = false
+  @State private var selectionErrorMessage: String?
+
+  var body: some View {
+    Section {
+      if let folder {
+        LabeledContent {
+          VStack(alignment: .trailing, spacing: 2) {
+            Text(folder.displayName)
+            if let volumeName = folder.volumeName, volumeName != folder.displayName {
+              Text(volumeName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+        } label: {
+          Label("Default Folder", systemImage: "folder")
+        }
+
+        Button("Choose Another Folder", systemImage: "folder.badge.plus") {
+          isSelectingFolder = true
+        }
+
+        Button(
+          "Clear Default Folder",
+          systemImage: "xmark.circle",
+          role: .destructive,
+          action: onClear
+        )
+      } else {
+        Button("Choose Default Folder", systemImage: "folder.badge.plus") {
+          isSelectingFolder = true
+        }
+      }
+    } header: {
+      Text("Video Import")
+    } footer: {
+      Text(
+        "Files opens in this folder when its storage is available. Otherwise, Files uses its normal starting location."
+      )
+    }
+    .fileImporter(
+      isPresented: $isSelectingFolder,
+      allowedContentTypes: [.folder]
+    ) { result in
+      switch result {
+      case .success(let url):
+        onSelect(url)
+      case .failure(let error):
+        if (error as? CocoaError)?.code != .userCancelled {
+          selectionErrorMessage = error.localizedDescription
+        }
+      }
+    }
+    .alert(
+      "Couldn't Choose Folder",
+      isPresented: Binding(
+        get: { selectionErrorMessage != nil },
+        set: { if $0 == false { selectionErrorMessage = nil } }
+      ),
+      presenting: selectionErrorMessage
+    ) { _ in
+      Button("OK", role: .cancel) {}
+    } message: { message in
+      Text(message)
     }
   }
 }
@@ -993,6 +1100,7 @@ private enum FargExternalLinks {
 #Preview("Settings") {
   FargSettingsView(
     library: LUTLibrary(),
+    defaultVideoFolder: DefaultVideoFolderStore(),
     previewSamples: LUTPreviewSampleLibrary(),
     initialPreviewSource: LUTPreviewSampleLibrary.makePreviewSource()
   )

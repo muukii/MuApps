@@ -3,25 +3,43 @@
 //
 
 import CoreGraphics
-import Observation
 import OSLog
+import Observation
+
+/// Identifies either the no-LUT result or one concrete LUT preview.
+nonisolated enum LUTPreviewItemID: Hashable, Sendable {
+  case original
+  case lut(String)
+
+  var logValue: String {
+    switch self {
+    case .original:
+      return "original"
+    case .lut(let id):
+      return id
+    }
+  }
+}
 
 /// Identifies one rendered LUT result for a source frame and library revision.
-struct LUTPreviewRequestID: Hashable, Sendable {
+nonisolated struct LUTPreviewRequestID: Hashable, Sendable {
 
   /// The source still identity. A new stopped frame produces a new value.
   var sourceID: String
-  /// The stable LUT identity.
-  var lutID: String
+  /// The no-LUT result or stable LUT identity being rendered.
+  var itemID: LUTPreviewItemID
   /// Invalidates a result when the LUT bytes change without changing its id.
   var libraryRevision: UInt
+  /// Invalidates every look when its shared pre-LUT exposure changes.
+  var exposureEV: Double
 }
 
 /// The source and library state shared by every LUT model on one screen.
-struct LUTPreviewContextID: Hashable, Sendable {
+nonisolated struct LUTPreviewContextID: Hashable, Sendable {
 
   var sourceID: String?
   var libraryRevision: UInt
+  var exposureEV: Double = 0
 }
 
 /// Holds one LUT's preview result independently of a lazy cell's lifetime.
@@ -44,7 +62,7 @@ final class LUTPreviewModel: Identifiable {
     case failed
   }
 
-  let id: String
+  let id: LUTPreviewItemID
 
   private(set) var renderedImage: CGImage?
   private(set) var phase: Phase = .idle
@@ -53,12 +71,12 @@ final class LUTPreviewModel: Identifiable {
   @ObservationIgnored private var renderTask: Task<Void, Never>?
   @ObservationIgnored private var isVisible = false
   @ObservationIgnored private let retainedResultDidChange:
-    @MainActor @Sendable (String, Int) -> Void
+    @MainActor @Sendable (LUTPreviewItemID, Int) -> Void
 
   init(
-    id: String,
+    id: LUTPreviewItemID,
     retainedResultDidChange:
-      @escaping @MainActor @Sendable (String, Int) -> Void
+      @escaping @MainActor @Sendable (LUTPreviewItemID, Int) -> Void
   ) {
     self.id = id
     self.retainedResultDidChange = retainedResultDidChange
@@ -79,11 +97,12 @@ final class LUTPreviewModel: Identifiable {
   func appear(
     requestID: LUTPreviewRequestID,
     source: LUTPreviewSourceImage,
-    recipe: LUTPreviewRecipe
+    recipe: LUTPreviewRecipe?,
+    exposure: ExposureAdjustment
   ) {
     isVisible = true
     Self.logger.debug(
-      "Appear LUT \(self.id, privacy: .public), source \(requestID.sourceID, privacy: .public), revision \(requestID.libraryRevision)"
+      "Appear LUT \(self.id.logValue, privacy: .public), source \(requestID.sourceID, privacy: .public), revision \(requestID.libraryRevision)"
     )
 
     if activeRequestID == requestID {
@@ -102,12 +121,13 @@ final class LUTPreviewModel: Identifiable {
     phase = .loading
     renderTask = Task { [weak self] in
       Self.logger.debug(
-        "Start render LUT \(requestID.lutID, privacy: .public)"
+        "Start render LUT \(requestID.itemID.logValue, privacy: .public)"
       )
       do {
         let image = try await LUTPreviewRenderer.shared.render(
           source: source,
           recipe: recipe,
+          exposure: exposure,
           libraryRevision: requestID.libraryRevision
         )
         guard
@@ -120,7 +140,7 @@ final class LUTPreviewModel: Identifiable {
         self.renderedImage = image
         self.phase = .ready
         Self.logger.debug(
-          "Finish render LUT \(requestID.lutID, privacy: .public)"
+          "Finish render LUT \(requestID.itemID.logValue, privacy: .public)"
         )
         self.retainedResultDidChange(
           self.id,
@@ -128,7 +148,7 @@ final class LUTPreviewModel: Identifiable {
         )
       } catch is CancellationError {
         Self.logger.debug(
-          "Cancel render LUT \(requestID.lutID, privacy: .public)"
+          "Cancel render LUT \(requestID.itemID.logValue, privacy: .public)"
         )
         return
       } catch {
@@ -141,7 +161,7 @@ final class LUTPreviewModel: Identifiable {
         }
         self.phase = .failed
         Self.logger.error(
-          "Fail render LUT \(requestID.lutID, privacy: .public): \(error.localizedDescription)"
+          "Fail render LUT \(requestID.itemID.logValue, privacy: .public): \(error.localizedDescription)"
         )
       }
     }
@@ -164,7 +184,7 @@ final class LUTPreviewModel: Identifiable {
   func invalidate() {
     if let activeRequestID {
       Self.logger.debug(
-        "Invalidate LUT \(self.id, privacy: .public), source \(activeRequestID.sourceID, privacy: .public), revision \(activeRequestID.libraryRevision)"
+        "Invalidate LUT \(self.id.logValue, privacy: .public), source \(activeRequestID.sourceID, privacy: .public), revision \(activeRequestID.libraryRevision)"
       )
     }
     renderTask?.cancel()
@@ -188,7 +208,8 @@ final class LUTPreviewModel: Identifiable {
     guard
       let activeRequestID,
       contextID.sourceID == activeRequestID.sourceID,
-      contextID.libraryRevision == activeRequestID.libraryRevision
+      contextID.libraryRevision == activeRequestID.libraryRevision,
+      contextID.exposureEV == activeRequestID.exposureEV
     else {
       invalidate()
       return
@@ -207,19 +228,19 @@ final class LUTPreviewModel: Identifiable {
   }
 }
 
-/// Persists per-LUT preview models above lazy cells and bounds strong results.
+/// Persists per-item preview models above lazy cells and bounds strong results.
 ///
-/// Models are cheap and remain keyed by stable LUT identity. Their rendered
+/// Models are cheap and remain keyed by stable preview identity. Their rendered
 /// `CGImage`s are pixel-bounded and use a separate cost-limited LRU so a large
 /// library cannot retain every rendered result.
 @MainActor
 @Observable
 final class LUTPreviewModelStore {
 
-  @ObservationIgnored private var modelsByID: [String: LUTPreviewModel] = [:]
+  @ObservationIgnored private var modelsByID: [LUTPreviewItemID: LUTPreviewModel] = [:]
   @ObservationIgnored private var contextID: LUTPreviewContextID?
-  @ObservationIgnored private var retainedCosts: [String: Int] = [:]
-  @ObservationIgnored private var retentionOrder: [String] = []
+  @ObservationIgnored private var retainedCosts: [LUTPreviewItemID: Int] = [:]
+  @ObservationIgnored private var retentionOrder: [LUTPreviewItemID] = []
   @ObservationIgnored private var totalRetainedCost = 0
 
   private let retainedCostLimit: Int
@@ -234,18 +255,18 @@ final class LUTPreviewModelStore {
   /// lazily guarantees that even an initially visible cell gets a model before
   /// its appearance task starts; catalog synchronization then only prunes stale
   /// identities.
-  func model(for lutID: String) -> LUTPreviewModel {
-    if let model = modelsByID[lutID] {
+  func model(for itemID: LUTPreviewItemID) -> LUTPreviewModel {
+    if let model = modelsByID[itemID] {
       return model
     }
-    let model = makeModel(id: lutID)
-    modelsByID[lutID] = model
+    let model = makeModel(id: itemID)
+    modelsByID[itemID] = model
     return model
   }
 
   /// Adds and removes models only when the LUT catalog itself changes.
   func synchronize(lutIDs: [String]) {
-    let requestedIDs = Set(lutIDs)
+    let requestedIDs = Set(lutIDs.map(LUTPreviewItemID.lut)).union([.original])
     let existingIDs = Set(modelsByID.keys)
     guard requestedIDs != existingIDs else { return }
 
@@ -277,31 +298,31 @@ final class LUTPreviewModelStore {
   }
 
   private func retainedResultDidChange(
-    for lutID: String,
+    for itemID: LUTPreviewItemID,
     cost: Int
   ) {
-    removeRetainedCost(for: lutID)
+    removeRetainedCost(for: itemID)
     guard cost > 0 else { return }
 
-    retainedCosts[lutID] = cost
-    retentionOrder.append(lutID)
+    retainedCosts[itemID] = cost
+    retentionOrder.append(itemID)
     totalRetainedCost += cost
-    evictIfNeeded(excluding: lutID)
+    evictIfNeeded(excluding: itemID)
   }
 
-  private func removeRetainedCost(for lutID: String) {
-    if let existingCost = retainedCosts.removeValue(forKey: lutID) {
+  private func removeRetainedCost(for itemID: LUTPreviewItemID) {
+    if let existingCost = retainedCosts.removeValue(forKey: itemID) {
       totalRetainedCost -= existingCost
     }
-    retentionOrder.removeAll { $0 == lutID }
+    retentionOrder.removeAll { $0 == itemID }
   }
 
-  private func evictIfNeeded(excluding protectedID: String) {
+  private func evictIfNeeded(excluding protectedID: LUTPreviewItemID) {
     while totalRetainedCost > retainedCostLimit {
       guard
-        let index = retentionOrder.firstIndex(where: { lutID in
-          lutID != protectedID
-            && modelsByID[lutID]?.canDiscardRetainedResult == true
+        let index = retentionOrder.firstIndex(where: { itemID in
+          itemID != protectedID
+            && modelsByID[itemID]?.canDiscardRetainedResult == true
         })
       else {
         return
@@ -315,11 +336,11 @@ final class LUTPreviewModelStore {
     }
   }
 
-  private func makeModel(id: String) -> LUTPreviewModel {
+  private func makeModel(id: LUTPreviewItemID) -> LUTPreviewModel {
     LUTPreviewModel(
       id: id,
-      retainedResultDidChange: { [weak self] lutID, cost in
-        self?.retainedResultDidChange(for: lutID, cost: cost)
+      retainedResultDidChange: { [weak self] itemID, cost in
+        self?.retainedResultDidChange(for: itemID, cost: cost)
       }
     )
   }

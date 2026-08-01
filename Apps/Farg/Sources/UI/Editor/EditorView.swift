@@ -4,8 +4,10 @@
 
 import FargMotionBlur
 import Foundation
+import Photos
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Authors one shared LUT recipe over an ordered collection of videos.
 struct EditorView: View {
@@ -13,6 +15,7 @@ struct EditorView: View {
   @Environment(\.displayScale) private var displayScale
 
   let library: LUTLibrary
+  let defaultVideoFolder: DefaultVideoFolderStore
   let previewSamples: LUTPreviewSampleLibrary
   @Bindable var editState: EditState
   let onFinishEditing: @MainActor @Sendable () -> Void
@@ -20,6 +23,9 @@ struct EditorView: View {
   @State private var preview = VideoPreviewModel()
   @State private var lutPreviewModels = LUTPreviewModelStore()
   @State private var pickerItems: [PhotosPickerItem] = []
+  @State private var isPhotosPickerPresented = false
+  @State private var isVideoFileImporterPresented = false
+  @State private var defaultVideoFolderAccess: DefaultVideoFolderAccess?
   @State private var isSettingsPresented = false
   @State private var videoInformationPresentation: VideoInformationPresentation?
   @State private var selectedEffect: EditorEffectTab = .lut
@@ -27,6 +33,17 @@ struct EditorView: View {
   @State private var errorMessage: String?
   @State private var videoLoadRequestID: UUID?
   @State private var videoLoadTask: Task<Void, Never>?
+
+  private var isErrorPresented: Binding<Bool> {
+    Binding(
+      get: { errorMessage != nil },
+      set: { isPresented in
+        if isPresented == false {
+          errorMessage = nil
+        }
+      }
+    )
+  }
 
   /// The stable content size of the Editor's hosting window.
   ///
@@ -48,14 +65,15 @@ struct EditorView: View {
       selectedClipID: editState.selectedClipID,
       hdrVideoCount: editState.hdrVideoCount,
       library: library,
-      pickerItems: $pickerItems,
       selectedLUT: $editState.selectedLUT,
+      exposure: $editState.exposure,
       motionBlur: $editState.motionBlur,
       grain: $editState.grain,
       selectedEffect: $selectedEffect,
       onSelectClip: editState.selectClip,
       onRemoveClip: removeClip,
-      onPickFileURLs: loadPickedVideoFiles
+      onSelectPhotos: { isPhotosPickerPresented = true },
+      onSelectFiles: presentVideoFileImporter
     )
     .onGeometryChange(for: EditorWindowMeasurement.self) { proxy in
       EditorWindowMeasurement(
@@ -96,38 +114,33 @@ struct EditorView: View {
     }
     .onChange(of: editState.selectedLUT) { _, _ in applyComposition() }
     .onChange(of: editState.amount) { _, _ in applyComposition() }
+    .onChange(of: editState.exposure) { _, _ in
+      applyComposition(change: .parametricDocument)
+      updateLUTPreviewContext()
+    }
     .onChange(of: editState.motionBlur) { _, _ in
       applyComposition(change: .motionBlur)
     }
     .onChange(of: editState.grain) { _, _ in
-      applyComposition(change: .grain)
+      applyComposition(change: .parametricDocument)
     }
     .onChange(of: preview.renderingErrorMessage) { _, message in
       if let message {
         errorMessage = message
       }
     }
-    .onChange(of: preview.lutPreviewSource?.id, initial: true) { _, sourceID in
-      lutPreviewModels.updateContext(
-        LUTPreviewContextID(
-          sourceID: sourceID,
-          libraryRevision: library.revision
-        )
-      )
+    .onChange(of: preview.lutPreviewSource?.id, initial: true) { _, _ in
+      updateLUTPreviewContext()
     }
-    .onChange(of: library.revision, initial: true) { _, revision in
+    .onChange(of: library.revision, initial: true) { _, _ in
       lutPreviewModels.synchronize(lutIDs: library.luts.map(\.id))
-      lutPreviewModels.updateContext(
-        LUTPreviewContextID(
-          sourceID: preview.lutPreviewSource?.id,
-          libraryRevision: revision
-        )
-      )
+      updateLUTPreviewContext()
     }
     .onChange(of: library.revision) { _, _ in reconcileSelectedLUT() }
     .sheet(isPresented: $isSettingsPresented) {
       FargSettingsView(
         library: library,
+        defaultVideoFolder: defaultVideoFolder,
         previewSamples: previewSamples
       )
       .tint(.accentColor)
@@ -144,17 +157,41 @@ struct EditorView: View {
     ) { session in
       ExportProgressView(session: session)
     }
+    .photosPicker(
+      isPresented: $isPhotosPickerPresented,
+      selection: $pickerItems,
+      selectionBehavior: .ordered,
+      matching: .videos,
+      photoLibrary: .shared()
+    )
+    .fileImporter(
+      isPresented: $isVideoFileImporterPresented,
+      allowedContentTypes: [.movie],
+      allowsMultipleSelection: true
+    ) { result in
+      switch result {
+      case .success(let fileURLs):
+        loadPickedVideoFiles(fileURLs)
+      case .failure(let error):
+        if (error as? CocoaError)?.code != .userCancelled {
+          errorMessage = error.localizedDescription
+        }
+      }
+    }
+    .fileDialogDefaultDirectory(defaultVideoFolderAccess?.url)
     .alert(
       "Something went wrong",
-      isPresented: Binding(
-        get: { errorMessage != nil },
-        set: { if $0 == false { errorMessage = nil } }
-      ),
+      isPresented: isErrorPresented,
       presenting: errorMessage
     ) { _ in
       Button("OK", role: .cancel) {}
     } message: { message in
       Text(message)
+    }
+    .onChange(of: isVideoFileImporterPresented) { _, isPresented in
+      if isPresented == false {
+        defaultVideoFolderAccess = nil
+      }
     }
     .onDisappear(perform: viewDidDisappear)
   }
@@ -163,12 +200,19 @@ struct EditorView: View {
 
   private func viewDidDisappear() {
     videoLoadTask?.cancel()
+    defaultVideoFolderAccess = nil
     if exportSession == nil {
       // Navigation may retain this view's state briefly. Release the player
       // item now so its compositor, VideoToolbox session, and IOSurfaces do
       // not depend on SwiftUI's eventual state destruction.
       preview.clear()
     }
+  }
+
+  /// Opens Files at the registered video folder when its storage is available.
+  private func presentVideoFileImporter() {
+    defaultVideoFolderAccess = defaultVideoFolder.makeAccess()
+    isVideoFileImporterPresented = true
   }
 
   private func loadPickedPhotos(_ items: [PhotosPickerItem]) {
@@ -289,6 +333,17 @@ struct EditorView: View {
     editState.selectedLUT = library.lut(id: selectedLUT.id)
   }
 
+  /// Invalidates editor LUT stills when their source, bytes, or exposure changes.
+  private func updateLUTPreviewContext() {
+    lutPreviewModels.updateContext(
+      LUTPreviewContextID(
+        sourceID: preview.lutPreviewSource?.id,
+        libraryRevision: library.revision,
+        exposureEV: editState.exposure.ev
+      )
+    )
+  }
+
   // MARK: - Export
 
   private func exportPresentationDidDismiss() {
@@ -372,14 +427,15 @@ private struct EditorLayout: View {
   let selectedClipID: VideoClip.ID?
   let hdrVideoCount: Int
   let library: LUTLibrary
-  @Binding var pickerItems: [PhotosPickerItem]
   @Binding var selectedLUT: LUT?
+  @Binding var exposure: ExposureAdjustment
   @Binding var motionBlur: MotionBlurSettings
   @Binding var grain: FilmGrainFeature
   @Binding var selectedEffect: EditorEffectTab
   let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
-  let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
+  let onSelectPhotos: @MainActor @Sendable () -> Void
+  let onSelectFiles: @MainActor @Sendable () -> Void
 
   var body: some View {
     VStack(spacing: 0) {
@@ -399,14 +455,15 @@ private struct EditorLayout: View {
         hdrVideoCount: hdrVideoCount,
         library: library,
         lutPreviewSource: lutPreviewSource,
-        pickerItems: $pickerItems,
         selectedLUT: $selectedLUT,
+        exposure: $exposure,
         motionBlur: $motionBlur,
         grain: $grain,
         selectedEffect: $selectedEffect,
         onSelectClip: onSelectClip,
         onRemoveClip: onRemoveClip,
-        onPickFileURLs: onPickFileURLs
+        onSelectPhotos: onSelectPhotos,
+        onSelectFiles: onSelectFiles
       )
       .fixedSize(horizontal: false, vertical: true)
     }
@@ -435,40 +492,6 @@ private struct EditorPreviewStage: View {
   }
 }
 
-/// The effect editor displayed below the shared video collection.
-private enum EditorEffectTab {
-  case lut
-  case motionBlur
-  case grain
-
-  var isLUT: Bool {
-    switch self {
-    case .lut:
-      return true
-    case .motionBlur, .grain:
-      return false
-    }
-  }
-
-  var isMotionBlur: Bool {
-    switch self {
-    case .lut, .grain:
-      return false
-    case .motionBlur:
-      return true
-    }
-  }
-
-  var isGrain: Bool {
-    switch self {
-    case .lut, .motionBlur:
-      return false
-    case .grain:
-      return true
-    }
-  }
-}
-
 /// Separates the fixed video collection from the scrollable edit controls.
 private struct EditorLowerPanel: View {
 
@@ -477,14 +500,15 @@ private struct EditorLowerPanel: View {
   let hdrVideoCount: Int
   let library: LUTLibrary
   let lutPreviewSource: LUTPreviewSourceImage?
-  @Binding var pickerItems: [PhotosPickerItem]
   @Binding var selectedLUT: LUT?
+  @Binding var exposure: ExposureAdjustment
   @Binding var motionBlur: MotionBlurSettings
   @Binding var grain: FilmGrainFeature
   @Binding var selectedEffect: EditorEffectTab
   let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
-  let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
+  let onSelectPhotos: @MainActor @Sendable () -> Void
+  let onSelectFiles: @MainActor @Sendable () -> Void
 
   var body: some View {
     EditorLowerPanelContent(
@@ -494,14 +518,15 @@ private struct EditorLowerPanel: View {
       hdrVideoCount: hdrVideoCount,
       library: library,
       lutPreviewSource: lutPreviewSource,
-      pickerItems: $pickerItems,
       selectedLUT: $selectedLUT,
+      exposure: $exposure,
       motionBlur: $motionBlur,
       grain: $grain,
       selectedEffect: $selectedEffect,
       onSelectClip: onSelectClip,
       onRemoveClip: onRemoveClip,
-      onPickFileURLs: onPickFileURLs
+      onSelectPhotos: onSelectPhotos,
+      onSelectFiles: onSelectFiles
     )
   }
 
@@ -514,14 +539,15 @@ private struct EditorLowerPanel: View {
     let hdrVideoCount: Int
     let library: LUTLibrary
     let lutPreviewSource: LUTPreviewSourceImage?
-    @Binding var pickerItems: [PhotosPickerItem]
     @Binding var selectedLUT: LUT?
+    @Binding var exposure: ExposureAdjustment
     @Binding var motionBlur: MotionBlurSettings
     @Binding var grain: FilmGrainFeature
     @Binding var selectedEffect: EditorEffectTab
     let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
     let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
-    let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
+    let onSelectPhotos: @MainActor @Sendable () -> Void
+    let onSelectFiles: @MainActor @Sendable () -> Void
 
     var body: some View {
       VStack(spacing: 0) {
@@ -529,10 +555,10 @@ private struct EditorLowerPanel: View {
           contentPadding: contentPadding,
           clips: clips,
           selectedClipID: selectedClipID,
-          pickerItems: $pickerItems,
           onSelectClip: onSelectClip,
           onRemoveClip: onRemoveClip,
-          onPickFileURLs: onPickFileURLs
+          onSelectPhotos: onSelectPhotos,
+          onSelectFiles: onSelectFiles
         )
         .padding(.vertical, contentPadding)
 
@@ -543,6 +569,7 @@ private struct EditorLowerPanel: View {
           library: library,
           lutPreviewSource: lutPreviewSource,
           selectedLUT: $selectedLUT,
+          exposure: $exposure,
           motionBlur: $motionBlur,
           grain: $grain,
           selectedEffect: $selectedEffect
@@ -551,7 +578,7 @@ private struct EditorLowerPanel: View {
     }
   }
 
-  /// Owns the LUT and Motion Blur tabs below the fixed video collection.
+  /// Owns the effect tabs below the fixed video collection.
   private struct EditorEditControl: View {
 
     let contentPadding: CGFloat
@@ -560,6 +587,7 @@ private struct EditorLowerPanel: View {
     let library: LUTLibrary
     let lutPreviewSource: LUTPreviewSourceImage?
     @Binding var selectedLUT: LUT?
+    @Binding var exposure: ExposureAdjustment
     @Binding var motionBlur: MotionBlurSettings
     @Binding var grain: FilmGrainFeature
     @Binding var selectedEffect: EditorEffectTab
@@ -574,6 +602,7 @@ private struct EditorLowerPanel: View {
           library: library,
           lutPreviewSource: lutPreviewSource,
           selectedLUT: $selectedLUT,
+          exposure: $exposure,
           motionBlur: $motionBlur,
           grain: $grain
         )
@@ -593,6 +622,7 @@ private struct EditorLowerPanel: View {
       let library: LUTLibrary
       let lutPreviewSource: LUTPreviewSourceImage?
       @Binding var selectedLUT: LUT?
+      @Binding var exposure: ExposureAdjustment
       @Binding var motionBlur: MotionBlurSettings
       @Binding var grain: FilmGrainFeature
 
@@ -604,9 +634,15 @@ private struct EditorLowerPanel: View {
               contentPadding: contentPadding,
               library: library,
               source: lutPreviewSource,
+              exposure: exposure,
               selected: $selectedLUT
             )
             .transition(.opacity)
+
+          case .exposure:
+            EditorExposureControls(exposure: $exposure)
+              .padding(.horizontal, contentPadding)
+              .transition(.opacity)
 
           case .motionBlur:
             EditorMotionBlurControls(settings: $motionBlur)
@@ -622,7 +658,76 @@ private struct EditorLowerPanel: View {
         .animation(.smooth, value: selectedEffect)
       }
     }
-  
+
+    /// Authors a photographic exposure offset before the selected LUT.
+    fileprivate struct EditorExposureControls: View {
+
+      @Binding var exposure: ExposureAdjustment
+
+      var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+          HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+              Text("Exposure")
+                .font(.caption.weight(.semibold))
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
+
+              Text("Before LUT")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            Button("Reset") {
+              exposure = .neutral
+            }
+            .font(.caption)
+            .disabled(exposure.isNeutral)
+            .accessibilityIdentifier("exposure-reset")
+          }
+
+          HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("Exposure")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+
+            Spacer(minLength: 12)
+
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+              Text(
+                exposure.ev,
+                format: .number.precision(.fractionLength(1))
+              )
+              Text("EV")
+            }
+            .font(.caption)
+            .monospacedDigit()
+            .foregroundStyle(.primary)
+          }
+
+          Slider(
+            value: $exposure.ev,
+            in: ExposureAdjustment.supportedEVRange,
+            step: ExposureAdjustment.evStep
+          )
+          .tint(.primary)
+          .accessibilityLabel("Exposure")
+          .accessibilityValue(
+            Text(
+              "\(exposure.ev, format: .number.precision(.fractionLength(1))) EV"
+            )
+          )
+          .accessibilityIdentifier("exposure-slider")
+
+          Text("Adjusts light before the LUT changes the image's color response.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+    }
+
     /// Exposes Apple's Optical Flow motion blur without presenting backend tuning
     /// as a physical shutter angle.
     fileprivate struct EditorMotionBlurControls: View {
@@ -810,98 +915,6 @@ private struct EditorLowerPanel: View {
 
 }
 
-/// Keeps effect selection reachable while the active controls scroll above it.
-private struct EditorEffectTabBar: View {
-
-  @Binding var selection: EditorEffectTab
-
-  var body: some View {
-
-    HStack(spacing: 16) {
-      Group {
-        EditorEffectTabButton(
-          title: "LUT",
-          systemImage: "circlebadge.2",
-          accessibilityIdentifier: "editor-effect-tab-lut",
-          isSelected: selection.isLUT
-        ) {
-          selection = .lut
-        }
-
-        EditorEffectTabButton(
-          title: "Motion",
-          systemImage: "app.background.dotted",
-          accessibilityIdentifier: "editor-effect-tab-motion-blur",
-          isSelected: selection.isMotionBlur
-        ) {
-          selection = .motionBlur
-        }
-
-        EditorEffectTabButton(
-          title: "Grain",
-          systemImage: "water.waves",
-          accessibilityIdentifier: "editor-effect-tab-grain",
-          isSelected: selection.isGrain
-        ) {
-          selection = .grain
-        }
-      }
-      .frame(width: 44)
-    }
-    .frame(height: 64)
-    .padding(.horizontal, 24)
-    .background(
-      Capsule()
-        .foregroundStyle(Color.init(white: 1, opacity: 0.05))
-        .glassEffect(
-          .regular.interactive()
-        )
-    )
-    .fixedSize(horizontal: true, vertical: false)
-
-  }
-
-  /// Represents one accessible effect mode in the editor's persistent tab bar.
-  private struct EditorEffectTabButton: View {
-
-    let title: LocalizedStringResource
-    let systemImage: String
-    let accessibilityIdentifier: String
-    let isSelected: Bool
-    let action: @MainActor @Sendable () -> Void
-
-    var body: some View {
-      Button(action: action) {
-        VStack(spacing: 6) {
-          Image(systemName: systemImage)
-            .font(.body)
-          //            .symbolVariant(isSelected ? .fill : .none)
-
-          Text(title)
-            .font(.caption.weight(isSelected ? .semibold : .regular))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
-      }
-      .buttonStyle(.plain)
-      .accessibilityLabel(title)
-      .foregroundStyle(
-        isSelected ? Color.primary : Color.secondary
-      )
-      .overlay(alignment: .bottom) {
-        Circle()
-          .fill(.primary)
-          .frame(width: 4, height: 4)
-          .padding(.bottom, 5)
-          .opacity(isSelected ? 1 : 0)
-      }
-      .accessibilityAddTraits(isSelected ? .isSelected : [])
-      .accessibilityIdentifier(accessibilityIdentifier)
-    }
-  }
-
-}
-
 extension ShapeStyle where Self == Color {
   static var debug: Self {
     #if DEBUG
@@ -970,6 +983,7 @@ private struct EditorToolbarContent: ToolbarContent {
   NavigationStack {
     EditorView(
       library: LUTLibrary(),
+      defaultVideoFolder: DefaultVideoFolderStore(),
       previewSamples: LUTPreviewSampleLibrary(),
       editState: EditState(),
       onFinishEditing: {}

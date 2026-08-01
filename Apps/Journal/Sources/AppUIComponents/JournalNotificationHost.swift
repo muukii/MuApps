@@ -20,7 +20,7 @@ public struct JournalNotificationHost<Content: View>: View {
   }
 
   public var body: some View {
-    ZStack(alignment: .bottom) {
+    ZStack(alignment: .top) {
       content
         .environment(center)
 
@@ -33,7 +33,7 @@ public struct JournalNotificationHost<Content: View>: View {
         )
         .frame(maxWidth: 420)
         .padding(.horizontal, 16)
-        .padding(.bottom, 18)
+        .padding(.top, 18)
         .transition(.journalNotificationFadeBlur)
         .zIndex(1)
       }
@@ -42,7 +42,7 @@ public struct JournalNotificationHost<Content: View>: View {
   }
 }
 
-/// Transition state for the bottom notification capsule.
+/// Transition state for the top notification capsule.
 private struct JournalNotificationFadeBlurScaleModifier: ViewModifier {
 
   let opacity: Double
@@ -53,7 +53,7 @@ private struct JournalNotificationFadeBlurScaleModifier: ViewModifier {
     content
       .opacity(opacity)
       .blur(radius: blurRadius)
-      .scaleEffect(scale, anchor: .bottom)
+      .scaleEffect(scale, anchor: .top)
   }
 }
 

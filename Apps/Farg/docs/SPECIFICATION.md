@@ -57,6 +57,14 @@ when a person searches for **Farg** without the diacritic.
   volume. The home navigation bar has no title; Settings remains available from
   its leading action. The Photos picker retains its top accessory for system
   search and album switching.
+- Settings includes a **Video Import** section where the user can choose or clear
+  one default Files folder. Färg stores a security-scoped bookmark for that
+  explicitly authorized directory, plus available volume metadata for display
+  and diagnostics.
+- The Home Files picker and Editor's **Add Videos > Files** picker start in the
+  bookmarked directory when it can be resolved. If its external storage is not
+  connected or access has been revoked, Files remains usable and opens at its
+  normal system-selected location instead.
 - The inline picker uses continuous ordered multi-selection. After selecting one
   or more videos, the user explicitly starts a new editing session from the
   floating bottom action.
@@ -90,9 +98,9 @@ when a person searches for **Farg** without the diacritic.
   among clips, and exposes **Delete Video** in each ready clip's context menu.
   Removing the last clip returns to the picker instead of showing an empty
   editor.
-- The selected video plays in the editor preview. LUT, motion-blur, and grain
-  settings remain shared across the collection; changing the preview does not
-  change the recipe.
+- The selected video plays in the editor preview. Exposure, LUT, motion-blur,
+  and grain settings remain shared across the collection; changing the preview
+  does not change the recipe.
 - The preview uses Färg-owned playback controls instead of the system video
   player interface. Preview audio starts muted. The controls provide play/pause,
   mute/unmute, current time, duration, and a timeline for seeking while keeping
@@ -113,8 +121,8 @@ when a person searches for **Farg** without the diacritic.
 - Preview prepares one temporal source topology per selected movie. LUT and
   Motion Blur enablement changes replace only the video composition on the
   existing player item. Strength updates its live temporal parameter, while
-  Grain enablement and Intensity/Size changes update the live parametric
-  document. These edits do not seek or reset the current playback position.
+  Exposure and Grain changes update the live parametric document. These edits
+  do not seek or reset the current playback position.
 - Preview audio mixes with music, podcasts, or other audio already playing
   outside Färg instead of interrupting it.
 - The editor navigation bar places its close menu and **Settings** at the
@@ -136,8 +144,8 @@ when a person searches for **Farg** without the diacritic.
   editing controls. **Videos** stays outside the editing controls' vertical
   scroll view while its own filmstrip remains horizontally scrollable.
 - Below **Videos**, a fixed bottom tab bar switches the editing controls among
-  **LUT**, **Motion Blur**, and **Grain**. Switching tabs does not change the
-  current video or recipe.
+  **LUT**, **Exposure**, **Motion Blur**, and **Grain**. Switching tabs does not
+  change the current video or recipe.
 
 ## Shortcuts
 
@@ -203,7 +211,7 @@ when a person searches for **Farg** without the diacritic.
   Linked LUTs are managed by changing their source folder.
 - The editor applies the selected LUT at full intensity. It does not currently
   expose an intensity control.
-- The **LUT** tab contains the **Original** choice and the preview-backed LUT
+- The **LUT** tab contains the **No LUT** choice and the preview-backed LUT
   selector.
 - Every LUT choice in the editor includes a still preview. Färg captures the
   source video's first frame on load and refreshes that still when playback
@@ -221,6 +229,23 @@ when a person searches for **Farg** without the diacritic.
   conditions. Each LUT row shows only the rendered result at the same aspect
   ratio as the source preview. Custom sample labels can be renamed and their
   app-owned copies can be deleted without changing the LUT library.
+
+## Exposure
+
+- Exposure is a shared part of the current video collection's recipe. Its
+  control appears in the dedicated **Exposure** tab and is authored in EV.
+- The slider covers -2.0 through +2.0 EV in 0.1 EV increments. New sessions
+  start at 0.0 EV, and **Reset** returns the adjustment to 0.0 EV.
+- Exposure is applied after optional Optical Flow motion blur and before the
+  selected LUT. It therefore changes the LUT's input and color response rather
+  than only brightening the final display-referred result.
+- Exposure changes update the live Brightroom parametric document without
+  replacing the Preview composition, player item, or playhead.
+- Editor LUT stills apply the current Exposure before every LUT. The **No LUT**
+  still applies Exposure without adding a LUT, so every visible choice matches
+  the same authored input conditions. Obsolete still results are discarded,
+  and a short debounce prevents slider ticks from starting redundant work.
+- Preview and export evaluate the same Exposure node in the same feature order.
 
 ## Optical Flow motion blur
 

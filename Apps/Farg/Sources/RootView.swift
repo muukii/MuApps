@@ -17,12 +17,15 @@ struct RootView: View {
   /// The application-scoped LUT collection, created before onboarding by the
   /// root scene so bundled starter content is ready when the home appears.
   let library: LUTLibrary
+  /// The application-scoped preferred starting location for Files video import.
+  let defaultVideoFolder: DefaultVideoFolderStore
   @State private var previewSamples = LUTPreviewSampleLibrary()
   @State private var editState = EditState()
   @State private var pickerItems: [PhotosPickerItem] = []
   @State private var isEditorPresented = false
   @State private var isShowingSettings = false
   @State private var isVideoFileImporterPresented = false
+  @State private var defaultVideoFolderAccess: DefaultVideoFolderAccess?
   @State private var errorMessage: String?
   @State private var loadingClips: [VideoClip] = []
   @State private var videoLoadRequestID: UUID?
@@ -38,7 +41,7 @@ struct RootView: View {
         loadingProgress: VideoLoadingProgress(clips: loadingClips),
         onStartEditing: { startEditing() },
         onCancelLoading: { cancelInitialVideoImport() },
-        onSelectFiles: { isVideoFileImporterPresented = true },
+        onSelectFiles: presentVideoFileImporter,
         onShowSettings: { isShowingSettings = true },
         namespace: namespace
       )
@@ -48,6 +51,7 @@ struct RootView: View {
       NavigationStack {
         EditorView(
           library: library,
+          defaultVideoFolder: defaultVideoFolder,
           previewSamples: previewSamples,
           editState: editState,
           onFinishEditing: { isEditorPresented = false }
@@ -60,6 +64,7 @@ struct RootView: View {
     .sheet(isPresented: $isShowingSettings) {
       FargSettingsView(
         library: library,
+        defaultVideoFolder: defaultVideoFolder,
         previewSamples: previewSamples
       )
       .tint(.accentColor)
@@ -78,6 +83,7 @@ struct RootView: View {
         }
       }
     }
+    .fileDialogDefaultDirectory(defaultVideoFolderAccess?.url)
     .alert(
       "Something went wrong",
       isPresented: Binding(
@@ -122,12 +128,24 @@ struct RootView: View {
         editState.removeAllClips()
       }
     }
+    .onChange(of: isVideoFileImporterPresented) { _, isPresented in
+      if isPresented == false {
+        defaultVideoFolderAccess = nil
+      }
+    }
     .onDisappear {
       videoLoadTask?.cancel()
+      defaultVideoFolderAccess = nil
     }
   }
 
   // MARK: - Video Selection
+
+  /// Opens Files at the registered video folder when its storage is available.
+  private func presentVideoFileImporter() {
+    defaultVideoFolderAccess = defaultVideoFolder.makeAccess()
+    isVideoFileImporterPresented = true
+  }
 
   /// Resolves the committed Photos/Files selection before exposing the editor.
   private func startEditing(fileURLs: [URL] = []) {
@@ -335,40 +353,42 @@ private struct InitialVideoLoadingHUD: View {
       Rectangle()
         .fill(.black.opacity(0.16))
 
-      VStack(spacing: 14) {
-        ProgressView()
-          .controlSize(.large)
-          .accessibilityLabel("Loading video")
-          .accessibilityValue(
-            "\(progress.currentItemIndex + 1) of \(progress.itemCount)"
-          )
+      VStack(spacing: 24) {
+        VStack(spacing: 14) {
+          ProgressView()
+            .controlSize(.large)
+            .accessibilityLabel("Loading video")
+            .accessibilityValue(
+              "\(progress.currentItemIndex + 1) of \(progress.itemCount)"
+            )
 
-        VStack(spacing: 6) {
-          Text(
-            "Loading video \(progress.currentItemIndex + 1) of \(progress.itemCount)…",
-            comment:
-              "Initial video import progress. Variables are the current and total videos."
-          )
-          .font(.title3.weight(.semibold))
+          VStack(spacing: 6) {
+            Text(
+              "Loading video \(progress.currentItemIndex + 1) of \(progress.itemCount)…",
+              comment:
+                "Initial video import progress. Variables are the current and total videos."
+            )
+            .font(.title3.weight(.semibold))
 
-          Text("Preparing your selection for editing.")
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+            Text("Preparing your selection for editing.")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+          }
+          .multilineTextAlignment(.center)
+
         }
-        .multilineTextAlignment(.center)
-
-        Button("Cancel", action: onCancel)
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .accessibilityIdentifier("cancel-video-loading")
+        
+        Button.init(action: onCancel, label: { 
+          Image(systemName: "xmark")
+        })
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .accessibilityIdentifier("cancel-video-loading")
       }
       .padding(24)
       .frame(maxWidth: 280)
-      .background(
-        .regularMaterial,
-        in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-      )
-      .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
+      .glassEffect(in: .rect(cornerRadius: 32))
+                 
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .accessibilityIdentifier("initial-video-loading")
@@ -410,5 +430,8 @@ private struct InitialVideoLoadingHUDPreview: View {
 }
 
 #Preview {
-  RootView(library: LUTLibrary())
+  RootView(
+    library: LUTLibrary(),
+    defaultVideoFolder: DefaultVideoFolderStore()
+  )
 }

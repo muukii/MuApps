@@ -10,17 +10,30 @@ struct LUTPreviewImageView: View {
   let source: LUTPreviewSourceImage?
   let lut: LUT?
   let library: LUTLibrary
+  let exposure: ExposureAdjustment
   @Environment(LUTPreviewModelStore.self) private var previewModels
+
+  init(
+    source: LUTPreviewSourceImage?,
+    lut: LUT?,
+    library: LUTLibrary,
+    exposure: ExposureAdjustment = .neutral
+  ) {
+    self.source = source
+    self.lut = lut
+    self.library = library
+    self.exposure = exposure
+  }
 
   var body: some View {
     ZStack {
       Color.secondary.opacity(0.12)
 
-      if let renderedImage = previewModel?.image(for: requestID) {
+      if let renderedImage = previewModel.image(for: requestID) {
         Image(decorative: renderedImage, scale: 1)
           .resizable()
           .scaledToFill()
-      } else if let source, lut == nil {
+      } else if let source, lut == nil, exposure.isNeutral {
         Image(decorative: source.image, scale: 1)
           .resizable()
           .scaledToFill()
@@ -28,7 +41,7 @@ struct LUTPreviewImageView: View {
         Image(systemName: "photo")
           .font(.title2)
           .foregroundStyle(.tertiary)
-      } else if previewModel?.didFail(requestID: requestID) == true {
+      } else if previewModel.didFail(requestID: requestID) {
         Image(systemName: "exclamationmark.triangle")
           .font(.title3)
           .foregroundStyle(.secondary)
@@ -39,45 +52,62 @@ struct LUTPreviewImageView: View {
     }
     .clipped()
     .task(id: taskID) {
-      requestPreview()
+      await requestPreview()
     }
     .onDisappear {
-      previewModel?.disappear()
+      previewModel.disappear()
     }
   }
 
   private var requestID: LUTPreviewRequestID {
     LUTPreviewRequestID(
       sourceID: source?.id ?? "missing-source",
-      lutID: lut?.id ?? "original",
-      libraryRevision: library.revision
+      itemID: itemID,
+      libraryRevision: library.revision,
+      exposureEV: exposure.ev
     )
   }
 
   private var taskID: LUTPreviewViewTaskID {
     LUTPreviewViewTaskID(
       requestID: requestID,
-      modelID: previewModel.map(ObjectIdentifier.init)
+      modelID: ObjectIdentifier(previewModel)
     )
   }
 
-  private var previewModel: LUTPreviewModel? {
-    lut.map { previewModels.model(for: $0.id) }
+  private var itemID: LUTPreviewItemID {
+    lut.map { .lut($0.id) } ?? .original
   }
 
-  private func requestPreview() {
-    guard
-      let source,
-      let lut,
-      let previewModel
-    else {
+  private var previewModel: LUTPreviewModel {
+    previewModels.model(for: itemID)
+  }
+
+  private func requestPreview() async {
+    guard let source else { return }
+    guard lut != nil || exposure.isNeutral == false else { return }
+
+    // A short cancellation window prevents slider ticks from starting a full
+    // visible-cell rerender before the authored EV settles.
+    do {
+      try await Task.sleep(for: .milliseconds(120))
+    } catch {
       return
     }
+    guard Task.isCancelled == false else { return }
+
     do {
+      let recipe: LUTPreviewRecipe?
+      if let lut {
+        recipe = try library.previewRecipe(for: lut)
+      } else {
+        recipe = nil
+      }
       previewModel.appear(
         requestID: requestID,
         source: source,
-        recipe: try library.previewRecipe(for: lut)
+        recipe: recipe,
+        exposure: exposure
       )
     } catch {
       previewModel.fail(requestID: requestID)
@@ -89,5 +119,5 @@ struct LUTPreviewImageView: View {
 private struct LUTPreviewViewTaskID: Hashable {
 
   var requestID: LUTPreviewRequestID
-  var modelID: ObjectIdentifier?
+  var modelID: ObjectIdentifier
 }

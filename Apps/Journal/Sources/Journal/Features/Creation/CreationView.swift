@@ -1,11 +1,11 @@
 import AVFoundation
 import AppUIComponents
 import CaptureAudio
-import CloudKit
 import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
 import CaptureSuggestions
+import CloudKit
 import CoreLocation
 import CoreTransferable
 import JournalIntents
@@ -56,7 +56,7 @@ struct CreationView: View {
   @AppStorage(JournalDefaults.shouldAttachLocationToNewCards)
   private var shouldAttachLocationToNewCards: Bool = true
 
-  @State private var composerDraft = ThreadDraftCard()
+  @State private var composerState = CreationComposerState()
   @State private var composerDraftEditorPresentation: ComposerDraftEditorPresentation?
   @State private var linkEditorPresentation: LinkEditorPresentation?
   @State private var photoCapturePresentation: PhotoCapturePresentation?
@@ -66,6 +66,7 @@ struct CreationView: View {
   @State private var quickDoodleSheetDetent: PresentationDetent = .large
   @State private var quickBauhausSheetDetent: PresentationDetent = .large
   @State private var savedCardScrollTargetID: UUID?
+  @State private var detailCardScrollTargetID: UUID?
   #if os(iOS)
     @State private var isSettingsPresented: Bool = false
   #endif
@@ -94,84 +95,91 @@ struct CreationView: View {
   @State private var isSaving: Bool = false
 
   var body: some View {
+    @Bindable var composerState = composerState
 
-    NavigationStack {
-      CreationContainer(
-        draft: composerDraft,
-        isProcessing: isSaving || isImportingMediaFromLibrary,
-        onOpenDraft: presentComposerDraftEditor,
-        onDiscardDraft: requestComposerDraftDiscard,
-        onPost: post
-      ) {
-        SavedListView(scrollTargetID: $savedCardScrollTargetID)
-      } menuContent: {
-        CreationAddMenuContent(
-          isSuggestionCaptureEnabled:
-            JournalFeatureFlags.isJournalingSuggestionsCaptureEnabled,
-          onComposeLink: presentLinkCapture,
-          onCapturePhoto: presentPhotoCapture,
-          onChooseMediaFromLibrary: presentLibraryMediaPicker,
-          onDrawDoodle: presentDoodleCanvas,
-          onComposeBauhaus: presentBauhausGrid,
-          onRecordVoice: presentVoiceRecorder,
-          onChooseSuggestion: finishSuggestionCapture
+    CreationContainer(
+      draft: composerState.activeDraft,
+      isPresented: composerState.isComposerPresented,
+      placement: composerState.placement,
+      isProcessing: isSaving || isImportingMediaFromLibrary,
+      onOpenDraft: presentComposerDraftEditor,
+      onDiscardDraft: requestComposerDraftDiscard,
+      onPost: post
+    ) {
+      NavigationStack(path: $composerState.navigationPath) {
+        SavedListView(
+          scrollTargetID: $savedCardScrollTargetID,
+          navigationPath: $composerState.navigationPath,
+          detailScrollTargetID: $detailCardScrollTargetID
         )
-      }
-      .toolbar(content: {
-        if onChangeVault != nil {
-          ToolbarItem(placement: .appLeadingAction) {
-            Button {
-              requestVaultChange()
-            } label: {
-              CreationVaultToolbarLabel(
-                title: vaultRuntime.selectedVault?.title ?? String(localized: "Vault"),
-                icon: vaultRuntime.selectedVault?.icon ?? .default
-              )
+        .toolbar(content: {
+          if onChangeVault != nil {
+            ToolbarItem(placement: .appLeadingAction) {
+              Button {
+                requestVaultChange()
+              } label: {
+                CreationVaultToolbarLabel(
+                  title: vaultRuntime.selectedVault?.title ?? String(localized: "Vault"),
+                  icon: vaultRuntime.selectedVault?.icon ?? .default
+                )
+              }
+              .accessibilityLabel("Change Vault")
+              .keyboardShortcut("v", modifiers: [.command, .shift])
             }
-            .accessibilityLabel("Change Vault")
-            .keyboardShortcut("v", modifiers: [.command, .shift])
           }
-        }
 
-        if let collaborationVault = selectedCollaborationVault,
-          let collaborationShare = vaultRuntime.collaborationShares[collaborationVault.vaultID]
-        {
-          ToolbarItem(placement: .appTrailingAction) {
-            VaultCollaborationControl(
-              vaultID: collaborationVault.vaultID,
-              title: collaborationVault.title,
-              share: collaborationShare,
-              onShareUpdated: noteCollaborationShareUpdated,
-              onSharingStopped: noteCollaborationSharingStopped,
-              onError: presentCollaborationError
-            )
-            .id(
-              VaultCollaborationControl.viewIdentity(
+          if let collaborationVault = selectedCollaborationVault,
+            let collaborationShare = vaultRuntime.collaborationShares[collaborationVault.vaultID]
+          {
+            ToolbarItem(placement: .appTrailingAction) {
+              VaultCollaborationControl(
                 vaultID: collaborationVault.vaultID,
-                share: collaborationShare
+                title: collaborationVault.title,
+                share: collaborationShare,
+                onShareUpdated: noteCollaborationShareUpdated,
+                onSharingStopped: noteCollaborationSharingStopped,
+                onError: presentCollaborationError
               )
-            )
-            .frame(width: 36, height: 36)
+              .id(
+                VaultCollaborationControl.viewIdentity(
+                  vaultID: collaborationVault.vaultID,
+                  share: collaborationShare
+                )
+              )
+              .frame(width: 36, height: 36)
+            }
           }
-        }
 
-        ToolbarItem(placement: .appTrailingAction) {
-          #if os(macOS)
-            SettingsLink {
-              Image(systemName: "gearshape")
-            }
-            .accessibilityLabel("Settings")
-          #else
-            Button(action: {
-              isSettingsPresented.toggle()
-            }) {
-              Image(systemName: "gearshape")
-            }
-            .appMatchedTransitionSource(id: "settings", in: namespace)
-            .keyboardShortcut(",", modifiers: .command)
-          #endif
-        }
-      })
+          ToolbarItem(placement: .appTrailingAction) {
+            #if os(macOS)
+              SettingsLink {
+                Image(systemName: "gearshape")
+              }
+              .accessibilityLabel("Settings")
+            #else
+              Button(action: {
+                isSettingsPresented.toggle()
+              }) {
+                Image(systemName: "gearshape")
+              }
+              .appMatchedTransitionSource(id: "settings", in: namespace)
+              .keyboardShortcut(",", modifiers: .command)
+            #endif
+          }
+        })
+      }
+    } menuContent: {
+      CreationAddMenuContent(
+        isSuggestionCaptureEnabled:
+          JournalFeatureFlags.isJournalingSuggestionsCaptureEnabled,
+        onComposeLink: presentLinkCapture,
+        onCapturePhoto: presentPhotoCapture,
+        onChooseMediaFromLibrary: presentLibraryMediaPicker,
+        onDrawDoodle: presentDoodleCanvas,
+        onComposeBauhaus: presentBauhausGrid,
+        onRecordVoice: presentVoiceRecorder,
+        onChooseSuggestion: finishSuggestionCapture
+      )
     }
     .sheet(
       item: $composerDraftEditorPresentation,
@@ -260,7 +268,7 @@ struct CreationView: View {
       titleVisibility: .visible
     ) {
       Button("Discard and Change Vault", role: .destructive) {
-        resetComposerDraft()
+        discardAllComposerDrafts()
         onChangeVault?()
       }
       Button("Cancel", role: .cancel) {}
@@ -285,7 +293,7 @@ struct CreationView: View {
       titleVisibility: .visible
     ) {
       Button("Discard and Continue", role: .destructive) {
-        resetComposerDraft()
+        discardAllComposerDrafts()
         Task { await continueSystemCaptureAfterDiscard() }
       }
       Button("Cancel", role: .cancel) {
@@ -355,6 +363,14 @@ struct CreationView: View {
 
   }
 
+  /// Draft selected by the active navigation level.
+  ///
+  /// Home owns the root draft; every entry destination owns a separate draft
+  /// whose eventual parent is that destination's placement id.
+  private var composerDraft: ThreadDraftCard {
+    composerState.activeDraft
+  }
+
   private var selectedVaultDescriptor: VaultDescriptor? {
     guard let selectedVault = vaultRuntime.selectedVault else {
       return nil
@@ -377,7 +393,7 @@ struct CreationView: View {
   private func requestVaultChange() {
     guard let onChangeVault else { return }
 
-    if composerDraft.isEmptyTextDraft {
+    if composerState.hasAuthoredDrafts == false {
       onChangeVault()
     } else {
       isChangeVaultConfirmationPresented = true
@@ -395,19 +411,21 @@ struct CreationView: View {
     }
 
     if vaultRuntime.selectedVault?.vaultID != targetVaultID {
-      guard composerDraft.isEmptyTextDraft else {
+      guard composerState.hasAuthoredDrafts == false else {
         isSystemCaptureDiscardConfirmationPresented = true
         return
       }
+      prepareHomeForSystemCapture()
       await selectVaultForSystemCapture(targetVaultID)
       return
     }
 
-    guard composerDraft.isEmptyTextDraft else {
+    guard composerState.hasAuthoredDrafts == false else {
       isSystemCaptureDiscardConfirmationPresented = true
       return
     }
 
+    prepareHomeForSystemCapture()
     consumeAndPresentSystemCapture(request)
   }
 
@@ -419,10 +437,18 @@ struct CreationView: View {
     }
 
     if vaultRuntime.selectedVault?.vaultID != targetVaultID {
+      prepareHomeForSystemCapture()
       await selectVaultForSystemCapture(targetVaultID)
     } else {
+      prepareHomeForSystemCapture()
       consumeAndPresentSystemCapture(request)
     }
+  }
+
+  /// System quick capture always authors a new root card.
+  private func prepareHomeForSystemCapture() {
+    composerState.navigateHome()
+    detailCardScrollTargetID = nil
   }
 
   private func selectVaultForSystemCapture(_ vaultID: VaultID) async {
@@ -474,8 +500,13 @@ struct CreationView: View {
   }
 
   private func resetComposerDraft() {
-    composerDraft.savingSnapshot().removeTemporaryMediaFiles()
-    composerDraft = ThreadDraftCard()
+    composerState.discardActiveDraft()
+    composerDraftEditorPresentation = nil
+  }
+
+  private func discardAllComposerDrafts() {
+    composerState.discardAllDrafts()
+    detailCardScrollTargetID = nil
     composerDraftEditorPresentation = nil
   }
 
@@ -710,7 +741,9 @@ struct CreationView: View {
 
     // Freeze the authored input before persistence converts or moves media.
     // A failed post keeps the live composer object untouched for another try.
-    let snapshot = composerDraft.savingSnapshot()
+    let target = composerDraft
+    let destination = composerState.activeDestination
+    let snapshot = target.savingSnapshot()
     isSaving = true
 
     Task { @MainActor in
@@ -723,9 +756,19 @@ struct CreationView: View {
         }
 
         let vaultDraft = try snapshot.vaultDraft()
-        let createdEdges = try vault.createThread(cards: [vaultDraft])
-        composerDraft = ThreadDraftCard()
-        savedCardScrollTargetID = createdEdges.first?.id
+        let createdEdge: CardEdge
+        switch destination {
+        case .root:
+          guard let rootEdge = try vault.createThread(cards: [vaultDraft]).first else {
+            throw CreationPostError.missingCreatedEdge
+          }
+          createdEdge = rootEdge
+          savedCardScrollTargetID = createdEdge.id
+        case .continuation(let parentEdgeID):
+          createdEdge = try vault.appendCard(vaultDraft, to: parentEdgeID)
+          detailCardScrollTargetID = createdEdge.id
+        }
+        composerState.resetDraft(for: destination, ifMatching: target)
         composerDraftEditorPresentation = nil
         linkEditorPresentation = nil
         photoCapturePresentation = nil
@@ -734,13 +777,130 @@ struct CreationView: View {
         quickBauhausGridPresentation = nil
         notifications.post(.cardPosted)
         await vaultRuntime.refresh()
-        WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
+        if case .root = destination {
+          WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
+        }
       } catch {
         notifications.post(.cardPostFailed)
       }
     }
   }
 
+}
+
+/// Persistence destination frozen when posting begins.
+///
+/// The value prevents a navigation change during an asynchronous save from
+/// retargeting authored content to a different card.
+private enum CreationPostDestination {
+  case root
+  case continuation(parentEdgeID: UUID)
+}
+
+private enum CreationPostError: Error {
+  case missingCreatedEdge
+}
+
+/// Owns one unpublished draft for Home and one for every visited detail level.
+///
+/// Keeping drafts per placement preserves text while the user moves through the
+/// graph. A detail draft is never reused for another parent, so posting cannot
+/// create a relationship different from the one shown by the UI.
+@MainActor
+@Observable
+private final class CreationComposerState {
+
+  var navigationPath: [SavedListNavigationRoute] = [] {
+    didSet {
+      ensureContinuationDraftsExist()
+    }
+  }
+
+  private var rootDraft = ThreadDraftCard()
+  private var continuationDrafts: [UUID: ThreadDraftCard] = [:]
+
+  var activeDraft: ThreadDraftCard {
+    guard let parentEdgeID = activeParentEdgeID else {
+      return rootDraft
+    }
+    guard let draft = continuationDrafts[parentEdgeID] else {
+      assertionFailure("A detail route must own a continuation draft.")
+      return rootDraft
+    }
+    return draft
+  }
+
+  var activeDestination: CreationPostDestination {
+    guard let activeParentEdgeID else { return .root }
+    return .continuation(parentEdgeID: activeParentEdgeID)
+  }
+
+  var placement: CreationComposerPlacement {
+    activeParentEdgeID == nil ? .root : .continuation
+  }
+
+  var isComposerPresented: Bool {
+    guard let route = navigationPath.last else { return true }
+    if case .locations = route {
+      return false
+    }
+    return true
+  }
+
+  var hasAuthoredDrafts: Bool {
+    rootDraft.isEmptyTextDraft == false
+      || continuationDrafts.values.contains { $0.isEmptyTextDraft == false }
+  }
+
+  func resetDraft(
+    for destination: CreationPostDestination,
+    ifMatching expectedDraft: ThreadDraftCard
+  ) {
+    switch destination {
+    case .root:
+      guard rootDraft === expectedDraft else { return }
+      rootDraft = ThreadDraftCard()
+    case .continuation(let parentEdgeID):
+      guard continuationDrafts[parentEdgeID] === expectedDraft else { return }
+      continuationDrafts[parentEdgeID] = ThreadDraftCard()
+    }
+  }
+
+  func discardActiveDraft() {
+    let draft = activeDraft
+    draft.savingSnapshot().removeTemporaryMediaFiles()
+    resetDraft(for: activeDestination, ifMatching: draft)
+  }
+
+  func discardAllDrafts() {
+    rootDraft.savingSnapshot().removeTemporaryMediaFiles()
+    for draft in continuationDrafts.values {
+      draft.savingSnapshot().removeTemporaryMediaFiles()
+    }
+    rootDraft = ThreadDraftCard()
+    continuationDrafts.removeAll(keepingCapacity: false)
+    navigateHome()
+  }
+
+  func navigateHome() {
+    navigationPath.removeAll(keepingCapacity: false)
+  }
+
+  private var activeParentEdgeID: UUID? {
+    guard let route = navigationPath.last,
+      case .entry(let edgeID) = route
+    else {
+      return nil
+    }
+    return edgeID
+  }
+
+  private func ensureContinuationDraftsExist() {
+    for case .entry(let edgeID) in navigationPath
+    where continuationDrafts[edgeID] == nil {
+      continuationDrafts[edgeID] = ThreadDraftCard()
+    }
+  }
 }
 
 /// Presentation payload for a collaboration management error.

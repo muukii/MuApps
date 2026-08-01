@@ -45,8 +45,7 @@ actor LUTPreviewRenderer {
   private let imageCache = NSCache<NSString, CGImage>()
   private let featureCache = NSCache<NSString, LUTPreviewFeatureCacheEntry>()
   private var renderingTasks: [String: Task<CGImage, any Error>] = [:]
-  private var featureLoadingTasks:
-    [String: Task<ColorCubeFeature, any Error>] = [:]
+  private var featureLoadingTasks: [String: Task<ColorCubeFeature, any Error>] = [:]
 
   init() {
     imageCache.countLimit = 160
@@ -55,14 +54,19 @@ actor LUTPreviewRenderer {
     featureCache.totalCostLimit = 64 * 1_024 * 1_024
   }
 
-  /// Returns the source unchanged for Original or a cached/rendered LUT result.
+  /// Returns a cached or newly rendered exposure-plus-LUT result.
   func render(
     source: LUTPreviewSourceImage,
     recipe: LUTPreviewRecipe?,
+    exposure: ExposureAdjustment = .neutral,
     libraryRevision: UInt
   ) async throws -> CGImage {
-    guard let recipe else { return source.image }
-    let key = "\(source.id)|\(recipe.lutID)|\(libraryRevision)"
+    guard recipe != nil || exposure.isNeutral == false else {
+      return source.image
+    }
+    let itemKey = recipe.map { "lut:\($0.lutID)" } ?? "original"
+    let key =
+      "\(source.id)|\(itemKey)|\(libraryRevision)|\(exposure.ev.bitPattern)"
     if let cached = imageCache.object(forKey: key as NSString) {
       return cached
     }
@@ -71,11 +75,20 @@ actor LUTPreviewRenderer {
     }
 
     let renderingTask = Task { @concurrent [self] in
-      let feature = try await feature(
-        for: recipe,
-        libraryRevision: libraryRevision
+      let lutFeature: ColorCubeFeature?
+      if let recipe {
+        lutFeature = try await feature(
+          for: recipe,
+          libraryRevision: libraryRevision
+        )
+      } else {
+        lutFeature = nil
+      }
+      return try Self.makeImage(
+        source: source,
+        feature: lutFeature,
+        exposure: exposure
       )
-      return try Self.makeImage(source: source, feature: feature)
     }
     renderingTasks[key] = renderingTask
 
@@ -154,11 +167,18 @@ actor LUTPreviewRenderer {
   /// Materializes one result from already-decoded LUT data.
   private nonisolated static func makeImage(
     source: LUTPreviewSourceImage,
-    feature: ColorCubeFeature
+    feature: ColorCubeFeature?,
+    exposure: ExposureAdjustment
   ) throws -> CGImage {
     try autoreleasepool {
+      var features: [MainFeature] = [
+        .effect(exposure.feature)
+      ]
+      if let feature {
+        features.append(.effect(feature))
+      }
       let document = EditingDocument(
-        mainTree: MainTree(features: [.effect(feature)])
+        mainTree: MainTree(features: features)
       )
       let sourceImage = CIImage(cgImage: source.image)
       let output = try ParametricImageRenderer().makeImage(
@@ -171,7 +191,10 @@ actor LUTPreviewRenderer {
           from: output.extent,
           format: .RGBA8,
           colorSpace:
-            FargLUTOutputColorSpace.rec709.coreMediaDeliveryColorSpace,
+            feature == nil
+            ? source.image.colorSpace
+              ?? CGColorSpace(name: CGColorSpace.sRGB)!
+            : FargLUTOutputColorSpace.rec709.coreMediaDeliveryColorSpace,
           deferred: false
         )
       else {

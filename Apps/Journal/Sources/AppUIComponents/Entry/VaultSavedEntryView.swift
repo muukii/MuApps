@@ -1,4 +1,3 @@
-import CaptureBauhaus
 import JournalVault
 import MapKit
 import MuColor
@@ -85,45 +84,6 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
   }
 }
 
-/// A finite placement boundary for authored content in the saved-entry grid.
-///
-/// The transparent tile owns only its 4:5 grid geometry. Content still owns its
-/// typography and media treatment through `.savedGrid`; the centered overlay
-/// prevents asynchronous media decoding from changing row height, while the
-/// outer boundary keeps every content type inside its column.
-public struct VaultSavedEntryGridCell: View {
-
-  private let content: EntryContent
-
-  public init(content: EntryContent) {
-    self.content = content
-  }
-
-  public var body: some View {
-    Color.clear
-      .aspectRatio(
-        .init(
-          width: 4,
-          height: 5
-        ),
-        contentMode: .fit
-      )
-      .overlay {
-        EntryContentView(
-          content: content,
-          style: .savedGrid
-        )
-        .frame(
-          maxWidth: .infinity,
-          maxHeight: .infinity,
-          alignment: .center
-        )
-      }
-      .contentShape(.rect)
-      .clipShape(.rect(cornerRadius: 24))
-  }
-}
-
 /// Standalone authored content and its record metadata in the detail screen.
 ///
 /// Unlike a compact tile, the detail row has no shared card silhouette. Each
@@ -136,19 +96,22 @@ public struct VaultSavedEntryDetailRow: View {
   let isDeletingDisabled: Bool
   let onEdit: @MainActor () -> Void
   let onDelete: @MainActor () -> Void
+  let onOpen: (@MainActor () -> Void)?
 
   public init(
     entry: VaultSavedEntryModel,
     isEditingDisabled: Bool,
     isDeletingDisabled: Bool,
     onEdit: @escaping @MainActor () -> Void,
-    onDelete: @escaping @MainActor () -> Void
+    onDelete: @escaping @MainActor () -> Void,
+    onOpen: (@MainActor () -> Void)? = nil
   ) {
     self.entry = entry
     self.isEditingDisabled = isEditingDisabled
     self.isDeletingDisabled = isDeletingDisabled
     self.onEdit = onEdit
     self.onDelete = onDelete
+    self.onOpen = onOpen
   }
 
   public var body: some View {
@@ -171,7 +134,8 @@ public struct VaultSavedEntryDetailRow: View {
         isEditingDisabled: isEditingDisabled,
         isDeletingDisabled: isDeletingDisabled,
         onEdit: onEdit,
-        onDelete: onDelete
+        onDelete: onDelete,
+        onOpen: onOpen
       )
       .frame(maxWidth: 640, alignment: .leading)
       .frame(maxWidth: .infinity, alignment: .center)
@@ -239,6 +203,7 @@ private struct VaultSavedEntryDetailMetadata: View {
   let isDeletingDisabled: Bool
   let onEdit: @MainActor () -> Void
   let onDelete: @MainActor () -> Void
+  let onOpen: (@MainActor () -> Void)?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -250,6 +215,18 @@ private struct VaultSavedEntryDetailMetadata: View {
         }
 
         Spacer(minLength: 0)
+
+        if let onOpen {
+          Button {
+            onOpen()
+          } label: {
+            Image(systemName: "chevron.right")
+              .frame(width: 44, height: 44)
+              .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Open Entry")
+        }
 
         Button {
           onEdit()
@@ -383,46 +360,6 @@ extension JournalVault.Card.Kind {
   }
 }
 
-#Preview("Vault Saved Entry Tiles") {
-  PrimaryContainer(accentColor: .default) {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 12) {
-        Text(
-          VaultSavedEntryPreviewFixtures.day,
-          format: .dateTime.weekday(.abbreviated).month(.wide).day().year()
-        )
-        .font(.headline)
-        .foregroundStyle(.appOnPrimaryContainer.opacity(0.72))
-
-        LazyVGrid(
-          columns: [
-            GridItem(.flexible(), spacing: 16),
-            GridItem(.flexible(), spacing: 16),
-          ],
-          spacing: 16
-        ) {
-          ForEach(VaultSavedEntryPreviewFixtures.examples) { example in
-            VaultSavedEntryGridCell(content: example.entry.content)
-          }
-        }
-      }
-      .padding(16)
-    }
-    .background(.background)
-  }
-}
-
-#Preview("Vault Saved Entry Bauhaus Tile") {
-  PrimaryContainer(accentColor: .default) {
-    VaultSavedEntryGridCell(
-      content: VaultSavedEntryPreviewFixtures.bauhausContent
-    )
-    .frame(width: 240)
-    .padding(16)
-    .background(.background)
-  }
-}
-
 #Preview("Vault Saved Entry Detail Row") {
   PrimaryContainer(accentColor: .default) {
     ScrollView {
@@ -479,17 +416,6 @@ extension JournalVault.Card.Kind {
   }
 }
 
-/// Preview-only example for one saved-entry grid cell.
-///
-/// The production list derives this value shape from live SwiftData models.
-/// Keeping the fixture at the display-model boundary lets the Preview render
-/// the real saved-entry components without opening a vault store.
-private struct VaultSavedEntryPreviewExample: Identifiable {
-  var id: UUID { entry.id }
-
-  let entry: VaultSavedEntryModel
-}
-
 @MainActor
 private enum VaultSavedEntryPreviewFixtures {
 
@@ -529,96 +455,9 @@ private enum VaultSavedEntryPreviewFixtures {
     )
   )
 
-  static let squarePhotoEntry = entry(
-    kind: .photo,
-    body: "",
-    createdAt: day.addingTimeInterval(-12_600),
-    attachment: mediaAttachment(
-      kind: .photo,
-      pixelSize: CGSize(width: 360, height: 360),
-      title: "SQUARE"
-    )
-  )
-
-  /// Authored vector artwork rendered through the real saved-grid content path.
-  static let bauhausContent: EntryContent = {
-    var artwork = BauhausGridArtwork()
-
-    artwork[BauhausGridPosition(row: 0, column: 0)] = BauhausTile(
-      shape: .circle,
-      shapeSwatch: .slot1,
-      backgroundSwatch: .slot3
-    )
-    artwork[BauhausGridPosition(row: 0, column: 4)] = BauhausTile(
-      shape: .square,
-      shapeSwatch: .slot6,
-      backgroundSwatch: .slot2
-    )
-    artwork[BauhausGridPosition(row: 1, column: 1)] = BauhausTile(
-      shape: .triangleBottomTrailing,
-      shapeSwatch: .slot5,
-      backgroundSwatch: .slot3
-    )
-    artwork[BauhausGridPosition(row: 2, column: 2)] = BauhausTile(
-      shape: .paddedCircle,
-      shapeSwatch: .slot2,
-      backgroundSwatch: .slot7
-    )
-    artwork[BauhausGridPosition(row: 3, column: 3)] = BauhausTile(
-      shape: .quarterCircleTopLeading,
-      shapeSwatch: .slot4,
-      backgroundSwatch: .slot5
-    )
-    artwork[BauhausGridPosition(row: 4, column: 0)] = BauhausTile(
-      shape: .semicircleFlatTrailing,
-      shapeSwatch: .slot7,
-      backgroundSwatch: .slot3
-    )
-    artwork[BauhausGridPosition(row: 4, column: 4)] = BauhausTile(
-      shape: .triangleTopLeading,
-      shapeSwatch: .slot1,
-      backgroundSwatch: .slot6
-    )
-
-    return .bauhaus(
-      BauhausContentSource(
-        document: BauhausGridDocument(artwork: artwork)
-      )
-    )
-  }()
-
   static let detailMediaEntries: [VaultSavedEntryModel] = [
     landscapePhotoEntry,
     portraitVideoEntry,
-  ]
-
-  static let examples: [VaultSavedEntryPreviewExample] = [
-    VaultSavedEntryPreviewExample(
-      entry: entry(
-        kind: .text,
-        body: "Small notes should keep their own shape in the real list.",
-        createdAt: day.addingTimeInterval(-120)
-      )
-    ),
-    VaultSavedEntryPreviewExample(
-      entry: squarePhotoEntry
-    ),
-    VaultSavedEntryPreviewExample(
-      entry: entry(
-        kind: .link,
-        body: "https://www.apple.com",
-        createdAt: day.addingTimeInterval(-460)
-      )
-    ),
-    VaultSavedEntryPreviewExample(entry: landscapePhotoEntry),
-    VaultSavedEntryPreviewExample(entry: portraitVideoEntry),
-    VaultSavedEntryPreviewExample(
-      entry: entry(
-        kind: .audio,
-        body: "",
-        createdAt: day.addingTimeInterval(-1_680)
-      )
-    ),
   ]
 
   private static func entry(

@@ -3,10 +3,7 @@
 //
 
 import AVFoundation
-import Photos
-import PhotosUI
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Selects the previewed clip while making the shared edit scope explicit.
 struct VideoBatchStripView: View {
@@ -14,22 +11,22 @@ struct VideoBatchStripView: View {
   let contentPadding: CGFloat
   let clips: [VideoClip]
   let selectedClipID: VideoClip.ID?
-  @Binding var pickerItems: [PhotosPickerItem]
   let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
-  let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
+  let onSelectPhotos: @MainActor @Sendable () -> Void
+  let onSelectFiles: @MainActor @Sendable () -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {    
+    VStack(alignment: .leading, spacing: 10) {
       VideoBatchFilmstrip(
         contentPadding: contentPadding,
         clips: clips,
         selectedClipID: selectedClipID,
-        pickerItems: $pickerItems,
         isPickerDisabled: clips.contains(where: \.isPreparing),
         onSelectClip: onSelectClip,
         onRemoveClip: onRemoveClip,
-        onPickFileURLs: onPickFileURLs
+        onSelectPhotos: onSelectPhotos,
+        onSelectFiles: onSelectFiles
       )
     }
   }
@@ -41,11 +38,11 @@ private struct VideoBatchFilmstrip: View {
   let contentPadding: CGFloat
   let clips: [VideoClip]
   let selectedClipID: VideoClip.ID?
-  @Binding var pickerItems: [PhotosPickerItem]
   let isPickerDisabled: Bool
   let onSelectClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
-  let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
+  let onSelectPhotos: @MainActor @Sendable () -> Void
+  let onSelectFiles: @MainActor @Sendable () -> Void
 
   var body: some View {
     ScrollViewReader { proxy in
@@ -62,9 +59,9 @@ private struct VideoBatchFilmstrip: View {
           }
 
           VideoBatchAddCell(
-            pickerItems: $pickerItems,
             isDisabled: isPickerDisabled,
-            onPickFileURLs: onPickFileURLs
+            onSelectPhotos: onSelectPhotos,
+            onSelectFiles: onSelectFiles
           )
         }
         .padding(.horizontal, 1)
@@ -88,7 +85,7 @@ private struct VideoBatchFilmstrip: View {
 }
 
 extension View {
-  
+
   func selectionOverlay(isSelected: Bool) -> some View {
     overlay {
       RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -98,7 +95,7 @@ extension View {
         )
     }
   }
-  
+
 }
 
 /// Renders one clip's lifecycle at its stable filmstrip position.
@@ -140,24 +137,20 @@ private struct VideoBatchClipCell: View {
 /// Offers both supported import sources at the trailing end of the filmstrip.
 private struct VideoBatchAddCell: View {
 
-  @Binding var pickerItems: [PhotosPickerItem]
   let isDisabled: Bool
-  let onPickFileURLs: @MainActor @Sendable ([URL]) -> Void
-
-  @State private var isPhotosPickerPresented = false
-  @State private var isVideoFileImporterPresented = false
-  @State private var fileImporterErrorMessage: String?
+  let onSelectPhotos: @MainActor @Sendable () -> Void
+  let onSelectFiles: @MainActor @Sendable () -> Void
 
   var body: some View {
     Menu {
       Button {
-        isPhotosPickerPresented = true
+        onSelectPhotos()
       } label: {
         Label("Photos", systemImage: "photo.on.rectangle")
       }
 
       Button {
-        isVideoFileImporterPresented = true
+        onSelectFiles()
       } label: {
         Label("Files", systemImage: "externaldrive")
       }
@@ -182,40 +175,6 @@ private struct VideoBatchAddCell: View {
     .buttonStyle(.plain)
     .disabled(isDisabled)
     .accessibilityLabel("Add Videos")
-    // TODO: Cellにこういうアクションがあるのはだめ
-    .photosPicker(
-      isPresented: $isPhotosPickerPresented,
-      selection: $pickerItems,
-      selectionBehavior: .ordered,
-      matching: .videos,
-      photoLibrary: .shared()
-    )
-    .fileImporter(
-      isPresented: $isVideoFileImporterPresented,
-      allowedContentTypes: [.movie],
-      allowsMultipleSelection: true
-    ) { result in
-      switch result {
-      case .success(let fileURLs):
-        onPickFileURLs(fileURLs)
-      case .failure(let error):
-        if (error as? CocoaError)?.code != .userCancelled {
-          fileImporterErrorMessage = error.localizedDescription
-        }
-      }
-    }
-    .alert(
-      "Couldn't Open Files",
-      isPresented: Binding(
-        get: { fileImporterErrorMessage != nil },
-        set: { if $0 == false { fileImporterErrorMessage = nil } }
-      ),
-      presenting: fileImporterErrorMessage
-    ) { _ in
-      Button("OK", role: .cancel) {}
-    } message: { message in
-      Text(message)
-    }
   }
 }
 

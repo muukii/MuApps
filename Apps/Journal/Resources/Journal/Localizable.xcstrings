@@ -2147,7 +2147,6 @@
       }
     },
     "Invite People" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2537,6 +2536,9 @@
           }
         }
       }
+    },
+    "Manage Sharing" : {
+
     },
     "Many ways to capture" : {
       "extractionState" : "stale",
