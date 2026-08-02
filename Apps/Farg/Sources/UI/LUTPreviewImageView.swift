@@ -26,30 +26,36 @@ struct LUTPreviewImageView: View {
   }
 
   var body: some View {
-    ZStack {
-      Color.secondary.opacity(0.12)
+    
+    Color.clear.overlay { 
+      ZStack {
 
-      if let renderedImage = previewModel.image(for: requestID) {
-        Image(decorative: renderedImage, scale: 1)
-          .resizable()
-          .scaledToFill()
-      } else if let source, lut == nil, exposure.isNeutral {
-        Image(decorative: source.image, scale: 1)
-          .resizable()
-          .scaledToFill()
-      } else if source == nil {
-        Image(systemName: "photo")
-          .font(.title2)
-          .foregroundStyle(.tertiary)
-      } else if previewModel.didFail(requestID: requestID) {
-        Image(systemName: "exclamationmark.triangle")
-          .font(.title3)
-          .foregroundStyle(.secondary)
-      } else {
-        ProgressView()
-          .controlSize(.small)
+        if let renderedImage = previewModel.image(for: requestID) {
+          Image(decorative: renderedImage, scale: 1)
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+        } else if let source, lut == nil, exposure.isNeutral {
+          Image(decorative: source.image, scale: 1)
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+        } else if source == nil {
+          Image(systemName: "photo")
+            .font(.title2)
+            .foregroundStyle(.tertiary)
+        } else if previewModel.didFail(requestID: requestID) {
+          Image(systemName: "exclamationmark.triangle")
+            .font(.title3)
+            .foregroundStyle(.secondary)
+        } else {
+          ProgressView()
+            .controlSize(.small)
+        }
+        
       }
     }
+    .background(content: { 
+      Color.secondary.opacity(0.12)
+    })
     .clipped()
     .task(id: taskID) {
       await requestPreview()
@@ -120,4 +126,14 @@ private struct LUTPreviewViewTaskID: Hashable {
 
   var requestID: LUTPreviewRequestID
   var modelID: ObjectIdentifier
+}
+
+#Preview {
+  LUTPreviewImageView(
+    source: LUTPreviewSampleLibrary.makePreviewSource(),
+    lut: nil,
+    library: LUTLibrary()
+  )
+  .environment(LUTPreviewModelStore())
+  .padding(50)
 }

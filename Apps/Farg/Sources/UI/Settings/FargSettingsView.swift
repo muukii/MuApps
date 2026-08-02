@@ -721,17 +721,21 @@ private struct PreviewSampleThumbnail: View {
   let isSelected: Bool
 
   var body: some View {
-    ZStack {
-      Color.secondary.opacity(0.12)
-
-      if let previewSource {
-        Image(decorative: previewSource.image, scale: 1)
-          .resizable()
-          .scaledToFill()
-      } else {
-        Image(systemName: "photo")
-          .font(.title2)
-          .foregroundStyle(.tertiary)
+    Color.clear.overlay {
+      ZStack {
+        Color.secondary.opacity(0.12)
+        
+        if let previewSource {
+          
+          Image(decorative: previewSource.image, scale: 1)
+            .resizable()
+            .scaledToFill()
+          
+        } else {
+          Image(systemName: "photo")
+            .font(.title2)
+            .foregroundStyle(.tertiary)
+        }
       }
     }
     .frame(width: 144, height: 90)
@@ -777,14 +781,7 @@ private struct PreviewSampleAddItem: View {
             .foregroundStyle(.secondary)
         }
         .frame(width: 144, height: 90)
-        .overlay {
-          RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(
-              Color.secondary.opacity(0.35),
-              style: StrokeStyle(lineWidth: 1, dash: [4])
-            )
-        }
-
+       
         Text("Add Sample")
           .font(.subheadline)
           .foregroundStyle(.secondary)

@@ -101,18 +101,15 @@ private struct OriginalCell: View {
   var body: some View {
     Button(action: action) {
       VStack(alignment: .leading, spacing: 7) {
-        Color.clear
-          .overlay {
-            LUTPreviewImageView(
-              source: source,
-              lut: nil,
-              library: library,
-              exposure: exposure
-            )
-          }
-          .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-          .selectionOverlay(isSelected: isSelected)
-          .aspectRatio(1, contentMode: .fill)
+        LUTPreviewImageView(
+          source: source,
+          lut: nil,
+          library: library,
+          exposure: exposure
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .selectionOverlay(isSelected: isSelected)
+        .aspectRatio(1, contentMode: .fill)
 
         Text(title)
           .font(.caption.weight(isSelected ? .semibold : .regular))
@@ -144,18 +141,15 @@ private struct LUTPreviewCell: View {
   var body: some View {
     Button(action: action) {
       VStack(alignment: .leading, spacing: 7) {
-        Color.clear
-          .overlay {
-            LUTPreviewImageView(
-              source: source,
-              lut: lut,
-              library: library,
-              exposure: exposure
-            )
-          }
-          .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-          .selectionOverlay(isSelected: isSelected)
-          .aspectRatio(1, contentMode: .fill)
+        LUTPreviewImageView(
+          source: source,
+          lut: lut,
+          library: library,
+          exposure: exposure
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .selectionOverlay(isSelected: isSelected)
+        .aspectRatio(1, contentMode: .fill)
 
         VStack(alignment: .leading, spacing: 1) {
           Text(title)

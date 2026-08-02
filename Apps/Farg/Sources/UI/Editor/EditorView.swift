@@ -436,7 +436,7 @@ private struct EditorLayout: View {
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onSelectPhotos: @MainActor @Sendable () -> Void
   let onSelectFiles: @MainActor @Sendable () -> Void
-
+  
   var body: some View {
     VStack(spacing: 0) {
 
@@ -464,10 +464,10 @@ private struct EditorLayout: View {
         onRemoveClip: onRemoveClip,
         onSelectPhotos: onSelectPhotos,
         onSelectFiles: onSelectFiles
-      )
+      )     
       .fixedSize(horizontal: false, vertical: true)
     }
-    .animation(.smooth, value: selectedEffect)
+    .animation(.smooth, value: UUID()) // TODO: should be better. To animate all container its content changes.
     .background(
       Rectangle()
         .foregroundStyle(.background)

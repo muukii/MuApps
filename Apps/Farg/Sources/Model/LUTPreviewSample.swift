@@ -43,7 +43,7 @@ struct LUTPreviewSample: Identifiable, Codable, Hashable, Sendable {
 }
 
 /// A decoded, orientation-normalized source shared by visible LUT previews.
-struct LUTPreviewSourceImage: @unchecked Sendable {
+struct LUTPreviewSourceImage: Sendable {
 
   /// The longest pixel edge retained for cell and Settings preview rendering.
   nonisolated static let maximumPixelSize = 300
@@ -51,7 +51,7 @@ struct LUTPreviewSourceImage: @unchecked Sendable {
   /// Changes whenever a different still should invalidate rendered thumbnails.
   var id: String
   /// The source pixels before LUT evaluation, bounded by `maximumPixelSize`.
-  var image: CGImage
+  nonisolated(unsafe) var image: CGImage
 
   /// Creates a preview input and catches oversized producers in debug builds.
   nonisolated init(id: String, image: CGImage) {

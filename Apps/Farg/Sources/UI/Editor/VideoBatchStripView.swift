@@ -163,13 +163,6 @@ private struct VideoBatchAddCell: View {
           .background.secondary,
           in: RoundedRectangle(cornerRadius: 9, style: .continuous)
         )
-        .overlay {
-          RoundedRectangle(cornerRadius: 9, style: .continuous)
-            .stroke(
-              Color.secondary.opacity(0.2),
-              style: StrokeStyle(lineWidth: 1, dash: [4])
-            )
-        }
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
     .buttonStyle(.plain)
@@ -229,14 +222,7 @@ private struct VideoBatchLoadingPlaceholder: View {
       .background(
         .background.secondary,
         in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-      )
-      .overlay {
-        RoundedRectangle(cornerRadius: 9, style: .continuous)
-          .stroke(
-            Color.secondary.opacity(0.2),
-            style: StrokeStyle(lineWidth: 1, dash: [4])
-          )
-      }
+      )    
       .accessibilityLabel("Adding video")
   }
 }
