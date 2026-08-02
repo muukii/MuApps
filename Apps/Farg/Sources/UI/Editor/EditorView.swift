@@ -421,6 +421,8 @@ private struct VideoInformationPresentation: Identifiable {
 /// Places the selected preview above or beside the shared batch inspector.
 private struct EditorLayout: View {
 
+  @State var hasAppeared: Bool = false
+  
   let preview: VideoPreviewModel
   let lutPreviewSource: LUTPreviewSourceImage?
   let clips: [VideoClip]
@@ -467,7 +469,7 @@ private struct EditorLayout: View {
       )     
       .fixedSize(horizontal: false, vertical: true)
     }
-    .animation(.smooth, value: UUID()) // TODO: should be better. To animate all container its content changes.
+    .animation(hasAppeared ? .smooth : nil, value: UUID()) // TODO: should be better. To animate all container its content changes.
     .background(
       Rectangle()
         .foregroundStyle(.background)
@@ -478,6 +480,9 @@ private struct EditorLayout: View {
     .padding(4)
     .safeAreaInset(edge: .bottom) {
       EditorEffectTabBar(selection: $selectedEffect)
+    }
+    .onAppear {
+      hasAppeared = true
     }
   }
 }

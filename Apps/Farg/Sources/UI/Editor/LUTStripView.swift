@@ -17,52 +17,120 @@ struct LUTStripView: View {
   @Binding var selected: LUT?
 
   var body: some View {
-    ScrollViewReader { proxy in
-      ScrollView(.horizontal, showsIndicators: false) {
-        LazyHStack(alignment: .top, spacing: 10) {
-          OriginalCell(
-            title: "No LUT",
-            source: source,
-            library: library,
-            exposure: exposure,
-            isSelected: selected == nil
-          ) {
-            selected = nil
-          }
-          .id(LUTStripItemID.original)
-
-          ForEach(library.luts) { lut in
-            LUTPreviewCell(
-              title: lut.name,
-              subtitle: originLabel(for: lut),
-              source: source,
-              lut: lut,
-              library: library,
-              exposure: exposure,
-              isSelected: selected?.id == lut.id
-            ) {
-              selected = lut
-            }
-            .id(LUTStripItemID.lut(lut.id))
-          }
-        }
+    HorizontalFolderView(
+      items: rootItems,
+      initialPath: selectedFolderPath,
+      itemView: itemView,
+      folderView: { name in
+        LUTFolderCell(title: name)
       }
-      .scrollClipDisabled()
-      .contentMargins(.horizontal, contentPadding, for: .scrollContent)
-      .onAppear {
-        proxy.scrollTo(selectedItemID, anchor: .center)
-      }
-      .onChange(of: selectedItemID) { _, itemID in
-        withAnimation(.snappy) {
-          proxy.scrollTo(itemID, anchor: .center)
-        }
-      }
-    }
-    .frame(height: 80)
+    )
+    .id(selectorIdentity)
+    .padding(.horizontal, contentPadding)
   }
 
-  private var selectedItemID: LUTStripItemID {
-    selected.map { .lut($0.id) } ?? .original
+  /// The top-level selector entries keep linked LUTs out of the flat root.
+  private var rootItems: [FileSystemNode<LUTStripItem>] {
+    let importedItems = library.importedLUTs.map {
+      FileSystemNode<LUTStripItem>.file(value: .lut($0))
+    }
+    let linkedFolderItems = library.linkedFolderCollections.map { collection in
+      FileSystemNode<LUTStripItem>.directory(
+        .init(
+          id: collection.id,
+          name: collection.name,
+          contents: folderContents(
+            luts: collection.luts,
+            folders: collection.folders
+          )
+        )
+      )
+    }
+    return [.file(value: .original)] + importedItems + linkedFolderItems
+  }
+
+  /// Converts the persisted linked-folder projection into navigable entries.
+  private func folderContents(
+    luts: [LUT],
+    folders: [LUTFolderNode]
+  ) -> [FileSystemNode<LUTStripItem>] {
+    let lutItems = luts.map { lut in
+      FileSystemNode<LUTStripItem>.file(value: .lut(lut))
+    }
+    let folderItems = folders.map { folder in
+      FileSystemNode<LUTStripItem>.directory(
+        .init(
+          id: folder.id,
+          name: folder.name,
+          contents: folderContents(
+            luts: folder.luts,
+            folders: folder.folders
+          )
+        )
+      )
+    }
+    return lutItems + folderItems
+  }
+
+  /// The directory ID path containing the selected linked LUT, including root.
+  private var selectedFolderPath: [String] {
+    guard
+      let selected,
+      let origin = selected.linkedFolderOrigin,
+      let collection = library.linkedFolderCollections.first(
+        where: { $0.id == origin.folderID }
+      )
+    else {
+      return []
+    }
+
+    let components = origin.relativePath
+      .split(separator: "/", omittingEmptySubsequences: true)
+      .map(String.init)
+    guard components.isEmpty == false else { return [] }
+    let directoryComponents = Array(components.dropLast())
+    let nestedFolderIDs = directoryComponents.indices.map { index in
+      let relativePath = directoryComponents[...index].joined(separator: "/")
+      return "\(origin.folderID):\(relativePath)"
+    }
+    return [collection.id] + nestedFolderIDs
+  }
+
+  /// Rebuilds the navigation stack when synchronized LUT metadata changes.
+  private var selectorIdentity: LUTSelectorIdentity {
+    LUTSelectorIdentity(
+      libraryRevision: library.revision,
+      folderPath: selectedFolderPath
+    )
+  }
+
+  @ViewBuilder
+  private func itemView(for item: LUTStripItem) -> some View {
+    switch item {
+    case .original:
+      OriginalCell(
+        title: "No LUT",
+        source: source,
+        library: library,
+        exposure: exposure,
+        isSelected: selected == nil
+      ) {
+        selected = nil
+      }
+
+    case .lut(let lut):
+      LUTPreviewCell(
+        title: lut.name,
+        subtitle: originLabel(for: lut),
+        source: source,
+        lut: lut,
+        library: library,
+        exposure: exposure,
+        isSelected: selected?.id == lut.id
+      ) {
+        selected = lut
+      }
+    }
   }
 
   // TODO: looks performance bad
@@ -83,10 +151,40 @@ struct LUTStripView: View {
   }
 }
 
-/// Stable anchors used to keep the active look visible in a large collection.
-private enum LUTStripItemID: Hashable {
+/// A root or leaf entry displayed by the hierarchical LUT selector.
+private enum LUTStripItem: Hashable {
   case original
-  case lut(String)
+  case lut(LUT)
+}
+
+/// Identity for the current LUT tree and its externally selected folder path.
+private struct LUTSelectorIdentity: Hashable {
+
+  let libraryRevision: UInt
+  let folderPath: [String]
+}
+
+/// One linked-folder directory in the editor's horizontal navigation stack.
+private struct LUTFolderCell: View {
+
+  let title: String
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 7) {
+      Image(systemName: "folder.fill")
+        .font(.title2)
+        .foregroundStyle(.tint)
+        .frame(width: 64, height: 64)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 9))
+
+      Text(title)
+        .font(.caption)
+        .foregroundStyle(.primary)
+        .lineLimit(1)
+    }
+    .frame(width: 64)
+    .contentShape(Rectangle())
+  }
 }
 
 private struct OriginalCell: View {

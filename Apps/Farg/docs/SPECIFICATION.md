@@ -203,6 +203,10 @@ when a person searches for **Farg** without the diacritic.
 - Linked LUTs preserve their Files directory hierarchy in the LUT library and
   identify their linked folder path in the editor's preview-backed selector.
   Directories without supported LUTs are not shown in Settings.
+- In the editor's LUT selector, linked folders appear as navigable folder items
+  alongside **No LUT** and individually imported LUTs. Opening a folder shows
+  its direct LUTs and child folders, and the selector's Back control returns to
+  the parent directory without flattening the Files hierarchy.
 - The editor keeps the currently selected LUT visible when the selection
   changes, including selections supplied by Shortcuts or linked folders.
 - Unlinking a folder stops future synchronization but preserves its current LUT

@@ -11,9 +11,20 @@ struct NavigationToolbar<Root: View>: View {
   @State var stackedView: [AnyView] = []
 
   let root: Root
+  private let usesGlass: Bool
 
-  init(@ViewBuilder root: () -> Root) {
+  init(
+    usesGlass: Bool = true,
+    initialStack: [AnyView] = [],
+    @ViewBuilder root: () -> Root
+  ) {
+    self.usesGlass = usesGlass
+    _stackedView = State(initialValue: initialStack)
     self.root = root()
+  }
+  
+  private var glass: Glass {
+    .regular    
   }
 
   var body: some View {
@@ -33,8 +44,13 @@ struct NavigationToolbar<Root: View>: View {
 
         }
         .environment(\.stackedView, $stackedView)
-        .glassEffect(.regular.interactive())
-        //        .frame(maxWidth: .infinity, alignment: .center)
+        .map {
+          if usesGlass {
+            $0.glassEffect(glass.interactive())
+          } else {
+            $0
+          }
+        }
 
         if stackedView.isEmpty == false {
           backButton
@@ -53,9 +69,20 @@ struct NavigationToolbar<Root: View>: View {
       Image(systemName: "chevron.backward")
         .padding(12)
     }
-    .glassEffect(.regular.interactive())
-    .glassEffectTransition(.matchedGeometry)
+    .map {
+      if usesGlass {
+        $0.glassEffect(glass.interactive())
+      } else {
+        $0
+      }
+    }
 
   }
 
+}
+
+extension View {
+  func map<U: View>(@ViewBuilder _ closure: (Self) -> U) -> some View {
+    closure(self)
+  }
 }
