@@ -330,7 +330,8 @@ private struct FargOnboardingActions: View {
     case .photoAccess:
       switch photoAccessState {
       case .notDetermined:
-        "Allow Photos Access"
+        // The system permission prompt follows immediately; keep this action neutral per App Review Guideline 5.1.1(iv).
+        "Continue"
       case .granted, .denied:
         "Get Started"
       }

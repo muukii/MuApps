@@ -36,7 +36,7 @@ when a person searches for **Farg** without the diacritic.
   action that applies a selected LUT and passes its rendered movie to the next
   workflow action.
 - The second screen prepares the person for Photos access and explains its
-  copy-free video selection and export benefits. **Allow Photos Access** then
+  copy-free video selection and export benefits. **Continue** then
   requests Photo Library read/write authorization. Full and Limited access both
   allow onboarding to complete; the system result is not a requirement to
   enter the app.
