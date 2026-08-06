@@ -2,6 +2,9 @@
 
 Use @coding-guide.md for coding.
 
+Use @PROJECT_MANAGEMENT.md for project-wide Notion specification, task, and
+decision tracking.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview

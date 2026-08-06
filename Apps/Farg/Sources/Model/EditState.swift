@@ -9,9 +9,9 @@ import Foundation
 /// The edit being authored: an ordered video collection plus one shared
 /// parametric feature stack.
 ///
-/// `makeRenderRecipe(using:)` is the single place the UI turns selections into
-/// an immutable single-frame document plus temporal settings, so every clip
-/// uses the same recipe during preview and batch export.
+/// `makeRenderRecipe(using:selectedLUTID:)` is the single place the UI turns
+/// selections into an immutable single-frame document plus temporal settings,
+/// so every clip uses the same recipe during preview and batch export.
 @MainActor
 @Observable
 final class EditState {
@@ -21,9 +21,6 @@ final class EditState {
 
   /// The clip currently shown by the preview.
   var selectedClipID: VideoClip.ID?
-
-  /// The selected LUT, or `nil` for the unmodified video.
-  var selectedLUT: LUT?
 
   /// The LUT intensity (0 = original, 1 = full LUT).
   var amount: Double = 1.0
@@ -104,11 +101,6 @@ final class EditState {
     }
   }
 
-  func removeAllClips() {
-    clips.removeAll()
-    selectedClipID = nil
-  }
-
   /// Removes unresolved clips belonging to one cancelled or failed import.
   func removeClips(ids: Set<VideoClip.ID>) {
     guard ids.isEmpty == false else { return }
@@ -126,13 +118,23 @@ final class EditState {
   /// input response. The identity-stable film-grain feature follows both.
   /// Keeping every single-frame effect in this ordered tree makes the document
   /// the complete authored spatial recipe.
-  func makeDocument(using library: LUTLibrary) throws -> EditingDocument {
+  ///
+  /// The editor session owns the selected LUT identifier. Keeping the lookup
+  /// at this boundary means `EditState` can continue to build render recipes
+  /// without becoming the source of truth for a copied library value.
+  func makeDocument(
+    using library: LUTLibrary,
+    selectedLUTID: LUT.ID?
+  ) throws -> EditingDocument {
     var features: [MainFeature] = [
       .effect(exposure.feature)
     ]
     // Below the threshold the LUT contributes nothing, so omit its node rather
     // than evaluating a null color cube. Exposure and Grain remain authored.
-    if let lut = selectedLUT, amount > Self.minimumAmount {
+    if let selectedLUTID,
+      let lut = library.lut(id: selectedLUTID),
+      amount > Self.minimumAmount
+    {
       let feature = try library.feature(for: lut, amount: amount)
       features.append(.effect(feature))
     }
@@ -141,13 +143,20 @@ final class EditState {
   }
 
   /// Snapshots the complete render recipe used by preview and export.
-  func makeRenderRecipe(using library: LUTLibrary) throws -> FargVideoRenderRecipe {
+  func makeRenderRecipe(
+    using library: LUTLibrary,
+    selectedLUTID: LUT.ID?
+  ) throws -> FargVideoRenderRecipe {
     let lutOutputColorSpace: FargLUTOutputColorSpace? =
-      selectedLUT != nil && amount > Self.minimumAmount
+      selectedLUTID.flatMap(library.lut(id:)) != nil
+        && amount > Self.minimumAmount
       ? .rec709
       : nil
     return FargVideoRenderRecipe(
-      document: try makeDocument(using: library),
+      document: try makeDocument(
+        using: library,
+        selectedLUTID: selectedLUTID
+      ),
       motionBlur: motionBlur,
       lutOutputColorSpace: lutOutputColorSpace
     )

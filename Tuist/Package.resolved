@@ -1,10 +1,10 @@
 {
-  "originHash" : "a4646bc63d76c5bf8da9e3a9588dd991e4551306bb5232595698d32833c79a0f",
+  "originHash" : "72daa73828f9a706b56cd834e47c3243f968877a806be6d2dc46db2fb55ce166",
   "pins" : [
     {
       "identity" : "alamofire",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Alamofire/Alamofire.git",
+      "location" : "https://github.com/Alamofire/Alamofire",
       "state" : {
         "revision" : "e938f8c66708e7352fc7e3512647fa54255b267a",
         "version" : "5.11.2"
@@ -40,7 +40,7 @@
     {
       "identity" : "libaom.swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/awxkee/libaom.swift.git",
+      "location" : "https://github.com/awxkee/libaom.swift",
       "state" : {
         "revision" : "83e08f0eb34bf6ef95a82d15f4cfbbc2d70deeb2",
         "version" : "1.1.2"
@@ -49,7 +49,7 @@
     {
       "identity" : "libdav1d.swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/awxkee/libdav1d.swift.git",
+      "location" : "https://github.com/awxkee/libdav1d.swift",
       "state" : {
         "revision" : "56f7037e7af7646f1d02bdcd16f5032e9d66e4d1",
         "version" : "1.2.0"
@@ -67,7 +67,7 @@
     {
       "identity" : "libwebp-ios",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/awxkee/libwebp-ios.git",
+      "location" : "https://github.com/awxkee/libwebp-ios",
       "state" : {
         "revision" : "46b42251e665d520a4d842d48e8d5bcac9399942",
         "version" : "1.2.0"
@@ -76,7 +76,7 @@
     {
       "identity" : "libyuv.swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/awxkee/libyuv.swift.git",
+      "location" : "https://github.com/awxkee/libyuv.swift",
       "state" : {
         "revision" : "810842f196c65b77a39c2f32080225166b0e8f87",
         "version" : "1.1.0"
@@ -85,7 +85,7 @@
     {
       "identity" : "nextgrowingtextview",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/FluidGroup/NextGrowingTextView.git",
+      "location" : "https://github.com/FluidGroup/NextGrowingTextView",
       "state" : {
         "revision" : "63f2139c440ee7e731852eb1af0553522771f78f",
         "version" : "3.0.0"
@@ -94,7 +94,7 @@
     {
       "identity" : "nuke",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/kean/Nuke.git",
+      "location" : "https://github.com/kean/Nuke",
       "state" : {
         "revision" : "0ead44350d2737db384908569c012fe67c421e4d",
         "version" : "12.8.0"
@@ -112,7 +112,7 @@
     {
       "identity" : "swift-collections",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-collections.git",
+      "location" : "https://github.com/apple/swift-collections",
       "state" : {
         "revision" : "6675bc0ff86e61436e615df6fc5174e043e57924",
         "version" : "1.4.1"
@@ -156,7 +156,7 @@
     {
       "identity" : "swift-numerics",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-numerics.git",
+      "location" : "https://github.com/apple/swift-numerics",
       "state" : {
         "revision" : "0c0290ff6b24942dadb83a929ffaaa1481df04a2",
         "version" : "1.1.1"
@@ -169,14 +169,6 @@
       "state" : {
         "revision" : "f2dbd09829c6267db0a769e7c37fe332dab0b675",
         "version" : "1.0.0"
-      }
-    },
-    {
-      "identity" : "swift-state-graph",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/VergeGroup/swift-state-graph",
-      "state" : {
-        "revision" : "f6290206f05d4bb13f75518ef7406167331513f6"
       }
     },
     {
@@ -218,7 +210,7 @@
     {
       "identity" : "swiftui-gaussian-linear-gradient",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/FluidGroup/swiftui-gaussian-linear-gradient.git",
+      "location" : "https://github.com/FluidGroup/swiftui-gaussian-linear-gradient",
       "state" : {
         "revision" : "24a73857bfe5d58d8946097856b5d3d92e1b10cc",
         "version" : "0.3.0"
@@ -245,7 +237,7 @@
     {
       "identity" : "swiftui-persistent-control",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/FluidGroup/swiftui-persistent-control.git",
+      "location" : "https://github.com/FluidGroup/swiftui-persistent-control",
       "state" : {
         "revision" : "093554c7a02642acb306b8e8482fd3b8322314f3"
       }
@@ -262,7 +254,7 @@
     {
       "identity" : "swiftui-scroll-edge-effect",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/FluidGroup/swiftui-scroll-edge-effect.git",
+      "location" : "https://github.com/FluidGroup/swiftui-scroll-edge-effect",
       "state" : {
         "revision" : "2d613b6e265f88261d85a2357330d6f166c0b921",
         "version" : "0.1.2"
@@ -280,7 +272,7 @@
     {
       "identity" : "swiftui-support",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/FluidGroup/swiftui-support.git",
+      "location" : "https://github.com/FluidGroup/swiftui-support",
       "state" : {
         "revision" : "fbc3f1770889f74818a56eea3d7099a0d3a9c5e1",
         "version" : "0.13.0"

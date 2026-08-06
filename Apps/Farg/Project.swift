@@ -94,6 +94,7 @@ let project = Project(
       dependencies: [
         .target(name: "FargMotionBlur"),
         .external(name: "BrightroomParametric"),
+        .external(name: "StateGraph"),
       ],
       settings: .settings(
         base: .appTarget.merging([

@@ -14,7 +14,7 @@ struct LUTStripView: View {
   let library: LUTLibrary
   let source: LUTPreviewSourceImage?
   let exposure: ExposureAdjustment
-  @Binding var selected: LUT?
+  @Binding var selectedLUTID: LUT.ID?
 
   var body: some View {
     HorizontalFolderView(
@@ -25,14 +25,15 @@ struct LUTStripView: View {
         LUTFolderCell(title: name)
       }
     )
-    .id(selectorIdentity)
+    // Selection invalidates retained cells; only a new tree resets navigation.
+    .id(library.revision)
     .padding(.horizontal, contentPadding)
   }
 
   /// The top-level selector entries keep linked LUTs out of the flat root.
   private var rootItems: [FileSystemNode<LUTStripItem>] {
     let importedItems = library.importedLUTs.map {
-      FileSystemNode<LUTStripItem>.file(value: .lut($0))
+      FileSystemNode<LUTStripItem>.file(id: "lut:\($0.id)", value: .lut($0))
     }
     let linkedFolderItems = library.linkedFolderCollections.map { collection in
       FileSystemNode<LUTStripItem>.directory(
@@ -46,7 +47,11 @@ struct LUTStripView: View {
         )
       )
     }
-    return [.file(value: .original)] + importedItems + linkedFolderItems
+    return FileSystemNode.ordered(
+      linkedFolderItems
+        + [.file(id: "original", value: .original)]
+        + importedItems
+    )
   }
 
   /// Converts the persisted linked-folder projection into navigable entries.
@@ -55,7 +60,7 @@ struct LUTStripView: View {
     folders: [LUTFolderNode]
   ) -> [FileSystemNode<LUTStripItem>] {
     let lutItems = luts.map { lut in
-      FileSystemNode<LUTStripItem>.file(value: .lut(lut))
+      FileSystemNode<LUTStripItem>.file(id: "lut:\(lut.id)", value: .lut(lut))
     }
     let folderItems = folders.map { folder in
       FileSystemNode<LUTStripItem>.directory(
@@ -69,14 +74,15 @@ struct LUTStripView: View {
         )
       )
     }
-    return lutItems + folderItems
+    return FileSystemNode.ordered(folderItems + lutItems)
   }
 
-  /// The directory ID path containing the selected linked LUT, including root.
+  /// The stable directory path containing the selected linked LUT.
   private var selectedFolderPath: [String] {
     guard
-      let selected,
-      let origin = selected.linkedFolderOrigin,
+      let selectedLUTID,
+      let selectedLUT = library.lut(id: selectedLUTID),
+      let origin = selectedLUT.linkedFolderOrigin,
       let collection = library.linkedFolderCollections.first(
         where: { $0.id == origin.folderID }
       )
@@ -88,20 +94,13 @@ struct LUTStripView: View {
       .split(separator: "/", omittingEmptySubsequences: true)
       .map(String.init)
     guard components.isEmpty == false else { return [] }
+
     let directoryComponents = Array(components.dropLast())
     let nestedFolderIDs = directoryComponents.indices.map { index in
       let relativePath = directoryComponents[...index].joined(separator: "/")
       return "\(origin.folderID):\(relativePath)"
     }
     return [collection.id] + nestedFolderIDs
-  }
-
-  /// Rebuilds the navigation stack when synchronized LUT metadata changes.
-  private var selectorIdentity: LUTSelectorIdentity {
-    LUTSelectorIdentity(
-      libraryRevision: library.revision,
-      folderPath: selectedFolderPath
-    )
   }
 
   @ViewBuilder
@@ -113,9 +112,9 @@ struct LUTStripView: View {
         source: source,
         library: library,
         exposure: exposure,
-        isSelected: selected == nil
+        isSelected: selectedLUTID == nil
       ) {
-        selected = nil
+        selectedLUTID = nil
       }
 
     case .lut(let lut):
@@ -126,9 +125,9 @@ struct LUTStripView: View {
         lut: lut,
         library: library,
         exposure: exposure,
-        isSelected: selected?.id == lut.id
+        isSelected: selectedLUTID == lut.id
       ) {
-        selected = lut
+        selectedLUTID = lut.id
       }
     }
   }
@@ -155,13 +154,6 @@ struct LUTStripView: View {
 private enum LUTStripItem: Hashable {
   case original
   case lut(LUT)
-}
-
-/// Identity for the current LUT tree and its externally selected folder path.
-private struct LUTSelectorIdentity: Hashable {
-
-  let libraryRevision: UInt
-  let folderPath: [String]
 }
 
 /// One linked-folder directory in the editor's horizontal navigation stack.
@@ -279,7 +271,7 @@ private struct LUTPreviewCell: View {
 }
 
 #Preview("LUT strip") {
-  @Previewable @State var selected: LUT?
+  @Previewable @State var selectedLUTID: LUT.ID?
   @Previewable @State var previewModels = LUTPreviewModelStore()
   let library = LUTLibrary()
   let source = LUTPreviewSampleLibrary.makePreviewSource()
@@ -289,7 +281,7 @@ private struct LUTPreviewCell: View {
     library: library,
     source: source,
     exposure: .neutral,
-    selected: $selected
+    selectedLUTID: $selectedLUTID
   )
   .environment(previewModels)
   .onAppear {

@@ -73,7 +73,7 @@ let package = Package(
 
     // State management and utilities
     .package(url: "https://github.com/VergeGroup/swift-typed-identifier", from: "2.0.4"),
-    .package(url: "https://github.com/VergeGroup/swift-state-graph", revision: "f6290206f05d4bb13f75518ef7406167331513f6"),
+    .package(path:"../submodules/swift-state-graph"),
     .package(url: "https://github.com/VergeGroup/Wrap", from: "4.0.0"),
     .package(url: "https://github.com/VergeGroup/swift-concurrency-task-manager", from: "2.1.4"),
     .package(url: "https://github.com/dagronf/SwiftSubtitles", from: "0.5.0"),

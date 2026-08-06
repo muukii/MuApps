@@ -6,6 +6,7 @@ import FargMotionBlur
 import Foundation
 import Photos
 import PhotosUI
+import StateGraph
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -13,15 +14,9 @@ import UniformTypeIdentifiers
 struct EditorView: View {
 
   @Environment(\.displayScale) private var displayScale
-
-  let library: LUTLibrary
-  let defaultVideoFolder: DefaultVideoFolderStore
-  let previewSamples: LUTPreviewSampleLibrary
-  @Bindable var editState: EditState
+  @Environment(EditorViewModel.self) private var viewModel
   let onFinishEditing: @MainActor @Sendable () -> Void
 
-  @State private var preview = VideoPreviewModel()
-  @State private var lutPreviewModels = LUTPreviewModelStore()
   @State private var pickerItems: [PhotosPickerItem] = []
   @State private var isPhotosPickerPresented = false
   @State private var isVideoFileImporterPresented = false
@@ -33,6 +28,19 @@ struct EditorView: View {
   @State private var errorMessage: String?
   @State private var videoLoadRequestID: UUID?
   @State private var videoLoadTask: Task<Void, Never>?
+
+  private var library: LUTLibrary { viewModel.library }
+  private var defaultVideoFolder: DefaultVideoFolderStore {
+    viewModel.defaultVideoFolder
+  }
+  private var previewSamples: LUTPreviewSampleLibrary {
+    viewModel.previewSamples
+  }
+  private var editState: EditState { viewModel.editState }
+  private var preview: VideoPreviewModel { viewModel.preview }
+  private var lutPreviewModels: LUTPreviewModelStore {
+    viewModel.lutPreviewModels
+  }
 
   private var isErrorPresented: Binding<Bool> {
     Binding(
@@ -56,6 +64,7 @@ struct EditorView: View {
   }
 
   var body: some View {
+    @Bindable var editState = viewModel.editState
     let currentDisplayScale = displayScale
 
     EditorLayout(
@@ -64,8 +73,6 @@ struct EditorView: View {
       clips: editState.clips,
       selectedClipID: editState.selectedClipID,
       hdrVideoCount: editState.hdrVideoCount,
-      library: library,
-      selectedLUT: $editState.selectedLUT,
       exposure: $editState.exposure,
       motionBlur: $editState.motionBlur,
       grain: $editState.grain,
@@ -112,7 +119,7 @@ struct EditorView: View {
     .onChange(of: editState.selectedClip?.content?.source.id) { _, _ in
       reloadPreview()
     }
-    .onChange(of: editState.selectedLUT) { _, _ in applyComposition() }
+    .onChange(of: viewModel.selectedLUTID) { _, _ in applyComposition() }
     .onChange(of: editState.amount) { _, _ in applyComposition() }
     .onChange(of: editState.exposure) { _, _ in
       applyComposition(change: .parametricDocument)
@@ -136,7 +143,11 @@ struct EditorView: View {
       lutPreviewModels.synchronize(lutIDs: library.luts.map(\.id))
       updateLUTPreviewContext()
     }
-    .onChange(of: library.revision) { _, _ in reconcileSelectedLUT() }
+    .onChange(of: library.revision) { _, _ in
+      viewModel.reconcileSelectedLUT()
+      // A synchronized LUT may keep the same ID while its fingerprint changes.
+      applyComposition()
+    }
     .sheet(isPresented: $isSettingsPresented) {
       FargSettingsView(
         library: library,
@@ -314,7 +325,10 @@ struct EditorView: View {
   ) {
     guard let content = editState.selectedClip?.content else { return }
     do {
-      let recipe = try editState.makeRenderRecipe(using: library)
+      let recipe = try editState.makeRenderRecipe(
+        using: library,
+        selectedLUTID: viewModel.selectedLUTID
+      )
       preview.apply(
         recipe: recipe,
         for: content.source,
@@ -325,12 +339,6 @@ struct EditorView: View {
       preview.failCurrentRender(error)
       errorMessage = error.localizedDescription
     }
-  }
-
-  /// Rebinds the selection to synchronized metadata or clears a removed LUT.
-  private func reconcileSelectedLUT() {
-    guard let selectedLUT = editState.selectedLUT else { return }
-    editState.selectedLUT = library.lut(id: selectedLUT.id)
   }
 
   /// Invalidates editor LUT stills when their source, bytes, or exposure changes.
@@ -369,7 +377,10 @@ struct EditorView: View {
       return
     }
     do {
-      let recipe = try editState.makeRenderRecipe(using: library)
+      let recipe = try editState.makeRenderRecipe(
+        using: library,
+        selectedLUTID: viewModel.selectedLUTID
+      )
       let items: [VideoExportSessionItem] =
         editState.readyClips.enumerated().compactMap {
           index,
@@ -418,18 +429,36 @@ private struct VideoInformationPresentation: Identifiable {
   let content: VideoClip.Content
 }
 
+/// Binds the LUT control to session graph state at the edge of the display tree.
+private struct EditorLUTStripBindingView: View {
+
+  @Environment(EditorViewModel.self) private var viewModel
+
+  let contentPadding: CGFloat
+  let source: LUTPreviewSourceImage?
+  let exposure: ExposureAdjustment
+
+  var body: some View {
+    LUTStripView(
+      contentPadding: contentPadding,
+      library: viewModel.library,
+      source: source,
+      exposure: exposure,
+      selectedLUTID: viewModel.$selectedLUTID.binding
+    )
+  }
+}
+
 /// Places the selected preview above or beside the shared batch inspector.
 private struct EditorLayout: View {
 
   @State var hasAppeared: Bool = false
-  
+
   let preview: VideoPreviewModel
   let lutPreviewSource: LUTPreviewSourceImage?
   let clips: [VideoClip]
   let selectedClipID: VideoClip.ID?
   let hdrVideoCount: Int
-  let library: LUTLibrary
-  @Binding var selectedLUT: LUT?
   @Binding var exposure: ExposureAdjustment
   @Binding var motionBlur: MotionBlurSettings
   @Binding var grain: FilmGrainFeature
@@ -438,7 +467,7 @@ private struct EditorLayout: View {
   let onRemoveClip: @MainActor @Sendable (VideoClip.ID) -> Void
   let onSelectPhotos: @MainActor @Sendable () -> Void
   let onSelectFiles: @MainActor @Sendable () -> Void
-  
+
   var body: some View {
     VStack(spacing: 0) {
 
@@ -455,9 +484,7 @@ private struct EditorLayout: View {
         clips: clips,
         selectedClipID: selectedClipID,
         hdrVideoCount: hdrVideoCount,
-        library: library,
         lutPreviewSource: lutPreviewSource,
-        selectedLUT: $selectedLUT,
         exposure: $exposure,
         motionBlur: $motionBlur,
         grain: $grain,
@@ -466,10 +493,11 @@ private struct EditorLayout: View {
         onRemoveClip: onRemoveClip,
         onSelectPhotos: onSelectPhotos,
         onSelectFiles: onSelectFiles
-      )     
+      )
       .fixedSize(horizontal: false, vertical: true)
     }
-    .animation(hasAppeared ? .smooth : nil, value: UUID()) // TODO: should be better. To animate all container its content changes.
+    // TODO: Scope this animation to the panel values that should animate.
+    .animation(hasAppeared ? .smooth : nil, value: UUID())
     .background(
       Rectangle()
         .foregroundStyle(.background)
@@ -503,9 +531,7 @@ private struct EditorLowerPanel: View {
   let clips: [VideoClip]
   let selectedClipID: VideoClip.ID?
   let hdrVideoCount: Int
-  let library: LUTLibrary
   let lutPreviewSource: LUTPreviewSourceImage?
-  @Binding var selectedLUT: LUT?
   @Binding var exposure: ExposureAdjustment
   @Binding var motionBlur: MotionBlurSettings
   @Binding var grain: FilmGrainFeature
@@ -521,9 +547,7 @@ private struct EditorLowerPanel: View {
       clips: clips,
       selectedClipID: selectedClipID,
       hdrVideoCount: hdrVideoCount,
-      library: library,
       lutPreviewSource: lutPreviewSource,
-      selectedLUT: $selectedLUT,
       exposure: $exposure,
       motionBlur: $motionBlur,
       grain: $grain,
@@ -542,9 +566,7 @@ private struct EditorLowerPanel: View {
     let clips: [VideoClip]
     let selectedClipID: VideoClip.ID?
     let hdrVideoCount: Int
-    let library: LUTLibrary
     let lutPreviewSource: LUTPreviewSourceImage?
-    @Binding var selectedLUT: LUT?
     @Binding var exposure: ExposureAdjustment
     @Binding var motionBlur: MotionBlurSettings
     @Binding var grain: FilmGrainFeature
@@ -571,9 +593,7 @@ private struct EditorLowerPanel: View {
           contentPadding: contentPadding,
           videoCount: clips.count,
           hdrVideoCount: hdrVideoCount,
-          library: library,
           lutPreviewSource: lutPreviewSource,
-          selectedLUT: $selectedLUT,
           exposure: $exposure,
           motionBlur: $motionBlur,
           grain: $grain,
@@ -589,9 +609,7 @@ private struct EditorLowerPanel: View {
     let contentPadding: CGFloat
     let videoCount: Int
     let hdrVideoCount: Int
-    let library: LUTLibrary
     let lutPreviewSource: LUTPreviewSourceImage?
-    @Binding var selectedLUT: LUT?
     @Binding var exposure: ExposureAdjustment
     @Binding var motionBlur: MotionBlurSettings
     @Binding var grain: FilmGrainFeature
@@ -604,9 +622,7 @@ private struct EditorLowerPanel: View {
           selectedEffect: selectedEffect,
           videoCount: videoCount,
           hdrVideoCount: hdrVideoCount,
-          library: library,
           lutPreviewSource: lutPreviewSource,
-          selectedLUT: $selectedLUT,
           exposure: $exposure,
           motionBlur: $motionBlur,
           grain: $grain
@@ -624,9 +640,7 @@ private struct EditorLowerPanel: View {
       let selectedEffect: EditorEffectTab
       let videoCount: Int
       let hdrVideoCount: Int
-      let library: LUTLibrary
       let lutPreviewSource: LUTPreviewSourceImage?
-      @Binding var selectedLUT: LUT?
       @Binding var exposure: ExposureAdjustment
       @Binding var motionBlur: MotionBlurSettings
       @Binding var grain: FilmGrainFeature
@@ -635,12 +649,10 @@ private struct EditorLowerPanel: View {
         ZStack(alignment: .topLeading) {
           switch selectedEffect {
           case .lut:
-            LUTStripView(
+            EditorLUTStripBindingView(
               contentPadding: contentPadding,
-              library: library,
               source: lutPreviewSource,
-              exposure: exposure,
-              selected: $selectedLUT
+              exposure: exposure
             )
             .transition(.opacity)
 
@@ -985,14 +997,18 @@ private struct EditorToolbarContent: ToolbarContent {
 }
 
 #Preview("Editor") {
+  let model = EditorViewModel(
+    library: LUTLibrary(),
+    defaultVideoFolder: DefaultVideoFolderStore(),
+    previewSamples: LUTPreviewSampleLibrary(),
+    editState: EditState()
+  )
+
   NavigationStack {
     EditorView(
-      library: LUTLibrary(),
-      defaultVideoFolder: DefaultVideoFolderStore(),
-      previewSamples: LUTPreviewSampleLibrary(),
-      editState: EditState(),
       onFinishEditing: {}
     )
+    .environment(model)
     .navigationBarTitleDisplayMode(.inline)
   }
 }

@@ -105,10 +105,12 @@ struct ExposureDocumentOrderTests {
     let lut = try #require(library.luts.first)
     let state = EditState()
     state.exposure = ExposureAdjustment(ev: 0.7)
-    state.selectedLUT = lut
     state.grain.isEnabled = true
 
-    let features = try state.makeDocument(using: library).mainTree.features
+    let features = try state.makeDocument(
+      using: library,
+      selectedLUTID: lut.id
+    ).mainTree.features
     #expect(features.count == 3)
 
     guard case .effect(let firstEffect) = features[0] else {

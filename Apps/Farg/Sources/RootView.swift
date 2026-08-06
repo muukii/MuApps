@@ -20,9 +20,8 @@ struct RootView: View {
   /// The application-scoped preferred starting location for Files video import.
   let defaultVideoFolder: DefaultVideoFolderStore
   @State private var previewSamples = LUTPreviewSampleLibrary()
-  @State private var editState = EditState()
+  @State private var editorSession: EditorViewModel?
   @State private var pickerItems: [PhotosPickerItem] = []
-  @State private var isEditorPresented = false
   @State private var isShowingSettings = false
   @State private var isVideoFileImporterPresented = false
   @State private var defaultVideoFolderAccess: DefaultVideoFolderAccess?
@@ -47,15 +46,12 @@ struct RootView: View {
       )
     }
     .appBlockingOverlayTarget()
-    .fullScreenCover(isPresented: $isEditorPresented) {
+    .fullScreenCover(item: $editorSession) { session in
       NavigationStack {
         EditorView(
-          library: library,
-          defaultVideoFolder: defaultVideoFolder,
-          previewSamples: previewSamples,
-          editState: editState,
-          onFinishEditing: { isEditorPresented = false }
+          onFinishEditing: { editorSession = nil }
         )
+        .environment(session)
         .navigationBarTitleDisplayMode(.inline)
       }
       .interactiveDismissDisabled()
@@ -121,11 +117,6 @@ struct RootView: View {
         library.deactivateLinkedFolderObservation()
       @unknown default:
         library.deactivateLinkedFolderObservation()
-      }
-    }
-    .onChange(of: isEditorPresented) { _, isPresented in
-      if isPresented == false {
-        editState.removeAllClips()
       }
     }
     .onChange(of: isVideoFileImporterPresented) { _, isPresented in
@@ -195,9 +186,10 @@ struct RootView: View {
         }
         guard result.clips.isEmpty == false else { return }
 
+        let editState = EditState()
         editState.replaceClips(with: result.clips)
         pickerItems = []
-        isEditorPresented = true
+        presentEditor(editState: editState)
       } catch is CancellationError {
         return
       } catch {
@@ -216,7 +208,7 @@ struct RootView: View {
 
   // MARK: - Shortcuts
 
-  /// Loads one buffered App Intent request into the existing editor state.
+  /// Loads one buffered App Intent request into a new editor session.
   private func consumeShortcutImport(
     id: ShortcutVideoImportRequest.ID
   ) async {
@@ -236,12 +228,26 @@ struct RootView: View {
       displayName: request.videoURL.deletingPathExtension().lastPathComponent,
       colorInfo: colorInfo
     )
-    editState.selectedLUT = lut
+    let editState = EditState()
     editState.amount = 1
     editState.motionBlur = .disabled
     editState.replaceClips(with: [clip])
     pickerItems = []
-    isEditorPresented = true
+    presentEditor(editState: editState, initialSelectedLUTID: lut.id)
+  }
+
+  /// Creates a new session owner for the next Editor presentation.
+  private func presentEditor(
+    editState: EditState,
+    initialSelectedLUTID: LUT.ID? = nil
+  ) {
+    editorSession = EditorViewModel(
+      library: library,
+      defaultVideoFolder: defaultVideoFolder,
+      previewSamples: previewSamples,
+      editState: editState,
+      initialSelectedLUTID: initialSelectedLUTID
+    )
   }
 }
 
@@ -377,10 +383,10 @@ private struct InitialVideoLoadingHUD: View {
           .multilineTextAlignment(.center)
 
         }
-        
-        Button.init(action: onCancel, label: { 
+
+        Button(action: onCancel) {
           Image(systemName: "xmark")
-        })
+        }
         .buttonStyle(.bordered)
         .controlSize(.large)
         .accessibilityIdentifier("cancel-video-loading")
@@ -388,7 +394,7 @@ private struct InitialVideoLoadingHUD: View {
       .padding(24)
       .frame(maxWidth: 280)
       .glassEffect(in: .rect(cornerRadius: 32))
-                 
+
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .accessibilityIdentifier("initial-video-loading")
