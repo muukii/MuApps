@@ -178,3 +178,14 @@ struct PhotoContentView: View {
     }
   }
 }
+
+#Preview("Photo Content — 3:2") {
+  EntryContentPreviewCanvas {
+    PhotoContentView(
+      photo: PhotoContentSource(
+        pixelSize: CGSize(width: 1_200, height: 800)
+      ),
+      style: .init(.detail)
+    )
+  }
+}

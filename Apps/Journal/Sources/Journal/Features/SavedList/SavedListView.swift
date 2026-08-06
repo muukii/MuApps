@@ -145,9 +145,14 @@ private struct VaultSavedListContentView: View {
             }
           }
         }
-        .padding(savedListPadding)
+//        .padding(.horizontal, 2)
+//        .padding(savedListPadding)
       }
-      .contentMargins(.bottom, composerOverlayHeight, for: .scrollContent)
+      .contentMargins(
+        .bottom,
+        composerOverlayHeight,
+        for: .scrollContent
+      )
       .scrollEdgeEffectStyle(.soft, for: .vertical)
       .scrollDismissesKeyboard(.interactively)
       .scrollBounceBehavior(.always, axes: .vertical)

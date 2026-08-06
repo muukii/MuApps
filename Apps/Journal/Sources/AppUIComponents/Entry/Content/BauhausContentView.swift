@@ -132,3 +132,12 @@ struct BauhausContentView: View {
     state = .loaded(document)
   }
 }
+
+#Preview("Bauhaus Content") {
+  EntryContentPreviewCanvas {
+    BauhausContentView(
+      bauhaus: BauhausContentSource(),
+      style: .init(.detail)
+    )
+  }
+}

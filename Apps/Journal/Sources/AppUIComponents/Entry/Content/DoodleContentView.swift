@@ -171,3 +171,14 @@ struct DoodleContentView: View {
     state = .loaded(drawing)
   }
 }
+
+#Preview("Doodle Content — 4:3") {
+  EntryContentPreviewCanvas {
+    DoodleContentView(
+      doodle: DoodleContentSource(
+        pixelSize: CGSize(width: 2_048, height: 1_536)
+      ),
+      style: .init(.detail)
+    )
+  }
+}

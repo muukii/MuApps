@@ -98,21 +98,8 @@ struct VaultSavedRootGroup: View {
     EntryContentView(content: entry.content, style: .detail)
       .frame(maxWidth: .infinity, alignment: .leading)
       .foregroundStyle(.appOnSecondaryContainer)
-      .allowsHitTesting(false)
-      .padding(rootGroupContentPadding)
-      .background(
-        .appSecondaryContainer,
-        in: RoundedRectangle(
-          cornerRadius: rootGroupCornerRadius,
-          style: .continuous
-        )
-      )
-      .contentShape(
-        .rect(
-          cornerRadius: rootGroupCornerRadius,
-          style: .continuous
-        )
-      )
+      .allowsHitTesting(false)  
+      .clipShape(.rect(cornerRadius: 32))    
   }
 }
 

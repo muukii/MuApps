@@ -111,3 +111,12 @@ struct TextContentView: View {
     }
   }
 }
+
+#Preview("Text Content") {
+  EntryContentPreviewCanvas {
+    TextContentView(
+      text: "A single-column journal leaves room for each entry to keep its own rhythm.",
+      style: .init(.detail)
+    )
+  }
+}

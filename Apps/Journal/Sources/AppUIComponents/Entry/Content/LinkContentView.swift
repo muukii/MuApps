@@ -59,3 +59,12 @@ struct LinkContentView: View {
     }
   }
 }
+
+#Preview("Link Content") {
+  EntryContentPreviewCanvas {
+    LinkContentView(
+      urlString: "https://rivet.design/",
+      style: .init(.detail)
+    )
+  }
+}

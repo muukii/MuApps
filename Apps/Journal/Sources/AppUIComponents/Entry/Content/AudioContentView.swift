@@ -110,3 +110,12 @@ private struct AudioWaveformSample: Identifiable {
     AudioWaveformSample(id: index, height: CGFloat(height))
   }
 }
+
+#Preview("Audio Content") {
+  EntryContentPreviewCanvas {
+    AudioContentView(
+      audio: AudioContentSource(),
+      style: .init(.detail)
+    )
+  }
+}

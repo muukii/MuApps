@@ -237,3 +237,14 @@ struct LivePhotoContentView: View {
     }
   }
 }
+
+#Preview("Live Photo Content — 3:4") {
+  EntryContentPreviewCanvas {
+    LivePhotoContentView(
+      livePhoto: LivePhotoContentSource(
+        pixelSize: CGSize(width: 3_024, height: 4_032)
+      ),
+      style: .init(.detail)
+    )
+  }
+}

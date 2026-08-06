@@ -1032,3 +1032,12 @@ extension TimeInterval {
       ? "\(hours) hr" : "\(hours) hr \(remainingMinutes) min"
   }
 }
+
+#Preview("Suggestion Content") {
+  EntryContentPreviewCanvas {
+    SuggestionContentView(
+      suggestion: SuggestionContentSource(),
+      style: .init(.detail)
+    )
+  }
+}

@@ -27,3 +27,9 @@ struct UnknownContentView: View {
     }
   }
 }
+
+#Preview("Unknown Content") {
+  EntryContentPreviewCanvas {
+    UnknownContentView(style: .init(.detail))
+  }
+}

@@ -201,3 +201,14 @@ struct VideoContentView: View {
   }
 
 }
+
+#Preview("Video Content — 9:16") {
+  EntryContentPreviewCanvas {
+    VideoContentView(
+      video: VideoContentSource(
+        pixelSize: CGSize(width: 1_080, height: 1_920)
+      ),
+      style: .init(.detail)
+    )
+  }
+}

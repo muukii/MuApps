@@ -174,3 +174,16 @@ struct FileContentView: View {
     return values
   }
 }
+
+#Preview("File Content") {
+  EntryContentPreviewCanvas {
+    FileContentView(
+      file: FileContentSource(
+        displayName: "Field Notes.pdf",
+        contentType: "application/pdf",
+        byteSize: 2_400_000
+      ),
+      style: .init(.detail)
+    )
+  }
+}
