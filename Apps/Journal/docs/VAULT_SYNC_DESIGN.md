@@ -503,6 +503,20 @@ CloudKit には `CardEdge.parentEdgeID` を通常の field として保存する
 削除 cascade、subtree move、cycle validation、latest item の解釈は
 CloudKit の record hierarchy ではなく domain rule として扱う。
 
+entry 削除のlocal境界は `CardEdge.deletedAt` とする。選択したsubtreeの全edgeへ
+同じtimestampを設定し、通常queryとlatest itemは `deletedAt == nil` のedgeだけを扱う。
+このとき `Card` / `Attachment` / `AttachmentResource` rowとmedia fileはlocalに保持し、
+SwiftUIが観測中のSwiftData modelをcontextからdetachしない。一方、同じtransactionで
+subtreeのCloudKit record deleteを即時outboxへ積む。delete ackは
+`PendingMutation`と`SyncMetadata`だけを削除する。
+
+`deletedAt`はCloudKit fieldにしない。remote側ではrecordの存在／削除がsignalであり、
+受信したCardEdgeまたはplaced Cardの削除をlocal logical deleteへ変換する。
+同一fetch batchではCardEdge/Card tombstoneをAttachment/Resourceより先に適用する。
+削除済みentry配下のpayload tombstoneはlocal row/fileを保持するが、entry削除を伴わない
+edit replacementのAttachment/Resource tombstoneはobsolete dataを物理削除できる。
+remote CardEdge recordが再作成された場合はlocal `deletedAt`をclearする。
+
 将来「この card が別の card を参照している」「この card への reply を作る」のような
 意味的な link が必要になった場合は、tree topology とは別の `CardLink` として追加する。
 `CardEdge` は placement / ordering 用、`CardLink` は semantic cross-link 用として分ける。
@@ -516,6 +530,7 @@ CardEdge
   layout?
   createdAt
   updatedAt
+  deletedAt?  # local only; never exported to CloudKit
 
 Card
   id
@@ -810,7 +825,7 @@ user-facing save は `CreationView` から `VaultInstance.createThread(cards:)` 
 user-facing edit は `SavedListView` から selected `VaultInstance` の
 `VaultContentStore.updateCard(cardID:with:)` に書く。
 user-facing list は selected `VaultInstance` の SwiftData `ModelContainer` を
-environment に入れ、`CardEdge` の `@Query` から `Card` / `Attachment` /
+environment に入れ、active `CardEdge` (`deletedAt == nil`) の `@Query` から `Card` / `Attachment` /
 `AttachmentResource` relationship を辿る。
 旧 saved-entry edit / export share UI、旧 sync status UI、`MediaSyncEngine`、
 `SyncStatusMonitor` は削除済み。share / edit は vault-backed UI として作り直す。
@@ -826,7 +841,9 @@ environment に入れ、`CardEdge` の `@Query` から `Card` / `Attachment` /
   save は必ず root `CardEdge` を作る。card edit は `Card` save と attachment replacement を
   同一 transaction で扱う。`CardEdge` / `Attachment` / `AttachmentResource` は
   SwiftData relationship を主接続として持ち、record の out-of-order import を
-  repair できるよう reference ID も横に保持する。削除 cascade は domain rule として実装。
+  repair できるよう reference ID も横に保持する。entry削除は`CardEdge.deletedAt`による
+  local logical deleteと即時CloudKit tombstone enqueueを同一transactionで行い、
+  content row/media fileはlocalに保持する。
 - `VaultStoreRegistry` — process 内で vault ごとに単一 `ModelContainer` を保証し、
   local mutation を `AsyncStream<VaultID>` で sync layer へ流す。
 - `VaultInstanceRegistry` / `VaultInstance` — process 内で vault ごとに stable な
@@ -856,12 +873,15 @@ environment に入れ、`CardEdge` の `@Query` から `Card` / `Attachment` /
 
 - conflict policy は record 単位で local-pending-wins。
   server の system fields だけ採用して再送する。field-wise merge は未決定のまま。
-- remote の record deletion は local edit より優先。
+- remote の record deletion は local edit より優先。CardEdgeまたはplaced Cardの削除は
+  local subtreeを論理削除し、payload row/fileは保持する。entry削除を伴わない
+  Attachment/Resource削除はedit replacementとして物理cleanupできる。
 - zone-level deletion(owner の削除 / share revoke / participant 側の removal)は
   catalog row と vault-local content directory を削除し、次回 picker refresh で消える。
 
 未実装(次フェーズ):
 
+- entry Trash UI、restore、retention、physical purge。
 - Shared with You 連携。
 - `VaultSummary` の latest card denormalize。
 - vault-backed saved-entry export share UI。

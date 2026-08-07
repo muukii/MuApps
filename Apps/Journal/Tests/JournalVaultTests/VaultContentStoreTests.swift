@@ -730,7 +730,7 @@ struct VaultContentStoreTests {
   // MARK: - deleteCardEdge
 
   @Test
-  func deleteCardEdge_neverSynced_dropsOutboxWithoutTombstones() throws {
+  func deleteCardEdge_neverSynced_retainsRowsAndDropsUnneededOutbox() throws {
     let store = try makeStore()
     let root = try #require(
       try store.createThread(cards: [
@@ -742,8 +742,11 @@ struct VaultContentStoreTests {
     try store.deleteCardEdge(edgeID: root.id)
 
     let context = store.container.mainContext
-    #expect(try context.fetchCount(FetchDescriptor<Card>()) == 0)
-    #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<Card>()) == 2)
+    let edges = try context.fetch(FetchDescriptor<CardEdge>())
+    #expect(edges.count == 2)
+    #expect(edges.allSatisfy { $0.deletedAt != nil })
+    #expect(Set(edges.compactMap(\.deletedAt)).count == 1)
     // Nothing ever reached CloudKit, so no remote tombstones are needed.
     #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 0)
   }
@@ -772,10 +775,13 @@ struct VaultContentStoreTests {
     let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
     #expect(outbox.count == 2)  // card + edge tombstones
     #expect(outbox.allSatisfy { $0.kind == .delete })
+    #expect(root.deletedAt != nil)
+    #expect(try context.fetchCount(FetchDescriptor<Card>()) == 1)
+    #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 1)
   }
 
   @Test
-  func deleteCardEdge_removesSubtreeAndMediaFiles() throws {
+  func deleteCardEdge_retainsSubtreeAndMediaFiles() throws {
     let store = try makeStore()
     let edges = try store.createThread(cards: [
       .init(kind: .text, text: "root"),
@@ -796,11 +802,22 @@ struct VaultContentStoreTests {
 
     try store.deleteCardEdge(edgeID: root.id)
 
-    #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 0)
-    #expect(try context.fetchCount(FetchDescriptor<Card>()) == 0)
-    #expect(try context.fetchCount(FetchDescriptor<JournalVault.Attachment>()) == 0)
-    #expect(try context.fetchCount(FetchDescriptor<JournalVault.AttachmentResource>()) == 0)
-    #expect(FileManager.default.fileExists(atPath: fileURL.path) == false)
+    let retainedEdges = try context.fetch(FetchDescriptor<CardEdge>())
+    #expect(retainedEdges.count == 2)
+    #expect(retainedEdges.allSatisfy { $0.deletedAt != nil })
+    #expect(Set(retainedEdges.compactMap(\.deletedAt)).count == 1)
+    #expect(try context.fetchCount(FetchDescriptor<Card>()) == 2)
+    #expect(try context.fetchCount(FetchDescriptor<JournalVault.Attachment>()) == 1)
+    #expect(try context.fetchCount(FetchDescriptor<JournalVault.AttachmentResource>()) == 1)
+    #expect(FileManager.default.fileExists(atPath: fileURL.path))
+    #expect(try store.latestRootCard() == nil)
+
+    let cloudEstimate = try store.cloudStorageEstimate()
+    #expect(cloudEstimate.cardEdgeCount == 0)
+    #expect(cloudEstimate.cardCount == 0)
+    #expect(cloudEstimate.attachmentCount == 0)
+    #expect(cloudEstimate.attachmentResourceCount == 0)
+    #expect(cloudEstimate.mediaBytes == 0)
   }
 
   // MARK: - Local mutation signal

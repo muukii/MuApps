@@ -1,4 +1,5 @@
 import SwiftUI
+import MuColor
 
 /// Renders written entry content using placement-specific typography.
 struct TextContentView: View {
@@ -91,23 +92,28 @@ struct TextContentView: View {
           )
       }
     } else {
-      if style.usesComposerForeground {
-        Text(text)
-          .font(style.font)
-          .lineLimit(style.lineLimit)
-          .foregroundStyle(.primary)
-      } else {
-        Text(text)
-          .font(style.font)
-          .lineLimit(style.lineLimit)
-          .lineSpacing(style.lineSpacing)
-          .minimumScaleFactor(style.minimumScaleFactor)
-          .frame(
-            maxWidth: style.fillsAvailableSpace ? .infinity : nil,
-            maxHeight: style.fillsAvailableSpace ? .infinity : nil,
-            alignment: .topLeading
-          )
+      ZStack {
+        if style.usesComposerForeground {
+          Text(text)
+            .font(style.font)
+            .lineLimit(style.lineLimit)
+            .foregroundStyle(.primary)
+        } else {
+          Text(text)
+            .font(style.font)
+            .lineLimit(style.lineLimit)
+            .lineSpacing(style.lineSpacing)
+            .minimumScaleFactor(style.minimumScaleFactor)
+            .frame(
+              maxWidth: style.fillsAvailableSpace ? .infinity : nil,
+              maxHeight: style.fillsAvailableSpace ? .infinity : nil,
+              alignment: .topLeading
+            )
+        }
       }
+      .padding(16)
+      .frame(maxWidth: .infinity)
+      .background(.appSecondaryContainer)
     }
   }
 }
@@ -119,4 +125,10 @@ struct TextContentView: View {
       style: .init(.detail)
     )
   }
+}
+
+#Preview {
+  Rectangle()
+    .foregroundStyle(.background.secondary)
+    .backgroundStyle(.white)
 }

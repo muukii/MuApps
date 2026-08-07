@@ -76,12 +76,7 @@ private struct VaultSavedListContentView: View {
   @Environment(\.composerOverlayHeight) private var composerOverlayHeight
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
 
-  @Query(
-    sort: [
-      SortDescriptor(\JournalVault.CardEdge.createdAt, order: .reverse),
-      SortDescriptor(\JournalVault.CardEdge.sortIndex),
-    ]
-  )
+  @Query
   private var edges: [JournalVault.CardEdge]
 
   @State private var sharePreviewPresentation: EntrySharePreviewPresentation?
@@ -93,6 +88,27 @@ private struct VaultSavedListContentView: View {
   @State private var deleteErrorMessage: String?
   @State private var deleteCandidate: VaultSavedEntry?
   @Namespace private var navigationTransitionNamespace
+
+  init(
+    vault: VaultInstance,
+    scrollTargetID: Binding<UUID?>,
+    navigationPath: Binding<[SavedListNavigationRoute]>,
+    detailScrollTargetID: Binding<UUID?>
+  ) {
+    self.vault = vault
+    _scrollTargetID = scrollTargetID
+    _navigationPath = navigationPath
+    _detailScrollTargetID = detailScrollTargetID
+    _edges = Query(
+      filter: #Predicate<JournalVault.CardEdge> { edge in
+        edge.deletedAt == nil
+      },
+      sort: [
+        SortDescriptor(\JournalVault.CardEdge.createdAt, order: .reverse),
+        SortDescriptor(\JournalVault.CardEdge.sortIndex),
+      ]
+    )
+  }
 
   var body: some View {
     let entries = entries
@@ -117,7 +133,7 @@ private struct VaultSavedListContentView: View {
         // would force the outer stack to size a container that is itself still
         // estimating its children, which drifts the content height while
         // scrolling. `Section` gives the same day grouping inside one stack.
-        LazyVStack(alignment: .leading, spacing: entrySpacing) {
+        LazyVStack(alignment: .leading, spacing: 2) {
           if locationPins.isEmpty == false {
             VaultSavedLocationsMapNavigationHeader(
               pins: locationPins,
@@ -145,8 +161,7 @@ private struct VaultSavedListContentView: View {
             }
           }
         }
-//        .padding(.horizontal, 2)
-//        .padding(savedListPadding)
+        .padding(.horizontal, 16)
       }
       .contentMargins(
         .bottom,

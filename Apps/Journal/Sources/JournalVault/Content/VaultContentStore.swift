@@ -410,7 +410,10 @@ extension VaultContentStore {
 
     let context = container.mainContext
     let allEdges = try context.fetch(FetchDescriptor<CardEdge>())
-    guard let parentEdge = allEdges.first(where: { $0.id == parentEdgeID }) else {
+    guard
+      let parentEdge = allEdges.first(where: { $0.id == parentEdgeID }),
+      parentEdge.deletedAt == nil
+    else {
       throw Error.cardEdgeNotFound(parentEdgeID)
     }
 
@@ -469,7 +472,7 @@ extension VaultContentStore {
       )
     )
 
-    for edge in edges where edge.parentEdgeID == nil {
+    for edge in edges where edge.parentEdgeID == nil && edge.deletedAt == nil {
       if let card = edge.card, card.id == edge.cardID {
         return card
       }
@@ -550,17 +553,22 @@ extension VaultContentStore {
     onLocalMutation()
   }
 
-  /// Deletes an edge and its entire subtree: descendant edges, their cards, and
-  /// those cards' attachments (rows, outbox tombstones, and media files).
+  /// Logically deletes an edge and its entire subtree.
   ///
-  /// The cascade is a domain rule here — not a SwiftData delete rule and not
-  /// CloudKit record hierarchy — so local deletes and imported remote deletes
-  /// go through the same explicit shape.
+  /// Every placement receives the same local deletion timestamp while cards,
+  /// attachments, resources, and media files remain in the vault. Matching
+  /// CloudKit record deletes are enqueued in the same transaction so remote
+  /// deletion begins immediately without detaching live SwiftData models.
   @MainActor
   public func deleteCardEdge(edgeID: UUID) throws {
     let context = container.mainContext
     let allEdges = try context.fetch(FetchDescriptor<CardEdge>())
-    guard let root = allEdges.first(where: { $0.id == edgeID }) else { return }
+    guard
+      let root = allEdges.first(where: { $0.id == edgeID }),
+      root.deletedAt == nil
+    else {
+      return
+    }
 
     var childrenByParent: [UUID: [CardEdge]] = [:]
     for edge in allEdges {
@@ -585,31 +593,27 @@ extension VaultContentStore {
     let resources = try context.fetch(FetchDescriptor<AttachmentResource>())
       .filter { attachmentIDs.contains($0.attachmentID) }
 
-    var mediaFileURLs: [URL] = []
-    for resource in resources {
-      mediaFileURLs.append(fileURL(for: resource))
-      try noteDelete(.attachmentResource, recordName: resource.id.uuidString, in: context)
-      context.delete(resource)
-    }
-    for attachment in attachments {
-      try noteDelete(.attachment, recordName: attachment.id.uuidString, in: context)
-      context.delete(attachment)
-    }
-    for card in cards {
-      try noteDelete(.card, recordName: card.id.uuidString, in: context)
-      context.delete(card)
-    }
-    for edge in subtree {
-      try noteDelete(.cardEdge, recordName: edge.id.uuidString, in: context)
-      context.delete(edge)
-    }
-
-    try context.save()
-
-    // Files go after the transaction: a failed save must keep bytes for rows
-    // that still exist.
-    for url in mediaFileURLs {
-      try? FileManager.default.removeItem(at: url)
+    let deletedAt = Date()
+    do {
+      // Entry-level records lead the outbox so receiving devices can establish
+      // logical deletion before processing attachment/resource tombstones.
+      for edge in subtree {
+        edge.deletedAt = deletedAt
+        try noteDelete(.cardEdge, recordName: edge.id.uuidString, in: context)
+      }
+      for card in cards {
+        try noteDelete(.card, recordName: card.id.uuidString, in: context)
+      }
+      for attachment in attachments {
+        try noteDelete(.attachment, recordName: attachment.id.uuidString, in: context)
+      }
+      for resource in resources {
+        try noteDelete(.attachmentResource, recordName: resource.id.uuidString, in: context)
+      }
+      try context.save()
+    } catch {
+      context.rollback()
+      throw error
     }
     onLocalMutation()
   }

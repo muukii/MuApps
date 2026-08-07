@@ -55,8 +55,49 @@ actor VaultSyncDatabase: ModelActor {
       }
       try modelContext.save()
     }
-    return rows.map {
+    return rows.sorted(by: Self.pendingChangePrecedes).map {
       PendingChange(recordName: $0.recordName, recordType: $0.recordType, kind: $0.kind)
+    }
+  }
+
+  /// Orders semantic entry tombstones ahead of their retained payload rows.
+  /// Receiving devices apply the same order, which establishes logical entry
+  /// deletion before attachment and resource cleanup decisions are made.
+  private static func pendingChangePrecedes(
+    _ lhs: PendingMutation,
+    _ rhs: PendingMutation
+  ) -> Bool {
+    let lhsPriority = pendingChangePriority(lhs)
+    let rhsPriority = pendingChangePriority(rhs)
+    if lhsPriority != rhsPriority {
+      return lhsPriority < rhsPriority
+    }
+    if lhs.enqueuedAt != rhs.enqueuedAt {
+      return lhs.enqueuedAt < rhs.enqueuedAt
+    }
+    return lhs.recordName < rhs.recordName
+  }
+
+  private static func pendingChangePriority(_ mutation: PendingMutation) -> Int {
+    let recordType = VaultRecordType(rawValue: mutation.recordType)
+    switch mutation.kind {
+    case .delete:
+      switch recordType {
+      case .cardEdge: return 0
+      case .card: return 1
+      case .attachment: return 2
+      case .attachmentResource: return 3
+      case .vaultInfo, .none: return 4
+      }
+    case .save:
+      switch recordType {
+      case .vaultInfo: return 10
+      case .card: return 11
+      case .cardEdge: return 12
+      case .attachment: return 13
+      case .attachmentResource: return 14
+      case .none: return 15
+      }
     }
   }
 
@@ -112,7 +153,8 @@ actor VaultSyncDatabase: ModelActor {
       VaultRecordMapper.applyFields(of: attachment, to: record)
 
     case .attachmentResource:
-      guard let id = UUID(uuidString: recordName), let resource = try fetchAttachmentResource(id) else {
+      guard let id = UUID(uuidString: recordName), let resource = try fetchAttachmentResource(id)
+      else {
         try discardPendingRow(pending)
         return nil
       }
@@ -234,6 +276,7 @@ actor VaultSyncDatabase: ModelActor {
     var outcome = ImportOutcome()
     var touchedEdgeTopology = false
     var touchedRelationships = false
+    let logicalDeletionDate = Date()
 
     for record in modifications {
       let recordName = record.recordID.recordName
@@ -330,14 +373,18 @@ actor VaultSyncDatabase: ModelActor {
       outcome.importedRecordCount += 1
     }
 
-    for deletion in deletions {
+    for deletion in deletions.sorted(by: Self.remoteDeletionPrecedes) {
       if deletion.recordType == VaultRecordType.cardEdge.rawValue {
         touchedEdgeTopology = true
       }
       if deletion.recordType != VaultRecordType.vaultInfo.rawValue {
         touchedRelationships = true
       }
-      try applyRemoteDeletion(deletion, outcome: &outcome)
+      try applyRemoteDeletion(
+        deletion,
+        logicalDeletionDate: logicalDeletionDate,
+        outcome: &outcome
+      )
     }
 
     if touchedRelationships {
@@ -354,6 +401,7 @@ actor VaultSyncDatabase: ModelActor {
 
   private func applyRemoteDeletion(
     _ deletion: RecordDeletion,
+    logicalDeletionDate: Date,
     outcome: inout ImportOutcome
   ) throws {
     let recordName = deletion.recordName
@@ -367,13 +415,13 @@ actor VaultSyncDatabase: ModelActor {
           modelContext.delete(info)
         }
       case .card:
-        try deleteImportedCard(cardID: id, outcome: &outcome)
+        try deleteImportedCard(cardID: id, deletedAt: logicalDeletionDate)
       case .cardEdge:
-        try deleteImportedEdgeSubtree(edgeID: id, outcome: &outcome)
+        try deleteImportedEdgeSubtree(edgeID: id, deletedAt: logicalDeletionDate)
       case .attachment:
-        try deleteImportedAttachment(attachmentID: id, outcome: &outcome)
+        try deleteImportedAttachment(attachmentID: id)
       case .attachmentResource:
-        try deleteImportedAttachmentResource(resourceID: id, outcome: &outcome)
+        try deleteImportedAttachmentResource(resourceID: id)
       }
     }
 
@@ -381,10 +429,34 @@ actor VaultSyncDatabase: ModelActor {
     outcome.deletedRecordCount += 1
   }
 
-  private func deleteImportedEdgeSubtree(
-    edgeID: UUID,
-    outcome: inout ImportOutcome
-  ) throws {
+  private static func remoteDeletionPrecedes(
+    _ lhs: RecordDeletion,
+    _ rhs: RecordDeletion
+  ) -> Bool {
+    let lhsPriority = remoteDeletionPriority(lhs)
+    let rhsPriority = remoteDeletionPriority(rhs)
+    if lhsPriority != rhsPriority {
+      return lhsPriority < rhsPriority
+    }
+    return lhs.recordName < rhs.recordName
+  }
+
+  private static func remoteDeletionPriority(_ deletion: RecordDeletion) -> Int {
+    switch VaultRecordType(rawValue: deletion.recordType) {
+    case .cardEdge: return 0
+    case .card: return 1
+    case .attachment: return 2
+    case .attachmentResource: return 3
+    case .vaultInfo, .none: return 4
+    }
+  }
+
+  /// Applies an entry-level CloudKit deletion without detaching local models.
+  ///
+  /// The complete subtree remains available for a future local restore. Sync
+  /// metadata and outbox rows are transport state and can be discarded once
+  /// the remote records are known to be gone.
+  private func deleteImportedEdgeSubtree(edgeID: UUID, deletedAt: Date) throws {
     let allEdges = try modelContext.fetch(FetchDescriptor<CardEdge>())
     guard let root = allEdges.first(where: { $0.id == edgeID }) else { return }
 
@@ -392,18 +464,25 @@ actor VaultSyncDatabase: ModelActor {
     let cardIDs = Set(subtree.map(\.cardID))
     let attachments = try modelContext.fetch(FetchDescriptor<Attachment>())
       .filter { cardIDs.contains($0.cardID) }
+    let attachmentIDs = Set(attachments.map(\.id))
+    let resources = try modelContext.fetch(FetchDescriptor<AttachmentResource>())
+      .filter { attachmentIDs.contains($0.attachmentID) }
     let cards = try modelContext.fetch(FetchDescriptor<Card>())
       .filter { cardIDs.contains($0.id) }
 
+    for resource in resources {
+      try removeSyncState(recordName: resource.id.uuidString)
+    }
     for attachment in attachments {
-      try deleteImportedAttachment(attachment, outcome: &outcome)
+      try removeSyncState(recordName: attachment.id.uuidString)
     }
     for card in cards {
-      modelContext.delete(card)
       try removeSyncState(recordName: card.id.uuidString)
     }
     for edge in subtree {
-      modelContext.delete(edge)
+      if edge.deletedAt == nil {
+        edge.deletedAt = deletedAt
+      }
       try removeSyncState(recordName: edge.id.uuidString)
     }
   }
@@ -427,15 +506,12 @@ actor VaultSyncDatabase: ModelActor {
     return subtree
   }
 
-  private func deleteImportedCard(
-    cardID: UUID,
-    outcome: inout ImportOutcome
-  ) throws {
+  private func deleteImportedCard(cardID: UUID, deletedAt: Date) throws {
     let allEdges = try modelContext.fetch(FetchDescriptor<CardEdge>())
     let edges = allEdges.filter { $0.cardID == cardID }
     if edges.isEmpty == false {
       for edge in edges {
-        try deleteImportedEdgeSubtree(edgeID: edge.id, outcome: &outcome)
+        try deleteImportedEdgeSubtree(edgeID: edge.id, deletedAt: deletedAt)
       }
       return
     }
@@ -443,7 +519,7 @@ actor VaultSyncDatabase: ModelActor {
     let attachments = try modelContext.fetch(FetchDescriptor<Attachment>())
       .filter { $0.cardID == cardID }
     for attachment in attachments {
-      try deleteImportedAttachment(attachment, outcome: &outcome)
+      try deleteImportedAttachment(attachment)
     }
     if let card = try fetchCard(cardID) {
       modelContext.delete(card)
@@ -451,20 +527,23 @@ actor VaultSyncDatabase: ModelActor {
     try removeSyncState(recordName: cardID.uuidString)
   }
 
-  private func deleteImportedAttachment(
-    attachmentID: UUID,
-    outcome: inout ImportOutcome
-  ) throws {
+  private func deleteImportedAttachment(attachmentID: UUID) throws {
     if let attachment = try fetchAttachment(attachmentID) {
-      try deleteImportedAttachment(attachment, outcome: &outcome)
+      try deleteImportedAttachment(attachment)
     }
     try removeSyncState(recordName: attachmentID.uuidString)
   }
 
-  private func deleteImportedAttachment(
-    _ attachment: Attachment,
-    outcome: inout ImportOutcome
-  ) throws {
+  private func deleteImportedAttachment(_ attachment: Attachment) throws {
+    if try isCardLogicallyDeleted(attachment.cardID) {
+      let resources = try fetchAttachmentResources(attachmentID: attachment.id)
+      for resource in resources {
+        try removeSyncState(recordName: resource.id.uuidString)
+      }
+      try removeSyncState(recordName: attachment.id.uuidString)
+      return
+    }
+
     let attachmentID = attachment.id
     let resources = try fetchAttachmentResources(attachmentID: attachmentID)
     for resource in resources {
@@ -474,28 +553,33 @@ actor VaultSyncDatabase: ModelActor {
     try removeSyncState(recordName: attachmentID.uuidString)
   }
 
-  private func deleteImportedAttachmentResource(
-    resourceID: UUID,
-    outcome: inout ImportOutcome
-  ) throws {
+  private func deleteImportedAttachmentResource(resourceID: UUID) throws {
     if let resource = try fetchAttachmentResource(resourceID) {
-      try deleteImportedAttachmentResource(resource, outcome: &outcome)
+      try deleteImportedAttachmentResource(resource)
     }
     try removeSyncState(recordName: resourceID.uuidString)
   }
 
-  private func deleteImportedAttachmentResource(
-    _ resource: AttachmentResource,
-    outcome: inout ImportOutcome
-  ) throws {
+  private func deleteImportedAttachmentResource(_ resource: AttachmentResource) throws {
     let attachmentID = resource.attachmentID
-    if let attachment = try fetchAttachment(attachmentID),
-      attachment.primaryResourceID == resource.id
-    {
-      try deleteImportedAttachment(attachment, outcome: &outcome)
-      return
+    if let attachment = try fetchAttachment(attachmentID) {
+      if try isCardLogicallyDeleted(attachment.cardID) {
+        try removeSyncState(recordName: resource.id.uuidString)
+        return
+      }
+      if attachment.primaryResourceID == resource.id {
+        try deleteImportedAttachment(attachment)
+        return
+      }
     }
     try deleteImportedAttachmentResourceFileAndRow(resource)
+  }
+
+  private func isCardLogicallyDeleted(_ cardID: UUID) throws -> Bool {
+    let edges = try modelContext.fetch(FetchDescriptor<CardEdge>())
+    return edges.contains { edge in
+      edge.cardID == cardID && edge.deletedAt != nil
+    }
   }
 
   private func deleteImportedAttachmentResourceFileAndRow(

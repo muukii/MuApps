@@ -57,8 +57,11 @@ extension PendingMutation {
     /// distinguish).
     case save
 
-    /// Delete the record remotely. The local row is already gone; this
-    /// tombstone carries everything the delete needs.
+    /// Delete the record remotely.
+    ///
+    /// The local content row may remain as logically deleted data. This
+    /// tombstone is transport bookkeeping only and is removed after CloudKit
+    /// confirms the deletion.
     case delete
   }
 }

@@ -156,8 +156,9 @@ inline / circular / rectangular accessory families. It uses
 the first catalog vault.
 
 The timeline provider opens the configured vault's `VaultContentStore` from the
-App Group and resolves the newest root `CardEdge` (`parentEdgeID == nil`) by
-creation date. Continuations are never eligible for the Latest Note widget,
+App Group and resolves the newest active root `CardEdge`
+(`parentEdgeID == nil && deletedAt == nil`) by creation date. Continuations and
+logically deleted entries are never eligible for the Latest Note widget,
 including when a child was authored more recently than every root. It shows
 kind-aware content: text uses `Card.body` (falling back to `Untitled`), links use
 their stored URL string, photos use the save-time raster thumbnail stored on
@@ -299,6 +300,15 @@ one continuation: it validates the parent edge, assigns the next direct-sibling
 order, and writes the Card, child CardEdge, optional attachment/resources, and
 their outbox saves together.
 
+`VaultContentStore.deleteCardEdge(edgeID:)` is a logical local delete at the
+placement boundary. It gives every `CardEdge` in the selected subtree one
+`deletedAt` timestamp and queues CloudKit deletes for the subtree's edge, card,
+attachment, and resource records in the same transaction. The local `Card`,
+`Attachment`, `AttachmentResource`, and media files remain attached to the
+SwiftData context. CloudKit acknowledgement removes only `PendingMutation` and
+`SyncMetadata`. Trash UI, restore, retention, and physical purge are separate
+future work.
+
 SwiftData relationships are the normal in-app source of truth for vault content:
 `CardEdge` points to its `Card` and parent/child edges, `Card` owns attachments,
 and `Attachment` owns resources. Stable UUID reference fields remain alongside
@@ -336,6 +346,7 @@ data without changing `Card`.
 | `layout` | `Data?` | Reserved layout metadata. |
 | `createdAt` | `Date` | |
 | `updatedAt` | `Date` | |
+| `deletedAt` | `Date?` | Local-only logical deletion timestamp. It is not a CloudKit field; a recreated remote edge clears it. |
 
 ### `Attachment` — media metadata for a Card
 
@@ -955,7 +966,7 @@ the gallery's **Lab** section).
   `backgroundColor` is passed; the global appearance proxy is never touched.
 - **`SavedListView`** — a vault-backed entries list over the selected
   `VaultInstance`. It attaches the selected vault's `ModelContainer`, queries
-  `CardEdge` rows with SwiftData, follows the `Card` / `Attachment` /
+  active (`deletedAt == nil`) `CardEdge` rows with SwiftData, follows the `Card` / `Attachment` /
   `AttachmentResource` relationships, and projects only root placements
   (`parentEdgeID == nil`) into Home. Roots are grouped into local-calendar day
   sections by the root card's own creation date and read as one full-width
@@ -1018,9 +1029,13 @@ the gallery's **Lab** section).
   back through `VaultContentStore.updateCard(cardID:with:)`; thumbnails are not
   used as lossy edit sources. Saved entries can also be deleted from a root group's
   context menu or from each detail row's trash button. Deletion is confirmed
-  first, then writes through `VaultContentStore.deleteCardEdge(edgeID:)` so the
-  selected edge, descendant persisted content rows, attachments, attachment resources, local media
-  files, and CloudKit delete outbox rows stay aligned. Deleting the current card
+  first, then writes through `VaultContentStore.deleteCardEdge(edgeID:)`. The
+  selected edge subtree leaves normal queries immediately, while its live
+  SwiftData models and local media stay retained and attached. CloudKit record
+  deletes are enqueued immediately in the same transaction. Incoming CardEdge
+  or placed-Card deletion applies the same local logical deletion; edit-only
+  attachment/resource replacement may still physically remove obsolete local
+  rows and files. Deleting the current card
   dismisses that detail level after success; deleting one of its visible child
   rows leaves the current detail level open.
 - **`SettingsView`** — an **Accent Color** picker, an **Appearance** picker, a **Location**
@@ -1042,7 +1057,8 @@ the gallery's **Lab** section).
   writable Vaults. Missing, deleted, or read-only selections require an explicit
   replacement instead of falling back to the last-opened Vault. **Cloud
   Storage** opens a Settings detail screen that estimates Journal's CloudKit
-  payload from local vault rows: owned vaults are grouped as data that counts
+  payload from active local vault rows (logically deleted retained rows are
+  excluded): owned vaults are grouped as data that counts
   toward the user's iCloud quota, participant vaults are grouped as shared data
   charged to the originating owner, and breakdowns show text/link body bytes,
   media file bytes, thumbnail bytes, record counts, and media kind totals. It is

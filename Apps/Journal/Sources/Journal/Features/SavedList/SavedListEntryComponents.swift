@@ -99,7 +99,8 @@ struct VaultSavedRootGroup: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .foregroundStyle(.appOnSecondaryContainer)
       .allowsHitTesting(false)  
-      .clipShape(.rect(cornerRadius: 32))    
+      .clipShape(.rect(cornerRadius: 24)) 
+      .contentShape(.rect)
   }
 }
 
@@ -107,10 +108,11 @@ struct VaultSavedDayHeader: View {
 
   let day: Date
 
-  var body: some View {
+  var body: some View {    
     Text(day, format: .dateTime.weekday(.abbreviated).month(.wide).day().year())
       .font(.headline)
       .foregroundStyle(.appOnPrimaryContainer.opacity(0.72))
       .accessibilityAddTraits(.isHeader)
+      .frame(maxWidth: .infinity, alignment: .center)
   }
 }

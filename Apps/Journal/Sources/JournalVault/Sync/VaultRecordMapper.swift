@@ -174,6 +174,9 @@ enum VaultRecordMapper {
 
   static func update(_ edge: CardEdge, from record: CKRecord) {
     let edgeRecord = CardEdgeRecord(record: record)
+    // A live remote record recreates a placement that was previously retained
+    // as locally deleted. `deletedAt` itself is intentionally not transported.
+    edge.deletedAt = nil
     if
       record[CardEdgeKey.cardID] != nil,
       let cardID = UUID(uuidString: edgeRecord.cardIDRawValue)

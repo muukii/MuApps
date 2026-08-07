@@ -47,6 +47,14 @@ public final class CardEdge {
   public var createdAt: Date
   public var updatedAt: Date
 
+  /// Local timestamp at which this placement left the active journal.
+  ///
+  /// Deleted placements stay attached to their SwiftData context so existing
+  /// SwiftUI observers can finish rendering safely and a future trash flow can
+  /// restore the subtree. This state is intentionally not exported to
+  /// CloudKit; remote record existence remains the synchronization signal.
+  public var deletedAt: Date?
+
   public init(
     id: UUID = UUID(),
     cardID: UUID,
@@ -54,7 +62,8 @@ public final class CardEdge {
     sortIndex: Int = 0,
     layout: Data? = nil,
     createdAt: Date = Date(),
-    updatedAt: Date = Date()
+    updatedAt: Date = Date(),
+    deletedAt: Date? = nil
   ) {
     self.id = id
     self.cardReferenceID = cardID
@@ -63,6 +72,7 @@ public final class CardEdge {
     self.layout = layout
     self.createdAt = createdAt
     self.updatedAt = updatedAt
+    self.deletedAt = deletedAt
   }
 }
 

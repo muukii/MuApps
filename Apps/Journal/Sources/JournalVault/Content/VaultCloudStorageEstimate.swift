@@ -103,10 +103,27 @@ extension VaultContentStore {
   public func cloudStorageEstimate() throws -> VaultCloudStorageEstimate {
     let context = container.mainContext
     let vaultInfoCount = try context.fetchCount(FetchDescriptor<VaultInfo>())
+    let allEdges = try context.fetch(FetchDescriptor<CardEdge>())
+    let activeEdges = allEdges.filter { $0.deletedAt == nil }
+    let activeCardIDs = Set(activeEdges.map(\.cardID))
+    let logicallyDeletedCardIDs = Set(
+      allEdges.lazy
+        .filter { $0.deletedAt != nil && activeCardIDs.contains($0.cardID) == false }
+        .map(\.cardID)
+    )
     let cards = try context.fetch(FetchDescriptor<Card>())
-    let edgesCount = try context.fetchCount(FetchDescriptor<CardEdge>())
-    let attachments = try context.fetch(FetchDescriptor<Attachment>())
+      .filter { logicallyDeletedCardIDs.contains($0.id) == false }
+    let allAttachments = try context.fetch(FetchDescriptor<Attachment>())
+    let logicallyDeletedAttachmentIDs = Set(
+      allAttachments.lazy
+        .filter { logicallyDeletedCardIDs.contains($0.cardID) }
+        .map(\.id)
+    )
+    let attachments =
+      allAttachments
+      .filter { logicallyDeletedAttachmentIDs.contains($0.id) == false }
     let resources = try context.fetch(FetchDescriptor<AttachmentResource>())
+      .filter { logicallyDeletedAttachmentIDs.contains($0.attachmentID) == false }
     let attachmentsByID = Dictionary(uniqueKeysWithValues: attachments.map { ($0.id, $0) })
 
     let cardBodyBytes = cards.reduce(0) { partialResult, card in
@@ -141,7 +158,7 @@ extension VaultContentStore {
     return VaultCloudStorageEstimate(
       vaultInfoCount: vaultInfoCount,
       cardCount: cards.count,
-      cardEdgeCount: edgesCount,
+      cardEdgeCount: activeEdges.count,
       attachmentCount: attachments.count,
       attachmentResourceCount: resources.count,
       cardBodyBytes: cardBodyBytes,
