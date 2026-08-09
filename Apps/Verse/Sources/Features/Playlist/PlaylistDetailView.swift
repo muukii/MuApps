@@ -11,7 +11,6 @@ struct PlaylistDetailView: View {
   @Environment(VideoItemService.self) private var historyService
   @Environment(\.editMode) private var editMode
 
-  @State private var selectedVideoItem: VideoItem?
   @State private var showRenameAlert: Bool = false
   @State private var newName: String = ""
 
@@ -41,9 +40,6 @@ struct PlaylistDetailView: View {
         }
       }
     }
-    .navigationDestination(item: $selectedVideoItem) { videoItem in
-      PlayerView(videoItem: videoItem)
-    }
     .alert("Rename Playlist", isPresented: $showRenameAlert) {
       TextField("Playlist name", text: $newName)
       Button("Cancel", role: .cancel) {}
@@ -70,9 +66,9 @@ struct PlaylistDetailView: View {
   private var listView: some View {
     List {
       ForEach(sortedVideos) { video in
-        Button {
-          selectedVideoItem = video
-        } label: {
+        // Pushes through the enclosing Home stack's HomeRoute destination so
+        // the player sits above this playlist in the same navigation path.
+        NavigationLink(value: HomeRoute.video(video.typedID)) {
           VideoItemCell(video: video)
         }
         .buttonStyle(.plain)

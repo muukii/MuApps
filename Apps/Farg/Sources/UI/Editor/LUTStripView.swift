@@ -3,6 +3,7 @@
 //
 
 import SwiftUI
+import StateGraph
 
 /// A horizontal LUT selector rendered from the latest stopped source frame.
 ///
@@ -14,7 +15,11 @@ struct LUTStripView: View {
   let library: LUTLibrary
   let source: LUTPreviewSourceImage?
   let exposure: ExposureAdjustment
-  @Binding var selectedLUTID: LUT.ID?
+  let _selectedLUTID: Stored<LUT.ID?>
+  
+  private var selectedLUTID: LUT.ID? {
+    _selectedLUTID.wrappedValue
+  }
 
   var body: some View {
     HorizontalFolderView(
@@ -114,7 +119,7 @@ struct LUTStripView: View {
         exposure: exposure,
         isSelected: selectedLUTID == nil
       ) {
-        selectedLUTID = nil
+        _selectedLUTID.wrappedValue = nil
       }
 
     case .lut(let lut):
@@ -127,7 +132,7 @@ struct LUTStripView: View {
         exposure: exposure,
         isSelected: selectedLUTID == lut.id
       ) {
-        selectedLUTID = lut.id
+        _selectedLUTID.wrappedValue = lut.id
       }
     }
   }
@@ -271,7 +276,7 @@ private struct LUTPreviewCell: View {
 }
 
 #Preview("LUT strip") {
-  @Previewable @State var selectedLUTID: LUT.ID?
+  @Previewable let _selectedLUTID: Stored<LUT.ID?> = .init(wrappedValue: nil)
   @Previewable @State var previewModels = LUTPreviewModelStore()
   let library = LUTLibrary()
   let source = LUTPreviewSampleLibrary.makePreviewSource()
@@ -281,7 +286,7 @@ private struct LUTPreviewCell: View {
     library: library,
     source: source,
     exposure: .neutral,
-    selectedLUTID: $selectedLUTID
+    _selectedLUTID: _selectedLUTID
   )
   .environment(previewModels)
   .onAppear {

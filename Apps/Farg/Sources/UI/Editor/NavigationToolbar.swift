@@ -22,44 +22,60 @@ struct NavigationToolbar<Root: View>: View {
     _stackedView = State(initialValue: initialStack)
     self.root = root()
   }
-  
+
   private var glass: Glass {
-    .regular    
+    .regular
   }
 
   var body: some View {
-    GlassEffectContainer(spacing: 10) {
-      HStack {
+    HStack {
 
-        ZStack {
+      ZStack {
 
-          Group {
-            if let top = stackedView.last {
-              top
-            } else {
-              root
+        GlassEffectContainer {
+          root
+            .map {
+              if usesGlass {
+                $0.glassEffect(glass.interactive())
+              } else {
+                $0
+              }
+            }
+        }
+        .opacity(stackedView.isEmpty ? 1 : 0)
+        .blur(radius: stackedView.isEmpty ? 0 : 8)
+
+        ForEach(stackedView.enumerated(), id: \.offset) { index, view in
+
+          GlassEffectContainer {
+            HStack {
+
+              if stackedView.isEmpty == false {
+                backButton
+              }
+
+              view
+                .map {
+                  if usesGlass {
+                    $0.glassEffect(glass.interactive())
+                  } else {
+                    $0
+                  }
+                }
             }
           }
-          .transition(.blurReplace)
-
-        }
-        .environment(\.stackedView, $stackedView)
-        .map {
-          if usesGlass {
-            $0.glassEffect(glass.interactive())
-          } else {
-            $0
-          }
-        }
-
-        if stackedView.isEmpty == false {
-          backButton
+          .transition(.blurReplace.animation(.smooth))
+          .opacity(index == stackedView.indices.last ? 1 : 0)
+          .blur(radius: index == stackedView.indices.last ? 0 : 8)
         }
 
       }
-      .fixedSize(horizontal: false, vertical: true)
+     
+      .environment(\.stackedView, $stackedView)
+
     }
-    .animation(.bouncy, value: stackedView.count)
+    .fixedSize(horizontal: false, vertical: true)
+    .animation(.smooth, value: stackedView.count)
   }
 
   private var backButton: some View {

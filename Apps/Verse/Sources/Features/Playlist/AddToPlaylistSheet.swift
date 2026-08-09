@@ -3,15 +3,16 @@
 //  YouTubeSubtitle
 //
 
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct AddToPlaylistSheet: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(VideoItemService.self) private var historyService
   @Query(sort: \Playlist.updatedAt, order: .reverse) private var playlists: [Playlist]
 
-  let video: VideoItem
+  /// Videos to add, ordered as they should be appended to a playlist.
+  let videos: [VideoItem]
 
   @State private var showCreateSheet: Bool = false
 
@@ -26,7 +27,7 @@ struct AddToPlaylistSheet: View {
       }
       .navigationTitle("Add to Playlist")
       #if os(iOS)
-      .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.inline)
       #endif
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
@@ -54,7 +55,9 @@ struct AddToPlaylistSheet: View {
     ContentUnavailableView {
       Label("No Playlists", systemImage: "list.bullet.rectangle")
     } description: {
-      Text("Create a playlist to organize your videos.")
+      Text(
+        "\(videos.count) selected. Create a playlist to organize \(videos.count == 1 ? "this video" : "these videos")."
+      )
     } actions: {
       Button {
         showCreateSheet = true
@@ -69,30 +72,35 @@ struct AddToPlaylistSheet: View {
 
   private var listView: some View {
     List {
-      ForEach(playlists) { playlist in
-        Button {
-          addToPlaylist(playlist)
-        } label: {
-          HStack {
-            VStack(alignment: .leading, spacing: 4) {
-              Text(playlist.name)
-                .font(.headline)
-                .foregroundStyle(.primary)
+      Section {
+        ForEach(playlists) { playlist in
+          Button {
+            addToPlaylist(playlist)
+          } label: {
+            HStack {
+              VStack(alignment: .leading, spacing: 4) {
+                Text(playlist.name)
+                  .font(.headline)
+                  .foregroundStyle(.primary)
 
-              Text("\(playlist.videoCount) videos")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Text("\(playlist.videoCount) videos")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+
+              Spacer()
+
+              if containsAllVideos(in: playlist) {
+                Image(systemName: "checkmark.circle.fill")
+                  .foregroundStyle(.green)
+              }
             }
-
-            Spacer()
-
-            if historyService.isVideo(video, in: playlist) {
-              Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-            }
+            .contentShape(Rectangle())
           }
+          .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+      } header: {
+        Text("\(videos.count) Selected")
       }
     }
     .listStyle(.inset)
@@ -101,16 +109,22 @@ struct AddToPlaylistSheet: View {
   // MARK: - Actions
 
   private func addToPlaylist(_ playlist: Playlist) {
-    let added = (try? historyService.addVideo(video, to: playlist)) ?? false
-    if added {
+    let addedCount = (try? historyService.addVideos(videos, to: playlist)) ?? 0
+    if addedCount > 0 {
       dismiss()
     }
-    // If already in playlist, stay open (checkmark shows it's already added)
+    // If every video is already present, stay open so the checkmark remains visible.
+  }
+
+  private func containsAllVideos(in playlist: Playlist) -> Bool {
+    !videos.isEmpty && videos.allSatisfy { historyService.isVideo($0, in: playlist) }
   }
 }
 
 // MARK: - Preview
 
 #Preview {
-  AddToPlaylistSheet(video: VideoItem(videoID: "test123", url: "https://youtube.com/watch?v=test123"))
+  AddToPlaylistSheet(
+    videos: [VideoItem(videoID: "test123", url: "https://youtube.com/watch?v=test123")]
+  )
 }

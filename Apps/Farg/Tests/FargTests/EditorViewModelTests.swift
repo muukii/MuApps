@@ -12,11 +12,11 @@ struct EditorViewModelTests {
       library: LUTLibrary(),
       defaultVideoFolder: DefaultVideoFolderStore(),
       previewSamples: LUTPreviewSampleLibrary(),
-      editState: EditState()
+      initialClips: []
     )
 
-    model.selectLUT(id: "lut-a")
-    model.selectLUT(id: "lut-b")
+    model.selectedLUTID = "lut-a"
+    model.selectedLUTID = "lut-b"
 
     #expect(model.selectedLUTID == "lut-b")
   }
@@ -27,7 +27,7 @@ struct EditorViewModelTests {
       library: LUTLibrary(),
       defaultVideoFolder: DefaultVideoFolderStore(),
       previewSamples: LUTPreviewSampleLibrary(),
-      editState: EditState()
+      initialClips: []
     )
     model.selectedLUTID = "removed-lut"
 
@@ -45,17 +45,22 @@ struct EditorViewModelTests {
       library: library,
       defaultVideoFolder: defaultVideoFolder,
       previewSamples: previewSamples,
-      editState: EditState()
+      initialClips: []
     )
     let second = EditorViewModel(
       library: library,
       defaultVideoFolder: defaultVideoFolder,
       previewSamples: previewSamples,
-      editState: EditState()
+      initialClips: []
     )
 
-    #expect(first.id != second.id)
-    #expect(first.editState !== second.editState)
+    first.exposure = ExposureAdjustment(ev: 0.5)
+
+    #expect(first !== second)
+    #expect(first.id == ObjectIdentifier(first))
+    #expect(second.id == ObjectIdentifier(second))
+    #expect(first.exposure.ev == 0.5)
+    #expect(second.exposure.isNeutral)
     #expect(first.preview !== second.preview)
   }
 }

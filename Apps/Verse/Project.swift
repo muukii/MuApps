@@ -19,6 +19,9 @@ let appInfoPlist: InfoPlist = .extendingDefault(with: [
     "This app uses speech recognition to convert your voice to text.",
   "UIBackgroundModes": .array(["audio", "processing", "fetch"]),
   "UILaunchScreen": .dictionary([:]),
+  "UISupportedInterfaceOrientations": .array([
+    "UIInterfaceOrientationPortrait",
+  ]),
 ])
 
 // MARK: - Project

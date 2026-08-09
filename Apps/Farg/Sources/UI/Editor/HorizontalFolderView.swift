@@ -215,10 +215,21 @@ struct HorizontalFolderView<
             .file(id: "1", value: "1"),
             .file(id: "2", value: "2"),
             .file(id: "3", value: "3"),
+            .directory(
+              .init(
+                id: "Mu",
+                name: "Mu",
+                contents: [
+                  .file(id: "1", value: "1"),
+                  .file(id: "2", value: "2"),
+                  .file(id: "3", value: "3"),
+                ]
+              )
+            ),
           ]
         )
       ),
-    ],
+    ] as [FileSystemNode<String>],
     itemView: { value in
       VStack {
         Image(systemName: "document.fill")

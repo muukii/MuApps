@@ -76,7 +76,7 @@ final class FeatureFlags {
 
   // MARK: - Stored Flags (UserDefaults backed)
 
-  @GraphStored(backed: .userDefaults(key: "featureFlag.downloadFeature"))
+  @GraphUserDefault("featureFlag.downloadFeature")
   var downloadFeatureFlag: Bool = true
 
   // MARK: - Public API
@@ -108,7 +108,10 @@ final class FeatureFlags {
   func binding(for flag: FeatureFlag) -> Binding<Bool> {
     switch flag {
     case .downloadFeature:
-      return $downloadFeatureFlag.binding
+      return Binding(
+        get: { self.downloadFeatureFlag },
+        set: { self.downloadFeatureFlag = $0 }
+      )
     }
   }
 

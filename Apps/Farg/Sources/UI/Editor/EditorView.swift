@@ -36,7 +36,6 @@ struct EditorView: View {
   private var previewSamples: LUTPreviewSampleLibrary {
     viewModel.previewSamples
   }
-  private var editState: EditState { viewModel.editState }
   private var preview: VideoPreviewModel { viewModel.preview }
   private var lutPreviewModels: LUTPreviewModelStore {
     viewModel.lutPreviewModels
@@ -64,20 +63,19 @@ struct EditorView: View {
   }
 
   var body: some View {
-    @Bindable var editState = viewModel.editState
     let currentDisplayScale = displayScale
 
     EditorLayout(
       preview: preview,
       lutPreviewSource: preview.lutPreviewSource,
-      clips: editState.clips,
-      selectedClipID: editState.selectedClipID,
-      hdrVideoCount: editState.hdrVideoCount,
-      exposure: $editState.exposure,
-      motionBlur: $editState.motionBlur,
-      grain: $editState.grain,
+      clips: viewModel.clips,
+      selectedClipID: viewModel.selectedClipID,
+      hdrVideoCount: viewModel.hdrVideoCount,
+      exposure: viewModel.$exposure.binding,
+      motionBlur: viewModel.$motionBlur.binding,
+      grain: viewModel.$grain.binding,
       selectedEffect: $selectedEffect,
-      onSelectClip: editState.selectClip,
+      onSelectClip: viewModel.selectClip,
       onRemoveClip: removeClip,
       onSelectPhotos: { isPhotosPickerPresented = true },
       onSelectFiles: presentVideoFileImporter
@@ -102,10 +100,10 @@ struct EditorView: View {
     .toolbar {
       EditorToolbarContent(
         canExport:
-          editState.hasVideos
-          && editState.isPreparingClips == false
+          viewModel.hasVideos
+          && viewModel.isPreparingClips == false
           && preview.renderState == .ready,
-        canShowVideoInformation: editState.selectedClip?.content != nil,
+        canShowVideoInformation: viewModel.selectedClip?.content != nil,
         onDiscard: onFinishEditing,
         onShowSettings: { isSettingsPresented = true },
         onShowVideoInformation: showSelectedVideoInformation,
@@ -116,19 +114,19 @@ struct EditorView: View {
       reloadPreview()
     }
     .onChange(of: pickerItems) { _, items in loadPickedPhotos(items) }
-    .onChange(of: editState.selectedClip?.content?.source.id) { _, _ in
+    .onChange(of: viewModel.selectedClip?.content?.source.id) { _, _ in
       reloadPreview()
     }
     .onChange(of: viewModel.selectedLUTID) { _, _ in applyComposition() }
-    .onChange(of: editState.amount) { _, _ in applyComposition() }
-    .onChange(of: editState.exposure) { _, _ in
+    .onChange(of: viewModel.amount) { _, _ in applyComposition() }
+    .onChange(of: viewModel.exposure) { _, _ in
       applyComposition(change: .parametricDocument)
       updateLUTPreviewContext()
     }
-    .onChange(of: editState.motionBlur) { _, _ in
+    .onChange(of: viewModel.motionBlur) { _, _ in
       applyComposition(change: .motionBlur)
     }
-    .onChange(of: editState.grain) { _, _ in
+    .onChange(of: viewModel.grain) { _, _ in
       applyComposition(change: .parametricDocument)
     }
     .onChange(of: preview.renderingErrorMessage) { _, message in
@@ -252,7 +250,7 @@ struct EditorView: View {
     let clipIDs = Set(clips.map(\.id))
     let requestID = UUID()
     videoLoadRequestID = requestID
-    editState.append(clips: clips)
+    viewModel.append(clips: clips)
 
     videoLoadTask = Task {
       defer {
@@ -260,7 +258,7 @@ struct EditorView: View {
           let unresolvedIDs = Set(
             clips.filter { $0.isReady == false }.map(\.id)
           )
-          editState.removeClips(ids: unresolvedIDs)
+          viewModel.removeClips(ids: unresolvedIDs)
           videoLoadRequestID = nil
           videoLoadTask = nil
         }
@@ -282,25 +280,25 @@ struct EditorView: View {
           errorMessage = failureMessage
         }
       } catch is CancellationError {
-        editState.removeClips(ids: clipIDs)
+        viewModel.removeClips(ids: clipIDs)
         return
       } catch {
-        editState.removeClips(ids: clipIDs)
+        viewModel.removeClips(ids: clipIDs)
         errorMessage = error.localizedDescription
       }
     }
   }
 
   private func removeClip(id: VideoClip.ID) {
-    editState.removeClip(id: id)
-    if editState.hasVideos == false {
+    viewModel.removeClip(id: id)
+    if viewModel.hasVideos == false {
       preview.clear()
       onFinishEditing()
     }
   }
 
   private func showSelectedVideoInformation() {
-    guard let clip = editState.selectedClip, let content = clip.content else {
+    guard let clip = viewModel.selectedClip, let content = clip.content else {
       return
     }
     videoInformationPresentation = VideoInformationPresentation(
@@ -312,7 +310,7 @@ struct EditorView: View {
   // MARK: - Preview
 
   private func reloadPreview() {
-    guard let content = editState.selectedClip?.content else {
+    guard let content = viewModel.selectedClip?.content else {
       preview.clear()
       return
     }
@@ -323,12 +321,9 @@ struct EditorView: View {
   private func applyComposition(
     change: VideoPreviewRecipeChange = .complete
   ) {
-    guard let content = editState.selectedClip?.content else { return }
+    guard let content = viewModel.selectedClip?.content else { return }
     do {
-      let recipe = try editState.makeRenderRecipe(
-        using: library,
-        selectedLUTID: viewModel.selectedLUTID
-      )
+      let recipe = try viewModel.makeRenderRecipe()
       preview.apply(
         recipe: recipe,
         for: content.source,
@@ -347,7 +342,7 @@ struct EditorView: View {
       LUTPreviewContextID(
         sourceID: preview.lutPreviewSource?.id,
         libraryRevision: library.revision,
-        exposureEV: editState.exposure.ev
+        exposureEV: viewModel.exposure.ev
       )
     )
   }
@@ -360,7 +355,7 @@ struct EditorView: View {
       // before rebuilding the editor's preview pipeline.
       await BackgroundExportCoordinator.shared
         .cancelAndDiscardCurrentSession()
-      if editState.hasVideos {
+      if viewModel.hasVideos {
         preview.resumeRendering()
         applyComposition()
         preview.play()
@@ -371,18 +366,15 @@ struct EditorView: View {
   private func startExport() {
     guard
       exportSession == nil,
-      editState.readyClips.isEmpty == false,
-      editState.isPreparingClips == false
+      viewModel.readyClips.isEmpty == false,
+      viewModel.isPreparingClips == false
     else {
       return
     }
     do {
-      let recipe = try editState.makeRenderRecipe(
-        using: library,
-        selectedLUTID: viewModel.selectedLUTID
-      )
+      let recipe = try viewModel.makeRenderRecipe()
       let items: [VideoExportSessionItem] =
-        editState.readyClips.enumerated().compactMap {
+        viewModel.readyClips.enumerated().compactMap {
           index,
           clip -> VideoExportSessionItem? in
           guard let content = clip.content else { return nil }
@@ -444,7 +436,7 @@ private struct EditorLUTStripBindingView: View {
       library: viewModel.library,
       source: source,
       exposure: exposure,
-      selectedLUTID: viewModel.$selectedLUTID.binding
+      _selectedLUTID: viewModel.$selectedLUTID
     )
   }
 }
@@ -1001,7 +993,7 @@ private struct EditorToolbarContent: ToolbarContent {
     library: LUTLibrary(),
     defaultVideoFolder: DefaultVideoFolderStore(),
     previewSamples: LUTPreviewSampleLibrary(),
-    editState: EditState()
+    initialClips: []
   )
 
   NavigationStack {

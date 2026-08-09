@@ -114,6 +114,8 @@ Safari Reactor is an iPhone/iPad container app for a Safari Web Extension that e
 
 Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that lets users play YouTube videos or imported audio and video files with synced subtitles, navigation tools, and on-device language assistance.
 
+- On iPhone, the app interface supports portrait orientation only; landscape rotation is not supported.
+
 ### Target Users
 - Language learners (English, Japanese, and other subtitle languages)
 - Students watching educational content
@@ -126,10 +128,12 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 #### 1.1 Video Sources
 - Play YouTube videos by URL (watch, youtu.be, shorts, etc.)
 - In-app YouTube browser with "Open with Subtitles" action
-- Import one audio or video file at a time from Files
-  - Validate that the selected file contains playable audio or video
-  - Copy the imported file into app-managed Documents storage for persistent access
-  - Add the imported file to history and open it in the local player
+- Import one or more audio or video files from Files (multi-select supported)
+  - Validate that each selected file contains playable audio or video
+  - Copy each imported file into app-managed Documents storage for persistent access
+  - Each imported file becomes its own history item; a batch is inserted at the top sorted alphabetically by filename (locale-aware), regardless of selection order
+  - Importing a single file opens it in the local player; importing multiple files stays on the Home list
+  - Files that fail validation or copying are skipped; one alert lists each failed file name with its reason while the remaining files still import
   - Show dedicated waveform artwork for audio-only files
 - Local playback when a video has been downloaded (feature-flagged)
 - Background audio for local media (downloaded videos and imported audio/video files):
@@ -247,19 +251,31 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
   - **Manual**: drag & drop custom ordering in edit mode
   - **Last Played**: sorted by most recently played videos (videos never played fall back to date added)
   - **Date Added**: sorted by when video was added to history (newest first)
-- Manual reordering (Manual sort mode only):
-  - Edit button in top-left toolbar toggles edit mode (only visible in Manual sort mode)
-  - Drag & drop support for custom ordering
+- Edit mode:
+  - Uses multi-selection controls instead of leading minus deletion controls
+  - Supports Select All / Deselect All, adding the selection to a playlist, and confirmed batch deletion
+  - Adding to a playlist keeps Edit mode and the selection active for another batch action
+  - Leaving Edit mode clears the transient selection
+  - In Manual sort, selected rows can also be reordered with drag handles
+- Manual ordering:
   - Uses lexicographic string ordering for efficient reordering
   - New items are added to the top of the list
-- Actions: tap to open, swipe to delete, clear all (in Settings)
+- Actions: tap to open, swipe to delete, batch Add to Playlist / delete in Edit mode, clear all (in Settings)
 
-#### 4.2 Playlists (Experimental)
+#### 4.2 Playlists
+- First-class feature surfaced as a horizontal "Playlists" shelf at the top of the Home screen
+  - Playlist cards show an orange list icon, name (up to 2 lines), and video count
+  - Trailing dashed "New Playlist" card opens the create sheet
+  - Tap a card to open the playlist; long-press for a context menu with Delete Playlist
 - Create, rename, delete playlists
-- Add videos from history (context menu)
+- Add one or more videos from history; existing playlist entries are skipped
+  - Edit mode exposes a visible Add to Playlist action for the current selection
+  - A selection-aware context menu acts on one row in normal mode or all selected rows in Edit mode
+  - The playlist picker shows the selection count and marks playlists that already contain the complete selection
+  - Newly added videos preserve their current History display order
 - Reorder and remove entries
 - Video entries show playback progress bar on thumbnails
-- Open videos from playlist view
+- Open videos from playlist view; the player pushes onto the same navigation stack (back returns to the playlist, then Home)
 
 ### 5. Downloads and Offline Playback (Feature-Flagged)
 - Download progressive MP4 streams with quality selection
@@ -281,13 +297,14 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 ## Screen Layout
 
 ### Home (HomeView)
-- Empty state with "Try Demo Video"
-- History list with thumbnails, metadata, and playback progress bars
-- Toolbar: Sort menu (Manual/Last Played/Date Added), Edit (for reordering in Manual mode only), Settings
-- Bottom bar: Add Media menu (Paste YouTube URL / Import Audio or Video), Browse YouTube
-- Navigation uses a single stack on all devices; selecting a history item pushes the player (no split view / detail pane)
-- Edit mode: drag handles for reordering history items (Manual sort mode only)
-- Context menu: Add to Playlist
+- Empty state with "Try Demo Video" (shown only when both history and playlists are empty)
+- "Playlists" section: horizontal shelf of playlist cards plus a "New Playlist" card
+- "History" section: list with thumbnails, metadata, and playback progress bars (hidden while history is empty)
+- Toolbar: Sort menu (Manual/Last Played/Date Added), Edit, Settings; Edit mode replaces Settings with Select All / Deselect All
+- Bottom bar: Add Media menu (Paste YouTube URL / Import Audio or Video), Browse YouTube; Edit mode replaces it with the selected count, Add to Playlist, and batch Delete actions
+- Navigation uses a single stack on all devices; selecting a history item pushes the player, selecting a playlist card pushes the playlist (no split view / detail pane)
+- Edit mode: History rows use selection controls with no leading minus icons; Manual sort additionally shows drag handles
+- Context menu: selection-aware Add to Playlist (one History row or the current multi-selection), Delete Playlist (playlist cards)
 
 ### URL Input Sheet (URLInputSheet)
 - URL field with live metadata preview
@@ -310,7 +327,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 ### Settings (SettingsView)
 - Language: AI Response Language picker (System / English / Japanese)
 - Data: Clear History (with confirmation dialog)
-- Experimental: Playlists, Live Transcription
+- Experimental: Live Transcription
 - Debug-only feature flags
 
 ## UI/UX Specifications

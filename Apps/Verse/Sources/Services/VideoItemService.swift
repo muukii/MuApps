@@ -288,17 +288,32 @@ final class VideoItemService {
   /// Returns true if added, false if already in playlist.
   @discardableResult
   func addVideo(_ video: VideoItem, to playlist: Playlist) throws -> Bool {
-    let isAlreadyInPlaylist = playlist.entries.contains { $0.video?.id == video.id }
-    guard !isAlreadyInPlaylist else { return false }
+    try addVideos([video], to: playlist) == 1
+  }
 
-    let order = playlist.entries.count
-    let entry = PlaylistEntry(playlist: playlist, video: video, order: order)
+  /// Adds videos to a playlist in input order and saves the batch once.
+  ///
+  /// Videos already in the playlist and duplicate videos in `videos` are
+  /// skipped without changing the relative order of the remaining videos.
+  /// - Returns: The number of new playlist entries inserted.
+  @discardableResult
+  func addVideos(_ videos: [VideoItem], to playlist: Playlist) throws -> Int {
+    var knownVideoIDs = Set(playlist.entries.compactMap { $0.video?.id })
+    var nextOrder = (playlist.entries.map(\.order).max() ?? -1) + 1
+    var addedCount = 0
 
-    modelContext.insert(entry)
+    for video in videos where knownVideoIDs.insert(video.id).inserted {
+      let entry = PlaylistEntry(playlist: playlist, video: video, order: nextOrder)
+      modelContext.insert(entry)
+      nextOrder += 1
+      addedCount += 1
+    }
+
+    guard addedCount > 0 else { return 0 }
+
     playlist.updatedAt = Date()
     try modelContext.save()
-
-    return true
+    return addedCount
   }
 
   /// Remove a video from a playlist.
@@ -385,6 +400,11 @@ final class VideoItemService {
 
   /// Move a history item from one position to another (for drag and drop).
   func moveHistoryItem(from sourceIndex: Int, to destinationIndex: Int) throws {
+    // Heal legacy duplicate keys BEFORE computing the insertion key: between()
+    // over a duplicate neighbor pair would place the dropped row outside the
+    // pair, and the post-move rebalance would freeze that misplacement.
+    try checkAndRebalanceIfNeeded()
+
     let descriptor = FetchDescriptor<VideoItem>(
       sortBy: [SortDescriptor(\.sortOrder)]
     )

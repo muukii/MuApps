@@ -48,7 +48,8 @@ public extension SettingsDictionary {
     "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
     // TARGETED_DEVICE_FAMILY is derived from each target's `destinations`; do not hardcode it here.
     "SUPPORTS_MACCATALYST": "NO",
-    // MARKETING_VERSION and CURRENT_PROJECT_VERSION are defined in Tuist/xcconfig/Version.xcconfig
+    // App targets may supply MARKETING_VERSION and CURRENT_PROJECT_VERSION
+    // through an app-local `xcconfig/Version.xcconfig`.
     "LD_RUNPATH_SEARCH_PATHS": "$(inherited) @executable_path/Frameworks",
     "LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]": "$(inherited) @executable_path/../Frameworks",
   ])

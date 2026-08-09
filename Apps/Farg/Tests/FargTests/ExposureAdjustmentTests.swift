@@ -100,17 +100,20 @@ struct ExposureAdjustmentTests {
 struct ExposureDocumentOrderTests {
 
   @Test
-  func editStatePlacesExposureBeforeLUTAndGrain() throws {
+  func editorViewModelPlacesExposureBeforeLUTAndGrain() throws {
     let library = LUTLibrary()
     let lut = try #require(library.luts.first)
-    let state = EditState()
-    state.exposure = ExposureAdjustment(ev: 0.7)
-    state.grain.isEnabled = true
+    let model = EditorViewModel(
+      library: library,
+      defaultVideoFolder: DefaultVideoFolderStore(),
+      previewSamples: LUTPreviewSampleLibrary(),
+      initialClips: [],
+      initialSelectedLUTID: lut.id
+    )
+    model.exposure = ExposureAdjustment(ev: 0.7)
+    model.grain.isEnabled = true
 
-    let features = try state.makeDocument(
-      using: library,
-      selectedLUTID: lut.id
-    ).mainTree.features
+    let features = try model.makeRenderRecipe().document.mainTree.features
     #expect(features.count == 3)
 
     guard case .effect(let firstEffect) = features[0] else {

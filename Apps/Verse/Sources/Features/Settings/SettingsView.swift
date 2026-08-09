@@ -156,17 +156,6 @@ enum Settings {
     var body: some SwiftUI.View {
       Section {
         NavigationLink {
-          PlaylistListView()
-        } label: {
-          FeatureLabel(
-            title: "Playlists",
-            description: "Organize videos into collections",
-            systemImage: "list.bullet.rectangle",
-            color: .orange
-          )
-        }
-
-        NavigationLink {
           RealtimeTranscriptionView()
         } label: {
           FeatureLabel(

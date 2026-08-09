@@ -186,10 +186,8 @@ struct RootView: View {
         }
         guard result.clips.isEmpty == false else { return }
 
-        let editState = EditState()
-        editState.replaceClips(with: result.clips)
         pickerItems = []
-        presentEditor(editState: editState)
+        presentEditor(clips: result.clips)
       } catch is CancellationError {
         return
       } catch {
@@ -228,24 +226,20 @@ struct RootView: View {
       displayName: request.videoURL.deletingPathExtension().lastPathComponent,
       colorInfo: colorInfo
     )
-    let editState = EditState()
-    editState.amount = 1
-    editState.motionBlur = .disabled
-    editState.replaceClips(with: [clip])
     pickerItems = []
-    presentEditor(editState: editState, initialSelectedLUTID: lut.id)
+    presentEditor(clips: [clip], initialSelectedLUTID: lut.id)
   }
 
   /// Creates a new session owner for the next Editor presentation.
   private func presentEditor(
-    editState: EditState,
+    clips: [VideoClip],
     initialSelectedLUTID: LUT.ID? = nil
   ) {
     editorSession = EditorViewModel(
       library: library,
       defaultVideoFolder: defaultVideoFolder,
       previewSamples: previewSamples,
-      editState: editState,
+      initialClips: clips,
       initialSelectedLUTID: initialSelectedLUTID
     )
   }

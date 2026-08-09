@@ -10,8 +10,9 @@ let appInfoPlist: InfoPlist = .extendingDefault(with: [
   // Keep the visible product name while giving system app search an
   // accent-free bundle name that matches the spelling people may type.
   "CFBundleName": "Farg",
-  "CFBundleShortVersionString": "1.0",
-  "CFBundleVersion": "1",
+  // The app target injects these values from `xcconfig/Version.xcconfig`.
+  "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+  "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
   "ITSAppUsesNonExemptEncryption": false,
   "LSApplicationCategoryType": "public.app-category.photo-video",
   "NSPhotoLibraryAddUsageDescription":
@@ -101,8 +102,8 @@ let project = Project(
           "ASSETCATALOG_COMPILER_APPICON_NAME": "Icon",
         ]),
         configurations: [
-          .debug(name: "Debug"),
-          .release(name: "Release"),
+          .debug(name: "Debug", xcconfig: "xcconfig/Version.xcconfig"),
+          .release(name: "Release", xcconfig: "xcconfig/Version.xcconfig"),
         ]
       )
     ),
