@@ -3,6 +3,7 @@
 //
 
 import Foundation
+import MuComponents
 import SwiftUI
 
 /// The selectable effect modes displayed in the editor's persistent tab bar.

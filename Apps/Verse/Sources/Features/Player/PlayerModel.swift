@@ -161,6 +161,41 @@ final class CurrentTime: @unchecked Sendable {
   var value: Double = 0
 }
 
+// MARK: - StepModeStopState
+
+/// Tracks the subtitle boundary most recently consumed by Step Mode.
+///
+/// The consumed boundary prevents an immediate second pause when playback resumes
+/// without moving the timeline. Seeking to a point before that boundary re-arms
+/// it so the same subtitle cue can be practiced repeatedly.
+nonisolated struct StepModeStopState {
+  private struct ConsumedBoundary {
+    let cueID: Subtitle.Cue.ID
+    let endTime: Double
+  }
+
+  private var consumedBoundary: ConsumedBoundary?
+
+  /// Returns whether Step Mode may stop at the cue's end boundary.
+  func isStopEligible(for cue: Subtitle.Cue) -> Bool {
+    cue.id != consumedBoundary?.cueID
+  }
+
+  /// Marks a cue's end boundary as consumed after Step Mode pauses there.
+  mutating func recordStop(at cue: Subtitle.Cue) {
+    consumedBoundary = ConsumedBoundary(
+      cueID: cue.id,
+      endTime: cue.endTime
+    )
+  }
+
+  /// Re-arms a consumed boundary when a seek moves playback before it.
+  mutating func handleSeek(to time: Double) {
+    guard let consumedBoundary, time < consumedBoundary.endTime else { return }
+    self.consumedBoundary = nil
+  }
+}
+
 // MARK: - PlayerModel
 
 /// Observable model for PlayerView that holds frequently updated playback state
@@ -223,8 +258,8 @@ final class PlayerModel {
   /// Step mode - stops at each subtitle cue's end time
   var isStepModeEnabled: Bool = false
 
-  /// Tracks the ID of the last cue we stopped at (prevents re-stopping on same cue)
-  private var lastStoppedCueID: Subtitle.Cue.ID?
+  /// Tracks whether the most recently reached cue boundary is still consumed.
+  private var stepModeStopState = StepModeStopState()
 
   // MARK: - Controller State
 
@@ -351,7 +386,7 @@ final class PlayerModel {
     for cue in cues {
       if currentTimeValue >= cue.endTime &&
         currentTimeValue < cue.endTime + 0.15 &&
-        cue.id != lastStoppedCueID {
+        stepModeStopState.isStopEligible(for: cue) {
         return cue
       }
     }
@@ -623,6 +658,7 @@ final class PlayerModel {
     guard let controller else { return }
 
     let seekTime = clampedPlaybackTime(time)
+    stepModeStopState.handleSeek(to: seekTime)
     currentTime.value = seekTime
     isApplyingSliderSeek = true
 
@@ -901,7 +937,7 @@ final class PlayerModel {
           }
           // Check step mode stop
           else if let cue = self.checkStepModeStop() {
-            self.lastStoppedCueID = cue.id
+            self.stepModeStopState.recordStop(at: cue)
             await self.controller?.pause()
             self.isPlaying = false
             await self.refreshNowPlayingPlaybackState()

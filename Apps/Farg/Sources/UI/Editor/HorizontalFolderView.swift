@@ -1,3 +1,4 @@
+import MuComponents
 import SwiftUI
 
 /// A file or directory entry rendered by a horizontal navigation surface.
@@ -89,6 +90,8 @@ struct HorizontalFolderView<
   let items: [FileSystemNode<Value>]
   /// Directory IDs used only to seed the toolbar's initial retained levels.
   let initialPath: [String]
+  /// Whether navigation levels use the interactive glass treatment.
+  let usesGlass: Bool
 
   private let itemView: (Value) -> ItemView
   private let folderView: (String) -> FolderView
@@ -96,18 +99,20 @@ struct HorizontalFolderView<
   init(
     items: [FileSystemNode<Value>],
     initialPath: [String] = [],
+    usesGlass: Bool = false,
     @ViewBuilder itemView: @escaping (Value) -> ItemView,
     @ViewBuilder folderView: @escaping (String) -> FolderView
   ) {
     self.items = items
     self.initialPath = initialPath
+    self.usesGlass = usesGlass
     self.itemView = itemView
     self.folderView = folderView
   }
 
   var body: some View {
     NavigationToolbar(
-      usesGlass: false,
+      usesGlass: usesGlass,
       initialStack: initialStack
     ) {
       ItemsView(
@@ -203,44 +208,157 @@ struct HorizontalFolderView<
   }
 }
 
-#Preview {
-  HorizontalFolderView(
-    items: [
-      .file(id: "A", value: "A"),
+#if DEBUG
+
+#Preview("Glass") {
+  HorizontalFolderPreviewStage(usesGlass: true)
+}
+
+#Preview("Without Glass") {
+  HorizontalFolderPreviewStage(usesGlass: false)
+}
+
+/// A stable file value rendered by the folder-navigation previews.
+private struct HorizontalFolderPreviewItem: Hashable {
+  let title: String
+  let systemImage: String
+}
+
+/// Presents the same folder tree and backdrop for both material variants.
+private struct HorizontalFolderPreviewStage: View {
+
+  let usesGlass: Bool
+
+  var body: some View {
+    ZStack {
+      HorizontalFolderPreviewBackdrop()
+
+      HorizontalFolderView(
+        items: previewItems,
+        usesGlass: usesGlass,
+        itemView: { item in
+          HorizontalFolderPreviewCell(
+            title: item.title,
+            systemImage: item.systemImage
+          )
+        },
+        folderView: { name in
+          HorizontalFolderPreviewCell(
+            title: name,
+            systemImage: "folder.fill"
+          )
+        }
+      )
+      .padding(.horizontal, 20)
+    }
+    .frame(height: 220)
+    .clipped()
+  }
+
+  private var previewItems: [FileSystemNode<HorizontalFolderPreviewItem>] {
+    [
       .directory(
         .init(
-          id: "Mu",
-          name: "Mu",
+          id: "favorites",
+          name: "Favorites",
           contents: [
-            .file(id: "1", value: "1"),
-            .file(id: "2", value: "2"),
-            .file(id: "3", value: "3"),
             .directory(
               .init(
-                id: "Mu",
-                name: "Mu",
+                id: "archive",
+                name: "Archive",
                 contents: [
-                  .file(id: "1", value: "1"),
-                  .file(id: "2", value: "2"),
-                  .file(id: "3", value: "3"),
+                  .file(
+                    id: "classic",
+                    value: .init(
+                      title: "Classic",
+                      systemImage: "camera.filters"
+                    )
+                  )
                 ]
+              )
+            ),
+            .file(
+              id: "cinematic",
+              value: .init(
+                title: "Cinematic",
+                systemImage: "film.stack"
+              )
+            ),
+            .file(
+              id: "warm",
+              value: .init(
+                title: "Warm",
+                systemImage: "sun.max.fill"
               )
             ),
           ]
         )
       ),
-    ] as [FileSystemNode<String>],
-    itemView: { value in
-      VStack {
-        Image(systemName: "document.fill")
-        Text(value)
-      }
-    },
-    folderView: { name in
-      VStack {
-        Image(systemName: "folder.fill")
-        Text(name)
-      }
-    }
-  )
+      .file(
+        id: "original",
+        value: .init(
+          title: "Original",
+          systemImage: "circle.lefthalf.filled"
+        )
+      ),
+      .file(
+        id: "soft",
+        value: .init(
+          title: "Soft",
+          systemImage: "camera.filters"
+        )
+      ),
+    ]
+  }
 }
+
+/// A colorful surface that makes the glass sampling visible in the canvas.
+private struct HorizontalFolderPreviewBackdrop: View {
+  var body: some View {
+    ZStack {
+      LinearGradient(
+        colors: [
+          Color.indigo,
+          Color.blue,
+          Color.orange,
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+      )
+
+      Circle()
+        .fill(Color.cyan.opacity(0.8))
+        .frame(width: 170, height: 170)
+        .blur(radius: 12)
+        .offset(x: 150, y: -70)
+
+      Circle()
+        .fill(Color.pink.opacity(0.75))
+        .frame(width: 150, height: 150)
+        .blur(radius: 16)
+        .offset(x: -150, y: 90)
+    }
+  }
+}
+
+/// A compact file or folder label shared by both preview variants.
+private struct HorizontalFolderPreviewCell: View {
+
+  let title: String
+  let systemImage: String
+
+  var body: some View {
+    VStack(spacing: 6) {
+      Image(systemName: systemImage)
+        .font(.title2)
+
+      Text(title)
+        .font(.caption.weight(.medium))
+        .lineLimit(1)
+    }
+    .frame(minWidth: 64)
+    .foregroundStyle(.white)
+  }
+}
+
+#endif

@@ -98,6 +98,8 @@ MuApps.xcworkspace/
 Apps/*/*.xcodeproj/
 Apps/*/*.xcworkspace/
 Apps/*/Derived/
+Shared/**/*.xcodeproj
+Shared/**/*.xcworkspace
 
 # Cloudflare Wrangler local cache
 .wrangler/

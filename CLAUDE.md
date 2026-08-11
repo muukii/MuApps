@@ -29,8 +29,10 @@ Apps/
   HelloWorld/                # Scaffold app — copy this to bootstrap a new app
     Project.swift
     Sources/
-Shared/                      # Shared modules shared across apps (currently empty)
-  Project.swift              # Add cross-app framework targets here
+Shared/                      # Framework modules shared across apps
+  Project.swift              # Declares cross-app framework targets
+  MuComponents/              # Reusable SwiftUI interaction components
+  MuDesignSystem/            # Shared colors and typography
 Packages/                    # Local SPM packages
 ```
 
@@ -84,7 +86,7 @@ Shared external SPM dependencies: add to `Tuist/Package.swift` and reference via
 - Uses SwiftUI as the UI framework
 - Target platforms: iOS (see `DeploymentTargets.app` in helpers)
 - Dependencies are managed via Swift Package Manager through Tuist
-- Each app owns its own sources under `Apps/<App>/`; frameworks shared across apps are a future refactor (currently `Components` is Verse-local)
+- Each app owns its feature sources under `Apps/<App>/`; reusable interaction components live in `Shared/MuComponents`, while shared visual tokens live in `Shared/MuDesignSystem`
 
 ## Documentation Policy
 

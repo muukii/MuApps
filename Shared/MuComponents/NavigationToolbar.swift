@@ -1,19 +1,34 @@
 import SwiftUI
 
 extension EnvironmentValues {
-  @Entry var stackedView: Binding<[AnyView]> = .constant([])
+  /// The retained view levels owned by the nearest ``NavigationToolbar``.
+  ///
+  /// Append a type-erased view to push a level. Removing the last view returns
+  /// to the preceding level.
+  @Entry public var stackedView: Binding<[AnyView]> = .constant([])
 }
 
-struct NavigationToolbar<Root: View>: View {
+/// A horizontal toolbar that retains pushed SwiftUI view levels.
+///
+/// Descendant content can use ``EnvironmentValues/stackedView`` to push a new
+/// level. The toolbar keeps earlier levels mounted and provides a back button
+/// while a pushed level is visible.
+public struct NavigationToolbar<Root: View>: View {
 
-  @Namespace var namespace
+  @Namespace private var namespace
 
-  @State var stackedView: [AnyView] = []
+  @State private var stackedView: [AnyView]
 
-  let root: Root
+  private let root: Root
   private let usesGlass: Bool
 
-  init(
+  /// Creates a stack-based toolbar with root content.
+  ///
+  /// - Parameters:
+  ///   - usesGlass: Whether toolbar surfaces use the interactive glass effect.
+  ///   - initialStack: View levels that should initially appear above `root`.
+  ///   - root: The toolbar's root content.
+  public init(
     usesGlass: Bool = true,
     initialStack: [AnyView] = [],
     @ViewBuilder root: () -> Root
@@ -27,7 +42,7 @@ struct NavigationToolbar<Root: View>: View {
     .regular
   }
 
-  var body: some View {
+  public var body: some View {
     HStack {
 
       ZStack {
@@ -70,7 +85,6 @@ struct NavigationToolbar<Root: View>: View {
         }
 
       }
-     
       .environment(\.stackedView, $stackedView)
 
     }
@@ -92,13 +106,11 @@ struct NavigationToolbar<Root: View>: View {
         $0
       }
     }
-
   }
-
 }
 
 extension View {
-  func map<U: View>(@ViewBuilder _ closure: (Self) -> U) -> some View {
+  fileprivate func map<U: View>(@ViewBuilder _ closure: (Self) -> U) -> some View {
     closure(self)
   }
 }

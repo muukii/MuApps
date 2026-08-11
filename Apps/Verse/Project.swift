@@ -29,7 +29,7 @@ let appInfoPlist: InfoPlist = .extendingDefault(with: [
 /// Destinations supported by the Verse app target.
 ///
 /// iPad support is currently disabled; iPhone only.
-let verseAppDestinations: Destinations = [.iPhone]
+let verseAppDestinations: Destinations = [.iPhone, .macWithiPadDesign]
 
 let project = Project(
   name: "Verse",
@@ -93,6 +93,38 @@ let project = Project(
           .release(name: "Release"),
         ]
       )
+    ),
+    // MARK: - Main App Tests
+    .target(
+      name: "VerseTests",
+      destinations: [.iPhone],
+      product: .unitTests,
+      bundleId: "app.muukii.verse.Tests",
+      deploymentTargets: .app,
+      infoPlist: .default,
+      buildableFolders: ["Tests/VerseTests"],
+      dependencies: [
+        .target(name: "Verse"),
+      ],
+      settings: .settings(
+        configurations: [
+          .debug(name: "Debug"),
+          .release(name: "Release"),
+        ]
+      )
+    ),
+  ],
+  schemes: [
+    .scheme(
+      name: "VerseTests",
+      shared: true,
+      buildAction: .buildAction(targets: ["VerseTests"]),
+      testAction: .targets([
+        .testableTarget(
+          target: "VerseTests",
+          parallelization: .swiftTestingOnly
+        ),
+      ])
     ),
   ]
 )

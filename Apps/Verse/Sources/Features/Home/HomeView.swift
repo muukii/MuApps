@@ -201,13 +201,8 @@ struct HomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
           topToolbarContent
-        }
-        .safeAreaInset(edge: .bottom) {
-          if editMode.isEditing {
-            historySelectionActionBar
-          } else {
-            historyActionBar
-          }
+          
+          bottomToolbarContent
         }
         .navigationDestination(for: HomeRoute.self) { route in
           switch route {
@@ -453,6 +448,72 @@ struct HomeView: View {
       }
     }
   }
+  
+  @ToolbarContentBuilder
+  private var bottomToolbarContent: some ToolbarContent {    
+    if editMode.isEditing {
+      ToolbarItem(placement: .bottomBar) { 
+        Button {
+          presentAddToPlaylist(for: selectedHistoryItemIDs)
+        } label: {
+          Label("Add to Playlist", systemImage: "text.badge.plus")
+        }
+        .buttonStyle(.bordered)
+        .disabled(selectedHistoryItemIDs.isEmpty)
+      }
+
+      ToolbarItem(placement: .bottomBar) { 
+        Button {
+          isDeleteSelectionConfirmationPresented = true
+        } label: {
+          Label("Delete", systemImage: "trash")
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.red)
+        .disabled(selectedHistoryItemIDs.isEmpty)
+      }
+    } else {
+      ToolbarItem(placement: .bottomBar) { 
+        Menu {
+          
+          Button {
+            showWebView = true
+          } label: {
+            Label("Browse YouTube", systemImage: "safari")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(.bordered)
+          
+          Button {
+            showURLInput = true
+          } label: {
+            Label("Paste YouTube URL", systemImage: "link")
+          }
+
+          Button {
+            showMediaImporter = true
+          } label: {
+            Label("Import Audio or Video", systemImage: "folder")
+          }
+          
+        } label: {
+          if isImportingMedia {
+            HStack {
+              ProgressView()
+              Text("Importing...")
+            }
+            .frame(maxWidth: .infinity)
+          } else {
+            Label("Add Media", systemImage: "plus")
+              .frame(maxWidth: .infinity)
+          }
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(isImportingMedia)
+      
+      }
+    }
+  }
 
   private var isAllHistorySelected: Bool {
     !history.isEmpty && selectedHistoryItemIDs.count == history.count
@@ -500,40 +561,7 @@ struct HomeView: View {
     VStack(spacing: 0) {
       Divider()
       HStack(spacing: 12) {
-        Menu {
-          Button {
-            showURLInput = true
-          } label: {
-            Label("Paste YouTube URL", systemImage: "link")
-          }
-
-          Button {
-            showMediaImporter = true
-          } label: {
-            Label("Import Audio or Video", systemImage: "folder")
-          }
-        } label: {
-          if isImportingMedia {
-            HStack {
-              ProgressView()
-              Text("Importing...")
-            }
-            .frame(maxWidth: .infinity)
-          } else {
-            Label("Add Media", systemImage: "plus")
-              .frame(maxWidth: .infinity)
-          }
-        }
-        .buttonStyle(.borderedProminent)
-        .disabled(isImportingMedia)
-
-        Button {
-          showWebView = true
-        } label: {
-          Label("Browse YouTube", systemImage: "safari")
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.bordered)
+       
       }
       .padding(.horizontal, 16)
       .padding(.top, 12)

@@ -94,6 +94,7 @@ let project = Project(
       ]),
       dependencies: [
         .target(name: "FargMotionBlur"),
+        .project(target: "MuComponents", path: "../../Shared"),
         .external(name: "BrightroomParametric"),
         .external(name: "StateGraph"),
       ],

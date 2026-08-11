@@ -22,6 +22,23 @@ let project = Project(
   ),
   targets: [
     .target(
+      name: "MuComponents",
+      destinations: .app,
+      product: .staticFramework,
+      bundleId: "app.muukii.shared.components",
+      deploymentTargets: .app,
+      infoPlist: .default,
+      buildableFolders: ["MuComponents"],
+      dependencies: [],
+      settings: .settings(
+        base: .frameworkTarget,
+        configurations: [
+          .debug(name: "Debug"),
+          .release(name: "Release"),
+        ]
+      )
+    ),
+    .target(
       name: "MuDesignSystem",
       destinations: .app,
       product: .staticFramework,
