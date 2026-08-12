@@ -10,8 +10,9 @@ import ObjectEdge
 import SwiftData
 import SwiftUI
 import TipKit
-import YouTubeKit
 import Translation
+import YouTubeKit
+import MuComponents
 
 struct PlayerView: View {
   let videoItem: VideoItem
@@ -48,7 +49,8 @@ struct PlayerView: View {
 
   // Transcription state
   @State private var isTranscribing: Bool = false
-  @State private var transcriptionState: TranscriptionService.TranscriptionState = .idle
+  @State private var transcriptionState:
+    TranscriptionService.TranscriptionState = .idle
   @State private var showTranscriptionSheet: Bool = false
 
   // Subtitle interaction state
@@ -58,11 +60,14 @@ struct PlayerView: View {
   @State private var onDeviceTranscribeViewModel = OnDeviceTranscribeViewModel()
 
   // Settings
-  @AppStorage("autoTranscribeEnabled") private var autoTranscribeEnabled: Bool = true
+  @AppStorage("autoTranscribeEnabled") private var autoTranscribeEnabled: Bool =
+    true
 
   // Playback position state
   @State private var savePositionTask: Task<Void, Never>?
   @State private var hasRestoredPosition: Bool = false
+
+  @State private var bottomHeight: CGFloat = 0
 
   // Computed property to access videoID from the entity
   private var videoID: YouTubeContentID { videoItem.videoID }
@@ -72,7 +77,9 @@ struct PlayerView: View {
   /// `SubtitleBookmark.matches`) so it survives re-transcription.
   private var bookmarkedCueIDs: Set<Subtitle.Cue.ID> {
     let bookmarks = videoItem.subtitleBookmarks
-    guard !bookmarks.isEmpty, let cues = currentSubtitles?.cues else { return [] }
+    guard !bookmarks.isEmpty, let cues = currentSubtitles?.cues else {
+      return []
+    }
     return Set(
       cues
         .filter { cue in bookmarks.contains { $0.matches(cue) } }
@@ -112,7 +119,9 @@ struct PlayerView: View {
       return vmPhase
     case .idle, .completed:
       // Only show completed if subtitles have word timing (from on-device transcription)
-      if let subtitles = currentSubtitles, !needsOnDeviceTranscription(subtitles) {
+      if let subtitles = currentSubtitles,
+        !needsOnDeviceTranscription(subtitles)
+      {
         return .completed
       }
       return .idle
@@ -127,29 +136,29 @@ struct PlayerView: View {
         VStack {
           VideoPlayerSection(
             controller: controller,
-            importedMediaKind: videoItem.importedMediaKind,
+            isAudioOnly: videoItem.isAudioOnly,
             title: videoItem.title,
             maxWidth: playerContentMaxWidth
           )
-            .compositingGroup()
-            .animation(.smooth) {              
-              $0.opacity(isPlayerCollapsed ? 0 : 1)
-                .scaleEffect(isPlayerCollapsed ? 0.95 : 1, anchor: .center)              
-            }
-            .onGeometryChange(for: CGFloat.self, of: \.size.height) { newValue in
-              self.height = newValue
-            }                  
+          .compositingGroup()
+          .animation(.smooth) {
+            $0.opacity(isPlayerCollapsed ? 0 : 1)
+              .scaleEffect(isPlayerCollapsed ? 0.95 : 1, anchor: .center)
+          }
+          .onGeometryChange(for: CGFloat.self, of: \.size.height) { newValue in
+            self.height = newValue
+          }
         }
         .frame(maxHeight: .infinity, alignment: .top)
 
         VStack {
-          
+
           Color.clear
-            .animation(.smooth) {              
+            .animation(.smooth) {
               $0
                 .frame(height: isPlayerCollapsed ? 0 : height)
             }
-          
+
           VStack {
             // Player collapse toggle button
             Button {
@@ -158,8 +167,10 @@ struct PlayerView: View {
               }
             } label: {
               HStack(spacing: 6) {
-                Image(systemName: isPlayerCollapsed ? "chevron.down" : "chevron.up")
-                  .font(.system(size: 12, weight: .semibold))
+                Image(
+                  systemName: isPlayerCollapsed ? "chevron.down" : "chevron.up"
+                )
+                .font(.system(size: 12, weight: .semibold))
                 Text(isPlayerCollapsed ? "Show Player" : "Hide Player")
                   .font(.caption)
               }
@@ -168,23 +179,12 @@ struct PlayerView: View {
               .frame(maxWidth: .infinity)
             }
             .buttonStyle(.plain)
-            
+
             subtitleSection
-            
-            PlayerControls(model: model)
           }
           .frame(maxWidth: readableContentMaxWidth)
           .frame(maxWidth: .infinity)
-          .background(
-            UnevenRoundedRectangle(
-              topLeadingRadius: 24,
-              bottomLeadingRadius: 0,
-              bottomTrailingRadius: 0,
-              topTrailingRadius: 24,
-              style: .continuous
-            )
-            .foregroundStyle(.appPlayerBackground)
-          )
+
         }
 
       }
@@ -196,10 +196,33 @@ struct PlayerView: View {
           startPeriodicPositionSaving()
         }
       }
+      .safeAreaInset(
+        edge: .bottom,
+        content: {
+          SizingContainer(height: $bottomHeight) {
 
+            PlayerControls(model: model)
+              .padding(.horizontal, 16).fixedSize(
+                horizontal: false,
+                vertical: true
+              )
+              .onGeometryChange(
+                for: CGFloat.self,
+                of: \.size.height,
+                action: { _, new in
+                  bottomHeight = new
+                }
+              )
+          }
+          .background(
+            Color.clear.contentShape(.rect)  // not sure why but it's needed to block touching for background.
+          )
+        }
+      )
+      .animation(.snappy, value: bottomHeight)
       .background(.appPlayerBackground)
       .toolbar {
-       toolbarContent
+        toolbarContent
       }
       .sheet(isPresented: $showDownloadView) {
         NavigationStack {
@@ -246,7 +269,9 @@ struct PlayerView: View {
           }
         )
         .presentationDetents([.medium])
-        .presentationDragIndicator(isTranscriptionInProgress ? .hidden : .visible)
+        .presentationDragIndicator(
+          isTranscriptionInProgress ? .hidden : .visible
+        )
         .interactiveDismissDisabled(isTranscriptionInProgress)
       }
       .translationPresentation(
@@ -273,7 +298,9 @@ struct PlayerView: View {
       }
       .onChange(of: videoItem.isDownloaded) { _, isDownloaded in
         // When download completes, automatically switch to local playback
-        if isDownloaded, model.playbackSource == .youtube, let fileURL = videoItem.downloadedFileURL {
+        if isDownloaded, model.playbackSource == .youtube,
+          let fileURL = videoItem.downloadedFileURL
+        {
           model.localFileURL = fileURL
           model.switchToLocal()
         }
@@ -296,7 +323,7 @@ struct PlayerView: View {
         }
     }
   }
-  
+
   @ToolbarContentBuilder
   var toolbarContent: some ToolbarContent {
     ToolbarItem(placement: .primaryAction) {
@@ -305,7 +332,11 @@ struct PlayerView: View {
         if model.localFileURL == nil {
           OnDeviceTranscribeButton(
             phase: transcriptionButtonPhase,
-            action: { startBackgroundTranscription(showLoadingState: currentSubtitles?.cues.isEmpty ?? true) }
+            action: {
+              startBackgroundTranscription(
+                showLoadingState: currentSubtitles?.cues.isEmpty ?? true
+              )
+            }
           )
           .popoverTip(TranscribeTip())
         }
@@ -348,7 +379,9 @@ struct PlayerView: View {
           isTranscribing: isTranscribing
         )
 
-        if videoItem.isYouTubeSource && FeatureFlags.shared.isDownloadFeatureEnabled {
+        if videoItem.isYouTubeSource
+          && FeatureFlags.shared.isDownloadFeatureEnabled
+        {
           DownloadButton(
             state: downloadButtonState,
             onTap: { showDownloadView = true }
@@ -387,7 +420,10 @@ struct PlayerView: View {
           case .translate(let cue):
             selectedCueForTranslation = cue
           case .toggleBookmark(let cue):
-            try? historyService.toggleSubtitleBookmark(video: videoItem, cue: cue)
+            try? historyService.toggleSubtitleBookmark(
+              video: videoItem,
+              cue: cue
+            )
           }
         }
       )
@@ -432,8 +468,9 @@ struct PlayerView: View {
       )
 
       if let historyItem = try? modelContext.fetch(descriptor).first,
-         let cached = historyItem.cachedSubtitles,
-         !cached.cues.isEmpty {
+        let cached = historyItem.cachedSubtitles,
+        !cached.cues.isEmpty
+      {
         await MainActor.run {
           currentSubtitles = cached
           isLoadingSubtitles = false
@@ -479,7 +516,10 @@ struct PlayerView: View {
           transcriptionState = .completed
 
           // Save to SwiftData for persistence across app launches
-          try? historyService.updateCachedSubtitles(videoID: videoID, subtitles: subtitles)
+          try? historyService.updateCachedSubtitles(
+            videoID: videoID,
+            subtitles: subtitles
+          )
         }
 
       } catch {
@@ -493,7 +533,8 @@ struct PlayerView: View {
 
   /// Starts on-device transcription in the background (download + transcribe)
   private func startBackgroundTranscription(showLoadingState: Bool) {
-    guard !onDeviceTranscribeViewModel.phase.isProcessing, !isTranscribing else { return }
+    guard !onDeviceTranscribeViewModel.phase.isProcessing, !isTranscribing
+    else { return }
 
     if showLoadingState {
       isLoadingSubtitles = true
@@ -501,22 +542,29 @@ struct PlayerView: View {
     }
 
     if let fileURL = model.localFileURL {
-      startBackgroundLocalTranscription(fileURL: fileURL, showLoadingState: showLoadingState)
+      startBackgroundLocalTranscription(
+        fileURL: fileURL,
+        showLoadingState: showLoadingState
+      )
       return
     }
 
     Task {
       do {
-        let subtitles = try await onDeviceTranscribeViewModel.startTranscription(
-          videoID: videoID,
-          downloadManager: downloadManager
-        )
+        let subtitles =
+          try await onDeviceTranscribeViewModel.startTranscription(
+            videoID: videoID,
+            downloadManager: downloadManager
+          )
 
         await MainActor.run {
           currentSubtitles = subtitles
           subtitleError = nil
           isLoadingSubtitles = false
-          try? historyService.updateCachedSubtitles(videoID: videoID, subtitles: subtitles)
+          try? historyService.updateCachedSubtitles(
+            videoID: videoID,
+            subtitles: subtitles
+          )
         }
       } catch {
         await MainActor.run {
@@ -529,7 +577,10 @@ struct PlayerView: View {
     }
   }
 
-  private func startBackgroundLocalTranscription(fileURL: URL, showLoadingState: Bool) {
+  private func startBackgroundLocalTranscription(
+    fileURL: URL,
+    showLoadingState: Bool
+  ) {
     isTranscribing = true
     transcriptionState = .idle
 
@@ -548,7 +599,10 @@ struct PlayerView: View {
           isLoadingSubtitles = false
           isTranscribing = false
           transcriptionState = .completed
-          try? historyService.updateCachedSubtitles(videoID: videoID, subtitles: subtitles)
+          try? historyService.updateCachedSubtitles(
+            videoID: videoID,
+            subtitles: subtitles
+          )
         }
       } catch {
         await MainActor.run {
@@ -588,7 +642,8 @@ struct PlayerView: View {
 
   /// Restore saved playback position when video loads (without auto-playing)
   private func restorePlaybackPosition() {
-    guard let savedPosition = videoItem.lastPlaybackPosition, savedPosition > 0 else { return }
+    guard let savedPosition = videoItem.lastPlaybackPosition, savedPosition > 0
+    else { return }
     model.seek(to: savedPosition)
   }
 
@@ -617,7 +672,8 @@ struct PlayerView: View {
   /// Opens the explanation prompt in the default browser, which hands off to the
   /// ChatGPT app when it is installed (chatgpt.com claims `/?q=` as a universal link).
   private func askChatGPT(text: String, context: String) {
-    guard let url = ChatGPTURLBuilder.buildURL(text: text, context: context) else { return }
+    guard let url = ChatGPTURLBuilder.buildURL(text: text, context: context)
+    else { return }
     openURL(url)
   }
 
@@ -627,7 +683,8 @@ struct PlayerView: View {
   /// Includes 2 cues before and 2 cues after the selected cue for better context.
   private func buildContextForCue(_ cue: Subtitle.Cue) -> String {
     guard let cues = currentSubtitles?.cues,
-          let currentIndex = cues.firstIndex(where: { $0.id == cue.id }) else {
+      let currentIndex = cues.firstIndex(where: { $0.id == cue.id })
+    else {
       return cue.decodedText
     }
 
@@ -660,7 +717,7 @@ extension PlayerView {
 
   struct VideoPlayerSection: View {
     let controller: PlayerController
-    let importedMediaKind: ImportedMediaKind?
+    let isAudioOnly: Bool
     let title: String?
     let maxWidth: CGFloat?
 
@@ -670,7 +727,7 @@ extension PlayerView {
         case .youtube(let controller):
           YouTubeVideoPlayer(controller: controller)
         case .local(let controller):
-          if importedMediaKind == .audio {
+          if isAudioOnly {
             AudioPlayerArtwork(title: title)
           } else {
             LocalVideoPlayer(controller: controller)
@@ -679,7 +736,7 @@ extension PlayerView {
       }
       .aspectRatio(16 / 9, contentMode: .fit)
       .frame(maxWidth: maxWidth)
-      .clipShape(RoundedRectangle(cornerRadius: 12))
+      .clipShape(RoundedRectangle(cornerRadius: 24))
       .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
       .frame(maxWidth: .infinity)
       .padding(.horizontal, 16)
@@ -745,10 +802,12 @@ extension PlayerView {
                 .font(.system(size: 48))
                 .foregroundStyle(.blue)
 
-              Text("Convert video audio to subtitles using Apple's Speech Recognition.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+              Text(
+                "Convert video audio to subtitles using Apple's Speech Recognition."
+              )
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+              .multilineTextAlignment(.center)
 
               Button {
                 onStart()
@@ -879,7 +938,10 @@ extension PlayerView {
               .stroke(Color.gray.opacity(0.3), lineWidth: 2)
             Circle()
               .trim(from: 0, to: progress)
-              .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+              .stroke(
+                Color.blue,
+                style: StrokeStyle(lineWidth: 2, lineCap: .round)
+              )
               .rotationEffect(.degrees(-90))
           }
           .frame(width: 18, height: 18)

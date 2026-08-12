@@ -9,6 +9,7 @@ import PhotosUI
 import StateGraph
 import SwiftUI
 import UniformTypeIdentifiers
+import MuComponents
 
 /// Authors one shared LUT recipe over an ordered collection of videos.
 struct EditorView: View {
@@ -445,6 +446,8 @@ private struct EditorLUTStripBindingView: View {
 private struct EditorLayout: View {
 
   @State var hasAppeared: Bool = false
+  @State private var effectTabBarHeight: CGFloat = 0
+  @State private var height: CGFloat = 0
 
   let preview: VideoPreviewModel
   let lutPreviewSource: LUTPreviewSourceImage?
@@ -472,24 +475,24 @@ private struct EditorLayout: View {
         )
         .padding(16)
 
-      EditorLowerPanel(
-        clips: clips,
-        selectedClipID: selectedClipID,
-        hdrVideoCount: hdrVideoCount,
-        lutPreviewSource: lutPreviewSource,
-        exposure: $exposure,
-        motionBlur: $motionBlur,
-        grain: $grain,
-        selectedEffect: $selectedEffect,
-        onSelectClip: onSelectClip,
-        onRemoveClip: onRemoveClip,
-        onSelectPhotos: onSelectPhotos,
-        onSelectFiles: onSelectFiles
-      )
-      .fixedSize(horizontal: false, vertical: true)
+      SizingContainer(height: $height) {
+
+        EditorLowerPanel(
+          clips: clips,
+          selectedClipID: selectedClipID,
+          hdrVideoCount: hdrVideoCount,
+          lutPreviewSource: lutPreviewSource,
+          exposure: $exposure,
+          motionBlur: $motionBlur,
+          grain: $grain,
+          selectedEffect: $selectedEffect,
+          onSelectClip: onSelectClip,
+          onRemoveClip: onRemoveClip,
+          onSelectPhotos: onSelectPhotos,
+          onSelectFiles: onSelectFiles
+        )
+      }
     }
-    // TODO: Scope this animation to the panel values that should animate.
-    .animation(hasAppeared ? .smooth : nil, value: UUID())
     .background(
       Rectangle()
         .foregroundStyle(.background)
@@ -499,8 +502,17 @@ private struct EditorLayout: View {
     )
     .padding(4)
     .safeAreaInset(edge: .bottom) {
-      EditorEffectTabBar(selection: $selectedEffect)
+      SizingContainer(height: $effectTabBarHeight) {         
+        EditorEffectTabBar(selection: $selectedEffect)
+          .fixedSize(horizontal: false, vertical: true)
+          .onGeometryChange(for: CGFloat.self, of: \.size.height) {
+            newHeight in
+            effectTabBarHeight = newHeight
+          }
+      }     
     }
+    .animation(.snappy, value: effectTabBarHeight)
+    .animation(.snappy, value: height)
     .onAppear {
       hasAppeared = true
     }
@@ -730,9 +742,11 @@ private struct EditorLowerPanel: View {
           )
           .accessibilityIdentifier("exposure-slider")
 
-          Text("Adjusts light before the LUT changes the image's color response.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+          Text(
+            "Adjusts light before the LUT changes the image's color response."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
         }
       }
     }

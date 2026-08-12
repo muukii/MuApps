@@ -190,12 +190,7 @@ struct VideoItemCell: View {
   // MARK: - Helpers
 
   private var placeholderSystemImage: String {
-    switch video.importedMediaKind {
-    case .audio:
-      return "waveform"
-    case .video, .none:
-      return "play.rectangle"
-    }
+    video.isAudioOnly ? "waveform" : "play.rectangle"
   }
 
   private func formatDate(_ date: Date) -> String {

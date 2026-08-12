@@ -78,6 +78,19 @@ final class VideoItem: TypedIdentifiable {
     }
   }
 
+  /// Whether this item should be presented as audio-only media.
+  ///
+  /// YouTube items and records without a recognized imported media kind are
+  /// treated as video-capable items for backward compatibility.
+  var isAudioOnly: Bool {
+    switch importedMediaKind {
+    case .audio:
+      return true
+    case .video, nil:
+      return false
+    }
+  }
+
   var isYouTubeSource: Bool {
     source == .youtube
   }

@@ -474,21 +474,12 @@ final class PlayerModel {
     // Prevent multiple loads
     guard controller == nil, loadErrorMessage == nil else { return }
 
-    do {
-      let isAudioOnly: Bool = {
-        switch videoItem.importedMediaKind {
-        case .audio: return true
-        case .video: return false
-        case nil: return false
-        }
-      }()
-      nowPlayingMetadata = NowPlayingSession.Metadata(
-        title: videoItem.title ?? "Verse",
-        artist: videoItem.author,
-        isAudioOnly: isAudioOnly,
-        thumbnailURL: videoItem.thumbnailURL.flatMap(URL.init(string:))
-      )
-    }
+    nowPlayingMetadata = NowPlayingSession.Metadata(
+      title: videoItem.title ?? "Verse",
+      artist: videoItem.author,
+      isAudioOnly: videoItem.isAudioOnly,
+      thumbnailURL: videoItem.thumbnailURL.flatMap(URL.init(string:))
+    )
 
     if videoItem.source == .importedFile {
       guard let fileURL = videoItem.downloadedFileURL,

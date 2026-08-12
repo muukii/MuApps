@@ -145,7 +145,9 @@ when a person searches for **Farg** without the diacritic.
   scroll view while its own filmstrip remains horizontally scrollable.
 - Below **Videos**, a fixed bottom tab bar switches the editing controls among
   **LUT**, **Exposure**, **Motion Blur**, and **Grain**. Switching tabs does not
-  change the current video or recipe.
+  change the current video or recipe. The editor reserves the bar's measured
+  height as a bottom inset, and the complete inset footprint prevents touches
+  from reaching the scrolling controls underneath it.
 
 ## Shortcuts
 

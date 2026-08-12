@@ -76,21 +76,9 @@ public struct PlaybackControl: View {
   }
 }
 
-#Playground {
-
-}
-
 #Preview {
   ZStack {
     Color.green
     PlaybackControl()
   }
-}
-
-#Preview {
-  Text("Hello")
-    .foregroundStyle(.tint)
-  
-  Text("Hello")
-    .foregroundStyle(.primary)
 }

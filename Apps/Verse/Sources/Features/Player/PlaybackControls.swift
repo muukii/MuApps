@@ -21,7 +21,7 @@ struct PlayerControls: View {
     VStack(spacing: 0) {
       ProgressSectionWrapper(model: model)
         .padding(.horizontal, 20)
-        .padding(.top, 12)
+        .padding(.top, 16)
 
       PlaybackButtonsControl(model: model)
         .padding(.top, 8)
@@ -46,8 +46,14 @@ struct PlayerControls: View {
       .padding(.top, 8)
       .padding(.bottom, 16)
     }
-    .animation(.smooth(duration: 0.3), value: controlsMode)
-
+    .glassEffect(
+      .regular,
+      in: .rect(cornerRadius: 32)
+    )
+    .animation(
+      .snappy,
+      value: controlsMode
+    )
   }
 
   private struct ProgressSectionWrapper: View {
@@ -75,11 +81,19 @@ extension PlayerControls {
     let onSeekPreview: (Double) -> Void
     let onSeek: (Double) -> Void
 
-    var body: some View {
-      VStack(spacing: 4) {
+    var body: some View {     
+      HStack {
+        Text(formatTime(displayTime))
+          .font(.system(.caption, design: .default).monospacedDigit())
+          .foregroundStyle(.secondary)
+
         progressBar
-        timeDisplay
+
+        Text(formatTime(duration))
+          .font(.system(.caption, design: .default).monospacedDigit())
+          .foregroundStyle(.secondary)
       }
+      .padding(.horizontal, 4)
     }
 
     private var progressBar: some View {
@@ -115,21 +129,6 @@ extension PlayerControls {
     private func seekTime(for normalizedValue: Double) -> Double {
       let clampedValue = max(0, min(1, normalizedValue))
       return clampedValue * duration
-    }
-
-    private var timeDisplay: some View {
-      HStack {
-        Text(formatTime(displayTime))
-          .font(.system(.caption, design: .default).monospacedDigit())
-          .foregroundStyle(.secondary)
-
-        Spacer()
-
-        Text(formatTime(duration))
-          .font(.system(.caption, design: .default).monospacedDigit())
-          .foregroundStyle(.secondary)
-      }
-      .padding(.horizontal, 4)
     }
 
     private func formatTime(_ seconds: Double) -> String {
@@ -403,7 +402,10 @@ extension PlayerControls {
             }
           }
         } label: {
-          HStack(alignment: .firstTextBaseline, spacing: -8) {
+          HStack(
+            alignment: .firstTextBaseline,
+            spacing: -8
+          ) {
             Text("\(formatRate(playbackRate))")
               .font(.system(size: 17, weight: .bold, design: .rounded))
               .padding(.horizontal, 8)
@@ -412,6 +414,7 @@ extension PlayerControls {
             Text(Image.init(systemName: "multiply"))
               .font(.system(size: 11, weight: .bold, design: .rounded))
           }
+          .fixedSize()
           .foregroundStyle(.primary)
         }
         .buttonStyle(.plain)
