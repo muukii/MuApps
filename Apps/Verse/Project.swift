@@ -55,6 +55,7 @@ let project = Project(
       dependencies: [
         // Internal target
         .target(name: "Components"),
+        .project(target: "MuComponents", path: "../../Shared"),
 
         // External SPM dependencies
         .external(name: "YouTubeKit"),

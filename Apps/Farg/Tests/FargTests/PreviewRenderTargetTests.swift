@@ -12,84 +12,85 @@ import Testing
 struct PreviewRenderTargetTests {
 
   @Test
-  func editorWindowPointsBecomeBoundedPixelCeiling() throws {
-    let target = try #require(
-      FargPreviewRenderTarget(
-        editorWindowSizeInPoints: CGSize(width: 390.75, height: 844),
-        displayScale: 3
-      )
+  func landscapeSourceUsesFixedFullHDTarget() throws {
+    let sourceSize = CGSize(width: 3_840, height: 2_160)
+    let target = try FargPreviewRenderTarget(
+      sourceDisplaySize: sourceSize
+    )
+
+    #expect(target.maximumPixelSize == CGSize(width: 1_920, height: 1_080))
+    #expect(try target.resolveRenderSize(sourceDisplaySize: sourceSize) == target.maximumPixelSize)
+  }
+
+  @Test
+  func portraitSourceUsesFixedFullHDTarget() throws {
+    let sourceSize = CGSize(width: 2_160, height: 3_840)
+    let target = try FargPreviewRenderTarget(
+      sourceDisplaySize: sourceSize
+    )
+
+    #expect(target.maximumPixelSize == CGSize(width: 1_080, height: 1_920))
+    #expect(try target.resolveRenderSize(sourceDisplaySize: sourceSize) == target.maximumPixelSize)
+  }
+
+  @Test
+  func squareSourceUsesSquare1080Target() throws {
+    let sourceSize = CGSize(width: 2_160, height: 2_160)
+    let target = try FargPreviewRenderTarget(
+      sourceDisplaySize: sourceSize
     )
 
     #expect(target.maximumPixelSize == CGSize(width: 1_080, height: 1_080))
-  }
-
-  @Test
-  func narrowEditorWindowKeepsItsNarrowPixelBound() throws {
-    let target = try #require(
-      FargPreviewRenderTarget(
-        editorWindowSizeInPoints: CGSize(width: 150, height: 700),
-        displayScale: 2
-      )
-    )
-
-    #expect(target.maximumPixelSize == CGSize(width: 300, height: 1_080))
-  }
-
-  @Test
-  func portraitSourceFitsUniformlyWithoutUpscaling() throws {
-    let target = try #require(
-      FargPreviewRenderTarget(
-        maximumPixelSize: CGSize(width: 468, height: 834)
-      )
-    )
-
-    let renderSize = try target.resolveRenderSize(
-      sourceDisplaySize: CGSize(width: 2_160, height: 3_840)
-    )
-
-    #expect(renderSize == CGSize(width: 468, height: 832))
+    #expect(try target.resolveRenderSize(sourceDisplaySize: sourceSize) == target.maximumPixelSize)
   }
 
   @Test
   func smallSourceRemainsAtSourceResolution() throws {
-    let target = try #require(
-      FargPreviewRenderTarget(
-        maximumPixelSize: CGSize(width: 1_200, height: 900)
-      )
+    let sourceSize = CGSize(width: 1_280, height: 720)
+    let target = try FargPreviewRenderTarget(
+      sourceDisplaySize: sourceSize
     )
 
-    let renderSize = try target.resolveRenderSize(
-      sourceDisplaySize: CGSize(width: 640, height: 360)
-    )
-
-    #expect(renderSize == CGSize(width: 640, height: 360))
+    #expect(try target.resolveRenderSize(sourceDisplaySize: sourceSize) == sourceSize)
   }
 
   @Test
-  func invalidTransientEditorWindowIsIgnored() {
-    #expect(
-      FargPreviewRenderTarget(
-        editorWindowSizeInPoints: .zero,
-        displayScale: 3
-      ) == nil
+  func nonWidescreenSourcePreservesAspectWithin1080p() throws {
+    let sourceSize = CGSize(width: 3_840, height: 2_880)
+    let target = try FargPreviewRenderTarget(
+      sourceDisplaySize: sourceSize
     )
+
+    #expect(
+      try target.resolveRenderSize(sourceDisplaySize: sourceSize)
+        == CGSize(width: 1_440, height: 1_080)
+    )
+  }
+
+  @Test
+  func invalidSourceSizeIsRejected() {
+    #expect(throws: FargPreviewRenderTargetError.self) {
+      try FargPreviewRenderTarget(sourceDisplaySize: .zero)
+    }
   }
 
   @Test
   func purposeKeepsPreviewAndExportSpatialPoliciesSeparate() throws {
-    let target = try #require(
-      FargPreviewRenderTarget(
-        maximumPixelSize: CGSize(width: 832, height: 468)
-      )
+    let sourceSize = CGSize(width: 3_840, height: 2_160)
+    let previewTarget = try FargVideoRenderPurpose.preview.motionBlurRenderTarget(
+      sourceDisplaySize: sourceSize
     )
 
-    #expect(FargVideoRenderPurpose.preview(target).allowsRealtimeFrameDropping)
+    #expect(FargVideoRenderPurpose.preview.allowsRealtimeFrameDropping)
     #expect(
-      FargVideoRenderPurpose.preview(target).motionBlurRenderTarget
-        == .fitWithin(target.maximumPixelSize)
+      previewTarget == .fitWithin(CGSize(width: 1_920, height: 1_080))
     )
     #expect(FargVideoRenderPurpose.export.allowsRealtimeFrameDropping == false)
-    #expect(FargVideoRenderPurpose.export.motionBlurRenderTarget == .source)
+    #expect(
+      try FargVideoRenderPurpose.export.motionBlurRenderTarget(
+        sourceDisplaySize: sourceSize
+      ) == .source
+    )
   }
 
   @Test

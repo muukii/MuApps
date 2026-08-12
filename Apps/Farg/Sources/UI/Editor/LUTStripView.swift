@@ -2,8 +2,8 @@
 // Copyright (c) 2026 Hiroshi Kimura(Muukii) <muukii.app@gmail.com>
 //
 
-import SwiftUI
 import StateGraph
+import SwiftUI
 
 /// A horizontal LUT selector rendered from the latest stopped source frame.
 ///
@@ -14,9 +14,10 @@ struct LUTStripView: View {
   let contentPadding: CGFloat
   let library: LUTLibrary
   let source: LUTPreviewSourceImage?
+  let whiteBalance: WhiteBalanceAdjustment
   let exposure: ExposureAdjustment
   let _selectedLUTID: Stored<LUT.ID?>
-  
+
   private var selectedLUTID: LUT.ID? {
     _selectedLUTID.wrappedValue
   }
@@ -116,6 +117,7 @@ struct LUTStripView: View {
         title: "No LUT",
         source: source,
         library: library,
+        whiteBalance: whiteBalance,
         exposure: exposure,
         isSelected: selectedLUTID == nil
       ) {
@@ -129,6 +131,7 @@ struct LUTStripView: View {
         source: source,
         lut: lut,
         library: library,
+        whiteBalance: whiteBalance,
         exposure: exposure,
         isSelected: selectedLUTID == lut.id
       ) {
@@ -189,6 +192,7 @@ private struct OriginalCell: View {
   let title: String
   let source: LUTPreviewSourceImage?
   let library: LUTLibrary
+  let whiteBalance: WhiteBalanceAdjustment
   let exposure: ExposureAdjustment
   let isSelected: Bool
   let action: @MainActor @Sendable () -> Void
@@ -200,6 +204,7 @@ private struct OriginalCell: View {
           source: source,
           lut: nil,
           library: library,
+          whiteBalance: whiteBalance,
           exposure: exposure
         )
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -229,6 +234,7 @@ private struct LUTPreviewCell: View {
   let lut: LUT?
   // TODO: shold not have this directly
   let library: LUTLibrary
+  let whiteBalance: WhiteBalanceAdjustment
   let exposure: ExposureAdjustment
   let isSelected: Bool
   let action: @MainActor @Sendable () -> Void
@@ -240,6 +246,7 @@ private struct LUTPreviewCell: View {
           source: source,
           lut: lut,
           library: library,
+          whiteBalance: whiteBalance,
           exposure: exposure
         )
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -285,6 +292,7 @@ private struct LUTPreviewCell: View {
     contentPadding: 16,
     library: library,
     source: source,
+    whiteBalance: .neutral,
     exposure: .neutral,
     _selectedLUTID: _selectedLUTID
   )

@@ -8,9 +8,20 @@ import SwiftUI
 
 /// The selectable effect modes displayed in the editor's persistent tab bar.
 enum EditorEffectTab: Equatable {
+
+  /// The LUT library and No LUT result.
   case lut
+
+  /// Relative color-temperature and tint correction.
+  case whiteBalance
+
+  /// Photographic exposure-value correction.
   case exposure
+
+  /// Temporal Optical Flow motion blur.
   case motionBlur
+
+  /// Post-grade film grain.
   case grain
 }
 
@@ -64,22 +75,17 @@ struct EditorEffectTabBar: View {
       EditorEffectTabBar.EditorEffectTabButton(
         title: "Adjust",
         systemImage: "slider.horizontal.3",
-        accessibilityIdentifier: "editor-effect-tab-exposure",
-        isSelected: selection == .exposure
+        accessibilityIdentifier: "editor-effect-tab-adjust",
+        isSelected: isAdjustSelected
       ) { stackedView in
+
+        if isAdjustSelected == false {
+          selection = .whiteBalance
+        }
 
         stackedView.wrappedValue.append(
           AnyView(
-            Container {
-              EditorEffectTabBar.EditorEffectTabButton(
-                title: "Exposure",
-                systemImage: "sun.max",
-                accessibilityIdentifier: "editor-effect-tab-exposure",
-                isSelected: true
-              ) { _ in
-                selection = .exposure
-              }
-            }
+            AdjustMenu(selection: $selection)
           )
         )
       }
@@ -103,6 +109,45 @@ struct EditorEffectTabBar: View {
       }
     }
   }
+
+  /// Keeps the nested adjustment selection live while NavigationToolbar owns
+  /// the type-erased level in its navigation stack.
+  private struct AdjustMenu: View {
+
+    @Binding var selection: EditorEffectTab
+
+    var body: some View {
+      Container {
+        EditorEffectTabBar.EditorEffectTabButton(
+          title: "White Balance",
+          systemImage: "thermometer.medium",
+          accessibilityIdentifier: "editor-effect-tab-white-balance",
+          isSelected: selection == .whiteBalance
+        ) { _ in
+          selection = .whiteBalance
+        }
+
+        EditorEffectTabBar.EditorEffectTabButton(
+          title: "Exposure",
+          systemImage: "sun.max",
+          accessibilityIdentifier: "editor-effect-tab-exposure",
+          isSelected: selection == .exposure
+        ) { _ in
+          selection = .exposure
+        }
+      }
+    }
+  }
+
+  private var isAdjustSelected: Bool {
+    switch selection {
+    case .whiteBalance, .exposure:
+      return true
+    case .lut, .motionBlur, .grain:
+      return false
+    }
+  }
+
   /// Represents one accessible effect mode in the editor's persistent tab bar.
   struct EditorEffectTabButton: View {
 

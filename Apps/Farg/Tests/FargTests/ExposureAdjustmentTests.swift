@@ -95,12 +95,12 @@ struct ExposureAdjustmentTests {
   }
 }
 
-@Suite("Exposure document order", .serialized)
+@Suite("Pre-LUT adjustment document order", .serialized)
 @MainActor
 struct ExposureDocumentOrderTests {
 
   @Test
-  func editorViewModelPlacesExposureBeforeLUTAndGrain() throws {
+  func editorViewModelPlacesWhiteBalanceAndExposureBeforeLUTAndGrain() throws {
     let library = LUTLibrary()
     let lut = try #require(library.luts.first)
     let model = EditorViewModel(
@@ -110,29 +110,38 @@ struct ExposureDocumentOrderTests {
       initialClips: [],
       initialSelectedLUTID: lut.id
     )
+    model.whiteBalance = WhiteBalanceAdjustment(temperature: 500, tint: 8)
     model.exposure = ExposureAdjustment(ev: 0.7)
     model.grain.isEnabled = true
 
     let features = try model.makeRenderRecipe().document.mainTree.features
-    #expect(features.count == 3)
+    #expect(features.count == 4)
 
     guard case .effect(let firstEffect) = features[0] else {
-      Issue.record("Expected Exposure as the first image effect.")
+      Issue.record("Expected White Balance as the first image effect.")
       return
     }
-    let exposure = try #require(firstEffect as? ExposureFeature)
-    #expect(exposure.value == 0.7)
+    let whiteBalance = try #require(firstEffect as? TemperatureFeature)
+    #expect(whiteBalance.value == 500)
+    #expect(whiteBalance.tint == 8)
 
     guard case .effect(let secondEffect) = features[1] else {
-      Issue.record("Expected LUT as the second image effect.")
+      Issue.record("Expected Exposure as the second image effect.")
       return
     }
-    #expect(secondEffect is ColorCubeFeature)
+    let exposure = try #require(secondEffect as? ExposureFeature)
+    #expect(exposure.value == 0.7)
 
     guard case .effect(let thirdEffect) = features[2] else {
-      Issue.record("Expected Grain as the third image effect.")
+      Issue.record("Expected LUT as the third image effect.")
       return
     }
-    #expect(thirdEffect is FilmGrainFeature)
+    #expect(thirdEffect is ColorCubeFeature)
+
+    guard case .effect(let fourthEffect) = features[3] else {
+      Issue.record("Expected Grain as the fourth image effect.")
+      return
+    }
+    #expect(fourthEffect is FilmGrainFeature)
   }
 }

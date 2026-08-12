@@ -61,4 +61,14 @@ extension SubtitleBookmark {
     let midpoint = (startTime + endTime) / 2
     return cue.startTime <= midpoint && midpoint < cue.endTime
   }
+
+  /// Retargets this bookmark snapshot to an edited cue.
+  ///
+  /// The bookmark's identity and creation date remain stable while its visible
+  /// text and seek time follow the chunk that contains the original midpoint.
+  func retarget(to cue: Subtitle.Cue) {
+    startTime = cue.startTime
+    endTime = cue.endTime
+    text = cue.decodedText
+  }
 }

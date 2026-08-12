@@ -30,16 +30,10 @@ struct LUTDeliveryVideoCompositionTests {
     let previewSource = try await pipeline.prepareTemporalPreviewSource(
       asset: asset
     )
-    let previewTarget = try #require(
-      FargPreviewRenderTarget(
-        maximumPixelSize: NeutralRec709VideoFixture.encodedSize
-      )
-    )
     let preview = try pipeline.makeTemporalPreview(
       source: previewSource,
       recipe: recipe,
       colorInfo: .sdrRec709,
-      target: previewTarget,
       strengthSource: MotionBlurStrengthSource(strength: 0),
       documentSource: ParametricDocumentSource(document: recipe.document)
     )

@@ -99,7 +99,6 @@ struct VaultSavedRootGroup: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .foregroundStyle(.appOnSecondaryContainer)
       .allowsHitTesting(false)  
-      .clipShape(.rect(cornerRadius: 24)) 
       .contentShape(.rect)
   }
 }

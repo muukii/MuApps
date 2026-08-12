@@ -168,7 +168,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 
 #### 2.1 Retrieval and Caching
 - Cached subtitles stored locally per history item
-- Auto-generate subtitles on load with on-device transcription when enabled and no suitable cached subtitles exist
+- Auto-generate subtitles on load with on-device transcription when enabled and no suitable cached subtitles exist; a transcript that has been manually chunk-edited is never replaced automatically
 - On-device transcription (SpeechAnalyzer) can enhance cached/imported subtitles with word timing data
 - Manual subtitle import from files (SRT, VTT, SBV, CSV, LRC, TTML)
 
@@ -196,7 +196,16 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
   - Ask ChatGPT
   - Translate
   - Set as A (start) / B (end)
-- Text selection shows an "Ask ChatGPT" item in the system edit menu, which sends the selected text with the cue as context
+  - Merge with Previous / Merge with Next under Edit Chunk; the unavailable direction is disabled on the first or last cue
+- Text selection shows custom items in the system edit menu:
+  - "Split Here" splits at the start of an internal selection, with the selected word beginning the new lower cue
+  - "Ask ChatGPT" sends the selected text with the cue as context
+- Chunk edits are persisted with the history item and immediately become the cue sequence used by current-cue tracking, subtitle seeking, Step Mode, search, and export
+  - Merging spans the upper cue's start through the lower cue's end and retains word timings only when both cues contain timing data
+  - Splitting a timed cue uses the selected word's exact start time and preserves timings on both halves
+  - Splitting a cue without word timings estimates the boundary proportionally from the selected text position within the cue
+  - Existing cue identities remain stable where possible; SRT export always emits sequential numbers from the edited display order
+  - A manually edited transcript is marked in its cached JSON; explicitly starting transcription shows a destructive-replacement confirmation
 
 #### 2.5 Subtitle Management
 - Export subtitles in selected format (SRT, VTT, SBV, CSV, LRC, TTML)
@@ -210,6 +219,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Bookmark a subtitle cue from the row's context menu or the leading swipe action; both toggle (re-invoking removes the bookmark)
 - Bookmarked rows show a small filled bookmark icon on the leading seek area
 - Bookmarks store a snapshot of the cue's text and time range, so they survive transcript regeneration; a row is considered bookmarked when the cue's time range contains the bookmarked range's midpoint (robust to re-transcription shifting cue timings)
+- After a chunk edit, each bookmark follows the resulting cue that contains its prior temporal midpoint; bookmarks that collapse onto the same merged cue are deduplicated
 - Bookmark list (bookmark icon in the player toolbar) opens a medium/large-detent sheet:
   - Rows show a timestamp pill and the bookmarked text, sorted by time
   - Tap to seek playback to the cue's start and dismiss the sheet

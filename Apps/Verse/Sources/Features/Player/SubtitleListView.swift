@@ -167,6 +167,10 @@ enum SubtitleAction {
   case translate(cue: Subtitle.Cue)
   /// Adds a bookmark for the cue, or removes the existing one.
   case toggleBookmark(cue: Subtitle.Cue)
+  /// Merges the selected cue with one adjacent cue.
+  case merge(cueID: Subtitle.Cue.ID, direction: SubtitleEditor.MergeDirection)
+  /// Splits the selected cue at the start of the rendered text selection.
+  case split(cueID: Subtitle.Cue.ID, selection: Subtitle.TextSelection)
 }
 
 // MARK: - Subtitle Scroll Content
@@ -184,12 +188,14 @@ private struct SubtitleScrollContent: View {
 
   var body: some View {
     List {
-      ForEach(Array(cues.enumerated()), id: \.element.id) { index, cue in
+      ForEach(cues.enumerated(), id: \.element.id) { index, cue in
         SubtitleRowView(
           cue: cue,
           currentTime: currentTime,
           isCurrent: cue.id == currentCueID,
           isBookmarked: bookmarkedCueIDs.contains(cue.id),
+          canMergeWithPrevious: index > 0,
+          canMergeWithNext: index < cues.count - 1,
           onAction: { action in
             switch action {
             case .tap:
@@ -211,6 +217,13 @@ private struct SubtitleScrollContent: View {
               onAction(.askChatGPTSelection(text: selectedText, context: cue.decodedText))
             case .toggleBookmark:
               onAction(.toggleBookmark(cue: cue))
+            case .mergeWithPrevious:
+              onAction(.merge(cueID: cue.id, direction: .previous))
+            case .mergeWithNext:
+              onAction(.merge(cueID: cue.id, direction: .next))
+            case .split(let selection):
+              onSelectionChanged?(true)
+              onAction(.split(cueID: cue.id, selection: selection))
             }
           }
         )

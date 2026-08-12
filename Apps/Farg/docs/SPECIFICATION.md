@@ -5,10 +5,9 @@
 Färg is an iPhone video editor for applying one color lookup table (LUT) recipe
 to one or more videos. Preview and export evaluate the same Brightroom
 parametric feature document and temporal recipe for every video in the
-collection. Preview evaluates that recipe at a bounded pixel target derived
-from the Editor window, while export preserves each source's display
-resolution. The app uses its dedicated Färg icon and supports portrait
-orientation only.
+collection. Preview evaluates that recipe at a fixed orientation-aware 1080p
+target, while export preserves each source's display resolution. The app uses
+its dedicated Färg icon and supports portrait orientation only.
 The visible app name remains **Färg**, while Spotlight can also find the app
 when a person searches for **Farg** without the diacritic.
 
@@ -98,9 +97,9 @@ when a person searches for **Farg** without the diacritic.
   among clips, and exposes **Delete Video** in each ready clip's context menu.
   Removing the last clip returns to the picker instead of showing an empty
   editor.
-- The selected video plays in the editor preview. Exposure, LUT, motion-blur,
-  and grain settings remain shared across the collection; changing the preview
-  does not change the recipe.
+- The selected video plays in the editor preview. White Balance, Exposure, LUT,
+  motion-blur, and grain settings remain shared across the collection; changing
+  the preview does not change the recipe.
 - The preview uses Färg-owned playback controls instead of the system video
   player interface. Preview audio starts muted. The controls provide play/pause,
   mute/unmute, current time, duration, and a timeline for seeking while keeping
@@ -108,21 +107,20 @@ when a person searches for **Farg** without the diacritic.
 - The video surface is centered and fitted to the selected movie's presentation
   aspect ratio. Any remaining letterbox area belongs to the neutral editor
   stage instead of enlarging the player layer beyond the movie.
-- Live Preview resolves its processing ceiling from the Editor window content
-  bounds multiplied by the current display scale, capping each dimension at
-  1080 pixels. The display-oriented source is uniformly fitted to that pixel
-  ceiling, never upscaled, and rounded down to hardware-compatible even
-  dimensions.
-- The first valid Editor-window measurement prepares immediately. That target
-  remains locked for the selected clip: changing an effect tab can resize the
-  visible player but cannot replace the custom compositor's render context. A
-  later selected clip adopts the latest valid Editor-window target; a transient
-  zero-size measurement never replaces it with a full-resolution fallback.
+- Live Preview uses a fixed orientation-aware 1080p processing ceiling:
+  1920×1080 for a landscape source, 1080×1920 for a portrait source, and
+  1080×1080 for a square source. The display-oriented source is uniformly fitted
+  inside that ceiling, never upscaled, and rounded down to hardware-compatible
+  even dimensions.
+- Preview resolution is independent of Editor bounds, display scale, effect-tab
+  layout, and presentation transitions. Changing the visible player size cannot
+  replace the custom compositor's render context with a different spatial
+  target.
 - Preview prepares one temporal source topology per selected movie. LUT and
   Motion Blur enablement changes replace only the video composition on the
   existing player item. Strength updates its live temporal parameter, while
-  Exposure and Grain changes update the live parametric document. These edits
-  do not seek or reset the current playback position.
+  White Balance, Exposure, and Grain changes update the live parametric
+  document. These edits do not seek or reset the current playback position.
 - Preview audio mixes with music, podcasts, or other audio already playing
   outside Färg instead of interrupting it.
 - The editor navigation bar places its close menu and **Settings** at the
@@ -144,10 +142,12 @@ when a person searches for **Farg** without the diacritic.
   editing controls. **Videos** stays outside the editing controls' vertical
   scroll view while its own filmstrip remains horizontally scrollable.
 - Below **Videos**, a fixed bottom tab bar switches the editing controls among
-  **LUT**, **Exposure**, **Motion Blur**, and **Grain**. Switching tabs does not
-  change the current video or recipe. The editor reserves the bar's measured
-  height as a bottom inset, and the complete inset footprint prevents touches
-  from reaching the scrolling controls underneath it.
+  **Look**, **Adjust**, **Motion**, and **Grain**. **Adjust** opens a nested
+  toolbar containing **White Balance** and **Exposure** while preserving the
+  active adjustment selection. Switching controls does not change the current
+  video or recipe. The editor reserves the bar's measured height as a bottom
+  inset, and the complete inset footprint prevents touches from reaching the
+  scrolling controls underneath it.
 
 ## Shortcuts
 
@@ -162,9 +162,9 @@ when a person searches for **Farg** without the diacritic.
 - The **Apply LUT to Video** action runs without presenting the app UI, renders
   the supplied movie with the selected LUT at 100% intensity, and returns a
   QuickTime movie to the next Shortcuts action.
-- Both Shortcuts actions remain LUT-specific and explicitly start with motion
-  blur and grain disabled. An earlier interactive edit cannot leak its
-  temporal or grain settings into a Shortcut request.
+- Both Shortcuts actions remain LUT-specific and explicitly start with neutral
+  White Balance and Exposure plus disabled motion blur and grain. An earlier
+  interactive edit cannot leak its authored settings into a Shortcut request.
 - On iOS 26, background App Intent runtime is system-bounded, so sufficiently
   long renders may be cancelled. The action's rendering boundary is prepared
   to adopt iOS 27 long-running intent execution when that SDK is used.
@@ -218,12 +218,13 @@ when a person searches for **Farg** without the diacritic.
   Linked LUTs are managed by changing their source folder.
 - The editor applies the selected LUT at full intensity. It does not currently
   expose an intensity control.
-- The **LUT** tab contains the **No LUT** choice and the preview-backed LUT
+- The **Look** control contains the **No LUT** choice and the preview-backed LUT
   selector.
 - Every LUT choice in the editor includes a still preview. Färg captures the
   source video's first frame on load and refreshes that still when playback
   stops or a paused scrub settles. It does not evaluate every LUT continuously
-  while the video is playing.
+  while the video is playing. Editor stills evaluate the current White Balance
+  and Exposure before the LUT so each choice matches the live recipe.
 - Settings includes a built-in color test and lets the user add multiple sample
   images from Photos. Each custom sample is copied into Application Support,
   normalized to a bounded JPEG, and given a required user-authored label such
@@ -237,15 +238,38 @@ when a person searches for **Farg** without the diacritic.
   ratio as the source preview. Custom sample labels can be renamed and their
   app-owned copies can be deleted without changing the LUT library.
 
+## White Balance
+
+- White Balance is a shared part of the current video collection's recipe. Its
+  **Temperature** and **Tint** controls appear together under **Adjust > White
+  Balance** and represent relative creative corrections rather than absolute
+  capture metadata.
+- Temperature covers -3000 through +3000 K in 50 K increments. Negative values
+  are cooler and positive values are warmer. Tint covers -100 through +100 in
+  increments of 1; negative values move toward green and positive values move
+  toward magenta.
+- New sessions start with both axes at zero. The White Balance **Reset** returns
+  Temperature and Tint to zero without changing Exposure.
+- Brightroom evaluates both axes as one `CITemperatureAndTint` white-point
+  transformation. White Balance is applied after optional Optical Flow motion
+  blur and before Exposure and the selected LUT.
+- White Balance changes update the live Brightroom parametric document without
+  replacing the Preview composition, player item, or playhead.
+- Editor LUT stills include both White Balance axes in their request identity
+  and cache key. The **No LUT** still applies White Balance and Exposure without
+  adding a LUT; obsolete results are discarded after either adjustment changes.
+- Preview and export evaluate the same White Balance node in the same feature
+  order. Existing Brightroom Temperature documents decode with neutral Tint.
+
 ## Exposure
 
 - Exposure is a shared part of the current video collection's recipe. Its
-  control appears in the dedicated **Exposure** tab and is authored in EV.
+  control appears under **Adjust > Exposure** and is authored in EV.
 - The slider covers -2.0 through +2.0 EV in 0.1 EV increments. New sessions
   start at 0.0 EV, and **Reset** returns the adjustment to 0.0 EV.
-- Exposure is applied after optional Optical Flow motion blur and before the
-  selected LUT. It therefore changes the LUT's input and color response rather
-  than only brightening the final display-referred result.
+- Exposure is applied after optional Optical Flow motion blur and White Balance,
+  and before the selected LUT. It therefore changes the LUT's input and color
+  response rather than only brightening the final display-referred result.
 - Exposure changes update the live Brightroom parametric document without
   replacing the Preview composition, player item, or playhead.
 - Editor LUT stills apply the current Exposure before every LUT. The **No LUT**
@@ -257,8 +281,7 @@ when a person searches for **Farg** without the diacritic.
 ## Optical Flow motion blur
 
 - Motion blur is an optional shared part of the current video collection's
-  recipe. Its enable switch and Strength control appear in the dedicated
-  **Motion Blur** tab.
+  recipe. Its enable switch and Strength control appear under **Motion**.
 - Färg prepares previous, current, and next source frames and sends them to the
   iOS 26 VideoToolbox motion-blur processor with internal Optical Flow
   calculation enabled. It does not substitute a simple frame blend.
@@ -266,14 +289,14 @@ when a person searches for **Farg** without the diacritic.
   normalizes variable-frame-rate input to its nominal fixed cadence. This keeps
   the timestamps supplied to Optical Flow truthful; the movie duration and
   copied audio timing do not change.
-- Motion blur is applied before the Brightroom parametric LUT, matching the
-  ordering of an in-camera exposure followed by color processing.
+- Motion blur is applied before Brightroom's White Balance, Exposure, and LUT
+  nodes, matching a temporal capture stage followed by color processing.
 - Decoded source color is preserved through the temporal stage. When a LUT is
   selected, only the post-LUT image is rendered and tagged as Rec.709; the
   composition must not convert an Apple Log or wide-gamut source to Rec.709
   before the LUT evaluates it.
 - Preview and export use the same temporal samples, ordering, and `Strength`
-  value. Preview runs Optical Flow at its Editor-window-fitted working
+  value. Preview runs Optical Flow at its fixed orientation-aware 1080p working
   resolution; export runs at the source display resolution. `Strength` follows
   VideoToolbox's 1–100 range; Färg does not present it as a shutter angle
   because Apple defines no physical angle conversion.
@@ -292,7 +315,7 @@ when a person searches for **Farg** without the diacritic.
   portrait movies and physically portrait-encoded movies therefore produce the
   same upright Preview without treating display width and processor width as
   interchangeable.
-- When Editor-window fitting or portrait canonicalization is required, Preview
+- When fixed-1080p fitting or portrait canonicalization is required, Preview
   transforms all three temporal source buffers into bounded, IOSurface-backed
   pools before Optical Flow. A source-sized buffer that already matches the
   processor geometry is passed through directly. Pool allocation is capped and
@@ -303,10 +326,10 @@ when a person searches for **Farg** without the diacritic.
   as unavailable, and a preparation failure is reported rather than silently
   exporting without the effect.
 - VideoToolbox accepts a working frame up to 4096×2160 on iOS. Preview checks
-  this limit after viewport downsampling. A source-resolution physical portrait
-  export such as 2160×3840 is rotated only inside the processor to 3840×2160
-  and restored to 2160×3840 for output. A working frame that does not fit the
-  limit in either orientation fails with an explicit message.
+  this limit after fixed-1080p downsampling. A source-resolution physical
+  portrait export such as 2160×3840 is rotated only inside the processor to
+  3840×2160 and restored to 2160×3840 for output. A working frame that does not
+  fit the limit in either orientation fails with an explicit message.
 - LUT still thumbnails remain single-frame previews and do not attempt to
   display motion blur.
 
@@ -332,8 +355,8 @@ when a person searches for **Farg** without the diacritic.
   live in the same ordered editing document as the LUT, while the current
   frame's presentation time arrives separately as a render-time input.
 - **Intensity** (1–100) controls the grain contrast. **Size** (1–100) controls
-  the grain pitch relative to the output height, so the viewport-fitted
-  preview and the source-resolution export show the same texture scale.
+  the grain pitch relative to the output height, so the fixed-1080p preview and
+  the source-resolution export show the same texture scale.
 - Grain has no device-support requirement and remains available in Simulator.
   It does not change export background eligibility; only Motion Blur restricts
   an export to the foreground.
@@ -431,10 +454,13 @@ when a person searches for **Farg** without the diacritic.
 
 The application owns product UI, LUT-library persistence, Photos integration,
 and export orchestration. LUT parsing, the ordered single-frame feature graph,
-and explicit presentation-time propagation are provided by the
-`BrightroomParametric` product from the Brightroom git submodule. Färg's sibling
-`FargMotionBlur` framework owns temporal-neighbor composition and the
+white-balance evaluation, and explicit presentation-time propagation are
+provided by the `BrightroomParametric` product from the Brightroom git
+submodule. Färg's sibling `FargMotionBlur` framework owns temporal-neighbor
+composition and the
 VideoToolbox Optical Flow processor; the app-level render pipeline combines
-both modules in one preview/export pass. Film grain is a Färg-owned host-defined
-parametric feature evaluated after the LUT; its stitchable Metal Core Image
-kernel is compiled into the app's ordinary `default.metallib`.
+both modules in one preview/export pass. Preview and Export evaluate Motion
+Blur → White Balance → Exposure → LUT → Grain → Delivery. Film grain is a
+Färg-owned host-defined parametric feature evaluated after the LUT; its
+stitchable Metal Core Image kernel is compiled into the app's ordinary
+`default.metallib`.

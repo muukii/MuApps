@@ -115,32 +115,9 @@ public struct VaultSavedEntryDetailRow: View {
   }
 
   public var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      EntryContentView(content: entry.content, style: .detail)
-        .frame(maxWidth: .infinity, alignment: .center)
-        .foregroundStyle(.appOnPrimaryContainer)
-
-      if let location = entry.location {
-        VaultSavedEntryLocationMap(location: location)
-          .frame(maxWidth: 640)
-          .frame(maxWidth: .infinity)
-          .padding(.horizontal, 8)
-      }
-
-      VaultSavedEntryDetailMetadata(
-        kind: entry.kind,
-        createdAt: entry.createdAt,
-        updatedAt: entry.updatedAt,
-        isEditingDisabled: isEditingDisabled,
-        isDeletingDisabled: isDeletingDisabled,
-        onEdit: onEdit,
-        onDelete: onDelete,
-        onOpen: onOpen
-      )
-      .frame(maxWidth: 640, alignment: .leading)
+    EntryContentView(content: entry.content, style: .detail)
       .frame(maxWidth: .infinity, alignment: .center)
-      .padding(.horizontal, 8)
-    }
+      .foregroundStyle(.appOnPrimaryContainer)
   }
 }
 

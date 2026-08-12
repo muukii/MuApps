@@ -4,7 +4,7 @@
 [submodule "submodules/Brightroom"]
 	path = submodules/Brightroom
 	url = https://github.com/FluidGroup/Brightroom
-	branch = codex/brightroom-parametric-foundation
+	branch = main
 [submodule "submodules/swift-state-graph"]
 	path = submodules/swift-state-graph
 	url = https://github.com/VergeGroup/swift-state-graph

@@ -6,15 +6,20 @@
 //
 
 import AVKit
+import MuComponents
 import ObjectEdge
 import SwiftData
 import SwiftUI
 import TipKit
 import Translation
 import YouTubeKit
-import MuComponents
 
 struct PlayerView: View {
+  private enum PendingTranscriptionRequest {
+    case background(showLoadingState: Bool)
+    case progressSheet
+  }
+
   let videoItem: VideoItem
 
   @Environment(\.modelContext) private var modelContext
@@ -49,12 +54,15 @@ struct PlayerView: View {
 
   // Transcription state
   @State private var isTranscribing: Bool = false
-  @State private var transcriptionState:
-    TranscriptionService.TranscriptionState = .idle
+  @State private var transcriptionState: TranscriptionService.TranscriptionState = .idle
   @State private var showTranscriptionSheet: Bool = false
 
   // Subtitle interaction state
   @State private var selectedCueForTranslation: Subtitle.Cue?
+  @State private var subtitleEditErrorMessage: String = ""
+  @State private var isShowingSubtitleEditError: Bool = false
+  @State private var pendingTranscriptionRequest: PendingTranscriptionRequest?
+  @State private var isShowingEditedSubtitleReplacementConfirmation: Bool = false
 
   // On-device transcribe state
   @State private var onDeviceTranscribeViewModel = OnDeviceTranscribeViewModel()
@@ -214,9 +222,8 @@ struct PlayerView: View {
                 }
               )
           }
-          .background(
-            Color.clear.contentShape(.rect)  // not sure why but it's needed to block touching for background.
-          )
+          // Blocks touches from reaching content behind the transparent inset.
+          .background(Color.clear.contentShape(.rect))
         }
       )
       .animation(.snappy, value: bottomHeight)
@@ -281,6 +288,27 @@ struct PlayerView: View {
         ),
         text: selectedCueForTranslation?.decodedText ?? ""
       )
+      .confirmationDialog(
+        "Replace Edited Subtitles?",
+        isPresented: $isShowingEditedSubtitleReplacementConfirmation,
+        titleVisibility: .visible
+      ) {
+        Button("Replace and Transcribe", role: .destructive) {
+          guard let request = pendingTranscriptionRequest else { return }
+          pendingTranscriptionRequest = nil
+          performTranscriptionRequest(request)
+        }
+        Button("Cancel", role: .cancel) {
+          pendingTranscriptionRequest = nil
+        }
+      } message: {
+        Text("Transcription will replace the subtitle chunks you edited manually.")
+      }
+      .alert("Unable to Edit Subtitle", isPresented: $isShowingSubtitleEditError) {
+        Button("OK", role: .cancel) {}
+      } message: {
+        Text(subtitleEditErrorMessage)
+      }
       .onDisappear {
         // Save playback position before leaving
         savePlaybackPosition()
@@ -333,8 +361,10 @@ struct PlayerView: View {
           OnDeviceTranscribeButton(
             phase: transcriptionButtonPhase,
             action: {
-              startBackgroundTranscription(
-                showLoadingState: currentSubtitles?.cues.isEmpty ?? true
+              requestTranscription(
+                .background(
+                  showLoadingState: currentSubtitles?.cues.isEmpty ?? true
+                )
               )
             }
           )
@@ -374,7 +404,7 @@ struct PlayerView: View {
             model.localFileURL = nil
           },
           onTranscribe: {
-            showTranscriptionSheet = true
+            requestTranscription(.progressSheet)
           },
           isTranscribing: isTranscribing
         )
@@ -424,6 +454,22 @@ struct PlayerView: View {
               video: videoItem,
               cue: cue
             )
+          case .merge(let cueID, let direction):
+            applySubtitleEdit { subtitles in
+              try SubtitleEditor.merge(
+                subtitles,
+                cueID: cueID,
+                direction: direction
+              )
+            }
+          case .split(let cueID, let selection):
+            applySubtitleEdit { subtitles in
+              try SubtitleEditor.split(
+                subtitles,
+                cueID: cueID,
+                selection: selection
+              )
+            }
           }
         }
       )
@@ -455,6 +501,44 @@ struct PlayerView: View {
 
   // MARK: - Private Methods
 
+  private func applySubtitleEdit(
+    _ edit: (Subtitle) throws -> Subtitle
+  ) {
+    guard let currentSubtitles else { return }
+
+    do {
+      let editedSubtitles = try edit(currentSubtitles)
+      try historyService.updateEditedSubtitles(
+        video: videoItem,
+        subtitles: editedSubtitles
+      )
+      isSubtitleTrackingEnabled = false
+      self.currentSubtitles = editedSubtitles
+    } catch {
+      subtitleEditErrorMessage = error.localizedDescription
+      isShowingSubtitleEditError = true
+    }
+  }
+
+  private func requestTranscription(_ request: PendingTranscriptionRequest) {
+    guard currentSubtitles?.manuallyEditedAt != nil else {
+      performTranscriptionRequest(request)
+      return
+    }
+
+    pendingTranscriptionRequest = request
+    isShowingEditedSubtitleReplacementConfirmation = true
+  }
+
+  private func performTranscriptionRequest(_ request: PendingTranscriptionRequest) {
+    switch request {
+    case .background(let showLoadingState):
+      startBackgroundTranscription(showLoadingState: showLoadingState)
+    case .progressSheet:
+      showTranscriptionSheet = true
+    }
+  }
+
   private func loadSubtitles(videoID: YouTubeContentID) {
     isLoadingSubtitles = true
     subtitleError = nil
@@ -476,7 +560,10 @@ struct PlayerView: View {
           isLoadingSubtitles = false
 
           // Auto-start on-device transcription if needed to add word timings.
-          if autoTranscribeEnabled && needsOnDeviceTranscription(cached) {
+          if autoTranscribeEnabled,
+            cached.manuallyEditedAt == nil,
+            needsOnDeviceTranscription(cached)
+          {
             startBackgroundTranscription(showLoadingState: false)
           }
         }
@@ -497,6 +584,7 @@ struct PlayerView: View {
   private func transcribeVideo() {
     guard let fileURL = model.localFileURL else { return }
 
+    let subtitleRevision = Subtitle.RevisionSnapshot(currentSubtitles)
     isTranscribing = true
     transcriptionState = .idle
 
@@ -511,6 +599,12 @@ struct PlayerView: View {
 
         // Update UI with transcribed subtitles and persist to SwiftData
         await MainActor.run {
+          guard subtitleRevision.matches(currentSubtitles) else {
+            isTranscribing = false
+            transcriptionState = .idle
+            return
+          }
+
           currentSubtitles = subtitles
           isTranscribing = false
           transcriptionState = .completed
@@ -536,6 +630,8 @@ struct PlayerView: View {
     guard !onDeviceTranscribeViewModel.phase.isProcessing, !isTranscribing
     else { return }
 
+    let subtitleRevision = Subtitle.RevisionSnapshot(currentSubtitles)
+
     if showLoadingState {
       isLoadingSubtitles = true
       subtitleError = nil
@@ -544,7 +640,8 @@ struct PlayerView: View {
     if let fileURL = model.localFileURL {
       startBackgroundLocalTranscription(
         fileURL: fileURL,
-        showLoadingState: showLoadingState
+        showLoadingState: showLoadingState,
+        subtitleRevision: subtitleRevision
       )
       return
     }
@@ -558,6 +655,11 @@ struct PlayerView: View {
           )
 
         await MainActor.run {
+          guard subtitleRevision.matches(currentSubtitles) else {
+            isLoadingSubtitles = false
+            return
+          }
+
           currentSubtitles = subtitles
           subtitleError = nil
           isLoadingSubtitles = false
@@ -579,7 +681,8 @@ struct PlayerView: View {
 
   private func startBackgroundLocalTranscription(
     fileURL: URL,
-    showLoadingState: Bool
+    showLoadingState: Bool,
+    subtitleRevision: Subtitle.RevisionSnapshot
   ) {
     isTranscribing = true
     transcriptionState = .idle
@@ -594,6 +697,13 @@ struct PlayerView: View {
         }
 
         await MainActor.run {
+          guard subtitleRevision.matches(currentSubtitles) else {
+            isLoadingSubtitles = false
+            isTranscribing = false
+            transcriptionState = .idle
+            return
+          }
+
           currentSubtitles = subtitles
           subtitleError = nil
           isLoadingSubtitles = false

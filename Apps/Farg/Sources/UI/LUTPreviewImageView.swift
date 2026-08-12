@@ -10,6 +10,7 @@ struct LUTPreviewImageView: View {
   let source: LUTPreviewSourceImage?
   let lut: LUT?
   let library: LUTLibrary
+  let whiteBalance: WhiteBalanceAdjustment
   let exposure: ExposureAdjustment
   @Environment(LUTPreviewModelStore.self) private var previewModels
 
@@ -17,24 +18,30 @@ struct LUTPreviewImageView: View {
     source: LUTPreviewSourceImage?,
     lut: LUT?,
     library: LUTLibrary,
+    whiteBalance: WhiteBalanceAdjustment = .neutral,
     exposure: ExposureAdjustment = .neutral
   ) {
     self.source = source
     self.lut = lut
     self.library = library
+    self.whiteBalance = whiteBalance
     self.exposure = exposure
   }
 
   var body: some View {
-    
-    Color.clear.overlay { 
+
+    Color.clear.overlay {
       ZStack {
 
         if let renderedImage = previewModel.image(for: requestID) {
           Image(decorative: renderedImage, scale: 1)
             .resizable()
             .aspectRatio(contentMode: .fill)
-        } else if let source, lut == nil, exposure.isNeutral {
+        } else if let source,
+          lut == nil,
+          whiteBalance.isNeutral,
+          exposure.isNeutral
+        {
           Image(decorative: source.image, scale: 1)
             .resizable()
             .aspectRatio(contentMode: .fill)
@@ -50,10 +57,10 @@ struct LUTPreviewImageView: View {
           ProgressView()
             .controlSize(.small)
         }
-        
+
       }
     }
-    .background(content: { 
+    .background(content: {
       Color.secondary.opacity(0.12)
     })
     .clipped()
@@ -70,7 +77,9 @@ struct LUTPreviewImageView: View {
       sourceID: source?.id ?? "missing-source",
       itemID: itemID,
       libraryRevision: library.revision,
-      exposureEV: exposure.ev
+      exposureEV: exposure.ev,
+      whiteBalanceTemperature: whiteBalance.temperature,
+      whiteBalanceTint: whiteBalance.tint
     )
   }
 
@@ -91,10 +100,16 @@ struct LUTPreviewImageView: View {
 
   private func requestPreview() async {
     guard let source else { return }
-    guard lut != nil || exposure.isNeutral == false else { return }
+    guard
+      lut != nil
+        || whiteBalance.isNeutral == false
+        || exposure.isNeutral == false
+    else {
+      return
+    }
 
     // A short cancellation window prevents slider ticks from starting a full
-    // visible-cell rerender before the authored EV settles.
+    // visible-cell rerender before the authored adjustment settles.
     do {
       try await Task.sleep(for: .milliseconds(120))
     } catch {
@@ -113,6 +128,7 @@ struct LUTPreviewImageView: View {
         requestID: requestID,
         source: source,
         recipe: recipe,
+        whiteBalance: whiteBalance,
         exposure: exposure
       )
     } catch {

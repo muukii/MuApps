@@ -54,19 +54,24 @@ actor LUTPreviewRenderer {
     featureCache.totalCostLimit = 64 * 1_024 * 1_024
   }
 
-  /// Returns a cached or newly rendered exposure-plus-LUT result.
+  /// Returns a cached or newly rendered white-balance, exposure, and LUT result.
   func render(
     source: LUTPreviewSourceImage,
     recipe: LUTPreviewRecipe?,
+    whiteBalance: WhiteBalanceAdjustment = .neutral,
     exposure: ExposureAdjustment = .neutral,
     libraryRevision: UInt
   ) async throws -> CGImage {
-    guard recipe != nil || exposure.isNeutral == false else {
+    guard
+      recipe != nil
+        || whiteBalance.isNeutral == false
+        || exposure.isNeutral == false
+    else {
       return source.image
     }
     let itemKey = recipe.map { "lut:\($0.lutID)" } ?? "original"
     let key =
-      "\(source.id)|\(itemKey)|\(libraryRevision)|\(exposure.ev.bitPattern)"
+      "\(source.id)|\(itemKey)|\(libraryRevision)|\(whiteBalance.temperature.bitPattern)|\(whiteBalance.tint.bitPattern)|\(exposure.ev.bitPattern)"
     if let cached = imageCache.object(forKey: key as NSString) {
       return cached
     }
@@ -87,6 +92,7 @@ actor LUTPreviewRenderer {
       return try Self.makeImage(
         source: source,
         feature: lutFeature,
+        whiteBalance: whiteBalance,
         exposure: exposure
       )
     }
@@ -168,11 +174,13 @@ actor LUTPreviewRenderer {
   private nonisolated static func makeImage(
     source: LUTPreviewSourceImage,
     feature: ColorCubeFeature?,
+    whiteBalance: WhiteBalanceAdjustment,
     exposure: ExposureAdjustment
   ) throws -> CGImage {
     try autoreleasepool {
       var features: [MainFeature] = [
-        .effect(exposure.feature)
+        .effect(whiteBalance.feature),
+        .effect(exposure.feature),
       ]
       if let feature {
         features.append(.effect(feature))

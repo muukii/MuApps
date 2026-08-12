@@ -22,6 +22,9 @@ struct SubtitleRowView: View {
     case translate
     case askChatGPTSelection(String)
     case toggleBookmark
+    case mergeWithPrevious
+    case mergeWithNext
+    case split(Subtitle.TextSelection)
   }
 
   let cue: Subtitle.Cue
@@ -29,6 +32,8 @@ struct SubtitleRowView: View {
   let currentTime: CurrentTime
   let isCurrent: Bool
   let isBookmarked: Bool
+  let canMergeWithPrevious: Bool
+  let canMergeWithNext: Bool
   let onAction: (Action) -> Void
 
   /// Computed highlight time - only reads currentTime.value when this row is current
@@ -77,6 +82,9 @@ struct SubtitleRowView: View {
           playbackTime: currentTime.value,
           onAskChatGPT: { selectedText in
             onAction(.askChatGPTSelection(selectedText))
+          },
+          onSplit: { selection in
+            onAction(.split(selection))
           }
         )
         .fixedSize(horizontal: false, vertical: true)
@@ -146,6 +154,22 @@ struct SubtitleRowView: View {
       } label: {
         Label("Set as B (End)", systemImage: "b.circle")
       }
+
+      Section("Edit Chunk") {
+        Button {
+          onAction(.mergeWithPrevious)
+        } label: {
+          Label("Merge with Previous", systemImage: "arrow.up")
+        }
+        .disabled(!canMergeWithPrevious)
+
+        Button {
+          onAction(.mergeWithNext)
+        } label: {
+          Label("Merge with Next", systemImage: "arrow.down")
+        }
+        .disabled(!canMergeWithNext)
+      }
     } label: {
       Image(systemName: "ellipsis")
         .font(.system(size: 18))
@@ -194,6 +218,8 @@ struct SubtitleRowView: View {
           currentTime: currentTime,
           isCurrent: true,
           isBookmarked: true,
+          canMergeWithPrevious: false,
+          canMergeWithNext: true,
           onAction: { _ in }
         )
         .padding()
@@ -209,6 +235,8 @@ struct SubtitleRowView: View {
           currentTime: currentTime,
           isCurrent: false,
           isBookmarked: false,
+          canMergeWithPrevious: true,
+          canMergeWithNext: false,
           onAction: { _ in }
         )
         .padding()
@@ -253,6 +281,8 @@ struct SubtitleRowView: View {
           currentTime: currentTime,
           isCurrent: true,
           isBookmarked: false,
+          canMergeWithPrevious: false,
+          canMergeWithNext: false,
           onAction: { action in
             print("Action: \(action)")
           }

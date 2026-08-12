@@ -92,7 +92,7 @@ final class VideoPreviewModel {
   /// The display-oriented ratio used while an item or composition is replaced.
   ///
   /// Keeping this outside `AVPlayerItem` prevents a transient 16:9 fallback
-  /// from feeding a false viewport back into portrait Preview preparation.
+  /// while a portrait source's prepared composition is being installed.
   private(set) var presentationAspectRatio: CGFloat = 16 / 9
 
   /// The relationship between the desired recipe and the installed player item.
@@ -106,18 +106,9 @@ final class VideoPreviewModel {
   private var loadedSource: VideoSource?
   private var desiredRenderRequest: DesiredRenderRequest?
   private var temporalPreviewState: TemporalPreviewState?
-  /// The most recent stable Editor window target, retained for the next clip.
-  private var editorWindowRenderTarget: FargPreviewRenderTarget?
-  /// The render target locked while the currently selected clip is active.
-  ///
-  /// Tab controls may alter the player surface but must not alter this target.
-  private var previewRenderTarget: FargPreviewRenderTarget?
-  private var hasInstalledPreviewForLoadedSource = false
   private var preparingTemporalSourceID: VideoSource.ID?
   private var sourcePreparationTask: Task<Void, Never>?
-  private var compositionUpdateTask: Task<Void, Never>?
   private var sourceGeneration: UInt = 0
-  private var compositionRevision: UInt = 0
   private var itemGeneration: UInt = 0
   private var frameCaptureTask: Task<Void, Never>?
   private var lastScheduledFrameTime: CMTime?
@@ -167,17 +158,12 @@ final class VideoPreviewModel {
     guard loadedSource?.id != source.id else { return }
     sourcePreparationTask?.cancel()
     sourcePreparationTask = nil
-    compositionUpdateTask?.cancel()
-    compositionUpdateTask = nil
     sourceGeneration &+= 1
-    compositionRevision &+= 1
     itemGeneration &+= 1
     loadedSource = source
     desiredRenderRequest = nil
     temporalPreviewState = nil
-    previewRenderTarget = editorWindowRenderTarget
     preparingTemporalSourceID = nil
-    hasInstalledPreviewForLoadedSource = false
     renderState = .preparing
     lutPreviewSource = nil
     lastScheduledFrameTime = nil
@@ -200,19 +186,14 @@ final class VideoPreviewModel {
   func clear() {
     sourcePreparationTask?.cancel()
     sourcePreparationTask = nil
-    compositionUpdateTask?.cancel()
-    compositionUpdateTask = nil
     sourceGeneration &+= 1
-    compositionRevision &+= 1
     itemGeneration &+= 1
     frameCaptureTask?.cancel()
     frameCaptureTask = nil
     loadedSource = nil
     desiredRenderRequest = nil
     temporalPreviewState = nil
-    previewRenderTarget = nil
     preparingTemporalSourceID = nil
-    hasInstalledPreviewForLoadedSource = false
     renderState = .empty
     lutPreviewSource = nil
     lastScheduledFrameTime = nil
@@ -234,8 +215,8 @@ final class VideoPreviewModel {
 
   /// Applies one immutable recipe to the source's reusable temporal topology.
   ///
-  /// Only a source change creates another topology and player item. Enablement,
-  /// viewport, and LUT changes replace the item's video composition in place.
+  /// Only a source change creates another topology and player item. Enablement
+  /// and LUT changes replace the item's video composition in place.
   /// Strength and film-grain edits update values consumed by subsequent frames.
   func apply(
     recipe: FargVideoRenderRecipe,
@@ -281,58 +262,14 @@ final class VideoPreviewModel {
       if previousRequest?.source.id == source.id,
         player.currentItem?.asset === temporalPreviewState.source.asset
       {
-        // The complete document is sampled once per compositor request.
-        // Exposure and Grain therefore update without replacing the composition
-        // or resetting the playhead.
+        // The complete document is sampled once per compositor request, so
+        // color and grain edits update without replacing the composition or
+        // resetting the playhead.
         return
       }
     }
 
-    guard previewRenderTarget != nil else {
-      renderState = .preparing
-      return
-    }
-    scheduleCompositionUpdate(debounce: false)
-  }
-
-  /// Captures a bounded Preview quality target from the Editor window.
-  ///
-  /// The active clip keeps its target even when the player surface changes.
-  /// This prevents a tab's layout animation from replacing the custom
-  /// compositor's render context mid-request. A later source selection uses
-  /// the newest valid Editor window target.
-  func updateEditorWindow(
-    sizeInPoints: CGSize,
-    displayScale: CGFloat
-  ) {
-    guard
-      let target = FargPreviewRenderTarget(
-        editorWindowSizeInPoints: sizeInPoints,
-        displayScale: displayScale
-      ),
-      target != editorWindowRenderTarget
-    else {
-      return
-    }
-    editorWindowRenderTarget = target
-    guard previewRenderTarget == nil else { return }
-    previewRenderTarget = target
-    guard
-      isRenderingSuspended == false,
-      let request = desiredRenderRequest
-    else {
-      return
-    }
-    guard
-      let temporalPreviewState,
-      temporalPreviewState.sourceID == request.source.id
-    else {
-      prepareTemporalSourceIfNeeded(for: request.source)
-      return
-    }
-    scheduleCompositionUpdate(
-      debounce: hasInstalledPreviewForLoadedSource
-    )
+    installLatestComposition()
   }
 
   /// Builds the source-owned three-track asset exactly once per selected clip.
@@ -380,12 +317,11 @@ final class VideoPreviewModel {
 
         guard
           self.isRenderingSuspended == false,
-          self.previewRenderTarget != nil,
           self.desiredRenderRequest?.source.id == source.id
         else {
           return
         }
-        self.scheduleCompositionUpdate(debounce: false)
+        self.installLatestComposition()
       } catch is CancellationError {
         return
       } catch {
@@ -405,43 +341,11 @@ final class VideoPreviewModel {
     }
   }
 
-  /// Coalesces operational resize bursts without rebuilding source topology.
-  private func scheduleCompositionUpdate(debounce: Bool) {
-    compositionUpdateTask?.cancel()
-    compositionRevision &+= 1
-    let revision = compositionRevision
-
-    guard debounce else {
-      installLatestComposition(revision: revision)
-      return
-    }
-
-    compositionUpdateTask = Task { [weak self] in
-      do {
-        try await Task.sleep(for: .milliseconds(120))
-        guard
-          let self,
-          self.compositionRevision == revision
-        else {
-          return
-        }
-        self.compositionUpdateTask = nil
-        self.installLatestComposition(revision: revision)
-      } catch is CancellationError {
-        return
-      } catch {
-        return
-      }
-    }
-  }
-
   /// Installs the latest composition while preserving the current player item.
-  private func installLatestComposition(revision: UInt) {
+  private func installLatestComposition() {
     guard
-      compositionRevision == revision,
       isRenderingSuspended == false,
       let request = desiredRenderRequest,
-      let target = previewRenderTarget,
       let temporalPreviewState,
       temporalPreviewState.sourceID == request.source.id
     else {
@@ -460,17 +364,14 @@ final class VideoPreviewModel {
         source: temporalPreviewState.source,
         recipe: request.recipe,
         colorInfo: request.colorInfo,
-        target: target,
         strengthSource: temporalPreviewState.strength,
         documentSource: documentSource
       )
-      guard compositionRevision == revision else { return }
       var updatedTemporalPreviewState = temporalPreviewState
       updatedTemporalPreviewState.document = documentSource
       self.temporalPreviewState = updatedTemporalPreviewState
       install(prepared: prepared)
     } catch {
-      guard compositionRevision == revision else { return }
       failRender(message: error.localizedDescription)
     }
   }
@@ -480,10 +381,7 @@ final class VideoPreviewModel {
     sourcePreparationTask?.cancel()
     sourcePreparationTask = nil
     preparingTemporalSourceID = nil
-    compositionUpdateTask?.cancel()
-    compositionUpdateTask = nil
     sourceGeneration &+= 1
-    compositionRevision &+= 1
     desiredRenderRequest = nil
     replacementSeekGeneration = nil
     pendingCompositionAfterReplacementSeek = nil
@@ -514,10 +412,7 @@ final class VideoPreviewModel {
     sourcePreparationTask?.cancel()
     sourcePreparationTask = nil
     preparingTemporalSourceID = nil
-    compositionUpdateTask?.cancel()
-    compositionUpdateTask = nil
     sourceGeneration &+= 1
-    compositionRevision &+= 1
 
     isPlaybackRequested = false
     isPlaying = false
@@ -806,16 +701,15 @@ final class VideoPreviewModel {
       item.asset === prepared.asset
     {
       if replacementSeekGeneration == itemGeneration {
-        // A portrait-driven viewport correction can arrive while the initial
-        // replacement seek is still positioning this item. Keep only the
-        // latest composition and install it after that seek completes.
+        // A recipe change can arrive while the initial replacement seek is
+        // still positioning this item. Keep only the latest composition and
+        // install it after that seek completes.
         pendingCompositionAfterReplacementSeek = prepared
         return
       }
-      // Mode, LUT, color, and viewport changes remain on the same decoder,
-      // playhead, and audio clock.
+      // Mode, LUT, and color changes remain on the same decoder, playhead, and
+      // audio clock.
       item.videoComposition = prepared.videoComposition
-      hasInstalledPreviewForLoadedSource = true
       if item.status == .readyToPlay {
         renderState = .ready
       }
@@ -841,7 +735,6 @@ final class VideoPreviewModel {
     item.videoComposition = prepared.videoComposition
     player.replaceCurrentItem(with: item)
     observe(item: item, itemGeneration: generation)
-    hasInstalledPreviewForLoadedSource = true
     player.seek(
       to: playbackPosition,
       toleranceBefore: .zero,

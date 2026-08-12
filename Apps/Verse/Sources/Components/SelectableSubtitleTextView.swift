@@ -83,6 +83,9 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
   /// Callback when "Ask ChatGPT" is selected from the context menu.
   var onAskChatGPT: ((String) -> Void)?
 
+  /// Callback when the user chooses to split the cue at a text selection.
+  var onSplit: ((Subtitle.TextSelection) -> Void)?
+
   // MARK: - Initializer
 
   /// Primary initializer using Content enum.
@@ -96,7 +99,8 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
     lineSpacing: CGFloat = 0,
     playbackTime: Double? = nil,
     onSelectionChanged: ((String?) -> Void)? = nil,
-    onAskChatGPT: ((String) -> Void)? = nil
+    onAskChatGPT: ((String) -> Void)? = nil,
+    onSplit: ((Subtitle.TextSelection) -> Void)? = nil
   ) {
     self.content = content
     self.highlightTime = highlightTime
@@ -108,6 +112,7 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
     self.playbackTime = playbackTime
     self.onSelectionChanged = onSelectionChanged
     self.onAskChatGPT = onAskChatGPT
+    self.onSplit = onSplit
   }
 
 
@@ -156,6 +161,7 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
 
     coordinator.onSelectionChanged = self.onSelectionChanged
     coordinator.onAskChatGPT = self.onAskChatGPT
+    coordinator.onSplit = self.onSplit
 
     // Build word ranges
     let wordRanges = buildWordRanges()
@@ -250,7 +256,8 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
     var currentLocation = 0
 
     for timing in wordTimings {
-      let length = timing.text.count
+      // UITextView and NSRange use UTF-16 offsets, not grapheme counts.
+      let length = timing.text.utf16.count
       let range = NSRange(location: currentLocation, length: length)
       ranges.append(WordRange(
         nsRange: range,
@@ -299,7 +306,7 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
   }
 
   public func makeCoordinator() -> Coordinator {
-    Coordinator(onAskChatGPT: onAskChatGPT)
+    Coordinator(onAskChatGPT: onAskChatGPT, onSplit: onSplit)
   }
 
   // MARK: - WordRange
@@ -315,12 +322,17 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
   public class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
     var onSelectionChanged: ((String?) -> Void)?
     var onAskChatGPT: ((String) -> Void)?
+    var onSplit: ((Subtitle.TextSelection) -> Void)?
 
     // Track previous selected text to avoid redundant callbacks
     private var lastSelectedText: String?
 
-    init(onAskChatGPT: ((String) -> Void)?) {
+    init(
+      onAskChatGPT: ((String) -> Void)?,
+      onSplit: ((Subtitle.TextSelection) -> Void)?
+    ) {
       self.onAskChatGPT = onAskChatGPT
+      self.onSplit = onSplit
     }
 
     @objc func handleTap(_ gesture: UITapGestureRecognizer) {
@@ -397,12 +409,18 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
       }
     }
 
-    @available(iOS 16.0, *)
+    @available(iOS 26.0, *)
     public func textView(
       _ textView: UITextView,
-      editMenuForTextIn range: NSRange,
+      editMenuForTextInRanges ranges: [NSValue],
       suggestedActions: [UIMenuElement]
     ) -> UIMenu? {
+      guard ranges.count == 1 else {
+        return UIMenu(children: suggestedActions)
+      }
+
+      let range = ranges[0].rangeValue
+
       // Extract selected text
       guard range.length > 0,
             let text = textView.text,
@@ -417,18 +435,46 @@ struct SelectableSubtitleTextView: UIViewRepresentable {
         return UIMenu(children: suggestedActions)
       }
 
-      let actionsItem = UIAction(
+      var customActions: [UIMenuElement] = []
+
+      if Self.canSplit(text: text, at: range) {
+        let selection = Subtitle.TextSelection(
+          utf16Range: range.location..<(range.location + range.length)
+        )
+        let splitItem = UIAction(
+          title: String(
+            localized: "Split Here",
+            comment: "Text selection menu action that splits a subtitle cue before the selected text."
+          ),
+          image: UIImage(systemName: "scissors")
+        ) { [weak self] _ in
+          self?.onSplit?(selection)
+        }
+        customActions.append(splitItem)
+      }
+
+      let askItem = UIAction(
         title: "Ask ChatGPT",
         image: UIImage(systemName: "sparkle.magnifyingglass")
       ) { [weak self] _ in
         self?.onAskChatGPT?(selectedText)
       }
+      customActions.append(askItem)
 
       // Add custom action before system actions
-      var allActions: [UIMenuElement] = [actionsItem]
+      var allActions = customActions
       allActions.append(contentsOf: suggestedActions)
 
       return UIMenu(children: allActions)
+    }
+
+    private static func canSplit(text: String, at range: NSRange) -> Bool {
+      guard let selectedRange = Range(range, in: text) else { return false }
+      let upperText = text[..<selectedRange.lowerBound]
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      let lowerText = text[selectedRange.lowerBound...]
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      return !upperText.isEmpty && !lowerText.isEmpty
     }
   }
 }

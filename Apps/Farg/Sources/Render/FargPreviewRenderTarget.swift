@@ -4,86 +4,48 @@
 
 import Foundation
 
-/// The pixel-space ceiling locked for one live editor preview.
+/// The fixed pixel-space ceiling for one live editor preview.
 ///
-/// This value describes the Editor window environment, not an authored edit.
-/// It is carried only by `FargVideoRenderPurpose.preview`, so exports cannot
-/// accidentally inherit the device viewport resolution. The Editor measures
-/// its stable parent content rather than its player surface: effect controls
-/// may resize the latter without changing the custom compositor's render size.
+/// Preview quality is an operational render policy rather than a property of
+/// the current SwiftUI layout. Landscape sources fit within 1920×1080, portrait
+/// sources fit within 1080×1920, and square sources fit within 1080×1080.
+/// Export remains an independent source-resolution policy.
 nonisolated struct FargPreviewRenderTarget: Equatable, Sendable {
 
-  /// The per-axis cap that bounds Preview's Optical Flow working set.
-  ///
-  /// A current iPhone editor is expected to display no more than this detail,
-  /// while the independent width and height limits retain useful quality in a
-  /// narrow window. Source frames are still never upscaled.
-  private static let maximumPreviewPixelDimension: CGFloat = 1_080
+  private static let landscapeFullHDSize = CGSize(width: 1_920, height: 1_080)
+  private static let portraitFullHDSize = CGSize(width: 1_080, height: 1_920)
+  private static let squareFullHDSize = CGSize(width: 1_080, height: 1_080)
 
-  /// The largest display-oriented frame the visible preview can consume.
+  /// The orientation-aware Full HD ceiling for the display-oriented source.
   let maximumPixelSize: CGSize
 
-  /// Converts the Editor's stable window content measurement into a bounded
-  /// pixel ceiling.
+  /// Resolves a deterministic Full HD ceiling from the source presentation.
   ///
-  /// This deliberately does not accept the live player surface measurement.
-  /// The player may become shorter when a tab changes, but that is a display
-  /// concern and must not replace a running custom-compositor render context.
-  /// Invalid transient geometry is rejected so a zero-size layout pass never
-  /// tears down the last usable preview.
-  init?(
-    editorWindowSizeInPoints: CGSize,
-    displayScale: CGFloat
-  ) {
+  /// The decision deliberately excludes Editor bounds and display scale so the
+  /// same source always receives the same Preview geometry.
+  init(sourceDisplaySize: CGSize) throws {
     guard
-      editorWindowSizeInPoints.width.isFinite,
-      editorWindowSizeInPoints.height.isFinite,
-      displayScale.isFinite,
-      editorWindowSizeInPoints.width > 0,
-      editorWindowSizeInPoints.height > 0,
-      displayScale > 0
+      sourceDisplaySize.width.isFinite,
+      sourceDisplaySize.height.isFinite,
+      sourceDisplaySize.width > 0,
+      sourceDisplaySize.height > 0
     else {
-      return nil
+      throw FargPreviewRenderTargetError.invalidSourceSize(sourceDisplaySize)
     }
-    let windowPixelSize = CGSize(
-      width: floor(editorWindowSizeInPoints.width * displayScale),
-      height: floor(editorWindowSizeInPoints.height * displayScale)
-    )
-    self.init(
-      maximumPixelSize: CGSize(
-        width: min(
-          windowPixelSize.width,
-          Self.maximumPreviewPixelDimension
-        ),
-        height: min(
-          windowPixelSize.height,
-          Self.maximumPreviewPixelDimension
-        )
-      )
-    )
-  }
 
-  /// Creates a target from an already measured pixel ceiling.
-  init?(maximumPixelSize: CGSize) {
-    let normalizedSize = CGSize(
-      width: floor(maximumPixelSize.width),
-      height: floor(maximumPixelSize.height)
-    )
-    guard
-      normalizedSize.width.isFinite,
-      normalizedSize.height.isFinite,
-      normalizedSize.width >= 2,
-      normalizedSize.height >= 2
-    else {
-      return nil
+    if sourceDisplaySize.width > sourceDisplaySize.height {
+      maximumPixelSize = Self.landscapeFullHDSize
+    } else if sourceDisplaySize.width < sourceDisplaySize.height {
+      maximumPixelSize = Self.portraitFullHDSize
+    } else {
+      maximumPixelSize = Self.squareFullHDSize
     }
-    self.maximumPixelSize = normalizedSize
   }
 
   /// Uniformly fits a source canvas without upscaling it.
   ///
   /// Both dimensions are made even for hardware-backed pixel buffers. Flooring
-  /// keeps the resolved preview inside the measured viewport.
+  /// keeps the resolved preview inside the fixed Full HD ceiling.
   func resolveRenderSize(sourceDisplaySize: CGSize) throws -> CGSize {
     guard
       sourceDisplaySize.width.isFinite,

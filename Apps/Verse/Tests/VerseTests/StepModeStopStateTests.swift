@@ -57,4 +57,14 @@ struct StepModeStopStateTests {
 
     #expect(state.isStopEligible(for: cueA) == false)
   }
+
+  @Test
+  func changingTheCueSequenceClearsTheConsumedBoundary() {
+    var state = StepModeStopState()
+    state.recordStop(at: cueA)
+
+    state.reset()
+
+    #expect(state.isStopEligible(for: cueA))
+  }
 }

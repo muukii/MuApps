@@ -32,6 +32,10 @@ nonisolated struct LUTPreviewRequestID: Hashable, Sendable {
   var libraryRevision: UInt
   /// Invalidates every look when its shared pre-LUT exposure changes.
   var exposureEV: Double
+  /// Invalidates every look when its shared white-balance temperature changes.
+  var whiteBalanceTemperature: Double = 0
+  /// Invalidates every look when its shared white-balance tint changes.
+  var whiteBalanceTint: Double = 0
 }
 
 /// The source and library state shared by every LUT model on one screen.
@@ -40,6 +44,8 @@ nonisolated struct LUTPreviewContextID: Hashable, Sendable {
   var sourceID: String?
   var libraryRevision: UInt
   var exposureEV: Double = 0
+  var whiteBalanceTemperature: Double = 0
+  var whiteBalanceTint: Double = 0
 }
 
 /// Holds one LUT's preview result independently of a lazy cell's lifetime.
@@ -98,6 +104,7 @@ final class LUTPreviewModel: Identifiable {
     requestID: LUTPreviewRequestID,
     source: LUTPreviewSourceImage,
     recipe: LUTPreviewRecipe?,
+    whiteBalance: WhiteBalanceAdjustment,
     exposure: ExposureAdjustment
   ) {
     isVisible = true
@@ -127,6 +134,7 @@ final class LUTPreviewModel: Identifiable {
         let image = try await LUTPreviewRenderer.shared.render(
           source: source,
           recipe: recipe,
+          whiteBalance: whiteBalance,
           exposure: exposure,
           libraryRevision: requestID.libraryRevision
         )
@@ -209,7 +217,10 @@ final class LUTPreviewModel: Identifiable {
       let activeRequestID,
       contextID.sourceID == activeRequestID.sourceID,
       contextID.libraryRevision == activeRequestID.libraryRevision,
-      contextID.exposureEV == activeRequestID.exposureEV
+      contextID.exposureEV == activeRequestID.exposureEV,
+      contextID.whiteBalanceTemperature
+        == activeRequestID.whiteBalanceTemperature,
+      contextID.whiteBalanceTint == activeRequestID.whiteBalanceTint
     else {
       invalidate()
       return

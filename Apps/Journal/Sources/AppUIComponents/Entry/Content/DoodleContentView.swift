@@ -75,6 +75,7 @@ struct DoodleContentView: View {
 
   var body: some View {
     content
+      .background(.appSecondaryContainer)
       .detailMediaFrame(
         aspectRatio: displayAspectRatio,
         isDetail: style.isDetail

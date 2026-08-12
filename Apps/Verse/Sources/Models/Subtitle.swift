@@ -15,8 +15,47 @@ import Speech
 nonisolated struct Subtitle: Codable, Equatable, Sendable {
   var cues: [Cue]
 
-  init(_ cues: [Cue] = []) {
+  /// The most recent time the user manually reshaped this transcript.
+  ///
+  /// This metadata lives inside the cached subtitle JSON so existing SwiftData
+  /// records decode without a schema migration. Automatic transcription must
+  /// not replace a transcript after this value is set.
+  var manuallyEditedAt: Date?
+
+  init(_ cues: [Cue] = [], manuallyEditedAt: Date? = nil) {
     self.cues = cues
+    self.manuallyEditedAt = manuallyEditedAt
+  }
+}
+
+// MARK: - Text Selection
+
+extension Subtitle {
+
+  /// A selected range in the rendered cue text, expressed as UTF-16 offsets.
+  ///
+  /// UIKit text selections use UTF-16 offsets. Keeping that coordinate system
+  /// explicit preserves Unicode correctness without leaking `NSRange` into the
+  /// subtitle editing model.
+  nonisolated struct TextSelection: Equatable, Sendable {
+    let utf16Range: Range<Int>
+  }
+
+  /// A value snapshot used to reject stale asynchronous transcript results.
+  ///
+  /// Transcription may finish after the user imports or manually reshapes the
+  /// visible transcript. A result is safe to apply only while the complete
+  /// subtitle value still matches the value captured when that work began.
+  nonisolated struct RevisionSnapshot: Sendable {
+    private let subtitle: Subtitle?
+
+    init(_ subtitle: Subtitle?) {
+      self.subtitle = subtitle
+    }
+
+    func matches(_ currentSubtitle: Subtitle?) -> Bool {
+      subtitle == currentSubtitle
+    }
   }
 }
 
@@ -26,7 +65,9 @@ extension Subtitle {
 
   /// A single subtitle cue with timing and optional word-level timing information.
   nonisolated struct Cue: Equatable, Sendable, Identifiable {
-    /// Unique identifier for the cue (1-based position)
+    /// Stable identifier for the cue within a cached transcript.
+    ///
+    /// Display and playback order come from the cue array, not this value.
     let id: Int
 
     /// Start time in seconds
@@ -156,10 +197,10 @@ extension Subtitle.Cue {
     "\(formatSRTTime(startTime)) --> \(formatSRTTime(endTime))"
   }
 
-  /// SRT formatted entry string
-  var srtFormat: String {
+  /// SRT formatted entry string using an explicit export sequence number.
+  func srtFormat(sequenceNumber: Int) -> String {
     """
-    \(id)
+    \(sequenceNumber)
     \(srtTimestamp)
     \(text)
     """
@@ -229,6 +270,8 @@ extension Subtitle {
 
   /// Export subtitles to SRT format
   func toSRT() -> String {
-    cues.map(\.srtFormat).joined(separator: "\n\n")
+    cues.enumerated().map { index, cue in
+      cue.srtFormat(sequenceNumber: index + 1)
+    }.joined(separator: "\n\n")
   }
 }

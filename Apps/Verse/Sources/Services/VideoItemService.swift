@@ -199,6 +199,49 @@ final class VideoItemService {
     try modelContext.save()
   }
 
+  /// Persists a manually edited transcript and reconciles its bookmarks.
+  ///
+  /// Visible Player state should be replaced only after this method returns.
+  /// A save failure rolls the context back so the prior transcript and bookmark
+  /// snapshots remain the current persisted state.
+  func updateEditedSubtitles(video: VideoItem, subtitles: Subtitle) throws {
+    let previousSubtitles = video.cachedSubtitles
+    let bookmarkSnapshots = video.subtitleBookmarks.map(SubtitleBookmarkSnapshot.init)
+
+    video.cachedSubtitles = subtitles
+
+    let sortedBookmarks = video.subtitleBookmarks.sorted { lhs, rhs in
+      if lhs.createdAt == rhs.createdAt {
+        return lhs.id.uuidString < rhs.id.uuidString
+      }
+      return lhs.createdAt < rhs.createdAt
+    }
+    var retainedCueIDs: Set<Subtitle.Cue.ID> = []
+
+    for bookmark in sortedBookmarks {
+      guard let cue = subtitles.cues.first(where: { bookmark.matches($0) }) else {
+        continue
+      }
+
+      if retainedCueIDs.insert(cue.id).inserted {
+        bookmark.retarget(to: cue)
+      } else {
+        modelContext.delete(bookmark)
+      }
+    }
+
+    do {
+      try modelContext.save()
+    } catch {
+      video.cachedSubtitles = previousSubtitles
+      for snapshot in bookmarkSnapshots {
+        snapshot.restore()
+      }
+      modelContext.rollback()
+      throw error
+    }
+  }
+
   // MARK: - Subtitle Bookmarks
 
   /// Toggle a bookmark for a subtitle cue.
@@ -523,6 +566,29 @@ final class VideoItemService {
       kind: kind,
       duration: durationSeconds
     )
+  }
+}
+
+// MARK: - Subtitle Bookmark Snapshot
+
+/// Restorable values used to keep subtitle edits atomic on save failure.
+private struct SubtitleBookmarkSnapshot {
+  let bookmark: SubtitleBookmark
+  let startTime: Double
+  let endTime: Double
+  let text: String
+
+  init(_ bookmark: SubtitleBookmark) {
+    self.bookmark = bookmark
+    self.startTime = bookmark.startTime
+    self.endTime = bookmark.endTime
+    self.text = bookmark.text
+  }
+
+  func restore() {
+    bookmark.startTime = startTime
+    bookmark.endTime = endTime
+    bookmark.text = text
   }
 }
 

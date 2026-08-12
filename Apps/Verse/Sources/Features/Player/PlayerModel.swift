@@ -194,6 +194,11 @@ nonisolated struct StepModeStopState {
     guard let consumedBoundary, time < consumedBoundary.endTime else { return }
     self.consumedBoundary = nil
   }
+
+  /// Clears a consumed boundary after the subtitle cue sequence changes.
+  mutating func reset() {
+    consumedBoundary = nil
+  }
 }
 
 // MARK: - PlayerModel
@@ -251,7 +256,12 @@ final class PlayerModel {
   // MARK: - Subtitle State
 
   /// Current subtitle cues for subtitle-based seeking
-  var cues: [Subtitle.Cue] = []
+  var cues: [Subtitle.Cue] = [] {
+    didSet {
+      guard cues != oldValue else { return }
+      stepModeStopState.reset()
+    }
+  }
 
   // MARK: - Step Mode State
 

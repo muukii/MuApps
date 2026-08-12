@@ -54,6 +54,7 @@ struct EditorViewModelTests {
       initialClips: []
     )
 
+    first.whiteBalance = WhiteBalanceAdjustment(temperature: 400, tint: -5)
     first.exposure = ExposureAdjustment(ev: 0.5)
 
     #expect(first !== second)
@@ -61,6 +62,9 @@ struct EditorViewModelTests {
     #expect(second.id == ObjectIdentifier(second))
     #expect(first.exposure.ev == 0.5)
     #expect(second.exposure.isNeutral)
+    #expect(first.whiteBalance.temperature == 400)
+    #expect(first.whiteBalance.tint == -5)
+    #expect(second.whiteBalance.isNeutral)
     #expect(first.preview !== second.preview)
   }
 }

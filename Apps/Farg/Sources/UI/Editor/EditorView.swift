@@ -4,17 +4,16 @@
 
 import FargMotionBlur
 import Foundation
+import MuComponents
 import Photos
 import PhotosUI
 import StateGraph
 import SwiftUI
 import UniformTypeIdentifiers
-import MuComponents
 
 /// Authors one shared LUT recipe over an ordered collection of videos.
 struct EditorView: View {
 
-  @Environment(\.displayScale) private var displayScale
   @Environment(EditorViewModel.self) private var viewModel
   let onFinishEditing: @MainActor @Sendable () -> Void
 
@@ -53,25 +52,14 @@ struct EditorView: View {
     )
   }
 
-  /// The stable content size of the Editor's hosting window.
-  ///
-  /// Unlike the player surface, this does not shrink when LUT and Motion Blur
-  /// controls change height. It is therefore safe to use as a Preview-quality
-  /// input without coupling the compositor to tab animation.
-  private nonisolated struct EditorWindowMeasurement: Equatable, Sendable {
-    let sizeInPoints: CGSize
-    let displayScale: CGFloat
-  }
-
   var body: some View {
-    let currentDisplayScale = displayScale
-
     EditorLayout(
       preview: preview,
       lutPreviewSource: preview.lutPreviewSource,
       clips: viewModel.clips,
       selectedClipID: viewModel.selectedClipID,
       hdrVideoCount: viewModel.hdrVideoCount,
+      whiteBalance: viewModel.$whiteBalance.binding,
       exposure: viewModel.$exposure.binding,
       motionBlur: viewModel.$motionBlur.binding,
       grain: viewModel.$grain.binding,
@@ -81,25 +69,14 @@ struct EditorView: View {
       onSelectPhotos: { isPhotosPickerPresented = true },
       onSelectFiles: presentVideoFileImporter
     )
-    .onGeometryChange(for: EditorWindowMeasurement.self) { proxy in
-      EditorWindowMeasurement(
-        sizeInPoints: proxy.size,
-        displayScale: currentDisplayScale
-      )
-    } action: { measurement in
-      preview.updateEditorWindow(
-        sizeInPoints: measurement.sizeInPoints,
-        displayScale: measurement.displayScale
-      )
-    }
     .environment(lutPreviewModels)
     .background(
       Rectangle()
         .foregroundStyle(.background.secondary)
         .ignoresSafeArea()
     )
-    .toolbar {
-      EditorToolbarContent(
+    .modifier(
+      EditorToolbarModifier(
         canExport:
           viewModel.hasVideos
           && viewModel.isPreparingClips == false
@@ -110,7 +87,7 @@ struct EditorView: View {
         onShowVideoInformation: showSelectedVideoInformation,
         onExport: startExport
       )
-    }
+    )
     .onAppear {
       reloadPreview()
     }
@@ -120,6 +97,10 @@ struct EditorView: View {
     }
     .onChange(of: viewModel.selectedLUTID) { _, _ in applyComposition() }
     .onChange(of: viewModel.amount) { _, _ in applyComposition() }
+    .onChange(of: viewModel.whiteBalance) { _, _ in
+      applyComposition(change: .parametricDocument)
+      updateLUTPreviewContext()
+    }
     .onChange(of: viewModel.exposure) { _, _ in
       applyComposition(change: .parametricDocument)
       updateLUTPreviewContext()
@@ -179,14 +160,7 @@ struct EditorView: View {
       allowedContentTypes: [.movie],
       allowsMultipleSelection: true
     ) { result in
-      switch result {
-      case .success(let fileURLs):
-        loadPickedVideoFiles(fileURLs)
-      case .failure(let error):
-        if (error as? CocoaError)?.code != .userCancelled {
-          errorMessage = error.localizedDescription
-        }
-      }
+      handleVideoFileImport(result)
     }
     .fileDialogDefaultDirectory(defaultVideoFolderAccess?.url)
     .alert(
@@ -233,6 +207,19 @@ struct EditorView: View {
   private func loadPickedVideoFiles(_ fileURLs: [URL]) {
     guard fileURLs.isEmpty == false else { return }
     loadPickedVideos(photoItems: [], fileURLs: fileURLs)
+  }
+
+  private func handleVideoFileImport(
+    _ result: Result<[URL], any Error>
+  ) {
+    switch result {
+    case .success(let fileURLs):
+      loadPickedVideoFiles(fileURLs)
+    case .failure(let error):
+      if (error as? CocoaError)?.code != .userCancelled {
+        errorMessage = error.localizedDescription
+      }
+    }
   }
 
   private func loadPickedVideos(
@@ -343,7 +330,9 @@ struct EditorView: View {
       LUTPreviewContextID(
         sourceID: preview.lutPreviewSource?.id,
         libraryRevision: library.revision,
-        exposureEV: viewModel.exposure.ev
+        exposureEV: viewModel.exposure.ev,
+        whiteBalanceTemperature: viewModel.whiteBalance.temperature,
+        whiteBalanceTint: viewModel.whiteBalance.tint
       )
     )
   }
@@ -416,6 +405,31 @@ struct EditorView: View {
   }
 }
 
+/// Isolates toolbar construction from the Editor's presentation and lifecycle
+/// modifier chain so each remains a bounded SwiftUI type-checking expression.
+private struct EditorToolbarModifier: ViewModifier {
+
+  let canExport: Bool
+  let canShowVideoInformation: Bool
+  let onDiscard: @MainActor @Sendable () -> Void
+  let onShowSettings: @MainActor @Sendable () -> Void
+  let onShowVideoInformation: @MainActor @Sendable () -> Void
+  let onExport: @MainActor @Sendable () -> Void
+
+  func body(content: Content) -> some View {
+    content.toolbar {
+      EditorToolbarContent(
+        canExport: canExport,
+        canShowVideoInformation: canShowVideoInformation,
+        onDiscard: onDiscard,
+        onShowSettings: onShowSettings,
+        onShowVideoInformation: onShowVideoInformation,
+        onExport: onExport
+      )
+    }
+  }
+}
+
 /// Freezes the selected clip at the moment its Information button is pressed.
 private struct VideoInformationPresentation: Identifiable {
   let id: VideoClip.ID
@@ -429,6 +443,7 @@ private struct EditorLUTStripBindingView: View {
 
   let contentPadding: CGFloat
   let source: LUTPreviewSourceImage?
+  let whiteBalance: WhiteBalanceAdjustment
   let exposure: ExposureAdjustment
 
   var body: some View {
@@ -436,6 +451,7 @@ private struct EditorLUTStripBindingView: View {
       contentPadding: contentPadding,
       library: viewModel.library,
       source: source,
+      whiteBalance: whiteBalance,
       exposure: exposure,
       _selectedLUTID: viewModel.$selectedLUTID
     )
@@ -454,6 +470,7 @@ private struct EditorLayout: View {
   let clips: [VideoClip]
   let selectedClipID: VideoClip.ID?
   let hdrVideoCount: Int
+  @Binding var whiteBalance: WhiteBalanceAdjustment
   @Binding var exposure: ExposureAdjustment
   @Binding var motionBlur: MotionBlurSettings
   @Binding var grain: FilmGrainFeature
@@ -482,6 +499,7 @@ private struct EditorLayout: View {
           selectedClipID: selectedClipID,
           hdrVideoCount: hdrVideoCount,
           lutPreviewSource: lutPreviewSource,
+          whiteBalance: $whiteBalance,
           exposure: $exposure,
           motionBlur: $motionBlur,
           grain: $grain,
@@ -502,14 +520,14 @@ private struct EditorLayout: View {
     )
     .padding(4)
     .safeAreaInset(edge: .bottom) {
-      SizingContainer(height: $effectTabBarHeight) {         
+      SizingContainer(height: $effectTabBarHeight) {
         EditorEffectTabBar(selection: $selectedEffect)
           .fixedSize(horizontal: false, vertical: true)
           .onGeometryChange(for: CGFloat.self, of: \.size.height) {
             newHeight in
             effectTabBarHeight = newHeight
           }
-      }     
+      }
     }
     .animation(.snappy, value: effectTabBarHeight)
     .animation(.snappy, value: height)
@@ -536,6 +554,7 @@ private struct EditorLowerPanel: View {
   let selectedClipID: VideoClip.ID?
   let hdrVideoCount: Int
   let lutPreviewSource: LUTPreviewSourceImage?
+  @Binding var whiteBalance: WhiteBalanceAdjustment
   @Binding var exposure: ExposureAdjustment
   @Binding var motionBlur: MotionBlurSettings
   @Binding var grain: FilmGrainFeature
@@ -552,6 +571,7 @@ private struct EditorLowerPanel: View {
       selectedClipID: selectedClipID,
       hdrVideoCount: hdrVideoCount,
       lutPreviewSource: lutPreviewSource,
+      whiteBalance: $whiteBalance,
       exposure: $exposure,
       motionBlur: $motionBlur,
       grain: $grain,
@@ -571,6 +591,7 @@ private struct EditorLowerPanel: View {
     let selectedClipID: VideoClip.ID?
     let hdrVideoCount: Int
     let lutPreviewSource: LUTPreviewSourceImage?
+    @Binding var whiteBalance: WhiteBalanceAdjustment
     @Binding var exposure: ExposureAdjustment
     @Binding var motionBlur: MotionBlurSettings
     @Binding var grain: FilmGrainFeature
@@ -598,6 +619,7 @@ private struct EditorLowerPanel: View {
           videoCount: clips.count,
           hdrVideoCount: hdrVideoCount,
           lutPreviewSource: lutPreviewSource,
+          whiteBalance: $whiteBalance,
           exposure: $exposure,
           motionBlur: $motionBlur,
           grain: $grain,
@@ -614,6 +636,7 @@ private struct EditorLowerPanel: View {
     let videoCount: Int
     let hdrVideoCount: Int
     let lutPreviewSource: LUTPreviewSourceImage?
+    @Binding var whiteBalance: WhiteBalanceAdjustment
     @Binding var exposure: ExposureAdjustment
     @Binding var motionBlur: MotionBlurSettings
     @Binding var grain: FilmGrainFeature
@@ -627,6 +650,7 @@ private struct EditorLowerPanel: View {
           videoCount: videoCount,
           hdrVideoCount: hdrVideoCount,
           lutPreviewSource: lutPreviewSource,
+          whiteBalance: $whiteBalance,
           exposure: $exposure,
           motionBlur: $motionBlur,
           grain: $grain
@@ -645,6 +669,7 @@ private struct EditorLowerPanel: View {
       let videoCount: Int
       let hdrVideoCount: Int
       let lutPreviewSource: LUTPreviewSourceImage?
+      @Binding var whiteBalance: WhiteBalanceAdjustment
       @Binding var exposure: ExposureAdjustment
       @Binding var motionBlur: MotionBlurSettings
       @Binding var grain: FilmGrainFeature
@@ -656,9 +681,15 @@ private struct EditorLowerPanel: View {
             EditorLUTStripBindingView(
               contentPadding: contentPadding,
               source: lutPreviewSource,
+              whiteBalance: whiteBalance,
               exposure: exposure
             )
             .transition(.opacity)
+
+          case .whiteBalance:
+            EditorWhiteBalanceControls(whiteBalance: $whiteBalance)
+              .padding(.horizontal, contentPadding)
+              .transition(.opacity)
 
           case .exposure:
             EditorExposureControls(exposure: $exposure)
@@ -677,6 +708,134 @@ private struct EditorLowerPanel: View {
           }
         }
         .animation(.smooth, value: selectedEffect)
+      }
+    }
+
+    /// Authors relative Temperature and Tint before Exposure and the LUT.
+    fileprivate struct EditorWhiteBalanceControls: View {
+
+      @Binding var whiteBalance: WhiteBalanceAdjustment
+
+      var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+          HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+              Text("White Balance")
+                .font(.caption.weight(.semibold))
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
+
+              Text("Before LUT")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            Button("Reset") {
+              whiteBalance = .neutral
+            }
+            .font(.caption)
+            .disabled(whiteBalance.isNeutral)
+            .accessibilityIdentifier("white-balance-reset")
+          }
+
+          VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+              Text("Temperature")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+              Spacer(minLength: 12)
+
+              HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(
+                  whiteBalance.temperature,
+                  format: .number
+                    .sign(strategy: .always(includingZero: false))
+                    .precision(.fractionLength(0))
+                )
+                Text("K")
+              }
+              .font(.caption)
+              .monospacedDigit()
+              .foregroundStyle(.primary)
+            }
+
+            Slider(
+              value: $whiteBalance.temperature,
+              in: WhiteBalanceAdjustment.supportedTemperatureRange,
+              step: WhiteBalanceAdjustment.temperatureStep
+            )
+            .tint(.primary)
+            .accessibilityLabel("Temperature")
+            .accessibilityValue(
+              Text(
+                "\(whiteBalance.temperature, format: .number.sign(strategy: .always(includingZero: false)).precision(.fractionLength(0))) K"
+              )
+            )
+            .accessibilityIdentifier("white-balance-temperature-slider")
+
+            HStack {
+              Text("Cool")
+              Spacer()
+              Text("Warm")
+            }
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+          }
+
+          VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+              Text("Tint")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+              Spacer(minLength: 12)
+
+              Text(
+                whiteBalance.tint,
+                format: .number
+                  .sign(strategy: .always(includingZero: false))
+                  .precision(.fractionLength(0))
+              )
+              .font(.caption)
+              .monospacedDigit()
+              .foregroundStyle(.primary)
+            }
+
+            Slider(
+              value: $whiteBalance.tint,
+              in: WhiteBalanceAdjustment.supportedTintRange,
+              step: WhiteBalanceAdjustment.tintStep
+            )
+            .tint(.primary)
+            .accessibilityLabel("Tint")
+            .accessibilityValue(
+              Text(
+                whiteBalance.tint,
+                format: .number
+                  .sign(strategy: .always(includingZero: false))
+                  .precision(.fractionLength(0))
+              )
+            )
+            .accessibilityIdentifier("white-balance-tint-slider")
+
+            HStack {
+              Text("Green")
+              Spacer()
+              Text("Magenta")
+            }
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+          }
+
+          Text(
+            "Corrects the source white point before Exposure and the LUT."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
       }
     }
 

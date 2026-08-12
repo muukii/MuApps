@@ -90,8 +90,8 @@ nonisolated struct PreparedFargVideoRender: @unchecked Sendable {
 
 /// Controls operational backpressure without changing the authored recipe.
 nonisolated enum FargVideoRenderPurpose: Equatable, Sendable {
-  /// Realtime playback renders only the pixels consumed by the live viewport.
-  case preview(FargPreviewRenderTarget)
+  /// Realtime playback renders at the fixed orientation-aware 1080p policy.
+  case preview
   /// Export completes every requested frame.
   case export
 
@@ -104,9 +104,14 @@ nonisolated enum FargVideoRenderPurpose: Equatable, Sendable {
     }
   }
 
-  var motionBlurRenderTarget: MotionBlurRenderTarget {
+  func motionBlurRenderTarget(
+    sourceDisplaySize: CGSize
+  ) throws -> MotionBlurRenderTarget {
     switch self {
-    case .preview(let target):
+    case .preview:
+      let target = try FargPreviewRenderTarget(
+        sourceDisplaySize: sourceDisplaySize
+      )
       return .fitWithin(target.maximumPixelSize)
     case .export:
       return .source
@@ -124,8 +129,8 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
 
   /// Prepares the stable temporal asset used by one editor Preview source.
   ///
-  /// The returned source is independent of viewport size, LUT state, and Motion
-  /// Blur controls. Keeping it alive lets Preview replace only its video
+  /// The returned source is independent of Preview resolution, LUT state, and
+  /// Motion Blur controls. Keeping it alive lets Preview replace only its video
   /// composition while preserving the `AVPlayerItem`, decoder, playhead, and
   /// audio clock.
   func prepareTemporalPreviewSource(
@@ -144,13 +149,12 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
   /// Disabled Motion Blur still uses the temporal source asset, but its
   /// current-frame mode avoids requesting temporal neighbors or starting
   /// VideoToolbox. Enabled mode shares a live strength source, and the
-  /// parametric document source lets Exposure and Grain edits update without
+  /// parametric document source lets color and grain edits update without
   /// replacing the composition or player item.
   func makeTemporalPreview(
     source: PreparedMotionBlurSource,
     recipe: FargVideoRenderRecipe,
     colorInfo: VideoColorInfo,
-    target: FargPreviewRenderTarget,
     strengthSource: MotionBlurStrengthSource,
     documentSource: ParametricDocumentSource
   ) throws -> PreparedFargVideoRender {
@@ -174,7 +178,9 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
     .makeVideoComposition(
       source: source,
       mode: mode,
-      renderTarget: .fitWithin(target.maximumPixelSize),
+      renderTarget: try FargVideoRenderPurpose.preview.motionBlurRenderTarget(
+        sourceDisplaySize: source.sourceDisplaySize
+      ),
       outputColorSpace:
         recipe.lutOutputColorSpace?.coreMediaDeliveryColorSpace,
       postProcessor: Self.makePostProcessor(
@@ -216,7 +222,9 @@ nonisolated struct FargVideoRenderPipeline: Sendable {
     let composition = try builder.makeVideoComposition(
       source: source,
       mode: mode,
-      renderTarget: purpose.motionBlurRenderTarget,
+      renderTarget: try purpose.motionBlurRenderTarget(
+        sourceDisplaySize: source.sourceDisplaySize
+      ),
       outputColorSpace:
         recipe.lutOutputColorSpace?.coreMediaDeliveryColorSpace,
       postProcessor: Self.makePostProcessor(

@@ -54,6 +54,9 @@ final class EditorViewModel: GraphObject, Identifiable {
   /// Exposure offset evaluated before the selected LUT.
   @GraphStored var exposure: ExposureAdjustment = .neutral
 
+  /// Relative white balance evaluated before Exposure and the selected LUT.
+  @GraphStored var whiteBalance: WhiteBalanceAdjustment = .neutral
+
   /// Optical Flow motion blur shared by every clip in the collection.
   @GraphStored var motionBlur: MotionBlurSettings = .disabled
 
@@ -176,11 +179,12 @@ final class EditorViewModel: GraphObject, Identifiable {
 
   /// Compiles the current spatial adjustments in their evaluation order.
   ///
-  /// Exposure is evaluated before the selected LUT so it changes the LUT's
-  /// input response. The identity-stable film-grain feature follows both.
+  /// White Balance and Exposure are evaluated before the selected LUT so both
+  /// change its input response. The identity-stable film-grain feature follows.
   private func makeDocument() throws -> EditingDocument {
     var features: [MainFeature] = [
-      .effect(exposure.feature)
+      .effect(whiteBalance.feature),
+      .effect(exposure.feature),
     ]
     // A zero-strength LUT contributes nothing. Omitting it also avoids
     // materializing and evaluating an otherwise null color cube.

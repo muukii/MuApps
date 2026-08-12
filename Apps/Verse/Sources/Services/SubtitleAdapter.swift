@@ -25,9 +25,9 @@ struct SubtitleAdapter {
   }
 
   private static func encodeSRT(_ subtitle: Subtitle) -> String {
-    subtitle.cues.map { cue in
+    subtitle.cues.enumerated().map { index, cue in
       """
-      \(cue.id)
+      \(index + 1)
       \(formatSRTTime(cue.startTime)) --> \(formatSRTTime(cue.endTime))
       \(cue.text)
       """

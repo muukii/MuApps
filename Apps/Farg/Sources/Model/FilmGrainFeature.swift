@@ -34,7 +34,7 @@ nonisolated struct FilmGrainFeature: ImageEffectFeatureType {
   /// The relative grain-particle size.
   ///
   /// The rendered pitch resolves against the output height, so the
-  /// viewport-fitted preview and the source-resolution export show the same
+  /// fixed-1080p preview and the source-resolution export show the same
   /// texture scale.
   var size: Int {
     didSet {
