@@ -27,15 +27,18 @@ struct SavedListView: View {
   @Binding private var scrollTargetID: UUID?
   @Binding private var navigationPath: [SavedListNavigationRoute]
   @Binding private var detailScrollTargetID: UUID?
+  @Binding private var selectedContentKind: JournalVault.Card.Kind?
 
   init(
     scrollTargetID: Binding<UUID?> = .constant(nil),
     navigationPath: Binding<[SavedListNavigationRoute]> = .constant([]),
-    detailScrollTargetID: Binding<UUID?> = .constant(nil)
+    detailScrollTargetID: Binding<UUID?> = .constant(nil),
+    selectedContentKind: Binding<JournalVault.Card.Kind?> = .constant(nil)
   ) {
     _scrollTargetID = scrollTargetID
     _navigationPath = navigationPath
     _detailScrollTargetID = detailScrollTargetID
+    _selectedContentKind = selectedContentKind
   }
 
   var body: some View {
@@ -47,7 +50,8 @@ struct SavedListView: View {
           vault: vault,
           scrollTargetID: $scrollTargetID,
           navigationPath: $navigationPath,
-          detailScrollTargetID: $detailScrollTargetID
+          detailScrollTargetID: $detailScrollTargetID,
+          selectedContentKind: $selectedContentKind
         )
         .modelContainer(vault.contentStore.container)
       } else {
@@ -70,6 +74,7 @@ private struct VaultSavedListContentView: View {
   @Binding var scrollTargetID: UUID?
   @Binding var navigationPath: [SavedListNavigationRoute]
   @Binding var detailScrollTargetID: UUID?
+  @Binding var selectedContentKind: JournalVault.Card.Kind?
 
   @Environment(\.calendar) private var calendar
   @Environment(\.appPalette) private var palette
@@ -84,8 +89,10 @@ private struct VaultSavedListContentView: View {
   @State private var isEditDraftLoading = false
   @State private var isSavingEdit = false
   @State private var isDeletingEntry = false
+  @State private var todoCompletionMutationCardIDs: Set<UUID> = []
   @State private var editErrorMessage: String?
   @State private var deleteErrorMessage: String?
+  @State private var todoCompletionErrorMessage: String?
   @State private var deleteCandidate: VaultSavedEntry?
   @Namespace private var navigationTransitionNamespace
 
@@ -93,12 +100,14 @@ private struct VaultSavedListContentView: View {
     vault: VaultInstance,
     scrollTargetID: Binding<UUID?>,
     navigationPath: Binding<[SavedListNavigationRoute]>,
-    detailScrollTargetID: Binding<UUID?>
+    detailScrollTargetID: Binding<UUID?>,
+    selectedContentKind: Binding<JournalVault.Card.Kind?>
   ) {
     self.vault = vault
     _scrollTargetID = scrollTargetID
     _navigationPath = navigationPath
     _detailScrollTargetID = detailScrollTargetID
+    _selectedContentKind = selectedContentKind
     _edges = Query(
       filter: #Predicate<JournalVault.CardEdge> { edge in
         edge.deletedAt == nil
@@ -114,54 +123,32 @@ private struct VaultSavedListContentView: View {
     let entries = entries
     let edgeIDs = Set(entries.map(\.edgeID))
     let rootEntries = entries.filter { $0.parentEdgeID == nil }
-    let visibleEdgeIDs = Set(rootEntries.map(\.edgeID))
+    let rootEdgeIDs = Set(rootEntries.map(\.edgeID))
+    let visibleRootEntries = Self.visibleRootEntries(
+      from: rootEntries,
+      selectedContentKind: selectedContentKind
+    )
+    let visibleEdgeIDs = Set(visibleRootEntries.map(\.edgeID))
     let isMutationDisabled =
       isEditDraftLoading || isSavingEdit || isDeletingEntry
+      || todoCompletionMutationCardIDs.isEmpty == false
     let visibleSections = VaultSavedDaySection.sections(
-      for: rootEntries.sortedForVaultList(),
+      for: visibleRootEntries.sortedForVaultList(),
       calendar: calendar
     )
     let childEntriesByParentID = Self.childEntriesByParentID(
       for: entries,
       edgeIDs: edgeIDs
     )
-    let locationPins = Self.savedLocationPins(for: rootEntries)
+    let locationPins = Self.savedLocationPins(for: visibleRootEntries)
 
     ScrollViewReader { proxy in
       ScrollView {
-        // One lazy stack owns every row. Nesting a second `LazyVStack` per day
-        // would force the outer stack to size a container that is itself still
-        // estimating its children, which drifts the content height while
-        // scrolling. `Section` gives the same day grouping inside one stack.
-        LazyVStack(alignment: .leading, spacing: 2) {
-          if locationPins.isEmpty == false {
-            VaultSavedLocationsMapNavigationHeader(
-              pins: locationPins,
-              transitionNamespace: navigationTransitionNamespace
-            )
-          }
-
-          ForEach(visibleSections) { section in
-            Section {
-              ForEach(section.entries) { entry in
-                VaultSavedEntryRow(
-                  entry: entry,
-                  isMutationDisabled: isMutationDisabled,
-                  transitionNamespace: navigationTransitionNamespace,
-                  onShare: presentSharePreview,
-                  onEdit: presentEditDraft,
-                  onRequestDelete: { entry in
-                    deleteCandidate = entry
-                  }
-                )
-              }
-            } header: {
-              VaultSavedDayHeader(day: section.day)
-                .padding(.vertical, daySectionTopSpacing)
-            }
-          }
-        }
-        .padding(.horizontal, 16)
+        savedListContent(
+          sections: visibleSections,
+          locationPins: locationPins,
+          isMutationDisabled: isMutationDisabled
+        )
       }
       .contentMargins(
         .bottom,
@@ -172,22 +159,47 @@ private struct VaultSavedListContentView: View {
       .scrollDismissesKeyboard(.interactively)
       .scrollBounceBehavior(.always, axes: .vertical)
       .onChange(of: scrollTargetID, initial: true) { _, _ in
-        scrollToPendingEntry(using: proxy, availableEdgeIDs: visibleEdgeIDs)
+        resolvePendingRootScroll(
+          using: proxy,
+          rootEdgeIDs: rootEdgeIDs,
+          visibleEdgeIDs: visibleEdgeIDs
+        )
+      }
+      .onChange(of: rootEdgeIDs) { _, _ in
+        resolvePendingRootScroll(
+          using: proxy,
+          rootEdgeIDs: rootEdgeIDs,
+          visibleEdgeIDs: visibleEdgeIDs
+        )
       }
       .onChange(of: visibleEdgeIDs) { _, _ in
-        scrollToPendingEntry(using: proxy, availableEdgeIDs: visibleEdgeIDs)
+        resolvePendingRootScroll(
+          using: proxy,
+          rootEdgeIDs: rootEdgeIDs,
+          visibleEdgeIDs: visibleEdgeIDs
+        )
       }
     }
     .overlay {
       if visibleSections.isEmpty {
-        ContentUnavailableView("No Entries", systemImage: "book.closed")
-          .allowsHitTesting(false)
+        VaultSavedListEmptyState(
+          hasAnyRootEntries: rootEntries.isEmpty == false,
+          selectedContentKind: selectedContentKind,
+          onShowAllEntries: {
+            selectedContentKind = nil
+          }
+        )
       }
     }
     .scrollContentBackground(.hidden)
     .background(.background)
     .refreshable {
       await vaultRuntime.refresh()
+    }
+    .toolbar {
+      ToolbarItem(placement: .appTrailingAction) {
+        VaultSavedListContentFilterMenu(selection: $selectedContentKind)
+      }
     }
     .navigationDestination(for: SavedListNavigationRoute.self) { route in
       switch route {
@@ -206,10 +218,12 @@ private struct VaultSavedListContentView: View {
           detailScrollTargetID: $detailScrollTargetID,
           isEditingDisabled: isMutationDisabled,
           isDeletingDisabled: isMutationDisabled,
+          isTodoCompletionDisabled: isMutationDisabled,
           transitionNamespace: navigationTransitionNamespace,
           onShare: presentSharePreview,
           onEdit: presentEditDraft,
-          onDelete: deleteEntry
+          onDelete: deleteEntry,
+          onToggleTodoCompletion: toggleTodoCompletion
         )
       }
     }
@@ -246,6 +260,13 @@ private struct VaultSavedListContentView: View {
         Text(deleteErrorMessage)
       }
     }
+    .alert("Could Not Update Todo", isPresented: todoCompletionErrorPresentation) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      if let todoCompletionErrorMessage {
+        Text(todoCompletionErrorMessage)
+      }
+    }
     .confirmationDialog(
       "Delete Entry",
       isPresented: deleteConfirmationPresentation,
@@ -278,6 +299,49 @@ private struct VaultSavedListContentView: View {
     }
   }
 
+  /// Builds the lazy Home stream in its own type-checking boundary.
+  ///
+  /// One lazy stack owns every row. Nesting a second `LazyVStack` per day would
+  /// force the outer stack to size a container that is itself still estimating
+  /// its children, which drifts the content height while scrolling. `Section`
+  /// gives the same day grouping inside one stack.
+  private func savedListContent(
+    sections: [VaultSavedDaySection],
+    locationPins: [VaultSavedLocationPin],
+    isMutationDisabled: Bool
+  ) -> some View {
+    LazyVStack(alignment: .leading, spacing: 2) {
+      if locationPins.isEmpty == false {
+        VaultSavedLocationsMapNavigationHeader(
+          pins: locationPins,
+          transitionNamespace: navigationTransitionNamespace
+        )
+      }
+
+      ForEach(sections) { section in
+        Section {
+          ForEach(section.entries) { entry in
+            VaultSavedEntryRow(
+              entry: entry,
+              isMutationDisabled: isMutationDisabled,
+              transitionNamespace: navigationTransitionNamespace,
+              onShare: presentSharePreview,
+              onEdit: presentEditDraft,
+              onRequestDelete: { entry in
+                deleteCandidate = entry
+              },
+              onToggleTodoCompletion: toggleTodoCompletion
+            )
+          }
+        } header: {
+          VaultSavedDayHeader(day: section.day)
+            .padding(.vertical, daySectionTopSpacing)
+        }
+      }
+    }
+    .padding(.horizontal, 16)
+  }
+
   /// Groups child placements once for the current query snapshot.
   private static func childEntriesByParentID(
     for entries: [VaultSavedEntry],
@@ -298,6 +362,21 @@ private struct VaultSavedListContentView: View {
     edges.compactMap { edge in
       guard let card = edge.card else { return nil }
       return VaultSavedEntry(edge: edge, card: card, store: vault.contentStore)
+    }
+  }
+
+  /// Applies the Home-only content projection without changing the complete
+  /// query snapshot used to construct entry-detail navigation.
+  private static func visibleRootEntries(
+    from rootEntries: [VaultSavedEntry],
+    selectedContentKind: JournalVault.Card.Kind?
+  ) -> [VaultSavedEntry] {
+    guard let selectedContentKind else {
+      return rootEntries
+    }
+
+    return rootEntries.filter { entry in
+      entry.kind == selectedContentKind
     }
   }
 
@@ -328,21 +407,27 @@ private struct VaultSavedListContentView: View {
     }
   }
 
-  /// Scrolls after the posted edge has reached this view's live SwiftData query.
-  /// Keeping the request pending until then avoids racing persistence with the
-  /// lazy grid's view construction.
-  private func scrollToPendingEntry(
+  /// Resolves a root-post scroll after the edge reaches the live query.
+  ///
+  /// A visible root scrolls normally. A root hidden by the active filter clears
+  /// the request without scrolling, so changing filters later cannot produce a
+  /// stale jump. Unknown ids remain pending while persistence is still racing
+  /// the query snapshot.
+  private func resolvePendingRootScroll(
     using proxy: ScrollViewProxy,
-    availableEdgeIDs: Set<UUID>
+    rootEdgeIDs: Set<UUID>,
+    visibleEdgeIDs: Set<UUID>
   ) {
-    guard let targetID = scrollTargetID, availableEdgeIDs.contains(targetID)
-    else {
+    guard let targetID = scrollTargetID, rootEdgeIDs.contains(targetID) else {
       return
     }
 
-    withAnimation(.smooth) {
-      proxy.scrollTo(targetID, anchor: .top)
+    if visibleEdgeIDs.contains(targetID) {
+      withAnimation(.smooth) {
+        proxy.scrollTo(targetID, anchor: .top)
+      }
     }
+
     scrollTargetID = nil
   }
 
@@ -362,6 +447,16 @@ private struct VaultSavedListContentView: View {
     } set: { isPresented in
       if isPresented == false {
         deleteErrorMessage = nil
+      }
+    }
+  }
+
+  private var todoCompletionErrorPresentation: Binding<Bool> {
+    Binding {
+      todoCompletionErrorMessage != nil
+    } set: { isPresented in
+      if isPresented == false {
+        todoCompletionErrorMessage = nil
       }
     }
   }
@@ -427,6 +522,41 @@ private struct VaultSavedListContentView: View {
     }
   }
 
+  /// Completes or reopens a Todo through the selected vault's transactional
+  /// mutation boundary. SwiftData drives the visible row update; the explicit
+  /// widget reload keeps the read-only latest-entry projection aligned.
+  private func toggleTodoCompletion(_ entry: VaultSavedEntry) {
+    guard entry.kind == .todo,
+      todoCompletionMutationCardIDs.contains(entry.cardID) == false
+    else {
+      return
+    }
+
+    let shouldComplete = entry.isCompleted == false
+    todoCompletionMutationCardIDs.insert(entry.cardID)
+
+    Task { @MainActor in
+      defer { todoCompletionMutationCardIDs.remove(entry.cardID) }
+
+      do {
+        guard let vault = vaultRuntime.selectedVault else {
+          throw VaultSavedEntryEditDraftError.vaultUnavailable
+        }
+
+        let didChange = try vault.contentStore.setTodoCompletion(
+          cardID: entry.cardID,
+          isCompleted: shouldComplete
+        )
+        guard didChange else { return }
+
+        await vaultRuntime.refresh()
+        WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
+      } catch {
+        todoCompletionErrorMessage = error.localizedDescription
+      }
+    }
+  }
+
   @MainActor
   private func deleteEntry(_ entry: VaultSavedEntry) async -> Bool {
     guard isDeletingEntry == false, isEditDraftLoading == false,
@@ -453,6 +583,98 @@ private struct VaultSavedListContentView: View {
     } catch {
       deleteErrorMessage = error.localizedDescription
       return false
+    }
+  }
+}
+
+/// Native single-selection menu for the content types that can appear on Home.
+private struct VaultSavedListContentFilterMenu: View {
+
+  @Binding var selection: JournalVault.Card.Kind?
+
+  var body: some View {
+    Menu {
+      Picker("Filter Entries", selection: $selection) {
+        Label("All Entries", systemImage: "square.stack.3d.up")
+          .tag(JournalVault.Card.Kind?.none)
+
+        ForEach(filterableKinds, id: \.self) { kind in
+          Label {
+            Text(kind.vaultListDisplayTitle)
+          } icon: {
+            Image(systemName: kind.vaultListSymbolName)
+          }
+          .tag(Optional(kind))
+        }
+      }
+      .pickerStyle(.inline)
+    } label: {
+      Label("Filter Entries", systemImage: filterSymbolName)
+        .labelStyle(.iconOnly)
+    }
+    .accessibilityLabel("Filter Entries")
+    .accessibilityValue(accessibilityValue)
+  }
+
+  private var filterableKinds: [JournalVault.Card.Kind] {
+    JournalVault.Card.Kind.allCases.filter(\.isAvailableInSavedListFilter)
+  }
+
+  private var filterSymbolName: String {
+    selection == nil
+      ? "line.3.horizontal.decrease.circle"
+      : "line.3.horizontal.decrease.circle.fill"
+  }
+
+  private var accessibilityValue: Text {
+    if let selection {
+      Text(selection.vaultListDisplayTitle)
+    } else {
+      Text("All Entries")
+    }
+  }
+}
+
+/// Empty-state projection that distinguishes an empty vault from an empty
+/// filter result while preserving an explicit path back to the complete list.
+private struct VaultSavedListEmptyState: View {
+
+  let hasAnyRootEntries: Bool
+  let selectedContentKind: JournalVault.Card.Kind?
+  let onShowAllEntries: @MainActor @Sendable () -> Void
+
+  var body: some View {
+    if hasAnyRootEntries, let selectedContentKind {
+      ContentUnavailableView {
+        Label(
+          "No Matching Entries",
+          systemImage: selectedContentKind.vaultListSymbolName
+        )
+      } description: {
+        Text("This vault has no entries of the selected content type.")
+      } actions: {
+        Button("Show All Entries", action: onShowAllEntries)
+      }
+    } else {
+      ContentUnavailableView("No Entries", systemImage: "book.closed")
+        .allowsHitTesting(false)
+    }
+  }
+}
+
+extension JournalVault.Card.Kind {
+
+  /// Whether users can intentionally author or import this type and therefore
+  /// select it from Home's content filter.
+  fileprivate var isAvailableInSavedListFilter: Bool {
+    switch self {
+    case .text, .todo, .link, .file, .photo, .video, .livePhoto, .audio,
+      .suggestion, .doodle, .bauhaus:
+      true
+    case .unknown:
+      false
+    @unknown default:
+      false
     }
   }
 }

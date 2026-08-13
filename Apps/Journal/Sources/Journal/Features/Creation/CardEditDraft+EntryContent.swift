@@ -18,6 +18,10 @@ extension CardEditDraft {
     switch kind {
     case .text:
       return .text(text)
+    case .todo:
+      return .todo(
+        TodoContentSource(text: text, completedAt: completedAt)
+      )
     case .link:
       return .link(text)
     case .file:

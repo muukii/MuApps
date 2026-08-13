@@ -23,6 +23,7 @@ enum VaultRecordMapper {
   enum CardKey {
     static let kind = "kind"
     static let body = "body"
+    static let completedAt = "completedAt"
     static let createdAt = "createdAt"
     static let updatedAt = "updatedAt"
     static let location = "location"
@@ -75,6 +76,7 @@ enum VaultRecordMapper {
     let cardRecord = CardRecord(record: record)
     cardRecord.kindRawValue = card.kindRawValue
     cardRecord.body = card.body
+    cardRecord.completedAt = card.kind == .todo ? card.completedAt : nil
     cardRecord.createdAt = card.createdAt
     cardRecord.updatedAt = card.updatedAt
     cardRecord.location = card.location
@@ -163,6 +165,7 @@ enum VaultRecordMapper {
       card.kindRawValue = cardRecord.kindRawValue
     }
     card.body = cardRecord.body
+    card.completedAt = card.kind == .todo ? cardRecord.completedAt : nil
     if record[CardKey.createdAt] != nil {
       card.createdAt = cardRecord.createdAt
     }
@@ -177,8 +180,7 @@ enum VaultRecordMapper {
     // A live remote record recreates a placement that was previously retained
     // as locally deleted. `deletedAt` itself is intentionally not transported.
     edge.deletedAt = nil
-    if
-      record[CardEdgeKey.cardID] != nil,
+    if record[CardEdgeKey.cardID] != nil,
       let cardID = UUID(uuidString: edgeRecord.cardIDRawValue)
     {
       edge.setCardReferenceID(cardID)
@@ -198,8 +200,7 @@ enum VaultRecordMapper {
 
   static func update(_ attachment: Attachment, from record: CKRecord) {
     let attachmentRecord = AttachmentRecord(record: record)
-    if
-      record[AttachmentKey.cardID] != nil,
+    if record[AttachmentKey.cardID] != nil,
       let cardID = UUID(uuidString: attachmentRecord.cardIDRawValue)
     {
       attachment.setCardReferenceID(cardID)
@@ -208,8 +209,7 @@ enum VaultRecordMapper {
       attachment.kindRawValue = attachmentRecord.kindRawValue
     }
     attachment.byteSize = attachmentRecord.byteSize
-    if
-      record[AttachmentKey.primaryResourceID] != nil,
+    if record[AttachmentKey.primaryResourceID] != nil,
       let primaryResourceID = UUID(uuidString: attachmentRecord.primaryResourceIDRawValue)
     {
       attachment.setPrimaryResourceReferenceID(primaryResourceID)
@@ -222,8 +222,7 @@ enum VaultRecordMapper {
 
   static func update(_ resource: AttachmentResource, from record: CKRecord) {
     let resourceRecord = AttachmentResourceRecord(record: record)
-    if
-      record[AttachmentResourceKey.attachmentID] != nil,
+    if record[AttachmentResourceKey.attachmentID] != nil,
       let attachmentID = UUID(uuidString: resourceRecord.attachmentIDRawValue)
     {
       resource.setAttachmentReferenceID(attachmentID)

@@ -123,6 +123,7 @@ struct NoteSnapshot: Sendable {
 /// the vault media file.
 enum NoteContent: Sendable {
   case text(String)
+  case todo(String, isCompleted: Bool)
   case link(String)
   case file(WidgetFileContent)
   case photo(Data?)
@@ -220,6 +221,7 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
         id: card.id,
         kind: card.kind,
         body: card.body,
+        completedAt: card.completedAt,
         createdAt: card.createdAt,
         mediaAttachment: Self.mediaAttachment(for: card, store: store)
       )
@@ -282,6 +284,7 @@ private struct WidgetLatestCardSnapshot: Sendable {
   let id: UUID
   let kind: Card.Kind
   let body: String
+  let completedAt: Date?
   let createdAt: Date
   let mediaAttachment: WidgetMediaAttachmentSnapshot?
 
@@ -297,6 +300,8 @@ private struct WidgetLatestCardSnapshot: Sendable {
     switch kind {
     case .text:
       return .text(displayText)
+    case .todo:
+      return .todo(displayText, isCompleted: completedAt != nil)
     case .link:
       return .link(displayText)
     case .file:
@@ -567,6 +572,13 @@ private struct NoteContentView: View {
         .lineLimit(bodyLineLimit)
         .multilineTextAlignment(.leading)
         .minimumScaleFactor(0.85)
+    case .todo(let text, let isCompleted):
+      WidgetTodoView(
+        text: text,
+        isCompleted: isCompleted,
+        font: bodyFont,
+        lineLimit: bodyLineLimit
+      )
     case .link(let urlString):
       Label {
         Text(urlString)
@@ -623,6 +635,34 @@ private struct NoteContentView: View {
     case .systemLarge: 14
     default: 4
     }
+  }
+}
+
+/// Read-only Todo state used by widget families; mutations stay in the app.
+private struct WidgetTodoView: View {
+
+  let text: String
+  let isCompleted: Bool
+  let font: Font
+  let lineLimit: Int
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 6) {
+      Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
+        .font(.body.weight(.semibold))
+
+      Text(text)
+        .font(font)
+        .fontWeight(.medium)
+        .lineLimit(lineLimit)
+        .multilineTextAlignment(.leading)
+        .minimumScaleFactor(0.85)
+        .strikethrough(isCompleted)
+        .opacity(isCompleted ? 0.58 : 1)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .accessibilityElement(children: .combine)
+    .accessibilityValue(isCompleted ? Text("Completed") : Text("Incomplete"))
   }
 }
 
@@ -911,7 +951,7 @@ extension Card.Kind {
       return .bauhaus
     case .suggestion:
       return .suggestion
-    case .text, .link, .audio, .unknown:
+    case .text, .todo, .link, .audio, .unknown:
       return nil
     }
   }
@@ -924,6 +964,8 @@ extension NoteContent {
     switch self {
     case .text:
       return "note.text"
+    case .todo(_, let isCompleted):
+      return isCompleted ? "checkmark.circle.fill" : "circle"
     case .link:
       return "link"
     case .file:
@@ -953,6 +995,9 @@ extension NoteContent {
     case .text(let text):
       let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
       return trimmedText.isEmpty ? String(localized: "Untitled") : trimmedText
+    case .todo(let text, _):
+      let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmedText.isEmpty ? String(localized: "Todo") : trimmedText
     case .link(let urlString):
       let trimmedURLString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
       return trimmedURLString.isEmpty ? String(localized: "Link") : trimmedURLString

@@ -37,9 +37,9 @@ struct CapturedVideo: Sendable, Equatable, Codable {
   }
 }
 
-private extension CapturedVideo {
-  var pixelWidth: Int? { pixelSize.nonZeroPixelWidth }
-  var pixelHeight: Int? { pixelSize.nonZeroPixelHeight }
+extension CapturedVideo {
+  fileprivate var pixelWidth: Int? { pixelSize.nonZeroPixelWidth }
+  fileprivate var pixelHeight: Int? { pixelSize.nonZeroPixelHeight }
 }
 
 /// A selected Live Photo represented by its required still image and paired
@@ -82,17 +82,17 @@ struct CapturedLivePhoto: Sendable, Equatable, Codable {
   }
 }
 
-private extension CapturedLivePhoto {
-  var pixelWidth: Int? { pixelSize.nonZeroPixelWidth }
-  var pixelHeight: Int? { pixelSize.nonZeroPixelHeight }
+extension CapturedLivePhoto {
+  fileprivate var pixelWidth: Int? { pixelSize.nonZeroPixelWidth }
+  fileprivate var pixelHeight: Int? { pixelSize.nonZeroPixelHeight }
 }
 
-private extension CGSize {
-  var nonZeroPixelWidth: Int? {
+extension CGSize {
+  fileprivate var nonZeroPixelWidth: Int? {
     width > 0 ? Int(width.rounded()) : nil
   }
 
-  var nonZeroPixelHeight: Int? {
+  fileprivate var nonZeroPixelHeight: Int? {
     height > 0 ? Int(height.rounded()) : nil
   }
 }
@@ -116,6 +116,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     case createdAt
     case kind
     case text
+    case completedAt
     case photo
     case video
     case livePhoto
@@ -153,10 +154,14 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   /// The modality this draft will become when persisted as a `Card`.
   var kind: Card.Kind
 
-  /// Written content for text drafts. Media drafts do not treat this as a
-  /// caption. Link drafts use this same body slot as raw URL text until save
-  /// time normalizes it.
+  /// Written content for text and Todo drafts. Media drafts do not treat this
+  /// as a caption. Link drafts use this same body slot as raw URL text until
+  /// save time normalizes it.
   var text: String
+
+  /// Completion timestamp retained while a saved Todo is edited.
+  /// New Todo drafts leave this `nil`, and non-Todo drafts ignore it.
+  var completedAt: Date?
 
   /// Normalized URL for a link draft, or `nil` while the typed value is not a
   /// previewable web URL.
@@ -208,7 +213,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   /// Whether the composer can persist this draft in its current shape.
   var canSave: Bool {
     switch kind {
-    case .text:
+    case .text, .todo:
       return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     case .link:
       return linkURL != nil
@@ -243,7 +248,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   /// input and must not be silently discarded when its editor closes.
   var isCurrentKindContentEmpty: Bool {
     switch kind {
-    case .text, .link:
+    case .text, .todo, .link:
       return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     case .file:
       return false
@@ -274,6 +279,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   var isEmptyTextDraft: Bool {
     kind == .text
       && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && completedAt == nil
       && photo == nil
       && video == nil
       && livePhoto == nil
@@ -289,6 +295,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     createdAt: Date = Date(),
     kind: Card.Kind = .text,
     text: String = "",
+    completedAt: Date? = nil,
     photo: CapturedPhoto? = nil,
     video: CapturedVideo? = nil,
     livePhoto: CapturedLivePhoto? = nil,
@@ -303,6 +310,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     self.createdAt = createdAt
     self.kind = kind
     self.text = text
+    self.completedAt = kind == .todo ? completedAt : nil
     self.photo = photo
     self.video = video
     self.livePhoto = livePhoto
@@ -318,17 +326,21 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     self.displayID = try container.decodeIfPresent(UUID.self, forKey: .displayID) ?? UUID()
     self.createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
-    self.kind = try container.decode(Card.Kind.self, forKey: .kind)
+    let decodedKind = try container.decode(Card.Kind.self, forKey: .kind)
+    self.kind = decodedKind
     self.text = try container.decode(String.self, forKey: .text)
+    let decodedCompletedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
+    self.completedAt = decodedKind == .todo ? decodedCompletedAt : nil
     self.photo = try container.decodeIfPresent(CapturedPhoto.self, forKey: .photo)
     self.video = try container.decodeIfPresent(CapturedVideo.self, forKey: .video)
     self.livePhoto = try container.decodeIfPresent(CapturedLivePhoto.self, forKey: .livePhoto)
     self.audio = try container.decodeIfPresent(AudioRecording.self, forKey: .audio)
     self.suggestion = try container.decodeIfPresent(SuggestionCardPayload.self, forKey: .suggestion)
-    self.suggestionMediaFileURLsByResourceID = try container.decodeIfPresent(
-      [UUID: URL].self,
-      forKey: .suggestionMediaFileURLsByResourceID
-    ) ?? [:]
+    self.suggestionMediaFileURLsByResourceID =
+      try container.decodeIfPresent(
+        [UUID: URL].self,
+        forKey: .suggestionMediaFileURLsByResourceID
+      ) ?? [:]
     self.doodle = try container.decodeIfPresent(DoodleDrawing.self, forKey: .doodle)
     self.bauhaus = try container.decodeIfPresent(BauhausGridDocument.self, forKey: .bauhaus)
     self.location = try container.decodeIfPresent(Coordinate.self, forKey: .location)
@@ -340,13 +352,15 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     try container.encode(createdAt, forKey: .createdAt)
     try container.encode(kind, forKey: .kind)
     try container.encode(text, forKey: .text)
+    try container.encodeIfPresent(completedAt, forKey: .completedAt)
     try container.encodeIfPresent(photo, forKey: .photo)
     try container.encodeIfPresent(video, forKey: .video)
     try container.encodeIfPresent(livePhoto, forKey: .livePhoto)
     try container.encodeIfPresent(audio, forKey: .audio)
     try container.encodeIfPresent(suggestion, forKey: .suggestion)
     if suggestionMediaFileURLsByResourceID.isEmpty == false {
-      try container.encode(suggestionMediaFileURLsByResourceID, forKey: .suggestionMediaFileURLsByResourceID)
+      try container.encode(
+        suggestionMediaFileURLsByResourceID, forKey: .suggestionMediaFileURLsByResourceID)
     }
     try container.encodeIfPresent(doodle, forKey: .doodle)
     try container.encodeIfPresent(bauhaus, forKey: .bauhaus)
@@ -360,6 +374,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     CardEditDraftSnapshot(
       kind: kind,
       text: text,
+      completedAt: completedAt,
       photo: photo,
       video: video,
       livePhoto: livePhoto,
@@ -394,6 +409,12 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   func setLinkURLString(_ urlString: String) {
     kind = .link
     text = urlString
+  }
+
+  /// Switches an empty composer draft to a new, incomplete Todo.
+  func setTodo() {
+    kind = .todo
+    completedAt = nil
   }
 
   /// Stores a completed audio recording and switches the draft to audio mode.
@@ -442,6 +463,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   func resetToEmptyTextPlaceholder() {
     kind = .text
     text = ""
+    completedAt = nil
     photo = nil
     video = nil
     livePhoto = nil
@@ -462,6 +484,7 @@ struct CardEditDraftSnapshot: Sendable, Codable {
 
   var kind: Card.Kind
   var text: String
+  var completedAt: Date?
   var photo: CapturedPhoto?
   var video: CapturedVideo?
   var livePhoto: CapturedLivePhoto?
@@ -479,6 +502,13 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       return VaultContentStore.CardDraft(
         kind: .text,
         text: text,
+        location: location
+      )
+    case .todo:
+      return VaultContentStore.CardDraft(
+        kind: .todo,
+        text: text,
+        completedAt: completedAt,
         location: location
       )
     case .link:
@@ -514,7 +544,8 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       )
     case .video:
       guard let video else { throw CardEditDraftSnapshotError.missingMediaPayload }
-      let thumbnail = video.thumbnailData
+      let thumbnail =
+        video.thumbnailData
         ?? (try? MediaThumbnailGenerator.videoThumbnail(from: video.fileURL).data)
       return VaultContentStore.CardDraft(
         kind: .video,
@@ -534,7 +565,8 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       )
     case .livePhoto:
       guard let livePhoto else { throw CardEditDraftSnapshotError.missingMediaPayload }
-      let thumbnail = livePhoto.thumbnailData
+      let thumbnail =
+        livePhoto.thumbnailData
         ?? (try? MediaThumbnailGenerator.imageThumbnail(from: livePhoto.stillImageData).data)
       return VaultContentStore.CardDraft(
         kind: .livePhoto,
@@ -650,10 +682,11 @@ private enum SuggestionCardResourceStager {
 
     for index in stagedSuggestion.mediaResources.indices {
       let media = stagedSuggestion.mediaResources[index]
-      guard let sourceURL = media.sourceURL(
-        in: suggestion,
-        sourceFilesByResourceID: sourceFilesByResourceID
-      ),
+      guard
+        let sourceURL = media.sourceURL(
+          in: suggestion,
+          sourceFilesByResourceID: sourceFilesByResourceID
+        ),
         sourceURL.isFileURL,
         FileManager.default.fileExists(atPath: sourceURL.path)
       else {
@@ -688,9 +721,9 @@ private enum SuggestionCardResourceStager {
   }
 }
 
-private extension SuggestionCardMediaResource {
+extension SuggestionCardMediaResource {
 
-  func sourceURL(
+  fileprivate func sourceURL(
     in suggestion: SuggestionCardPayload,
     sourceFilesByResourceID: [UUID: URL]
   ) -> URL? {
@@ -737,9 +770,9 @@ private extension SuggestionCardMediaResource {
   }
 }
 
-private extension SuggestionCardMediaResource.Kind {
+extension SuggestionCardMediaResource.Kind {
 
-  var attachmentResourceRole: AttachmentResource.Role {
+  fileprivate var attachmentResourceRole: AttachmentResource.Role {
     switch self {
     case .livePhotoVideo, .video:
       return .suggestionVideo
@@ -758,7 +791,7 @@ private extension SuggestionCardMediaResource.Kind {
     }
   }
 
-  var fallbackContentType: String {
+  fileprivate var fallbackContentType: String {
     switch self {
     case .livePhotoVideo, .video:
       return "public.mpeg-4"
@@ -778,9 +811,9 @@ private extension SuggestionCardMediaResource.Kind {
   }
 }
 
-private extension URL {
+extension URL {
 
-  var inferredContentTypeIdentifier: String? {
+  fileprivate var inferredContentTypeIdentifier: String? {
     UTType(filenameExtension: pathExtension)?.identifier
   }
 }

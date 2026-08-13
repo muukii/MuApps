@@ -16,6 +16,7 @@ public struct VaultSavedEntryModel: Identifiable, Hashable {
   public let id: UUID
   public let kind: JournalVault.Card.Kind
   public let body: String
+  public let completedAt: Date?
   public let createdAt: Date
   public let updatedAt: Date
   public let location: JournalVault.Coordinate?
@@ -25,6 +26,7 @@ public struct VaultSavedEntryModel: Identifiable, Hashable {
     id: UUID,
     kind: JournalVault.Card.Kind,
     body: String,
+    completedAt: Date? = nil,
     createdAt: Date,
     updatedAt: Date,
     location: JournalVault.Coordinate?,
@@ -33,6 +35,7 @@ public struct VaultSavedEntryModel: Identifiable, Hashable {
     self.id = id
     self.kind = kind
     self.body = body
+    self.completedAt = completedAt
     self.createdAt = createdAt
     self.updatedAt = updatedAt
     self.location = location
@@ -44,6 +47,7 @@ public struct VaultSavedEntryModel: Identifiable, Hashable {
     EntryContent(
       kind: kind,
       body: body,
+      completedAt: completedAt,
       attachment: attachment?.contentAttachment
     )
   }
@@ -94,30 +98,47 @@ public struct VaultSavedEntryDetailRow: View {
   let entry: VaultSavedEntryModel
   let isEditingDisabled: Bool
   let isDeletingDisabled: Bool
+  let isTodoCompletionDisabled: Bool
   let onEdit: @MainActor () -> Void
   let onDelete: @MainActor () -> Void
   let onOpen: (@MainActor () -> Void)?
+  let onToggleTodoCompletion: (@MainActor () -> Void)?
 
   public init(
     entry: VaultSavedEntryModel,
     isEditingDisabled: Bool,
     isDeletingDisabled: Bool,
+    isTodoCompletionDisabled: Bool = false,
     onEdit: @escaping @MainActor () -> Void,
     onDelete: @escaping @MainActor () -> Void,
-    onOpen: (@MainActor () -> Void)? = nil
+    onOpen: (@MainActor () -> Void)? = nil,
+    onToggleTodoCompletion: (@MainActor () -> Void)? = nil
   ) {
     self.entry = entry
     self.isEditingDisabled = isEditingDisabled
     self.isDeletingDisabled = isDeletingDisabled
+    self.isTodoCompletionDisabled = isTodoCompletionDisabled
     self.onEdit = onEdit
     self.onDelete = onDelete
     self.onOpen = onOpen
+    self.onToggleTodoCompletion = onToggleTodoCompletion
   }
 
   public var body: some View {
-    EntryContentView(content: entry.content, style: .detail)
-      .frame(maxWidth: .infinity, alignment: .center)
-      .foregroundStyle(.appOnPrimaryContainer)
+    EntryContentView(
+      content: entry.content,
+      style: .detail,
+      onToggleTodoCompletion: todoCompletionAction
+    )
+    .frame(maxWidth: .infinity, alignment: .center)
+    .foregroundStyle(.appOnPrimaryContainer)
+  }
+
+  private var todoCompletionAction: (@MainActor () -> Void)? {
+    guard entry.kind == .todo, isTodoCompletionDisabled == false else {
+      return nil
+    }
+    return onToggleTodoCompletion
   }
 }
 
@@ -144,6 +165,8 @@ extension JournalVault.Card.Kind {
     switch self {
     case .text:
       "Text"
+    case .todo:
+      "Todo"
     case .link:
       "Link"
     case .file:
@@ -173,6 +196,8 @@ extension JournalVault.Card.Kind {
     switch self {
     case .text:
       "text.alignleft"
+    case .todo:
+      "checkmark.circle"
     case .link:
       "link"
     case .file:

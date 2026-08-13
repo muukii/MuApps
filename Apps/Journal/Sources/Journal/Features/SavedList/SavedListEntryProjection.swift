@@ -35,6 +35,8 @@ struct VaultSavedEntry: Identifiable {
   var sortIndex: Int { edge.sortIndex }
   var kind: JournalVault.Card.Kind { card.kind }
   var body: String { card.body }
+  var completedAt: Date? { card.completedAt }
+  var isCompleted: Bool { card.isCompleted }
   var createdAt: Date { card.createdAt }
   var updatedAt: Date { card.updatedAt }
   var location: JournalVault.Coordinate? { card.location }
@@ -64,6 +66,13 @@ extension VaultSavedEntry {
     switch kind {
     case .text:
       return CardEditDraft(kind: .text, text: body, location: location)
+    case .todo:
+      return CardEditDraft(
+        kind: .todo,
+        text: body,
+        completedAt: completedAt,
+        location: location
+      )
     case .link:
       return CardEditDraft(kind: .link, text: body, location: location)
     case .file:
@@ -455,6 +464,7 @@ extension VaultSavedEntry {
       id: edgeID,
       kind: kind,
       body: body,
+      completedAt: completedAt,
       createdAt: createdAt,
       location: location,
       attachment: attachment?.shareSource
@@ -470,6 +480,7 @@ extension VaultSavedEntry {
       id: edgeID,
       kind: kind,
       body: body,
+      completedAt: completedAt,
       createdAt: createdAt,
       updatedAt: updatedAt,
       location: location,

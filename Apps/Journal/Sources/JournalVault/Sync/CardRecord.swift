@@ -15,6 +15,9 @@ final class CardRecord {
   @CKField("body", .string, default: "")
   var body: String
 
+  @CKField("completedAt", .date)
+  var completedAt: Date?
+
   @CKField("createdAt", .date, required: true)
   var createdAt: Date
 

@@ -8,10 +8,11 @@ functional change lands (see [Documentation Policy](#documentation-policy)).
 ## Overview
 
 `Journal` is a journaling app for iPhone, iPad, and native macOS. Each thing a
-user records — text, a shared file, a photo, a doodle, Bauhaus grid artwork,
-ambient sound, or (on supported iPhone/iPad hardware) a Journaling Suggestion —
-keeps a presentation suited to that content instead of being forced into one
-shared card shape. `Card` remains the internal persisted content-row name.
+user records — text, a Todo, a shared file, a photo, a doodle, Bauhaus grid
+artwork, ambient sound, or (on supported iPhone/iPad hardware) a Journaling
+Suggestion — keeps a presentation suited to that content instead of being
+forced into one shared card shape. `Card` remains the internal persisted
+content-row name.
 iCloud sync and vault collaboration are hard product requirements, so
 the app is moving to **per-vault SwiftData stores with CloudKit mirroring
 disabled** and explicit CloudKit sync through `JournalVault`.
@@ -28,7 +29,7 @@ exists today is:
   developed and exercised on its own, independent of the undecided UI.
 - A **Creation-first app shell** that automatically activates the restored or
   first available vault, presents `VaultSelectionView` as a management sheet,
-  then writes text, link, photo, audio, doodle, and
+  then writes text, Todo, link, photo, audio, doodle, and
   Bauhaus content into the selected `VaultInstance` through content-specific editors,
   plus a **dev gallery**
   (`CaptureGalleryView`) that launches each component standalone for on-device
@@ -160,7 +161,8 @@ App Group and resolves the newest active root `CardEdge`
 (`parentEdgeID == nil && deletedAt == nil`) by creation date. Continuations and
 logically deleted entries are never eligible for the Latest Note widget,
 including when a child was authored more recently than every root. It shows
-kind-aware content: text uses `Card.body` (falling back to `Untitled`), links use
+kind-aware content: text uses `Card.body` (falling back to `Untitled`), Todo
+uses `Card.body` plus the read-only state derived from `completedAt`, links use
 their stored URL string, photos use the save-time raster thumbnail stored on
 their attachment, files show their original name and type/size metadata, and
 doodle / Bauhaus content decodes its authored JSON attachment and renders
@@ -176,7 +178,7 @@ It maps the `Card` to a `Sendable` `NoteSnapshot` so the timeline entry and
 views stay free of live SwiftData model references; it shows an empty state when
 there are no vaults or when the chosen vault has no entries.
 
-New entry saves and saved-entry edits request
+New entry saves, saved-entry edits, and Todo completion changes request
 `WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)` so
 configured widgets refresh promptly. The 15-minute periodic timeline refresh
 remains only for relative-date freshness. Future optimization can denormalize
@@ -320,8 +322,9 @@ of order.
 | Property | Type | Notes |
 |----------|------|-------|
 | `id` | `UUID` | Unique inside the vault store. |
-| `kindRawValue` | `String` | Stored/synced modality string: `.text`, `.link`, `.file`, `.photo`, `.video`, `.livePhoto`, `.audio`, `.suggestion`, `.doodle`, `.bauhaus`, or a newer unknown value. `kind` maps unknown values to `.unknown`. |
-| `body` | `String` | Text content for `.text`; canonical URL string for `.link`; original display name for `.file`; other media cards keep this empty. |
+| `kindRawValue` | `String` | Stored/synced modality string: `.text`, `.todo`, `.link`, `.file`, `.photo`, `.video`, `.livePhoto`, `.audio`, `.suggestion`, `.doodle`, `.bauhaus`, or a newer unknown value. `kind` maps unknown values to `.unknown`. |
+| `body` | `String` | Text content for `.text` and `.todo`; canonical URL string for `.link`; original display name for `.file`; other media cards keep this empty. |
+| `completedAt` | `Date?` | Todo completion timestamp. `nil` means incomplete; non-Todo cards normalize it to `nil`. `isCompleted` is derived and is not persisted separately. |
 | `attachments` | `[Attachment]` | Relationship-owned media rows for this card. |
 | `placements` | `[CardEdge]` | Relationship-owned placements that point at this card. |
 | `createdAt` | `Date` | |
@@ -390,12 +393,15 @@ directory before the CloudKit temporary file disappears.
 
 ### Content rendering boundary
 
-`EntryContentView` performs only exhaustive routing. Text, Link, File, Photo,
-Video, Live Photo, Audio, Suggestion, Doodle, Bauhaus, and Unknown leaf views
-each own a concrete `Style`. The `.composer`, `.savedGrid`, `.detail`, and
+`EntryContentView` performs only exhaustive routing. Text, Todo, Link, File,
+Photo, Video, Live Photo, Audio, Suggestion, Doodle, Bauhaus, and Unknown leaf
+views each own a concrete `Style`. The `.composer`, `.savedGrid`, `.detail`, and
 `.share` presets select those leaf styles without reintroducing shared card
 chrome. Text and link content render their stored body/URL in SwiftUI; file
 content renders the original name with a document icon, content type, and size.
+Todo content owns its completion indicator, completed typography, and read-only
+share treatment while feature code supplies the persistence action for editable
+Home and detail placements.
 Doodle and Bauhaus content decode their saved JSON attachment and render
 `DoodleDrawingView` / `BauhausGridArtworkView` directly as SwiftUI content; if
 the vault media file has not arrived locally yet, the UI shows a modality
@@ -854,18 +860,21 @@ the gallery's **Lab** section).
   placement own separate unpublished drafts, so navigating deeper or back does
   not retarget or erase another level's input.
   The trailing glass up-arrow posts that entry and is enabled only when the
-  current content is persistable: text must contain non-whitespace content, a
-  link must resolve to a valid HTTP(S) URL, and capture-backed kinds must contain
-  their completed payload. Command-Return invokes the same post action. On
+  current content is persistable: text and Todo must contain non-whitespace
+  content, a link must resolve to a valid HTTP(S) URL, and capture-backed kinds
+  must contain their completed payload. A newly authored Todo is incomplete.
+  Command-Return invokes the same post action. On
   iOS, starting a drag on the saved-entry scroller dismisses the inline text
   keyboard, including when the active vault has too few entries to scroll. On
   macOS, the bar is centered and capped at `720pt`; Command-Shift-V opens Vaults
   and Command-comma opens Settings.
 
   While the input is the untouched empty text entry, the leading `+` opens a
-  standard SwiftUI `Menu` containing Link, Camera, Photos, Bauhaus, Doodle,
-  Voice, and feature-flagged Suggestions. Text needs no menu item because it is
-  entered directly in the bar. The system owns menu placement, interaction,
+  standard SwiftUI `Menu` containing Todo, Link, Camera, Photos, Bauhaus,
+  Doodle, Voice, and feature-flagged Suggestions. Text needs no menu item because
+  it is entered directly in the bar. Choosing Todo keeps the compact composer,
+  adds an incomplete-circle affordance, and focuses a multiline Todo field. The
+  system owns menu placement, interaction,
   accessibility, and dismissal. Once the input is no longer the untouched text
   placeholder — including while it is in Link mode — the `+` becomes an
   `xmark`; choosing it requires destructive confirmation before the unpublished
@@ -879,8 +888,8 @@ the gallery's **Lab** section).
   any visited level, Journal asks before discarding it; cancelling consumes the
   system request and leaves every draft unchanged.
 
-  Link, Camera, Photos, Bauhaus, Doodle, Voice, and Suggestions reuse that same
-  single entry rather than appending another draft. Link capture uses URL-keyboard
+  Todo, Link, Camera, Photos, Bauhaus, Doodle, Voice, and Suggestions reuse that
+  same single entry rather than appending another draft. Link capture uses URL-keyboard
   input and normalizes values such as `example.com` to HTTPS. Camera writes a
   `CapturedPhoto`; Photos uses the system picker and imports still images,
   videos, or Live Photos while preserving the paired Live Photo resources. A
@@ -971,7 +980,20 @@ the gallery's **Lab** section).
   (`parentEdgeID == nil`) into Home. Roots are grouped into local-calendar day
   sections by the root card's own creation date and read as one full-width
   vertical stream; adding a continuation does not move the root to another day
-  or create another Home item. Each root `CardEdge` owns one flat rounded group
+  or create another Home item. Home's toolbar provides a single-selection
+  content-type filter with **All Entries** plus every supported user-visible
+  `Card.Kind`; unknown content
+  remains available through All Entries but is not a selectable filter. The
+  selection is transient UI state and changes only when the user chooses an
+  option, so vault changes, detail navigation, and posting do not reset it. The
+  filter applies to Home's root stream and location-map header only; detail
+  child lookup continues to use every active edge. If a non-empty vault has no
+  roots of the selected type, Home shows a filtered empty state with **Show All
+  Entries**. Posting a matching root keeps the filter and scrolls that root into
+  view. Posting a root outside the current filter still succeeds and remains
+  hidden; its pending Home scroll is cleared as soon as the root reaches the
+  live query so a later filter change cannot cause a delayed jump. Each root
+  `CardEdge` owns one flat rounded group
   surface containing only its root card content. The authored content has no
   separate card background, border, shadow, fixed tile, child preview,
   continuation count, or other summary label. It uses the natural-height detail
@@ -1016,8 +1038,13 @@ the gallery's **Lab** section).
   Doodle and Bauhaus previews decode the authored JSON attachment file and render
   it with their SwiftUI renderers. When a media file is not local yet, the UI
   shows a modality placeholder; when sync writes the file and bumps the resource
-  revision, SwiftData observation re-runs the affected content load. Saved entries
-  can be shared from a root group's context menu
+  revision, SwiftData observation re-runs the affected content load. Todo entries
+  show an explicit completion control on Home and every detail level. Completing
+  or reopening a Todo changes `completedAt` and `updatedAt` atomically with the
+  Card outbox mutation, without moving it in the chronological stream or tree.
+  Editing its text preserves the saved completion state; share artifacts and
+  widget surfaces render that state without offering a mutation control. Saved
+  entries can be shared from a root group's context menu
   or a detail row's context menu. The share action opens a preview sheet backed
   by a detached `EntryShareSnapshot`, renders the actual temporary PNG artifact
   on a full-bleed branded canvas with the same `.share` leaf styles, and, for
@@ -1137,6 +1164,11 @@ vaults, the runtime treats the install as a new-user state and leaves the vault
 picker empty until the user creates a vault.
 Live CloudKit account/network behavior, including two-account invite
 acceptance, still needs device or signed simulator verification.
+
+Todo completion adds the optional `Card.completedAt` date field. Existing or
+older records that omit it import as incomplete. Before release, verify that the
+field exists with the Date type in the Development schema and deploy the updated
+schema to Production together with the rest of the vault record types.
 
 **Before sync works on real devices:** create/let Xcode auto-create the
 `iCloud.app.muukii.journal` container, verify the vault record types in the

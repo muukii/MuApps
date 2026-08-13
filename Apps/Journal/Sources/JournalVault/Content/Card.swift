@@ -22,11 +22,18 @@ public final class Card {
   /// `"unknown"`. Read through `kind` unless re-encoding for transport.
   public var kindRawValue: String
 
-  /// Body-backed payload for card metadata. `.text` stores written content,
-  /// `.link` stores the canonical URL string, and `.file` stores the original
-  /// user-facing file name. Other media and authored JSON kinds keep this empty
-  /// and point at `Attachment` rows instead.
+  /// Body-backed payload for card metadata. `.text` and `.todo` store written
+  /// content, `.link` stores the canonical URL string, and `.file` stores the
+  /// original user-facing file name. Other media and authored JSON kinds keep
+  /// this empty and point at `Attachment` rows instead.
   public var body: String
+
+  /// When this Todo was completed, or `nil` while it remains open.
+  ///
+  /// The optional timestamp is the single persisted completion source of truth;
+  /// `isCompleted` is deliberately derived instead of storing a duplicate Bool.
+  /// Non-Todo cards keep this value `nil`.
+  public var completedAt: Date?
 
   public var createdAt: Date
   public var updatedAt: Date
@@ -52,6 +59,7 @@ public final class Card {
     id: UUID = UUID(),
     kind: Kind = .text,
     body: String = "",
+    completedAt: Date? = nil,
     createdAt: Date = Date(),
     updatedAt: Date = Date(),
     location: Coordinate? = nil
@@ -59,6 +67,7 @@ public final class Card {
     self.id = id
     self.kindRawValue = kind.rawValue
     self.body = body
+    self.completedAt = kind == .todo ? completedAt : nil
     self.createdAt = createdAt
     self.updatedAt = updatedAt
     self.location = location
@@ -75,6 +84,10 @@ extension Card {
   public enum Kind: String, Codable, Sendable, CaseIterable, Hashable {
     /// A written note. `body` is the primary content.
     case text
+
+    /// One actionable item. `body` stores its text and `completedAt` stores its
+    /// completion timestamp when finished.
+    case todo
 
     /// A web link card. `body` stores the canonical URL string.
     case link
@@ -116,6 +129,16 @@ extension Card {
   /// Typed view over `kindRawValue`. Unrecognized raw values read as `.unknown`.
   public var kind: Kind {
     get { Kind(rawValue: kindRawValue) ?? .unknown }
-    set { kindRawValue = newValue.rawValue }
+    set {
+      kindRawValue = newValue.rawValue
+      if newValue != .todo {
+        completedAt = nil
+      }
+    }
+  }
+
+  /// Whether this Todo has a completion timestamp.
+  public var isCompleted: Bool {
+    kind == .todo && completedAt != nil
   }
 }

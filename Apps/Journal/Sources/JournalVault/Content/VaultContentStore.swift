@@ -95,6 +95,7 @@ extension VaultContentStore {
   public enum Error: Swift.Error {
     case cardNotFound(UUID)
     case cardEdgeNotFound(UUID)
+    case cardIsNotTodo(UUID)
     case missingMediaPayload(Card.Kind)
   }
 }
@@ -111,10 +112,15 @@ extension VaultContentStore {
     /// Primary modality of the card to create.
     public var kind: Card.Kind
 
-    /// Textual payload for body-backed cards. `.text` stores written content,
-    /// `.link` stores the canonical URL string, and `.file` stores the original
-    /// user-facing file name. Other media and authored JSON cards ignore it.
+    /// Textual payload for body-backed cards. `.text` and `.todo` store written
+    /// content, `.link` stores the canonical URL string, and `.file` stores the
+    /// original user-facing file name. Other media and authored JSON cards
+    /// ignore it.
     public var text: String
+
+    /// Completion timestamp to preserve when creating or editing a Todo.
+    /// Other card kinds normalize this to `nil` at the write boundary.
+    public var completedAt: Date?
 
     /// In-memory attachment bytes for photo, suggestion, doodle, and Bauhaus cards.
     public var mediaData: Data?
@@ -144,6 +150,7 @@ extension VaultContentStore {
     public init(
       kind: Card.Kind,
       text: String = "",
+      completedAt: Date? = nil,
       mediaData: Data? = nil,
       mediaFileURL: URL? = nil,
       mediaResources: [AttachmentResourceDraft] = [],
@@ -152,6 +159,7 @@ extension VaultContentStore {
     ) {
       self.kind = kind
       self.text = text
+      self.completedAt = kind == .todo ? completedAt : nil
       self.mediaData = mediaData
       self.mediaFileURL = mediaFileURL
       self.mediaResources = mediaResources
@@ -507,6 +515,7 @@ extension VaultContentStore {
 
       card.kind = draft.kind
       card.body = Self.body(for: draft)
+      card.completedAt = Self.completedAt(for: draft)
       card.location = draft.location
       card.updatedAt = Date()
       try noteSave(.card, recordName: card.id.uuidString, in: context)
@@ -551,6 +560,42 @@ extension VaultContentStore {
     try noteSave(.card, recordName: card.id.uuidString, in: context)
     try context.save()
     onLocalMutation()
+  }
+
+  /// Completes or reopens one Todo without rewriting its authored body.
+  ///
+  /// The card mutation and its CloudKit outbox save commit in the same SwiftData
+  /// transaction, matching every other user-visible vault write.
+  ///
+  /// - Returns: `true` when the completion state changed, or `false` when the
+  ///   Todo already matched `isCompleted`.
+  @MainActor
+  @discardableResult
+  public func setTodoCompletion(cardID: UUID, isCompleted: Bool) throws -> Bool {
+    let context = container.mainContext
+    guard let card = try fetchCard(id: cardID, in: context) else {
+      throw Error.cardNotFound(cardID)
+    }
+    guard card.kind == .todo else {
+      throw Error.cardIsNotTodo(cardID)
+    }
+    guard card.isCompleted != isCompleted else {
+      return false
+    }
+
+    do {
+      let now = Date()
+      card.completedAt = isCompleted ? now : nil
+      card.updatedAt = now
+      try noteSave(.card, recordName: card.id.uuidString, in: context)
+      try context.save()
+    } catch {
+      context.rollback()
+      throw error
+    }
+
+    onLocalMutation()
+    return true
   }
 
   /// Logically deletes an edge and its entire subtree.
@@ -648,6 +693,7 @@ extension VaultContentStore {
     let card = Card(
       kind: draft.kind,
       body: Self.body(for: draft),
+      completedAt: Self.completedAt(for: draft),
       createdAt: createdAt,
       updatedAt: createdAt,
       location: draft.location
@@ -833,10 +879,20 @@ extension VaultContentStore {
 
   private static func body(for draft: CardDraft) -> String {
     switch draft.kind {
-    case .text, .link, .file:
+    case .text, .todo, .link, .file:
       return draft.text
     case .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus, .unknown:
       return ""
+    }
+  }
+
+  private static func completedAt(for draft: CardDraft) -> Date? {
+    switch draft.kind {
+    case .todo:
+      return draft.completedAt
+    case .text, .link, .file, .photo, .video, .livePhoto, .audio, .suggestion, .doodle,
+      .bauhaus, .unknown:
+      return nil
     }
   }
 
@@ -937,7 +993,7 @@ extension VaultContentStore {
 
   private static func attachmentKind(for cardKind: Card.Kind) -> Attachment.Kind? {
     switch cardKind {
-    case .text, .link, .unknown:
+    case .text, .todo, .link, .unknown:
       return nil
     case .file:
       return .file

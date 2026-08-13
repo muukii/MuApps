@@ -1,0 +1,122 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "+ %@ more" : {
+
+    },
+    "BL" : {
+
+    },
+    "BR" : {
+
+    },
+    "Completed" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Completed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了"
+          }
+        }
+      }
+    },
+    "Incomplete" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Incomplete"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未完了"
+          }
+        }
+      }
+    },
+    "Mark Todo Complete" : {
+      "comment" : "Button that marks an incomplete Todo as completed.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mark Todo Complete"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Todoを完了にする"
+          }
+        }
+      }
+    },
+    "Reopen Todo" : {
+      "comment" : "Button that changes a completed Todo back to incomplete.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reopen Todo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Todoを未完了に戻す"
+          }
+        }
+      }
+    },
+    "Suggestion" : {
+
+    },
+    "TL" : {
+
+    },
+    "Todo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Todo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Todo"
+          }
+        }
+      }
+    },
+    "TR" : {
+
+    },
+    "Untitled Todo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Untitled Todo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無題のTodo"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

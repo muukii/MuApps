@@ -500,6 +500,7 @@ let project = Project(
     journalFramework(
       name: "AppUIComponents",
       product: .framework,
+      resources: ["Resources/AppUIComponents/**"],
       dependencies: [
         .sdk(name: "AVFoundation", type: .framework),
         .sdk(name: "CloudKit", type: .framework),

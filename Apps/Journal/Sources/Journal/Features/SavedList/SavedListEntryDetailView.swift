@@ -19,10 +19,12 @@ struct VaultSavedEntryDetailDestination: View {
   @Binding var detailScrollTargetID: UUID?
   let isEditingDisabled: Bool
   let isDeletingDisabled: Bool
+  let isTodoCompletionDisabled: Bool
   let transitionNamespace: Namespace.ID
   let onShare: @MainActor (VaultSavedEntry) -> Void
   let onEdit: @MainActor (VaultSavedEntry) -> Void
   let onDelete: @MainActor (VaultSavedEntry) async -> Bool
+  let onToggleTodoCompletion: @MainActor (VaultSavedEntry) -> Void
 
   var body: some View {
     Group {
@@ -33,11 +35,13 @@ struct VaultSavedEntryDetailDestination: View {
           detailScrollTargetID: $detailScrollTargetID,
           isEditingDisabled: isEditingDisabled,
           isDeletingDisabled: isDeletingDisabled,
+          isTodoCompletionDisabled: isTodoCompletionDisabled,
           transitionNamespace: transitionNamespace,
           onOpen: openEntry,
           onShare: onShare,
           onEdit: onEdit,
-          onDelete: onDelete
+          onDelete: onDelete,
+          onToggleTodoCompletion: onToggleTodoCompletion
         )
         .appZoomNavigationTransition(
           sourceID: currentEntry.edgeID,
@@ -81,11 +85,13 @@ private struct VaultSavedEntryDetailView: View {
   @Binding var detailScrollTargetID: UUID?
   let isEditingDisabled: Bool
   let isDeletingDisabled: Bool
+  let isTodoCompletionDisabled: Bool
   let transitionNamespace: Namespace.ID
   let onOpen: @MainActor (VaultSavedEntry) -> Void
   let onShare: @MainActor (VaultSavedEntry) -> Void
   let onEdit: @MainActor (VaultSavedEntry) -> Void
   let onDelete: @MainActor (VaultSavedEntry) async -> Bool
+  let onToggleTodoCompletion: @MainActor (VaultSavedEntry) -> Void
 
   @Environment(\.dismiss) private var dismiss
   @Environment(\.composerOverlayHeight) private var composerOverlayHeight
@@ -168,13 +174,17 @@ private struct VaultSavedEntryDetailView: View {
       entry: entry.entryModel,
       isEditingDisabled: isEditingDisabled || entry.kind == .file,
       isDeletingDisabled: isDeletingDisabled,
+      isTodoCompletionDisabled: isTodoCompletionDisabled,
       onEdit: {
         self.onEdit(entry)
       },
       onDelete: {
         deleteCandidate = entry
       },
-      onOpen: onOpen
+      onOpen: onOpen,
+      onToggleTodoCompletion: {
+        onToggleTodoCompletion(entry)
+      }
     )
     .contextMenu {
       Button {

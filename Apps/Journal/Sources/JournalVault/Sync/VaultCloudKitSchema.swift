@@ -76,6 +76,12 @@ public enum VaultCloudKitSchema {
         .string,
         missing: .defaultValue("empty body")
       ),
+      optionalField(
+        VaultRecordMapper.CardKey.completedAt,
+        .date,
+        missing: .clearValue,
+        notes: ["Todo completion timestamp; nil means open."]
+      ),
       dateField(VaultRecordMapper.CardKey.createdAt),
       dateField(VaultRecordMapper.CardKey.updatedAt),
       optionalField(
@@ -134,7 +140,7 @@ public enum VaultCloudKitSchema {
       ),
     ],
     notes: [
-      "Tree semantics, cycle repair, and cascades are domain rules, not CloudKit record hierarchy.",
+      "Tree semantics, cycle repair, and cascades are domain rules, not CloudKit record hierarchy."
     ]
   )
 
@@ -232,10 +238,10 @@ public enum VaultCloudKitSchema {
         targetRecordType: VaultRecordType.attachment.rawValue,
         storage: .recordNameString(fieldName: VaultRecordMapper.AttachmentResourceKey.attachmentID),
         isRequired: true
-      ),
+      )
     ],
     notes: [
-      "`localFileRevision` is intentionally local-only and is not a CloudKit field.",
+      "`localFileRevision` is intentionally local-only and is not a CloudKit field."
     ]
   )
 }

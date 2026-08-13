@@ -105,6 +105,27 @@ struct VaultContentStoreTests {
   }
 
   @Test
+  func createThread_todoStoresBodyAndDefaultsToIncomplete() throws {
+    let store = try makeStore()
+
+    let root = try #require(
+      try store.createThread(cards: [
+        .init(kind: .todo, text: "Book the train")
+      ]).first
+    )
+
+    let context = store.container.mainContext
+    let card = try #require(
+      try context.fetch(FetchDescriptor<Card>()).first { $0.id == root.cardID }
+    )
+    #expect(card.kind == .todo)
+    #expect(card.body == "Book the train")
+    #expect(card.completedAt == nil)
+    #expect(card.isCompleted == false)
+    #expect(card.attachments.isEmpty)
+  }
+
+  @Test
   func createThread_multipleDrafts_buildsRootWithOrderedChildren() throws {
     let store = try makeStore()
 
@@ -568,7 +589,7 @@ struct VaultContentStoreTests {
       switch error {
       case .missingMediaPayload(let kind):
         #expect(kind == .file)
-      case .cardNotFound, .cardEdgeNotFound:
+      case .cardNotFound, .cardEdgeNotFound, .cardIsNotTodo:
         Issue.record("Expected missingMediaPayload, received \(error)")
       }
     }
@@ -617,6 +638,101 @@ struct VaultContentStoreTests {
   }
 
   // MARK: - updateCardBody
+
+  @Test
+  func setTodoCompletion_completesReopensAndReusesCardOutbox() throws {
+    let mutationCount = Mutex(0)
+    let store = try makeStore {
+      mutationCount.withLock { $0 += 1 }
+    }
+    let root = try #require(
+      try store.createThread(cards: [
+        .init(kind: .todo, text: "Pick up flowers")
+      ]).first
+    )
+    let context = store.container.mainContext
+    let card = try #require(
+      try context.fetch(FetchDescriptor<Card>()).first { $0.id == root.cardID }
+    )
+    let initialUpdatedAt = card.updatedAt
+
+    let didComplete = try store.setTodoCompletion(
+      cardID: root.cardID,
+      isCompleted: true
+    )
+
+    #expect(didComplete)
+    #expect(card.completedAt != nil)
+    #expect(card.isCompleted)
+    #expect(card.updatedAt >= initialUpdatedAt)
+    #expect(mutationCount.withLock { $0 } == 2)
+
+    let unchangedCompletionDate = card.completedAt
+    let didRepeatCompletion = try store.setTodoCompletion(
+      cardID: root.cardID,
+      isCompleted: true
+    )
+    #expect(didRepeatCompletion == false)
+    #expect(card.completedAt == unchangedCompletionDate)
+    #expect(mutationCount.withLock { $0 } == 2)
+
+    let didReopen = try store.setTodoCompletion(
+      cardID: root.cardID,
+      isCompleted: false
+    )
+    #expect(didReopen)
+    #expect(card.completedAt == nil)
+    #expect(card.isCompleted == false)
+    #expect(mutationCount.withLock { $0 } == 3)
+
+    let cardMutations = try context.fetch(FetchDescriptor<PendingMutation>())
+      .filter { $0.recordName == root.cardID.uuidString }
+    #expect(cardMutations.count == 1)
+    #expect(cardMutations.first?.kind == .save)
+  }
+
+  @Test
+  func updateCard_todoBodyPreservesCompletionTimestamp() throws {
+    let store = try makeStore()
+    let root = try #require(
+      try store.createThread(cards: [
+        .init(kind: .todo, text: "Draft")
+      ]).first
+    )
+    _ = try store.setTodoCompletion(cardID: root.cardID, isCompleted: true)
+
+    let context = store.container.mainContext
+    let card = try #require(
+      try context.fetch(FetchDescriptor<Card>()).first { $0.id == root.cardID }
+    )
+    let completedAt = try #require(card.completedAt)
+
+    try store.updateCard(
+      cardID: root.cardID,
+      with: .init(
+        kind: .todo,
+        text: "Final wording",
+        completedAt: completedAt
+      )
+    )
+
+    #expect(card.kind == .todo)
+    #expect(card.body == "Final wording")
+    #expect(card.completedAt == completedAt)
+    #expect(card.isCompleted)
+  }
+
+  @Test
+  func setTodoCompletion_rejectsNonTodoCard() throws {
+    let store = try makeStore()
+    let root = try #require(
+      try store.createThread(cards: [.init(kind: .text, text: "Note")]).first
+    )
+
+    #expect(throws: VaultContentStore.Error.self) {
+      try store.setTodoCompletion(cardID: root.cardID, isCompleted: true)
+    }
+  }
 
   @Test
   func updateCardBody_reArmsExistingOutboxRowWithoutDuplicating() throws {

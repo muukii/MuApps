@@ -169,6 +169,8 @@ extension JournalVault.Card.Kind {
     switch self {
     case .text:
       return "Text"
+    case .todo:
+      return "Todo"
     case .link:
       return "Link"
     case .file:
@@ -198,6 +200,8 @@ extension JournalVault.Card.Kind {
     switch self {
     case .text:
       return "text.alignleft"
+    case .todo:
+      return "checkmark.circle"
     case .link:
       return "link"
     case .file:

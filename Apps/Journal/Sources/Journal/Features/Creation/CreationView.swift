@@ -32,6 +32,7 @@ private let photoLibraryImportLog = Logger(
 struct CreationView: View {
 
   @Binding private var systemCaptureRequest: JournalCaptureRequest?
+  @Binding private var selectedHomeContentKind: JournalVault.Card.Kind?
   private let onChangeVault: (@MainActor @Sendable () -> Void)?
   private let onSelectVaultForSystemCapture: @MainActor @Sendable (VaultID) async -> Bool
   private let onSystemCaptureFailure: @MainActor @Sendable (String) -> Void
@@ -41,6 +42,7 @@ struct CreationView: View {
 
   init(
     systemCaptureRequest: Binding<JournalCaptureRequest?> = .constant(nil),
+    selectedHomeContentKind: Binding<JournalVault.Card.Kind?> = .constant(nil),
     onChangeVault: (@MainActor @Sendable () -> Void)? = nil,
     onSelectVaultForSystemCapture: @escaping @MainActor @Sendable (VaultID) async -> Bool = { _ in
       false
@@ -48,6 +50,7 @@ struct CreationView: View {
     onSystemCaptureFailure: @escaping @MainActor @Sendable (String) -> Void = { _ in }
   ) {
     _systemCaptureRequest = systemCaptureRequest
+    _selectedHomeContentKind = selectedHomeContentKind
     self.onChangeVault = onChangeVault
     self.onSelectVaultForSystemCapture = onSelectVaultForSystemCapture
     self.onSystemCaptureFailure = onSystemCaptureFailure
@@ -110,7 +113,8 @@ struct CreationView: View {
         SavedListView(
           scrollTargetID: $savedCardScrollTargetID,
           navigationPath: $composerState.navigationPath,
-          detailScrollTargetID: $detailCardScrollTargetID
+          detailScrollTargetID: $detailCardScrollTargetID,
+          selectedContentKind: $selectedHomeContentKind
         )
         .toolbar(content: {
           if onChangeVault != nil {
@@ -172,6 +176,7 @@ struct CreationView: View {
       CreationAddMenuContent(
         isSuggestionCaptureEnabled:
           JournalFeatureFlags.isJournalingSuggestionsCaptureEnabled,
+        onComposeTodo: presentTodoCapture,
         onComposeLink: presentLinkCapture,
         onCapturePhoto: presentPhotoCapture,
         onChooseMediaFromLibrary: presentLibraryMediaPicker,
@@ -515,6 +520,10 @@ struct CreationView: View {
     linkEditorPresentation = LinkEditorPresentation(target: composerDraft)
   }
 
+  private func presentTodoCapture() {
+    composerDraft.setTodo()
+  }
+
   private func restoreEmptyLinkPlaceholderIfNeeded() {
     restoreEmptyComposerPlaceholderIfNeeded()
   }
@@ -668,7 +677,7 @@ struct CreationView: View {
 
   private func updateComposerLocationForTextChange() {
     switch composerDraft.kind {
-    case .text, .link:
+    case .text, .todo, .link:
       if composerDraft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         composerDraft.location = nil
       } else {
@@ -1299,6 +1308,7 @@ extension CMTime {
 private struct CreationAddMenuContent: View {
 
   let isSuggestionCaptureEnabled: Bool
+  let onComposeTodo: @MainActor @Sendable () -> Void
   let onComposeLink: @MainActor @Sendable () -> Void
   let onCapturePhoto: @MainActor @Sendable () -> Void
   let onChooseMediaFromLibrary: @MainActor @Sendable () -> Void
@@ -1308,6 +1318,10 @@ private struct CreationAddMenuContent: View {
   let onChooseSuggestion: @MainActor @Sendable (CapturedSuggestion) -> Void
 
   var body: some View {
+    Button(action: onComposeTodo) {
+      Label("Todo", systemImage: "checkmark.circle")
+    }
+
     Button(action: onComposeLink) {
       Label("Link", systemImage: "link")
     }
@@ -1370,6 +1384,8 @@ extension Card.Kind {
     switch self {
     case .text:
       return "Text"
+    case .todo:
+      return "Todo"
     case .link:
       return "Link"
     case .file:

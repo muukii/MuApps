@@ -13,6 +13,7 @@ struct EntryShareSource: Sendable, Equatable {
   let id: UUID
   let kind: JournalVault.Card.Kind
   let body: String
+  let completedAt: Date?
   let createdAt: Date
   let location: JournalVault.Coordinate?
   let attachment: EntryShareAttachmentSource?
@@ -83,6 +84,7 @@ struct EntryShareSnapshot: Identifiable, Sendable, Equatable {
     self.content = Self.makeContent(
       kind: source.kind,
       body: body,
+      completedAt: source.completedAt,
       attachment: source.attachment
     )
   }
@@ -90,11 +92,16 @@ struct EntryShareSnapshot: Identifiable, Sendable, Equatable {
   private static func makeContent(
     kind: JournalVault.Card.Kind,
     body: String,
+    completedAt: Date?,
     attachment: EntryShareAttachmentSource?
   ) -> EntryContent {
     switch kind {
     case .text, .link:
       return .text(body)
+    case .todo:
+      return .todo(
+        TodoContentSource(text: body, completedAt: completedAt)
+      )
     case .file:
       let fileAttachment = attachment?.kind == .file ? attachment : nil
       let availableFileURL = fileURL(for: fileAttachment)

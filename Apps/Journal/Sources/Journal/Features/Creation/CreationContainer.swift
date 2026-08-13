@@ -337,7 +337,7 @@ private struct CreationComposerExpandedPreviewInputBar: View {
       )
       .frame(maxWidth: .infinity)
       .frame(height: audioPreviewHeight)
-    case .text, .file, .suggestion, .unknown:
+    case .text, .todo, .file, .suggestion, .unknown:
       EntryContentView(
         content: draft.entryContent,
         style: .composer
@@ -445,6 +445,7 @@ private struct CreationComposerLeadingAction<MenuContent: View>: View {
 private struct CreationComposerDraftContent: View {
 
   @Bindable var draft: ThreadDraftCard
+  @FocusState private var isTodoTextFocused: Bool
   let placement: CreationComposerPlacement
   let isProcessing: Bool
   let onOpenDraft: @MainActor @Sendable () -> Void
@@ -458,6 +459,26 @@ private struct CreationComposerDraftContent: View {
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .disabled(isProcessing)
         .accessibilityLabel("Entry text")
+    case .todo:
+      HStack(spacing: 8) {
+        Image(systemName: "circle")
+          .font(.title3.weight(.semibold))
+          .foregroundStyle(.secondary)
+          .frame(width: 28, height: 44)
+          .accessibilityHidden(true)
+
+        TextField("Todo", text: $draft.text, axis: .vertical)
+          .textFieldStyle(.plain)
+          .lineLimit(1...5)
+          .focused($isTodoTextFocused)
+      }
+      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+      .disabled(isProcessing)
+      .accessibilityLabel("Todo text")
+      .task {
+        await Task.yield()
+        isTodoTextFocused = true
+      }
     case .link, .file, .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus, .unknown:
       Button(action: onOpenDraft) {
         CreationComposerDraftPreview(draft: draft)
@@ -930,7 +951,7 @@ extension CardEditDraft {
       return linkURL != nil
     case .photo, .video, .livePhoto, .audio, .doodle, .bauhaus:
       return true
-    case .text, .file, .suggestion, .unknown:
+    case .text, .todo, .file, .suggestion, .unknown:
       return false
     @unknown default:
       return false

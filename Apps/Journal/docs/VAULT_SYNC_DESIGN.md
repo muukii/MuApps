@@ -536,6 +536,7 @@ Card
   id
   kind
   body
+  completedAt?  # Todo only; nil means incomplete
   createdAt
   updatedAt
   location?
@@ -590,6 +591,7 @@ erDiagram
     uuid id
     string kind
     string body
+    datetime completedAt
   }
 
   ATTACHMENT {
@@ -675,6 +677,8 @@ full card content が必要な場合は vault ID から該当する `VaultConten
 Widget timeline で original-size image file を読まない。
 text/link は本文、doodle / Bauhaus は authored JSON を decode した value を
 Widget の SwiftUI view が描画する。
+Todo は本文とoptional `completedAt`から作るread-only snapshotを描画し、
+完了操作はapp側の`VaultContentStore` mutationに限定する。
 audio と Lock Screen accessory family は constrained surface として typed label /
 symbol を使う。
 将来の default path は小さな summary snapshot を読む形に最適化する。
@@ -824,6 +828,8 @@ legacy local `JournalModel` module は project から削除済み。Journal は 
 user-facing save は `CreationView` から `VaultInstance.createThread(cards:)` に書く。
 user-facing edit は `SavedListView` から selected `VaultInstance` の
 `VaultContentStore.updateCard(cardID:with:)` に書く。
+Todoの完了／再開は`VaultContentStore.setTodoCompletion(cardID:isCompleted:)`に書き、
+`completedAt`、`updatedAt`、Card save outboxを同一transactionで更新する。
 user-facing list は selected `VaultInstance` の SwiftData `ModelContainer` を
 environment に入れ、active `CardEdge` (`deletedAt == nil`) の `@Query` から `Card` / `Attachment` /
 `AttachmentResource` relationship を辿る。
@@ -839,7 +845,9 @@ environment に入れ、active `CardEdge` (`deletedAt == nil`) の `@Query` か�
   `Attachment` / `AttachmentResource` / `SyncMetadata` / `PendingMutation`。
   すべての write は同一 transaction で outbox(`PendingMutation`)を積む。
   save は必ず root `CardEdge` を作る。card edit は `Card` save と attachment replacement を
-  同一 transaction で扱う。`CardEdge` / `Attachment` / `AttachmentResource` は
+  同一 transaction で扱う。Todoは`Card.body`に本文、optional `Card.completedAt`に
+  完了時刻を持ち、Boolは保存しない。完了／再開は本文を変更せず、既に同じ状態なら
+  outboxを追加しない。`CardEdge` / `Attachment` / `AttachmentResource` は
   SwiftData relationship を主接続として持ち、record の out-of-order import を
   repair できるよう reference ID も横に保持する。entry削除は`CardEdge.deletedAt`による
   local logical deleteと即時CloudKit tombstone enqueueを同一transactionで行い、
@@ -872,7 +880,8 @@ environment に入れ、active `CardEdge` (`deletedAt == nil`) の `@Query` か�
 暫定判断(コード側にも記載):
 
 - conflict policy は record 単位で local-pending-wins。
-  server の system fields だけ採用して再送する。field-wise merge は未決定のまま。
+  server の system fields だけ採用して再送する。Todo本文と完了状態も同じCard record
+  なので、同時変更のfield-wise mergeは行わない。
 - remote の record deletion は local edit より優先。CardEdgeまたはplaced Cardの削除は
   local subtreeを論理削除し、payload row/fileは保持する。entry削除を伴わない
   Attachment/Resource削除はedit replacementとして物理cleanupできる。

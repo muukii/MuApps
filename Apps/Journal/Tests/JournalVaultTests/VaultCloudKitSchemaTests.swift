@@ -28,6 +28,7 @@ struct VaultCloudKitSchemaTests {
       .card: [
         VaultRecordMapper.CardKey.kind,
         VaultRecordMapper.CardKey.body,
+        VaultRecordMapper.CardKey.completedAt,
         VaultRecordMapper.CardKey.createdAt,
         VaultRecordMapper.CardKey.updatedAt,
         VaultRecordMapper.CardKey.location,
@@ -76,9 +77,10 @@ struct VaultCloudKitSchemaTests {
 
     #expect(
       descriptor.relationships.contains {
-        $0.storage == .optionalRecordNameString(
-          fieldName: VaultRecordMapper.CardEdgeKey.parentEdgeID
-        )
+        $0.storage
+          == .optionalRecordNameString(
+            fieldName: VaultRecordMapper.CardEdgeKey.parentEdgeID
+          )
       }
     )
   }
@@ -92,25 +94,31 @@ struct VaultCloudKitSchemaTests {
     let wrapper = CardRecord(recordID: recordID)
     let createdAt = Date(timeIntervalSince1970: 1_725_000_000)
     let updatedAt = Date(timeIntervalSince1970: 1_725_000_060)
+    let completedAt = Date(timeIntervalSince1970: 1_725_000_030)
 
-    wrapper.kindRawValue = Card.Kind.text.rawValue
+    wrapper.kindRawValue = Card.Kind.todo.rawValue
     wrapper.body = "hello"
+    wrapper.completedAt = completedAt
     wrapper.createdAt = createdAt
     wrapper.updatedAt = updatedAt
     wrapper.location = Coordinate(latitude: 35.0, longitude: 139.7)
 
     #expect(CardRecord.recordType == VaultRecordType.card.rawValue)
     #expect(CardRecord.descriptor.recordType == VaultRecordType.card.rawValue)
-    #expect(CardRecord.descriptor.field(named: VaultRecordMapper.CardKey.body)?.defaultValueDescription == "")
+    #expect(
+      CardRecord.descriptor.field(named: VaultRecordMapper.CardKey.body)?.defaultValueDescription
+        == "")
     #expect(wrapper.record.recordType == VaultRecordType.card.rawValue)
-    #expect(wrapper.record[VaultRecordMapper.CardKey.kind] as? String == Card.Kind.text.rawValue)
+    #expect(wrapper.record[VaultRecordMapper.CardKey.kind] as? String == Card.Kind.todo.rawValue)
     #expect(wrapper.record[VaultRecordMapper.CardKey.body] as? String == "hello")
+    #expect(wrapper.record[VaultRecordMapper.CardKey.completedAt] as? Date == completedAt)
     #expect(wrapper.record[VaultRecordMapper.CardKey.createdAt] as? Date == createdAt)
     #expect(wrapper.record[VaultRecordMapper.CardKey.updatedAt] as? Date == updatedAt)
 
     let imported = CardRecord(record: wrapper.record)
-    #expect(imported.kindRawValue == Card.Kind.text.rawValue)
+    #expect(imported.kindRawValue == Card.Kind.todo.rawValue)
     #expect(imported.body == "hello")
+    #expect(imported.completedAt == completedAt)
     #expect(imported.createdAt == createdAt)
     #expect(imported.updatedAt == updatedAt)
     #expect(imported.location?.latitude == 35.0)

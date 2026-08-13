@@ -102,7 +102,7 @@ private struct EntryContentKindPicker: View {
       switch kind {
       case .file, .video, .livePhoto, .suggestion, .unknown:
         return false
-      case .text, .link, .photo, .audio, .doodle, .bauhaus:
+      case .text, .todo, .link, .photo, .audio, .doodle, .bauhaus:
         return true
       }
     }
@@ -129,6 +129,11 @@ private struct EntryContentKindEditor: View {
       switch draft.kind {
       case .text:
         ThreadDraftTextEditorContent(text: $draft.text)
+      case .todo:
+        TodoDraftEditorContent(
+          text: $draft.text,
+          isCompleted: draft.completedAt != nil
+        )
       case .link:
         ThreadDraftLinkEditorContent(urlString: $draft.text)
       case .file:
@@ -171,6 +176,26 @@ private struct ThreadDraftPhotoDetailEditor: View {
     ThreadDraftPhotoCaptureContent(card: card) { [card] photo in
       card.setPhoto(photo)
     }
+  }
+}
+
+/// Text editor for a Todo draft with a non-interactive incomplete marker.
+private struct TodoDraftEditorContent: View {
+
+  @Binding var text: String
+  let isCompleted: Bool
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 8) {
+      Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
+        .font(.title2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .frame(width: 44, height: 44)
+        .accessibilityHidden(true)
+
+      ThreadDraftTextEditorContent(text: $text)
+    }
+    .padding(.leading, 8)
   }
 }
 
@@ -249,6 +274,8 @@ extension Card.Kind {
     switch self {
     case .text:
       return "Text"
+    case .todo:
+      return "Todo"
     case .link:
       return "Link"
     case .file:

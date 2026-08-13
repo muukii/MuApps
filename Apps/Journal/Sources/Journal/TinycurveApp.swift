@@ -63,14 +63,14 @@ struct TinycurveApp: App {
             vaultRuntime: vaultRuntime,
             hasCachedInitialVaultAvailability: hasCachedInitialVaultAvailability
           )
-            .task { DoodleHaptics.prepareForDrawing() }
+          .task { DoodleHaptics.prepareForDrawing() }
         }
       #else
         RootView(
           vaultRuntime: vaultRuntime,
           hasCachedInitialVaultAvailability: hasCachedInitialVaultAvailability
         )
-          .task { DoodleHaptics.prepareForDrawing() }
+        .task { DoodleHaptics.prepareForDrawing() }
       #endif
     }
 
@@ -478,6 +478,10 @@ private struct JournalHomeView: View {
   #endif
   @State private var vaultSheetDetent: PresentationDetent = .medium
 
+  /// Home's transient content projection lives above the vault-specific
+  /// Creation identity so changing vaults cannot reset a user selection.
+  @State private var selectedHomeContentKind: JournalVault.Card.Kind?
+
   init(
     systemCaptureRequest: Binding<JournalCaptureRequest?>,
     onSystemCaptureFailure: @escaping @MainActor @Sendable (String) -> Void,
@@ -493,6 +497,7 @@ private struct JournalHomeView: View {
       state: contentState,
       initialAvailabilityResolution: vaultRuntime.lastInitialAvailabilityResolution,
       systemCaptureRequest: $systemCaptureRequest,
+      selectedHomeContentKind: $selectedHomeContentKind,
       onOpenVaults: presentVaultSelection,
       onSelectVaultForSystemCapture: selectVaultForSystemCapture,
       onSystemCaptureFailure: onSystemCaptureFailure,
@@ -640,6 +645,7 @@ private struct JournalHomeContent: View {
   let state: JournalHomeContentState
   let initialAvailabilityResolution: VaultInitialAvailabilityResolution?
   @Binding var systemCaptureRequest: JournalCaptureRequest?
+  @Binding var selectedHomeContentKind: JournalVault.Card.Kind?
   let onOpenVaults: @MainActor @Sendable () -> Void
   let onSelectVaultForSystemCapture: @MainActor @Sendable (VaultID) async -> Bool
   let onSystemCaptureFailure: @MainActor @Sendable (String) -> Void
@@ -664,6 +670,7 @@ private struct JournalHomeContent: View {
     case .creation(let vaultID):
       CreationView(
         systemCaptureRequest: $systemCaptureRequest,
+        selectedHomeContentKind: $selectedHomeContentKind,
         onChangeVault: onOpenVaults,
         onSelectVaultForSystemCapture: onSelectVaultForSystemCapture,
         onSystemCaptureFailure: onSystemCaptureFailure

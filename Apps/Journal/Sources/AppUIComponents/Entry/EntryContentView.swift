@@ -10,13 +10,19 @@ public struct EntryContentView: View {
 
   let content: EntryContent
   let style: EntryContentStyle
+  let showsTodoCompletionIndicator: Bool
+  let onToggleTodoCompletion: (@MainActor () -> Void)?
 
   public init(
     content: EntryContent,
-    style: EntryContentStyle
+    style: EntryContentStyle,
+    showsTodoCompletionIndicator: Bool = true,
+    onToggleTodoCompletion: (@MainActor () -> Void)? = nil
   ) {
     self.content = content
     self.style = style
+    self.showsTodoCompletionIndicator = showsTodoCompletionIndicator
+    self.onToggleTodoCompletion = onToggleTodoCompletion
   }
 
   public var body: some View {
@@ -28,6 +34,14 @@ public struct EntryContentView: View {
           style: style.text
         )
         .frame(minHeight: style.text.minimumHeight)
+      case .todo(let todo):
+        TodoContentView(
+          source: todo,
+          style: style.todo,
+          showsCompletionIndicator: showsTodoCompletionIndicator,
+          onToggleCompletion: onToggleTodoCompletion
+        )
+        .frame(minHeight: style.todo.minimumHeight)
       case .link(let urlString):
         LinkContentView(urlString: urlString, style: style.link)
           .frame(minHeight: style.link.minimumHeight)
@@ -60,7 +74,7 @@ public struct EntryContentView: View {
           .frame(minHeight: style.unknown.minimumHeight)
       }
     }
-    .clipShape(.rect(cornerRadius: 24)) 
+    .clipShape(.rect(cornerRadius: 24))
   }
 }
 
@@ -75,6 +89,7 @@ public enum EntryContentStyle: Hashable, Sendable {
   case share
 
   fileprivate var text: TextContentView.Style { .init(self) }
+  fileprivate var todo: TodoContentView.Style { .init(self) }
   fileprivate var link: LinkContentView.Style { .init(self) }
   fileprivate var file: FileContentView.Style { .init(self) }
   fileprivate var photo: PhotoContentView.Style { .init(self) }
@@ -94,6 +109,7 @@ public enum EntryContentStyle: Hashable, Sendable {
 /// small value without leaking their storage boundary into the renderer.
 public enum EntryContent: Equatable, Sendable {
   case text(String)
+  case todo(TodoContentSource)
   case link(String)
   case file(FileContentSource)
   case photo(PhotoContentSource)
@@ -108,11 +124,16 @@ public enum EntryContent: Equatable, Sendable {
   public init(
     kind: JournalVault.Card.Kind,
     body: String,
+    completedAt: Date? = nil,
     attachment: EntryContentAttachment?
   ) {
     switch kind {
     case .text:
       self = .text(body)
+    case .todo:
+      self = .todo(
+        TodoContentSource(text: body, completedAt: completedAt)
+      )
     case .link:
       self = .link(body)
     case .file:

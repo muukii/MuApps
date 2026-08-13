@@ -15,9 +15,11 @@ struct VaultRecordMapperTests {
 
   @Test
   func cardFields_roundTrip() {
+    let completedAt = Date(timeIntervalSince1970: 1_700_000_120)
     let card = Card(
-      kind: .text,
+      kind: .todo,
       body: "hello",
+      completedAt: completedAt,
       location: Coordinate(latitude: 35.0, longitude: 139.7)
     )
     let record = makeRecord(type: .card, recordName: card.id.uuidString)
@@ -26,8 +28,10 @@ struct VaultRecordMapperTests {
     let imported = Card(id: card.id)
     VaultRecordMapper.update(imported, from: record)
 
-    #expect(imported.kind == .text)
+    #expect(imported.kind == .todo)
     #expect(imported.body == "hello")
+    #expect(imported.completedAt == completedAt)
+    #expect(imported.isCompleted)
     #expect(imported.createdAt == card.createdAt)
     #expect(imported.updatedAt == card.updatedAt)
     #expect(imported.location?.latitude == 35.0)
@@ -68,8 +72,9 @@ struct VaultRecordMapperTests {
     let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
     let updatedAt = Date(timeIntervalSince1970: 1_700_000_060)
     let card = Card(
-      kind: .photo,
+      kind: .todo,
       body: "local body",
+      completedAt: Date(timeIntervalSince1970: 1_700_000_030),
       createdAt: createdAt,
       updatedAt: updatedAt,
       location: Coordinate(latitude: 35.0, longitude: 139.7)
@@ -78,8 +83,9 @@ struct VaultRecordMapperTests {
 
     VaultRecordMapper.update(card, from: record)
 
-    #expect(card.kind == .photo)
+    #expect(card.kind == .todo)
     #expect(card.body == "")
+    #expect(card.completedAt == nil)
     #expect(card.createdAt == createdAt)
     #expect(card.updatedAt == updatedAt)
     #expect(card.location == nil)

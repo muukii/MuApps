@@ -47,18 +47,26 @@ struct VaultSavedEntryRow: View {
   let onShare: @MainActor (VaultSavedEntry) -> Void
   let onEdit: @MainActor (VaultSavedEntry) -> Void
   let onRequestDelete: @MainActor (VaultSavedEntry) -> Void
+  let onToggleTodoCompletion: @MainActor (VaultSavedEntry) -> Void
 
   var body: some View {
-    NavigationLink(
-      value: SavedListNavigationRoute.entry(edgeID: entry.edgeID)
-    ) {
-      VaultSavedRootGroup(entry: entry.entryModel)
-        .appMatchedTransitionSource(
-          id: entry.edgeID,
-          in: transitionNamespace
-        )
+    Group {
+      if entry.kind == .todo {
+        HStack(alignment: .center, spacing: 0) {
+          TodoCompletionButton(isCompleted: entry.isCompleted) {
+            onToggleTodoCompletion(entry)
+          }
+          .padding(.leading, 8)
+          .disabled(isMutationDisabled)
+
+          entryNavigationLink(showsTodoCompletionIndicator: false)
+        }
+        .background(.appSecondaryContainer)
+        .clipShape(.rect(cornerRadius: rootGroupCornerRadius))
+      } else {
+        entryNavigationLink(showsTodoCompletionIndicator: true)
+      }
     }
-    .buttonStyle(.plain)
     .id(entry.edgeID)
     .contextMenu {
       Button {
@@ -82,6 +90,24 @@ struct VaultSavedEntryRow: View {
       .disabled(isMutationDisabled)
     }
   }
+
+  private func entryNavigationLink(
+    showsTodoCompletionIndicator: Bool
+  ) -> some View {
+    NavigationLink(
+      value: SavedListNavigationRoute.entry(edgeID: entry.edgeID)
+    ) {
+      VaultSavedRootGroup(
+        entry: entry.entryModel,
+        showsTodoCompletionIndicator: showsTodoCompletionIndicator
+      )
+      .appMatchedTransitionSource(
+        id: entry.edgeID,
+        in: transitionNamespace
+      )
+    }
+    .buttonStyle(.plain)
+  }
 }
 
 /// Root-edge presentation used by Home's single-column reading stream.
@@ -93,13 +119,26 @@ struct VaultSavedEntryRow: View {
 struct VaultSavedRootGroup: View {
 
   let entry: VaultSavedEntryModel
+  let showsTodoCompletionIndicator: Bool
+
+  init(
+    entry: VaultSavedEntryModel,
+    showsTodoCompletionIndicator: Bool = true
+  ) {
+    self.entry = entry
+    self.showsTodoCompletionIndicator = showsTodoCompletionIndicator
+  }
 
   var body: some View {
-    EntryContentView(content: entry.content, style: .detail)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .foregroundStyle(.appOnSecondaryContainer)
-      .allowsHitTesting(false)  
-      .contentShape(.rect)
+    EntryContentView(
+      content: entry.content,
+      style: .detail,
+      showsTodoCompletionIndicator: showsTodoCompletionIndicator
+    )
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .foregroundStyle(.appOnSecondaryContainer)
+    .allowsHitTesting(false)
+    .contentShape(.rect)
   }
 }
 
@@ -107,7 +146,7 @@ struct VaultSavedDayHeader: View {
 
   let day: Date
 
-  var body: some View {    
+  var body: some View {
     Text(day, format: .dateTime.weekday(.abbreviated).month(.wide).day().year())
       .font(.headline)
       .foregroundStyle(.appOnPrimaryContainer.opacity(0.72))
