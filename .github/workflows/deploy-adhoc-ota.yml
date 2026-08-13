@@ -20,10 +20,8 @@ on:
           - PhotosOrganizer
           - AmbientLight
           - Färg
-          - HearAugment
           - PolyReader
           - VoiceRecorder
-          - HelloWorld
 
 permissions:
   contents: write
@@ -97,10 +95,8 @@ jobs:
             printf 'PhotosOrganizer\tApps/PhotosOrganizer\tPhotosOrganizer\tapp.muukii.PhotosOrganizer\tPhotosOrganizer.ipa\tPhotosOrganizer-manifest.plist\n'
             printf 'AmbientLight\tApps/AmbientLight\tAmbientLight\tapp.muukii.ambientlight\tAmbientLight.ipa\tAmbientLight-manifest.plist\n'
             printf 'Färg\tApps/Farg\tFarg\tapp.muukii.farg\tFarg.ipa\tFarg-manifest.plist\n'
-            printf 'HearAugment\tApps/HearAugment\tHearAugment\tapp.muukii.hearaugment\tHearAugment.ipa\tHearAugment-manifest.plist\n'
             printf 'PolyReader\tApps/PolyReader\tPolyReader\tapp.muukii.polyreader\tPolyReader.ipa\tPolyReader-manifest.plist\n'
             printf 'VoiceRecorder\tApps/VoiceRecorder\tVoiceRecorder\tapp.muukii.voicerecorder\tVoiceRecorder.ipa\tVoiceRecorder-manifest.plist\n'
-            printf 'HelloWorld\tApps/HelloWorld\tHelloWorld\tapp.muukii.helloworld\tHelloWorld.ipa\tHelloWorld-manifest.plist\n'
           } > ./build/all-adhoc-apps.tsv
 
           if [ "$requested_app" = "all" ]; then

@@ -98,6 +98,9 @@ MuApps.xcworkspace/
 Apps/*/*.xcodeproj/
 Apps/*/*.xcworkspace/
 Apps/*/Derived/
+Experiments/*/*.xcodeproj/
+Experiments/*/*.xcworkspace/
+Experiments/*/Derived/
 Shared/**/*.xcodeproj
 Shared/**/*.xcworkspace
 

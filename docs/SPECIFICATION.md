@@ -2,23 +2,25 @@
 
 ## Ad Hoc OTA Install Page
 - Pushes to the `main` branch run the Ad Hoc workflow automatically; manual runs can still publish all apps or a selected app from `main`.
-- The workflow exports Ad Hoc IPAs for Verse, Tone, PhotosOrganizer, AmbientLight, HearAugment, PolyReader, VoiceRecorder, and HelloWorld.
+- The workflow exports Ad Hoc IPAs for Verse, Journal/Tinycurve, Tone, PhotosOrganizer, AmbientLight, Färg, PolyReader, and VoiceRecorder.
 - Builds are published to the single `adhoc-latest` GitHub release so the release list does not grow per branch.
 - GitHub Pages serves `docs/install.html` as the shared install page for the latest `main` Ad Hoc builds.
 - Each app has its own install action backed by an `itms-services` manifest in the `adhoc-latest` GitHub release.
 - Installs require a registered iPhone included in the Apple Developer Ad Hoc provisioning profile.
 
 ## App Store Connect Deployment
-- The App Store Connect workflow manages deploys for Verse, Journal, Tone, and AmbientLight.
-- Pushes to the `main` branch automatically upload apps marked with `deploy_on_main`; currently Verse and Journal.
-- Manual workflow runs can choose Verse, Journal, Tone, AmbientLight, or all configured apps.
+- The App Store Connect workflow manages deploys for Verse, Journal/Tinycurve, Tone, AmbientLight, and Färg.
+- Pushes to the `main` branch automatically upload apps marked with `deploy_on_main`; currently Verse, Journal/Tinycurve, and Färg.
+- Manual workflow runs can choose Verse, Journal, Tone, AmbientLight, Färg, or all configured apps.
 - Deployable apps are listed in `.github/appstore-apps.json` with their scheme, project path, Xcode version, macOS runner, and optional `deploy_on_main` flag.
 - If `all` is selected, apps whose project path does not exist on the current branch are skipped with a notice; selecting a missing app directly fails the run with a clear error.
 - The shared deploy workflow installs Tuist dependencies, generates the workspace, archives the selected scheme, signs the archived app and nested extensions with discovered entitlements, then exports and uploads to App Store Connect using the repository App Store Connect API key secrets.
 
 ## Local Build Coverage
-- The pull request build workflow also builds CodexPet as an experimental simulator app.
-- CodexPet is not yet included in Ad Hoc OTA publishing or App Store Connect deployment.
+- The pull request build workflow has separate matrices for release-targeted apps under `Apps/` and active experiments under `Experiments/`.
+- Active experiments are CodexPet, ColorPlayground, HearAugment, HelloWorld, SafariReactor, and TabLab.
+- Experiments are not included in Ad Hoc OTA publishing or App Store Connect deployment.
+- Archived experiments remain under `Experiments/` but are omitted from the root workspace and CI matrices.
 
 ---
 
@@ -53,7 +55,7 @@ CodexPet is an experimental SwiftUI app for previewing Codex Desktop custom pet 
 - Renders a static representative frame for the selected pose because WidgetKit widgets are snapshot-driven rather than continuous animation surfaces.
 
 ### 5. Web App
-- Provides a static web app under `Apps/CodexPet/Web/`.
+- Provides a static web app under `Experiments/CodexPet/Web/`.
 - Uses the same bundled Mofu Monkey and Mofu Monkey Dot sprite atlases as PNG assets.
 - Animates the pet by updating CSS sprite background positions from the 8 x 9 Codex pet atlas.
 - Detects transparent atlas cells in a canvas pass and excludes blank frames while keeping each visible frame's full 192 x 208 cell registration.
@@ -97,7 +99,7 @@ Safari Reactor is an iPhone/iPad container app for a Safari Web Extension that e
 - Summarizes the current target page, milestone, and default overlay behavior.
 
 ### 3. Development Mock
-- Includes `Apps/SafariReactor/Development/mock-player.html` as a local Netflix-like fixture.
+- Includes `Experiments/SafariReactor/Development/mock-player.html` as a local Netflix-like fixture.
 - The mock page reuses the production content script and stylesheet so overlay, subtitle detection, and playback controls can be developed before real Netflix/Safari verification.
 
 ## Constraints

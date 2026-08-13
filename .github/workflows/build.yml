@@ -12,24 +12,69 @@ permissions:
   contents: read
 
 jobs:
-  build-ios:
-    name: Build ${{ matrix.app }}
+  build-release-apps:
+    name: Build Release App - ${{ matrix.app }}
     runs-on: macos-26
     strategy:
       fail-fast: false
       matrix:
         app:
-          - Verse
-          - Tinycurve
-          - CodexPet
-          - Tone
-          - PhotosOrganizer
           - AmbientLight
           - Farg
-          - HearAugment
+          - PhotosOrganizer
           - PolyReader
+          - Tinycurve
+          - Tone
+          - Verse
           - VoiceRecorder
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install mise
+        uses: jdx/mise-action@v2
+        with:
+          install: true
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.4'
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install dependencies with Tuist
+        run: tuist install
+
+      - name: Generate Xcode workspace with Tuist
+        run: tuist generate --no-open
+
+      - name: Build ${{ matrix.app }}
+        run: |
+          set -o pipefail && xcodebuild \
+            -workspace MuApps.xcworkspace \
+            -scheme ${{ matrix.app }} \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipMacroValidation \
+            build | xcbeautify --renderer github-actions
+
+  build-experiments:
+    name: Build Experiment - ${{ matrix.app }}
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - CodexPet
+          - ColorPlayground
+          - HearAugment
           - HelloWorld
+          - SafariReactor
+          - TabLab
     steps:
       - name: Checkout
         uses: actions/checkout@v4

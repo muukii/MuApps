@@ -9,23 +9,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`MuApps` is a Tuist-managed monorepo that hosts multiple iOS apps under `Apps/`. `Verse` is the primary app (SwiftUI-based YouTube subtitle viewer / learning tool). `HelloWorld` is a minimal scaffold that serves as the template for new apps.
+`MuApps` is a Tuist-managed monorepo. Release-targeted applications live under
+`Apps/`, executable proofs of concept and archived experiments live under
+`Experiments/`, and cross-app modules live under `Shared/`. See
+`docs/REPOSITORY_STRUCTURE.md` for the classification and migration contract.
 
 ## Workspace Layout
 
 ```
-Workspace.swift              # Tuist workspace (lists projects under Apps/)
+Workspace.swift              # Tuist workspace (groups Apps, Experiments, Shared)
 Tuist.swift                  # Tuist config
 Tuist/
   Package.swift              # Shared external SPM dependencies (all apps)
   ProjectDescriptionHelpers/ # Shared Project.swift helpers (AppConstants, settings)
-Apps/
+Apps/                        # Release-targeted applications
   Verse/                     # Main app
     Project.swift
     Sources/                 # Swift sources (incl. YouTubeSubtitle.entitlements)
     Components/              # App-local Components framework target
     Info.plist
     xcconfig/Version.xcconfig
+Experiments/                 # Active PoCs, labs, scaffolds, and archives
   HelloWorld/                # Scaffold app — copy this to bootstrap a new app
     Project.swift
     Sources/
@@ -74,10 +78,16 @@ open MuApps.xcworkspace
 
 ## Adding a New App
 
-1. Copy `Apps/HelloWorld/` to `Apps/<NewApp>/` and rename sources.
+1. Copy `Experiments/HelloWorld/` to `Apps/<NewApp>/` and rename sources.
 2. Update `bundleId` and `name` in its `Project.swift`.
 3. Add the new directory to `Workspace.swift`'s `projects` array.
 4. Run `tuist generate`.
+
+For a PoC or lab, copy the same scaffold to `Experiments/<NewExperiment>/`
+instead. Active experiments belong in the experiment section of
+`Workspace.swift` and the experiment CI matrix, but not in release distribution
+configuration. Archived experiments remain under `Experiments/` and are removed
+from both the workspace and CI.
 
 Shared external SPM dependencies: add to `Tuist/Package.swift` and reference via `.external(name: ...)` in the app's `Project.swift`. Shared manifest helpers (settings, constants): extend `Tuist/ProjectDescriptionHelpers/Project+Templates.swift`.
 
@@ -86,7 +96,10 @@ Shared external SPM dependencies: add to `Tuist/Package.swift` and reference via
 - Uses SwiftUI as the UI framework
 - Target platforms: iOS (see `DeploymentTargets.app` in helpers)
 - Dependencies are managed via Swift Package Manager through Tuist
-- Each app owns its feature sources under `Apps/<App>/`; reusable interaction components live in `Shared/MuComponents`, while shared visual tokens live in `Shared/MuDesignSystem`
+- Each project owns its feature sources under `Apps/<App>/` or
+  `Experiments/<Experiment>/`; reusable interaction components live in
+  `Shared/MuComponents`, while shared visual tokens live in
+  `Shared/MuDesignSystem`
 
 ## Documentation Policy
 
