@@ -157,7 +157,7 @@ private struct VaultSavedListContentView: View {
               }
             } header: {
               VaultSavedDayHeader(day: section.day)
-                .padding(.top, daySectionTopSpacing)
+                .padding(.vertical, daySectionTopSpacing)
             }
           }
         }
