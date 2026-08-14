@@ -1,5 +1,5 @@
 // Version Configuration
 // This file is the single source of truth for app version
 
-MARKETING_VERSION = 5.0.0
+MARKETING_VERSION = 6.0.0
 CURRENT_PROJECT_VERSION = 1
