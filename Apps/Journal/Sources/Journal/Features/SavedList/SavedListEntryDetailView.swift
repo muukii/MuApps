@@ -3,20 +3,17 @@ import JournalVault
 import SwiftUI
 
 private let detailScreenPadding: CGFloat = 16
-private let detailMaximumContentWidth: CGFloat = 720
 
-/// Resolves one fractal detail level from the live relationship graph.
+/// Resolves one re-rooted detail tree from the live relationship graph.
 ///
-/// A destination shows the selected placement and only its direct children.
-/// Opening any child pushes this same destination type again. Ancestor ids are
-/// filtered defensively while sync repair is resolving a malformed cycle.
+/// The selected placement becomes the local root. Ancestors and siblings stay
+/// represented by the navigation path instead of being repeated in this view.
 struct VaultSavedEntryDetailDestination: View {
 
   let edgeID: UUID
-  let entries: [VaultSavedEntry]
-  let childEntriesByParentID: [UUID: [VaultSavedEntry]]
+  let treeProjection: SavedEntryTreeProjection<VaultSavedEntry>
   @Binding var navigationPath: [SavedListNavigationRoute]
-  @Binding var detailScrollTargetID: UUID?
+  @Binding var detailScrollRequest: SavedListDetailScrollRequest?
   let isEditingDisabled: Bool
   let isDeletingDisabled: Bool
   let isTodoCompletionDisabled: Bool
@@ -28,23 +25,21 @@ struct VaultSavedEntryDetailDestination: View {
 
   var body: some View {
     Group {
-      if let currentEntry {
+      if let tree {
         VaultSavedEntryDetailView(
-          currentEntry: currentEntry,
-          childEntries: directChildren,
-          detailScrollTargetID: $detailScrollTargetID,
+          tree: tree,
+          detailScrollRequest: $detailScrollRequest,
           isEditingDisabled: isEditingDisabled,
           isDeletingDisabled: isDeletingDisabled,
           isTodoCompletionDisabled: isTodoCompletionDisabled,
           transitionNamespace: transitionNamespace,
-          onOpen: openEntry,
           onShare: onShare,
           onEdit: onEdit,
           onDelete: onDelete,
           onToggleTodoCompletion: onToggleTodoCompletion
         )
         .appZoomNavigationTransition(
-          sourceID: currentEntry.edgeID,
+          sourceID: transitionSourceID,
           in: transitionNamespace
         )
       } else {
@@ -56,38 +51,43 @@ struct VaultSavedEntryDetailDestination: View {
     }
   }
 
-  private var currentEntry: VaultSavedEntry? {
-    entries.first { $0.edgeID == edgeID }
-  }
-
-  private var directChildren: [VaultSavedEntry] {
+  private var tree: SavedEntryTreeProjection<VaultSavedEntry>.Node? {
     let ancestorEdgeIDs = Set(
       navigationPath
         .prefix(throughEntry: edgeID)
         .compactMap(\.entryEdgeID)
+        .filter { $0 != edgeID }
     )
-    return (childEntriesByParentID[edgeID] ?? [])
-      .filter { ancestorEdgeIDs.contains($0.edgeID) == false }
+    return treeProjection.tree(
+      startingAt: edgeID,
+      excluding: ancestorEdgeIDs
+    )
   }
 
-  private func openEntry(_ entry: VaultSavedEntry) {
-    guard navigationPath.contains(.entry(edgeID: entry.edgeID)) == false else {
-      return
-    }
-    navigationPath.append(.entry(edgeID: entry.edgeID))
+  /// Matches the source registered by the tree surface immediately below this
+  /// route, rather than another retained surface that renders the same edge.
+  private var transitionSourceID: VaultSavedEntryTransitionSourceID {
+    let route = SavedListNavigationRoute.entry(edgeID: edgeID)
+    let sourceTreeRootEdgeID = navigationPath.firstIndex(of: route)
+      .flatMap { index in
+        navigationPath[..<index].last?.entryEdgeID
+      }
+    return VaultSavedEntryTransitionSourceID(
+      treeRootEdgeID: sourceTreeRootEdgeID,
+      edgeID: edgeID
+    )
   }
 }
 
+/// Detail surface for a subtree whose first node is the current route.
 private struct VaultSavedEntryDetailView: View {
 
-  let currentEntry: VaultSavedEntry
-  let childEntries: [VaultSavedEntry]
-  @Binding var detailScrollTargetID: UUID?
+  let tree: SavedEntryTreeProjection<VaultSavedEntry>.Node
+  @Binding var detailScrollRequest: SavedListDetailScrollRequest?
   let isEditingDisabled: Bool
   let isDeletingDisabled: Bool
   let isTodoCompletionDisabled: Bool
   let transitionNamespace: Namespace.ID
-  let onOpen: @MainActor (VaultSavedEntry) -> Void
   let onShare: @MainActor (VaultSavedEntry) -> Void
   let onEdit: @MainActor (VaultSavedEntry) -> Void
   let onDelete: @MainActor (VaultSavedEntry) async -> Bool
@@ -98,37 +98,44 @@ private struct VaultSavedEntryDetailView: View {
   @State private var deleteCandidate: VaultSavedEntry?
 
   var body: some View {
-    ScrollViewReader { proxy in
-      ScrollView {
-        LazyVStack(alignment: .center, spacing: 40) {
-          detailRow(currentEntry)
-
-          ForEach(childEntries) { entry in
-            detailRow(
-              entry,
-              onOpen: {
-                onOpen(entry)
-              }
-            )
-            .appMatchedTransitionSource(
-              id: entry.edgeID,
-              in: transitionNamespace
-            )
+    GeometryReader { viewport in
+      TreeScrollView(
+        root: tree,
+        indentation: VaultSavedEntryTreeMetrics.indentation,
+        spacing: VaultSavedEntryTreeMetrics.nodeSpacing,
+        scrollTargetID: detailScrollRequest?.targetID(ownedBy: tree.id),
+        onScrollTargetResolved: { targetID in
+          if detailScrollRequest?.ownerDetailRootEdgeID == tree.id,
+            detailScrollRequest?.targetEdgeID == targetID
+          {
+            detailScrollRequest = nil
           }
         }
-        .frame(maxWidth: .infinity)
-        .padding(detailScreenPadding)
+      ) { entry in
+        VaultSavedEntryTreeCell(
+          entry: entry,
+          viewportWidth: max(
+            0,
+            viewport.size.width - (detailScreenPadding * 2)
+          ),
+          isNavigationEnabled: entry.edgeID != tree.id,
+          isMutationDisabled: isEditingDisabled || isDeletingDisabled
+            || isTodoCompletionDisabled,
+          transitionSourceTreeRootEdgeID: tree.id,
+          transitionNamespace: transitionNamespace,
+          onShare: onShare,
+          onEdit: onEdit,
+          onRequestDelete: { entry in
+            deleteCandidate = entry
+          },
+          onToggleTodoCompletion: onToggleTodoCompletion
+        )
       }
+      .padding(.horizontal, detailScreenPadding)
       .contentMargins(.bottom, composerOverlayHeight, for: .scrollContent)
-      .onChange(of: detailScrollTargetID, initial: true) { _, _ in
-        scrollToPendingChild(using: proxy)
-      }
-      .onChange(of: childEntries.map(\.edgeID)) { _, _ in
-        scrollToPendingChild(using: proxy)
-      }
     }
     .background(.background)
-    .navigationTitle(currentEntry.kind.vaultListDisplayTitle)
+    .navigationTitle(tree.body.kind.vaultListDisplayTitle)
     .appInlineNavigationTitle()
     .confirmationDialog(
       "Delete Entry",
@@ -140,7 +147,7 @@ private struct VaultSavedEntryDetailView: View {
         deleteCandidate = nil
         Task { @MainActor in
           let didDelete = await onDelete(entry)
-          if didDelete, entry.edgeID == currentEntry.edgeID {
+          if didDelete, entry.edgeID == tree.id {
             dismiss()
           }
         }
@@ -165,65 +172,6 @@ private struct VaultSavedEntryDetailView: View {
     }
   }
 
-  @ViewBuilder
-  private func detailRow(
-    _ entry: VaultSavedEntry,
-    onOpen: (@MainActor () -> Void)? = nil
-  ) -> some View {
-    VaultSavedEntryDetailRow(
-      entry: entry.entryModel,
-      isEditingDisabled: isEditingDisabled || entry.kind == .file,
-      isDeletingDisabled: isDeletingDisabled,
-      isTodoCompletionDisabled: isTodoCompletionDisabled,
-      onEdit: {
-        self.onEdit(entry)
-      },
-      onDelete: {
-        deleteCandidate = entry
-      },
-      onOpen: onOpen,
-      onToggleTodoCompletion: {
-        onToggleTodoCompletion(entry)
-      }
-    )
-    .contextMenu {
-      Button {
-        onShare(entry)
-      } label: {
-        Label("Share", systemImage: "square.and.arrow.up")
-      }
-
-      Button {
-        self.onEdit(entry)
-      } label: {
-        Label("Edit", systemImage: "square.and.pencil")
-      }
-      .disabled(isEditingDisabled || entry.kind == .file)
-
-      Button(role: .destructive) {
-        deleteCandidate = entry
-      } label: {
-        Label("Delete", systemImage: "trash")
-      }
-      .disabled(isDeletingDisabled)
-    }
-    .id(entry.edgeID)
-    .frame(maxWidth: detailMaximumContentWidth)
-  }
-
-  /// Waits for the appended child to enter the live query before scrolling.
-  private func scrollToPendingChild(using proxy: ScrollViewProxy) {
-    guard let targetID = detailScrollTargetID,
-      childEntries.contains(where: { $0.edgeID == targetID })
-    else {
-      return
-    }
-
-    withAnimation(.snappy) {
-      proxy.scrollTo(targetID, anchor: .center)
-    }
-    detailScrollTargetID = nil
-  }
 }
 
 extension SavedListNavigationRoute {

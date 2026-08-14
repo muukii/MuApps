@@ -43,7 +43,6 @@ struct BauhausContentView: View {
       }
     }
 
-    var usesMediaWell: Bool { preset == .share }
     var usesCompactLoading: Bool { preset == .composer }
     var placeholderAspectRatio: CGFloat { 1 }
     var minimumHeight: CGFloat? { preset == .detail ? 180 : nil }
@@ -57,7 +56,6 @@ struct BauhausContentView: View {
 
   var body: some View {
     content
-      .contentMediaWell(isEnabled: style.usesMediaWell)
       .task(
         id: ContentFileLoadID(
           fileURL: bauhaus.fileURL,
@@ -96,8 +94,11 @@ struct BauhausContentView: View {
 
   @ViewBuilder
   private func rendered(_ document: BauhausGridDocument) -> some View {
-    BauhausGridArtworkView(artwork: document.artwork)
-      .padding(style.artworkPadding)
+    BauhausGridArtworkView(
+      padding: 20, 
+      artwork: document.artwork
+    )
+    .padding(style.artworkPadding)
   }
 
   @MainActor
@@ -136,8 +137,49 @@ struct BauhausContentView: View {
 #Preview("Bauhaus Content") {
   EntryContentPreviewCanvas {
     BauhausContentView(
-      bauhaus: BauhausContentSource(),
+      bauhaus: BauhausContentSource(
+        document: BauhausContentPreview.document
+      ),
       style: .init(.detail)
     )
   }
+}
+
+/// A populated authored document for exercising the entry-content renderer.
+///
+/// This fixture stays local to the preview because it represents neither a
+/// capture default nor persisted product content.
+private enum BauhausContentPreview {
+
+  static let document: BauhausGridDocument = {
+    var artwork = BauhausGridArtwork()
+    artwork[BauhausGridPosition(row: 0, column: 1)] = BauhausTile(
+      shape: .circle,
+      shapeSwatch: .slot1
+    )
+    artwork[BauhausGridPosition(row: 1, column: 3)] = BauhausTile(
+      shape: .semicircleLeading,
+      shapeSwatch: .slot5,
+      backgroundSwatch: .slot2
+    )
+    artwork[BauhausGridPosition(row: 2, column: 0)] = BauhausTile(
+      shape: .triangleBottomTrailing,
+      shapeSwatch: .slot7,
+      backgroundSwatch: .slot4
+    )
+    artwork[BauhausGridPosition(row: 2, column: 2)] = BauhausTile(
+      shape: .square,
+      shapeSwatch: .slot2
+    )
+    artwork[BauhausGridPosition(row: 3, column: 1)] = BauhausTile(
+      shape: .quarterCircleTopTrailing,
+      shapeSwatch: .slot6
+    )
+    artwork[BauhausGridPosition(row: 4, column: 4)] = BauhausTile(
+      shape: .paddedCircle,
+      shapeSwatch: .slot1,
+      backgroundSwatch: .slot5
+    )
+    return BauhausGridDocument(artwork: artwork)
+  }()
 }

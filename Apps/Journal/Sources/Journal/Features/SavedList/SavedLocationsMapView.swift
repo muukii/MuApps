@@ -120,6 +120,7 @@ struct VaultSavedLocationsMapView: View {
       markerColor: palette.tint,
       glyphColor: palette.onTint
     )
+    .ignoresSafeArea()
     .navigationTitle("Map")
     .appInlineNavigationTitle()
   }

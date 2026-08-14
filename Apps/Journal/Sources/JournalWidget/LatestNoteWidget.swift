@@ -60,7 +60,9 @@ struct LatestNoteWidget: Widget {
 struct LatestNoteWidgetConfiguration: WidgetConfigurationIntent {
 
   static let title: LocalizedStringResource = "Latest Note"
-  static let description = IntentDescription("Choose which vault this widget should show.")
+  static let description = IntentDescription(
+    "Choose which vault this widget should show."
+  )
 
   @Parameter(title: "Vault")
   var vault: JournalVaultEntity?
@@ -102,7 +104,8 @@ struct WidgetVaultSnapshot: Sendable, Hashable {
 
   private static func displayTitle(for title: String) -> String {
     let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmedTitle.isEmpty ? String(localized: "Untitled Vault") : trimmedTitle
+    return trimmedTitle.isEmpty
+      ? String(localized: "Untitled Vault") : trimmedTitle
   }
 }
 
@@ -181,7 +184,8 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
     return Timeline(entries: [entry], policy: .after(next))
   }
 
-  private func loadEntry(for configuration: LatestNoteWidgetConfiguration) async -> LatestNoteEntry
+  private func loadEntry(for configuration: LatestNoteWidgetConfiguration) async
+    -> LatestNoteEntry
   {
     do {
       guard
@@ -203,7 +207,8 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
   ///
   /// Returns `nil` when the vault has no roots or when its store can't be
   /// opened; the view shows an empty state in both cases.
-  private func loadLatestNote(in vaultID: VaultID) async throws -> NoteSnapshot? {
+  private func loadLatestNote(in vaultID: VaultID) async throws -> NoteSnapshot?
+  {
     let cardSnapshot: WidgetLatestCardSnapshot? = try await MainActor.run {
       let layout = try VaultStoreLayout.appGroup()
       // A widget is a short-lived, read-only process. A transient open failure
@@ -263,7 +268,8 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
     }
 
     let fileURL = store.fileURL(for: resource)
-    let availableFileURL = FileManager.default.fileExists(atPath: fileURL.path) ? fileURL : nil
+    let availableFileURL =
+      FileManager.default.fileExists(atPath: fileURL.path) ? fileURL : nil
     return WidgetMediaAttachmentSnapshot(
       fileURL: availableFileURL,
       thumbnailData: attachment.thumbnail,
@@ -321,19 +327,34 @@ private struct WidgetLatestCardSnapshot: Sendable {
     case .audio:
       return .audio
     case .suggestion:
-      guard let mediaFileURL = mediaAttachment?.fileURL else { return .suggestion(nil) }
+      guard let mediaFileURL = mediaAttachment?.fileURL else {
+        return .suggestion(nil)
+      }
       return .suggestion(
-        await WidgetMediaFileReader.decode(SuggestionCardPayload.self, from: mediaFileURL)
+        await WidgetMediaFileReader.decode(
+          SuggestionCardPayload.self,
+          from: mediaFileURL
+        )
       )
     case .doodle:
-      guard let mediaFileURL = mediaAttachment?.fileURL else { return .doodle(nil) }
+      guard let mediaFileURL = mediaAttachment?.fileURL else {
+        return .doodle(nil)
+      }
       return .doodle(
-        await WidgetMediaFileReader.decode(DoodleDrawing.self, from: mediaFileURL)
+        await WidgetMediaFileReader.decode(
+          DoodleDrawing.self,
+          from: mediaFileURL
+        )
       )
     case .bauhaus:
-      guard let mediaFileURL = mediaAttachment?.fileURL else { return .bauhaus(nil) }
+      guard let mediaFileURL = mediaAttachment?.fileURL else {
+        return .bauhaus(nil)
+      }
       return .bauhaus(
-        await WidgetMediaFileReader.decode(BauhausGridDocument.self, from: mediaFileURL)
+        await WidgetMediaFileReader.decode(
+          BauhausGridDocument.self,
+          from: mediaFileURL
+        )
       )
     case .unknown:
       return .unknown
@@ -382,12 +403,16 @@ private enum WidgetMediaFileReader {
 /// representation.
 private enum JournalWidgetVaultCatalogReader {
 
-  static func resolvedVault(for entity: JournalVaultEntity?) async throws -> WidgetVaultSnapshot? {
+  static func resolvedVault(for entity: JournalVaultEntity?) async throws
+    -> WidgetVaultSnapshot?
+  {
     let descriptors = try await descriptors()
     guard descriptors.isEmpty == false else { return nil }
 
     if let entity,
-      let descriptor = descriptors.first(where: { $0.vaultID.uuidString == entity.id })
+      let descriptor = descriptors.first(where: {
+        $0.vaultID.uuidString == entity.id
+      })
     {
       return WidgetVaultSnapshot(descriptor: descriptor)
     }
@@ -489,7 +514,8 @@ private struct LatestNoteCircularAccessoryView: View {
   private var accessibilityTitle: String {
     entry.note?.content.accessoryTitle
       ?? (entry.vault == nil
-        ? String(localized: "No vaults yet") : String(localized: "No notes yet"))
+        ? String(localized: "No vaults yet")
+        : String(localized: "No notes yet"))
   }
 }
 
@@ -523,7 +549,8 @@ private struct LatestNoteRectangularAccessoryView: View {
   private var bodyTitle: String {
     entry.note?.content.accessoryTitle
       ?? (entry.vault == nil
-        ? String(localized: "No vaults yet") : String(localized: "No notes yet"))
+        ? String(localized: "No vaults yet")
+        : String(localized: "No notes yet"))
   }
 
 }
@@ -617,7 +644,10 @@ private struct NoteContentView: View {
     case .bauhaus(let document):
       WidgetBauhausView(document: document)
     case .unknown:
-      WidgetMediaLabel(title: "Untitled", systemImage: "questionmark.square.dashed")
+      WidgetMediaLabel(
+        title: "Untitled",
+        systemImage: "questionmark.square.dashed"
+      )
     }
   }
 
@@ -732,8 +762,11 @@ private struct WidgetBauhausView: View {
   var body: some View {
     if let document {
       WidgetRenderedMediaFrame {
-        BauhausGridArtworkView(artwork: document.artwork)
-          .padding(6)
+        BauhausGridArtworkView(
+          padding: 8,
+          artwork: document.artwork
+        )
+        .padding(6)
       }
       .accessibilityLabel(Text("Bauhaus"))
     } else {
@@ -890,7 +923,8 @@ private struct LatestNoteEmptyState: View {
   }
 
   private var title: String {
-    vault == nil ? String(localized: "No vaults yet") : String(localized: "No entries yet")
+    vault == nil
+      ? String(localized: "No vaults yet") : String(localized: "No entries yet")
   }
 
 }
@@ -999,8 +1033,11 @@ extension NoteContent {
       let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
       return trimmedText.isEmpty ? String(localized: "Todo") : trimmedText
     case .link(let urlString):
-      let trimmedURLString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-      return trimmedURLString.isEmpty ? String(localized: "Link") : trimmedURLString
+      let trimmedURLString = urlString.trimmingCharacters(
+        in: .whitespacesAndNewlines
+      )
+      return trimmedURLString.isEmpty
+        ? String(localized: "Link") : trimmedURLString
     case .file(let file):
       return file.displayName
     case .photo:
@@ -1012,7 +1049,9 @@ extension NoteContent {
     case .audio:
       return String(localized: "Audio")
     case .suggestion(let suggestion):
-      let title = suggestion?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+      let title = suggestion?.title.trimmingCharacters(
+        in: .whitespacesAndNewlines
+      )
       if let title, title.isEmpty == false {
         return title
       }
@@ -1100,24 +1139,38 @@ extension DoodleDrawing {
 }
 
 extension BauhausGridDocument {
-  fileprivate static let widgetSample = BauhausGridDocument(artwork: .widgetSample)
+  fileprivate static let widgetSample = BauhausGridDocument(
+    artwork: .widgetSample
+  )
 }
 
 extension BauhausGridArtwork {
   fileprivate static let widgetSample: BauhausGridArtwork = {
     var artwork = BauhausGridArtwork()
     artwork[BauhausGridPosition(row: 0, column: 1)] = BauhausTile(
-      shape: .circle, shapeSwatch: .slot1)
+      shape: .circle,
+      shapeSwatch: .slot1
+    )
     artwork[BauhausGridPosition(row: 1, column: 2)] = BauhausTile(
-      shape: .semicircleTrailing, shapeSwatch: .slot5)
+      shape: .semicircleTrailing,
+      shapeSwatch: .slot5
+    )
     artwork[BauhausGridPosition(row: 2, column: 0)] = BauhausTile(
-      shape: .triangleBottomTrailing, shapeSwatch: .slot4)
+      shape: .triangleBottomTrailing,
+      shapeSwatch: .slot4
+    )
     artwork[BauhausGridPosition(row: 2, column: 3)] = BauhausTile(
-      shape: .square, shapeSwatch: .slot2)
+      shape: .square,
+      shapeSwatch: .slot2
+    )
     artwork[BauhausGridPosition(row: 3, column: 1)] = BauhausTile(
-      shape: .quarterCircleTopTrailing, shapeSwatch: .slot6)
+      shape: .quarterCircleTopTrailing,
+      shapeSwatch: .slot6
+    )
     artwork[BauhausGridPosition(row: 4, column: 4)] = BauhausTile(
-      shape: .paddedCircle, shapeSwatch: .slot7)
+      shape: .paddedCircle,
+      shapeSwatch: .slot7
+    )
     return artwork
   }()
 }

@@ -268,6 +268,26 @@ let project = Project(
       )
     ),
 
+    .target(
+      name: "TinycurveTests",
+      destinations: journalDestinations,
+      product: .unitTests,
+      bundleId: "app.muukii.journal.TinycurveTests",
+      deploymentTargets: journalDeploymentTargets,
+      infoPlist: .default,
+      buildableFolders: ["Tests/TinycurveTests"],
+      dependencies: [
+        .target(name: "Tinycurve"),
+      ],
+      settings: .settings(
+        base: [:],
+        configurations: [
+          .debug(name: "Debug"),
+          .release(name: "Release"),
+        ]
+      )
+    ),
+
     // MARK: - System capture foundations
 
     // Extension-safe App Intents entities, Quick Capture preferences, app
@@ -607,6 +627,16 @@ let project = Project(
     ),
   ],
   schemes: [
+    .scheme(
+      name: "TinycurveTests",
+      buildAction: .buildAction(targets: ["TinycurveTests"]),
+      testAction: .targets([
+        .testableTarget(
+          target: "TinycurveTests",
+          parallelization: .swiftTestingOnly
+        ),
+      ])
+    ),
     .scheme(
       name: "JournalIntentsTests",
       buildAction: .buildAction(targets: ["JournalIntentsTests"]),

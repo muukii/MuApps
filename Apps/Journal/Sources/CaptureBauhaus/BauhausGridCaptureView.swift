@@ -67,24 +67,7 @@ public struct BauhausGridDocument: Codable, Equatable, Sendable {
     try container.encode(artwork, forKey: .artwork)
     try container.encodeIfPresent(replay, forKey: .replay)
   }
-
-  /// Rasterizes the final artwork into a square image for explicit raster
-  /// outputs. The document itself remains editable JSON; normal card UI should
-  /// render `BauhausGridArtworkView` or `BauhausGridReplayView` directly.
-  @MainActor
-  public func image(
-    colorScheme: ColorScheme = .light,
-    colorPalette: BauhausColorPalette = .default,
-    size: CGSize = CGSize(width: 512, height: 512),
-    scale: CGFloat = 1
-  ) -> BauhausRasterImage? {
-    artwork.image(
-      colorScheme: colorScheme,
-      colorPalette: colorPalette,
-      size: size,
-      scale: scale
-    )
-  }
+ 
 }
 
 /// Time-ordered Bauhaus edit operations for read-only replay.
@@ -249,30 +232,6 @@ public struct BauhausGridArtwork: Codable, Equatable, Sendable {
     tiles.allSatisfy { $0 == nil }
   }
 
-  /// Rasterizes the grid artwork into a square image while keeping the stored
-  /// value as vector-like tile data.
-  @MainActor
-  public func image(
-    colorScheme: ColorScheme = .light,
-    colorPalette: BauhausColorPalette = .default,
-    size: CGSize = CGSize(width: 512, height: 512),
-    scale: CGFloat = 1
-  ) -> BauhausRasterImage? {
-    guard size.width > 0, size.height > 0 else { return nil }
-    let renderer = ImageRenderer(
-      content: BauhausGridArtworkView(artwork: self, colorPalette: colorPalette)
-        .environment(\.colorScheme, colorScheme)
-        .frame(width: size.width, height: size.height)
-    )
-    renderer.scale = max(scale, 1)
-    renderer.isOpaque = true
-    #if canImport(UIKit)
-    return renderer.uiImage
-    #elseif canImport(AppKit)
-    return renderer.nsImage
-    #endif
-  }
-
   private func index(for position: BauhausGridPosition) -> Int? {
     guard position.row >= 0,
           position.row < Self.dimension,
@@ -292,102 +251,27 @@ public struct BauhausGridArtworkView: View {
 
   @Environment(\.colorScheme) private var colorScheme
 
+  public let padding: CGFloat
   public let artwork: BauhausGridArtwork
   public let colorPalette: BauhausColorPalette
 
   public init(
+    padding: CGFloat,
     artwork: BauhausGridArtwork,
     colorPalette: BauhausColorPalette = .default
   ) {
+    self.padding = padding
     self.artwork = artwork
     self.colorPalette = colorPalette
   }
 
   public var body: some View {
     BauhausArtworkRasterView(
+      padding: padding,
       artwork: artwork,
       colors: colorPalette.colors(for: colorScheme)
     )
-      .aspectRatio(1, contentMode: .fit)
-  }
-}
-
-/// Read-only SwiftUI replay for a saved `BauhausGridDocument`.
-///
-/// The caller owns playback state through `isPlaying`; the view only maps the
-/// document's optional replay timeline to a sequence of visible grid states.
-/// Documents without replay data render their final artwork statically.
-public struct BauhausGridReplayView: View {
-
-  public let document: BauhausGridDocument
-  public let colorPalette: BauhausColorPalette
-
-  @Binding private var isPlaying: Bool
-  @State private var replayStart: Date?
-
-  public init(
-    document: BauhausGridDocument,
-    colorPalette: BauhausColorPalette = .default,
-    isPlaying: Binding<Bool>
-  ) {
-    self.document = document
-    self.colorPalette = colorPalette
-    self._isPlaying = isPlaying
-  }
-
-  public var body: some View {
-    if let replay = document.replay, replay.isEmpty == false, isPlaying {
-      let playbackReplay = replay.presentationTimeline(
-        eventInterval: BauhausGridReplayRecipe.eventInterval
-      )
-      let recipe = BauhausGridReplayRecipe(replay: playbackReplay)
-
-      TimelineView(.animation) { timeline in
-        let elapsed = elapsedTime(at: timeline.date, recipe: recipe)
-        BauhausGridReplayFrameView(
-          replay: playbackReplay,
-          videoTime: elapsed,
-          recipe: recipe,
-          colorPalette: colorPalette
-        )
-        .onChange(of: elapsed >= recipe.totalDuration) { _, finished in
-          if finished {
-            isPlaying = false
-          }
-        }
-      }
-      .onAppear {
-        synchronizeReplayStart()
-      }
-      .onChange(of: isPlaying) { _, _ in
-        synchronizeReplayStart()
-      }
-      .onChange(of: document) { _, _ in
-        synchronizeReplayStart()
-      }
-    } else {
-      BauhausGridArtworkView(
-        artwork: document.artwork,
-        colorPalette: colorPalette
-      )
-      .onAppear {
-        if document.replay?.isEmpty != false {
-          isPlaying = false
-        }
-      }
-    }
-  }
-
-  private func synchronizeReplayStart() {
-    replayStart = isPlaying ? Date() : nil
-  }
-
-  private func elapsedTime(
-    at date: Date,
-    recipe: BauhausGridReplayRecipe
-  ) -> TimeInterval {
-    guard let replayStart else { return 0 }
-    return min(max(date.timeIntervalSince(replayStart), 0), recipe.totalDuration)
+    .aspectRatio(1, contentMode: .fit)
   }
 }
 
@@ -1862,6 +1746,7 @@ fileprivate struct BauhausArtworkThumbnail: View {
 
 fileprivate struct BauhausArtworkRasterView: View {
 
+  let padding: CGFloat
   let artwork: BauhausGridArtwork
   let colors: BauhausResolvedColors
 
@@ -1885,7 +1770,7 @@ fileprivate struct BauhausArtworkRasterView: View {
         .aspectRatio(1, contentMode: .fit)
       }
     }
-    .padding(8)
+    .padding(padding)
     .background(
       Rectangle()
         .fill(colors.chrome.paper)
@@ -2195,10 +2080,6 @@ public extension BauhausShapeKind {
   BauhausCaptureControlsPreview()
 }
 
-#Preview("Bauhaus Replay") {
-  BauhausReplayPreview()
-}
-
 // MARK: - Previews
 
 fileprivate enum BauhausPreviewFixtures {
@@ -2426,21 +2307,6 @@ fileprivate struct BauhausCaptureControlsPreview: View {
         onExport: {},
         onSelectSwatch: {}
       )
-    }
-  }
-}
-
-fileprivate struct BauhausReplayPreview: View {
-
-  @State private var isPlaying = true
-
-  var body: some View {
-    BauhausPreviewCanvas {
-      BauhausGridReplayView(
-        document: BauhausPreviewFixtures.replayDocument,
-        isPlaying: $isPlaying
-      )
-      .frame(width: 320, height: 320)
     }
   }
 }

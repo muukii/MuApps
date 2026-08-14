@@ -59,52 +59,53 @@ struct TinycurveApp: App {
             .preferredColorScheme(.dark)
 
         case nil:
+          JournalSceneAppearanceHost {
+            RootView(
+              vaultRuntime: vaultRuntime,
+              hasCachedInitialVaultAvailability: hasCachedInitialVaultAvailability
+            )
+            .task { DoodleHaptics.prepareForDrawing() }
+          }
+        }
+      #else
+        JournalSceneAppearanceHost {
           RootView(
             vaultRuntime: vaultRuntime,
             hasCachedInitialVaultAvailability: hasCachedInitialVaultAvailability
           )
           .task { DoodleHaptics.prepareForDrawing() }
         }
-      #else
-        RootView(
-          vaultRuntime: vaultRuntime,
-          hasCachedInitialVaultAvailability: hasCachedInitialVaultAvailability
-        )
-        .task { DoodleHaptics.prepareForDrawing() }
       #endif
     }
 
     #if os(macOS)
       Settings {
-        TinycurveSettingsSceneRoot(vaultRuntime: vaultRuntime)
+        JournalSceneAppearanceHost {
+          TinycurveSettingsSceneRoot(vaultRuntime: vaultRuntime)
+        }
       }
     #endif
   }
 }
 
 #if os(macOS)
-  /// Supplies the app-scoped runtime and visual preferences to the independent
-  /// macOS Settings scene.
+  /// Supplies the app-scoped runtime and accent palette to the independent
+  /// macOS Settings content.
   ///
-  /// Scenes don't inherit the environment installed below `RootView`, so the
-  /// Settings window needs its own root before it can reuse `SettingsScreen`.
+  /// `JournalSceneAppearanceHost` is installed separately at the Settings scene
+  /// boundary because independent scenes don't inherit the main window's environment.
   private struct TinycurveSettingsSceneRoot: View {
 
     let vaultRuntime: JournalVaultRuntime
 
     @AppStorage(JournalDefaults.accentColorID)
     private var accentColorID: String = AccentColor.default.id
-    @AppStorage(JournalDefaults.appearancePreferenceID)
-    private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
 
     var body: some View {
-      let appearancePreference = JournalAppearancePreference.with(id: appearancePreferenceID)
-
       PrimaryContainer(accentColor: AccentColor.with(id: accentColorID)) {
         SettingsScreen()
       }
       .environment(vaultRuntime)
-      .preferredColorScheme(appearancePreference.colorScheme)
       .frame(minWidth: 520, minHeight: 520)
     }
   }
@@ -164,9 +165,10 @@ struct TinycurveApp: App {
   }
 #endif
 
-/// Reads the persisted accent and appearance preference, then applies them to the
-/// whole app. Kept separate from `TinycurveApp` so the `@AppStorage` reads live in
-/// a `View`, where changes re-render the tree.
+/// Reads the persisted accent and applies the root `MuColor` palette.
+///
+/// `JournalSceneAppearanceHost` supplies the scene color scheme before this view
+/// resolves `PrimaryContainer`, so appearance and palette ownership remain separate.
 ///
 /// Also the root router: a fresh install blocks on initial vault discovery, while
 /// later launches restore the local vault first and reconcile CloudKit afterward.
@@ -199,8 +201,6 @@ private struct RootView: View {
 
   @AppStorage(JournalDefaults.accentColorID)
   private var accentColorID: String = AccentColor.default.id
-  @AppStorage(JournalDefaults.appearancePreferenceID)
-  private var appearancePreferenceID: String = JournalAppearancePreference.system.rawValue
   @AppStorage(JournalDefaults.hasCompletedOnboarding) private var hasCompletedOnboarding: Bool =
     false
   @AppStorage(JournalDefaults.hasResolvedInitialVaultAvailability)
@@ -224,8 +224,6 @@ private struct RootView: View {
   }
 
   var body: some View {
-    let appearancePreference = JournalAppearancePreference.with(id: appearancePreferenceID)
-
     PrimaryContainer(accentColor: AccentColor.with(id: accentColorID)) {
       JournalNotificationHost(center: notificationCenter) {
         switch rootRoute {
@@ -252,7 +250,6 @@ private struct RootView: View {
       }
     }
     .environment(vaultRuntime)
-    .preferredColorScheme(appearancePreference.colorScheme)
     .task { await startRootRouting() }
     .task { await acceptIncomingCloudKitShares() }
     .task { await acceptSystemCaptureRequests() }

@@ -76,7 +76,6 @@ struct PhotoContentView: View {
         imageData: photo.imageData ?? photo.thumbnailData,
         fallbackSystemImage: "photo"
       )
-      .contentMediaWell(isEnabled: true)
     }
   }
 

@@ -465,9 +465,12 @@ extension VaultContentStore {
 
   /// Returns the newest top-level card, ignoring every continuation depth.
   ///
-  /// Widget and Home overview semantics are root-only. Root resolution uses the
-  /// stable edge reference so a temporarily unrepaired relationship cannot make
-  /// a child appear as top-level content.
+  /// Widget selection and Home chronology are anchored to root placements.
+  ///
+  /// Home may render each root's subtree, but only roots participate in its day
+  /// grouping and the Latest Note widget. Root resolution uses the stable edge
+  /// reference so a temporarily unrepaired relationship cannot make a child
+  /// appear as top-level content.
   @MainActor
   public func latestRootCard() throws -> Card? {
     let context = container.mainContext

@@ -69,7 +69,7 @@ struct CreationView: View {
   @State private var quickDoodleSheetDetent: PresentationDetent = .large
   @State private var quickBauhausSheetDetent: PresentationDetent = .large
   @State private var savedCardScrollTargetID: UUID?
-  @State private var detailCardScrollTargetID: UUID?
+  @State private var detailCardScrollRequest: SavedListDetailScrollRequest?
   #if os(iOS)
     @State private var isSettingsPresented: Bool = false
   #endif
@@ -113,7 +113,7 @@ struct CreationView: View {
         SavedListView(
           scrollTargetID: $savedCardScrollTargetID,
           navigationPath: $composerState.navigationPath,
-          detailScrollTargetID: $detailCardScrollTargetID,
+          detailScrollRequest: $detailCardScrollRequest,
           selectedContentKind: $selectedHomeContentKind
         )
         .toolbar(content: {
@@ -453,7 +453,7 @@ struct CreationView: View {
   /// System quick capture always authors a new root card.
   private func prepareHomeForSystemCapture() {
     composerState.navigateHome()
-    detailCardScrollTargetID = nil
+    detailCardScrollRequest = nil
   }
 
   private func selectVaultForSystemCapture(_ vaultID: VaultID) async {
@@ -511,7 +511,7 @@ struct CreationView: View {
 
   private func discardAllComposerDrafts() {
     composerState.discardAllDrafts()
-    detailCardScrollTargetID = nil
+    detailCardScrollRequest = nil
     composerDraftEditorPresentation = nil
   }
 
@@ -775,7 +775,10 @@ struct CreationView: View {
           savedCardScrollTargetID = createdEdge.id
         case .continuation(let parentEdgeID):
           createdEdge = try vault.appendCard(vaultDraft, to: parentEdgeID)
-          detailCardScrollTargetID = createdEdge.id
+          detailCardScrollRequest = SavedListDetailScrollRequest(
+            ownerDetailRootEdgeID: parentEdgeID,
+            targetEdgeID: createdEdge.id
+          )
         }
         composerState.resetDraft(for: destination, ifMatching: target)
         composerDraftEditorPresentation = nil

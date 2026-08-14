@@ -397,7 +397,8 @@ directory before the CloudKit temporary file disappears.
 Photo, Video, Live Photo, Audio, Suggestion, Doodle, Bauhaus, and Unknown leaf
 views each own a concrete `Style`. The `.composer`, `.savedGrid`, `.detail`, and
 `.share` presets select those leaf styles without reintroducing shared card
-chrome. Text and link content render their stored body/URL in SwiftUI; file
+chrome. Shared media renders directly on the branded export canvas without an
+additional media-well background or clipping. Text and link content render their stored body/URL in SwiftUI; file
 content renders the original name with a document icon, content type, and size.
 Todo content owns its completion indicator, completed typography, and read-only
 share treatment while feature code supplies the persistence action for editable
@@ -841,10 +842,13 @@ the gallery's **Lab** section).
   cover).
 - **`CreationView`** — the selected-vault home and compose screen. The main
   surface embeds `SavedListView`, so entries already posted to the active vault
-  remain visible while composing. Home projects only root placements from the
-  vault's live SwiftData graph, ordered newest first and grouped by
-  local-calendar day. Posting on Home creates a root edge and brings that new
-  root into view; children remain reachable only through detail navigation.
+  remain visible while composing. Home selects root placements from the vault's
+  live SwiftData graph as chronological grouping anchors, orders those roots
+  newest first, and groups them by local-calendar day. Each anchor renders its
+  complete active subtree inline, using `CardEdge.edgeID` as placement identity;
+  descendants do not become independent Home items or day-grouping anchors.
+  Posting on Home creates a root edge and brings that new root into view. Any
+  visible placement can open a detail rooted at that point in the same tree.
   When the selected vault is shared — owned or joined as a participant — the
   navigation toolbar also
   shows the same system `SWCollaborationView` control used by the vault picker,
@@ -939,9 +943,11 @@ the gallery's **Lab** section).
   `VaultContentStore.CardDraft`. On Home it calls `createThread(cards:)` with
   that single value, persists one root `CardEdge`, refreshes the Latest Note
   widget, and scrolls Home toward the new root. In detail it calls
-  `appendCard(_:to:)` with the displayed edge as parent and scrolls that detail
-  level toward the new direct child; continuation posting does not refresh the
-  root-only widget. The matching level's input clears only after success. The
+  `appendCard(_:to:)` with the displayed detail-root edge as parent and reveals
+  the appended edge in that same re-rooted subtree; continuation posting does
+  not refresh the root-only widget. The one-shot reveal request carries both
+  the owning detail-root edge and appended edge so a retained ancestor detail
+  cannot consume it. The matching level's input clears only after success. The
   Photo, Video, and Live Photo write paths generate or carry a bounded
   thumbnail; Doodle, Bauhaus, and Suggestion retain authored payloads, with
   Suggestion media copied alongside its JSON when available.
@@ -976,39 +982,55 @@ the gallery's **Lab** section).
 - **`SavedListView`** — a vault-backed entries list over the selected
   `VaultInstance`. It attaches the selected vault's `ModelContainer`, queries
   active (`deletedAt == nil`) `CardEdge` rows with SwiftData, follows the `Card` / `Attachment` /
-  `AttachmentResource` relationships, and projects only root placements
-  (`parentEdgeID == nil`) into Home. Roots are grouped into local-calendar day
-  sections by the root card's own creation date and read as one full-width
-  vertical stream; adding a continuation does not move the root to another day
-  or create another Home item. Home's toolbar provides a single-selection
+  `AttachmentResource` relationships, and builds a cycle-safe tree projection
+  from every resolved active placement. Home selects root placements
+  (`parentEdgeID == nil`) as grouping anchors. Roots are grouped into
+  local-calendar day sections by the root card's own creation date and read as
+  one vertical stream; adding a continuation does not move the root to another
+  day or create another Home item. Each root item contains the root and its full
+  active descendant subtree. This initial implementation projects and renders
+  descendants eagerly. Any placement that is not reachable from a valid root —
+  including an unresolved placement, an orphan and its descendants, or a
+  rootless cyclic component — is omitted. Recursive projection also stops at a
+  repeated edge defensively. Tree identity is the placement's stable
+  `CardEdge.edgeID`, never the authored card id.
+
+  Home's toolbar provides a single-selection
   content-type filter with **All Entries** plus every supported user-visible
   `Card.Kind`; unknown content
   remains available through All Entries but is not a selectable filter. The
   selection is transient UI state and changes only when the user chooses an
   option, so vault changes, detail navigation, and posting do not reset it. The
-  filter applies to Home's root stream and location-map header only; detail
-  child lookup continues to use every active edge. If a non-empty vault has no
-  roots of the selected type, Home shows a filtered empty state with **Show All
-  Entries**. Posting a matching root keeps the filter and scrolls that root into
-  view. Posting a root outside the current filter still succeeds and remains
-  hidden; its pending Home scroll is cleared as soon as the root reaches the
-  live query so a later filter change cannot cause a delayed jump. Each root
-  `CardEdge` owns one flat rounded group
-  surface containing only its root card content. The authored content has no
-  separate card background, border, shadow, fixed tile, child preview,
-  continuation count, or other summary label. It uses the natural-height detail
-  content placement so text can expand and media can keep its authored aspect
-  ratio. Opening a root group shows that root and only its direct children.
-  Every child row has an **Open Entry** affordance that pushes the same detail
-  destination again, where that child becomes the current card and only its
-  direct children are shown. This fractal navigation can continue to any depth
-  without exposing descendants as independent Home items. Ancestor edges are
-  filtered at each level, so ordinary stream layout is independent from tree
-  size and malformed sync cycles cannot navigate forever.
+  filter applies only when selecting Home roots and location-map pins. Once a
+  root is selected, descendants remain unfiltered so the thread stays intact;
+  detail projection likewise continues to use every active edge. If a non-empty
+  vault has no roots of the selected type, Home shows a filtered empty state
+  with **Show All Entries**. Posting a matching root keeps the filter and scrolls
+  that root into view. Posting a root outside the current filter still succeeds
+  and remains hidden; its pending Home scroll is cleared as soon as the root
+  reaches the live query so a later filter change cannot cause a delayed jump.
+
+  Every tree node reuses the same current saved-entry card presentation at every
+  depth and is constrained to the tree viewport width. Descendant indentation
+  produces horizontal overflow within its root tree; it does not substitute a
+  thumbnail style, suppress video behavior, or introduce a continuation count
+  or other summary label. The tree keeps its outer vertical scroll separate from
+  each root's horizontal descendant scroll. Revealing a newly appended node
+  coordinates those two existing scroll positions without merging them into one
+  two-axis scroll surface. Opening any node pushes `.entry(edgeID:)`. The selected
+  placement becomes the local root of the detail screen and its complete active
+  descendant subtree remains visible; its ancestors and siblings are not
+  repeated. Back returns to the preceding tree view. A descendant can be opened
+  again to re-root the same detail surface at any depth. The current local root
+  is not a navigation link to itself, and ancestor ids already represented in
+  the navigation path are excluded defensively so malformed sync cycles cannot
+  navigate forever.
   Pull-to-refresh asks the vault runtime to import fresh CloudKit changes;
-  the old toolbar reload icon is not shown in the normal list surface. Root
-  groups are matched transition sources so opening a detail view uses the system
-  zoom navigation transition from the tapped group. Link content uses iOS's
+  the old toolbar reload icon is not shown in the normal list surface. Every
+  navigation-enabled node is a matched transition source scoped to its owning
+  tree surface, so opening a detail view uses the system zoom navigation
+  transition from the tapped node without colliding with retained ancestor
+  surfaces. Link content uses iOS's
   LinkPresentation preview in both Home groups and detail, fetching
   metadata at display time and caching it in a dedicated device-local SwiftData
   store under the app's Caches directory for up to seven days. The cache is not
@@ -1019,20 +1041,17 @@ the gallery's **Lab** section).
   invalidate intrinsic layout only when the metadata object actually changes.
   Media placeholders reserve the same aspect-ratio geometry as their loaded
   content, so a row keeps one height from its first layout pass through its
-  poster, still image, and inline player. The pushed detail view presents
-  authored content without a common
-  shape, rounded clipping, stroke, or fixed height. Text uses its natural height;
+  poster, still image, and inline player. Home and re-rooted detail trees present
+  authored content without a common shape, rounded clipping, stroke, or fixed
+  height. Text uses its natural height;
   Photo, Video, and Live Photo use the persisted pixel dimensions (falling back
   to decoded media dimensions) and aspect-fit the complete image without crop.
   Doodle saves its authored canvas size alongside its JSON and reserves that
   geometry too; doodles saved before those dimensions were recorded still resize
   from a square once their file decodes.
-  When an entry has a location, its detail row shows a slender, non-interactive
-  street map centered on the recorded point between the authored content and
-  record metadata. The content type, created/updated timestamps, and edit/delete
-  controls sit below it. The bottom composer appends a new direct child to the
-  current card at every depth. Detail rows can still read the full vault media
-  file and retain detail-only Link and Live Photo interaction. Video previews
+  The bottom composer appends a new direct child to the current detail-root edge
+  at every depth. Tree nodes read the full vault media file using the same card
+  presentation on Home and detail. Video previews
   play as muted inline loops when the media file is local, while keeping the app
   audio session mixed with other audio so external music or podcasts continue.
   Doodle and Bauhaus previews decode the authored JSON attachment file and render
@@ -1044,27 +1063,27 @@ the gallery's **Lab** section).
   Card outbox mutation, without moving it in the chronological stream or tree.
   Editing its text preserves the saved completion state; share artifacts and
   widget surfaces render that state without offering a mutation control. Saved
-  entries can be shared from a root group's context menu
-  or a detail row's context menu. The share action opens a preview sheet backed
+  entries can be shared from any visible tree node's context menu. The share
+  action opens a preview sheet backed
   by a detached `EntryShareSnapshot`, renders the actual temporary PNG artifact
   on a full-bleed branded canvas with the same `.share` leaf styles, and, for
   Doodle or Bauhaus entries with authored replay data, also offers a
   generated mp4 replay before handing the selected file to the system activity
-  sheet. Saved entries can be edited from a root group's context menu or from each
-  detail row's pencil button. Editing rehydrates the saved entry into
+  sheet. Saved entries can be edited from any visible tree node's context menu.
+  Editing rehydrates the saved entry into
   `EntryDraftEditor`, requires the full media file for media content, and saves
   back through `VaultContentStore.updateCard(cardID:with:)`; thumbnails are not
-  used as lossy edit sources. Saved entries can also be deleted from a root group's
-  context menu or from each detail row's trash button. Deletion is confirmed
+  used as lossy edit sources. Saved entries can also be deleted from any visible
+  tree node's context menu. Deletion is confirmed
   first, then writes through `VaultContentStore.deleteCardEdge(edgeID:)`. The
   selected edge subtree leaves normal queries immediately, while its live
   SwiftData models and local media stay retained and attached. CloudKit record
   deletes are enqueued immediately in the same transaction. Incoming CardEdge
   or placed-Card deletion applies the same local logical deletion; edit-only
   attachment/resource replacement may still physically remove obsolete local
-  rows and files. Deleting the current card
-  dismisses that detail level after success; deleting one of its visible child
-  rows leaves the current detail level open.
+  rows and files. Deleting the current detail-root edge dismisses that detail
+  level after success; deleting one of its visible descendants leaves the
+  current detail level open.
 - **`SettingsView`** — an **Accent Color** picker, an **Appearance** picker, a **Location**
   toggle for automatic location attachment, an explicit **Quick Capture Vault**
   picker, a **Storage** section with **Cloud

@@ -103,9 +103,9 @@ public struct DoodleDrawing: Sendable, Equatable, Codable {
 
 /// Read-only SwiftUI rendering for a saved `DoodleDrawing`.
 ///
-/// The drawing stays vector data: this view scales the authored canvas into the
-/// available layout space and renders the strokes with SwiftUI `Canvas` instead
-/// of first flattening them into an image.
+/// The drawing stays vector data: the final-size SwiftUI `Canvas` transforms the
+/// authored coordinate space before rasterizing each stroke. This avoids first
+/// flattening or rendering the authored canvas and then scaling that result.
 public struct DoodleDrawingView: View {
 
   public let drawing: DoodleDrawing
@@ -130,21 +130,14 @@ public struct DoodleDrawingView: View {
   public var body: some View {
     if let canvasSize = drawing.validCanvasSize {
       GeometryReader { proxy in
-        let fitted = DoodleDrawingFittedLayout(
-          sourceSize: canvasSize,
-          containerSize: proxy.size
-        )
-
         DoodleStrokesView(
           strokes: drawing.strokes,
           liveStroke: nil,
           inkColor: inkColor,
-          revealedTime: nil
+          revealedTime: nil,
+          sourceCanvasSize: canvasSize
         )
-        .frame(width: canvasSize.width, height: canvasSize.height)
-        .scaleEffect(fitted.scale, anchor: .topLeading)
-        .frame(width: fitted.size.width, height: fitted.size.height, alignment: .topLeading)
-        .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+        .frame(width: proxy.size.width, height: proxy.size.height)
       }
       .aspectRatio(
         doodleDisplayAspectRatio(displayAspectRatio, canvasSize: canvasSize),
@@ -200,21 +193,13 @@ public struct DoodleDrawingReplayView: View {
   public var body: some View {
     if let canvasSize = drawing.validCanvasSize {
       GeometryReader { proxy in
-        let fitted = DoodleDrawingFittedLayout(
-          sourceSize: canvasSize,
-          containerSize: proxy.size
-        )
-
         DoodleDrawingReplayLayer(
           drawing: drawing,
           inkColor: inkColor,
           replayStart: replayStart,
           isPlaying: $isPlaying
         )
-        .frame(width: canvasSize.width, height: canvasSize.height)
-        .scaleEffect(fitted.scale, anchor: .topLeading)
-        .frame(width: fitted.size.width, height: fitted.size.height, alignment: .topLeading)
-        .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+        .frame(width: proxy.size.width, height: proxy.size.height)
       }
       .aspectRatio(
         doodleDisplayAspectRatio(displayAspectRatio, canvasSize: canvasSize),
@@ -271,7 +256,8 @@ private struct DoodleDrawingReplayLayer: View {
           strokes: replay,
           liveStroke: nil,
           inkColor: inkColor,
-          revealedTime: elapsed
+          revealedTime: elapsed,
+          sourceCanvasSize: drawing.canvasSize
         )
         .onChange(of: elapsed >= replayDuration) { _, finished in
           if finished {
@@ -284,12 +270,15 @@ private struct DoodleDrawingReplayLayer: View {
         strokes: drawing.strokes,
         liveStroke: nil,
         inkColor: inkColor,
-        revealedTime: nil
+        revealedTime: nil,
+        sourceCanvasSize: drawing.canvasSize
       )
     }
   }
 }
 
+/// Uniform aspect-fit geometry from an authored doodle coordinate space into a
+/// final-size SwiftUI `Canvas`.
 private struct DoodleDrawingFittedLayout {
   let sourceSize: CGSize
   let containerSize: CGSize
@@ -303,6 +292,13 @@ private struct DoodleDrawingFittedLayout {
     CGSize(
       width: sourceSize.width * scale,
       height: sourceSize.height * scale
+    )
+  }
+
+  var origin: CGPoint {
+    CGPoint(
+      x: (containerSize.width - size.width) / 2,
+      y: (containerSize.height - size.height) / 2
     )
   }
 }
@@ -324,8 +320,11 @@ private extension DoodleDrawing {
 
 // MARK: - Rendering
 
-/// Batch stroke renderer used by replay and raster export, where every stroke
-/// intentionally redraws into one canvas.
+/// Batch stroke renderer used by saved display, replay, and raster export.
+///
+/// Saved display and replay provide `sourceCanvasSize` so authored vector
+/// commands are fitted inside the destination Canvas before rasterization.
+/// Direct renderers omit it because their points already use Canvas coordinates.
 struct DoodleStrokesView: View {
 
   let strokes: [DoodleStroke]
@@ -334,14 +333,54 @@ struct DoodleStrokesView: View {
   /// When non-nil, only the portion of each stroke drawn up to this time is shown
   /// — the mechanism behind replay. `nil` draws everything.
   let revealedTime: TimeInterval?
+  /// Authored coordinate-space size for saved drawings that must aspect-fit into
+  /// the current Canvas. `nil` means points already use the Canvas coordinates,
+  /// as they do during live input and explicit raster export.
+  let sourceCanvasSize: CGSize?
+
+  init(
+    strokes: [DoodleStroke],
+    liveStroke: DoodleStroke?,
+    inkColor: Color,
+    revealedTime: TimeInterval?,
+    sourceCanvasSize: CGSize? = nil
+  ) {
+    self.strokes = strokes
+    self.liveStroke = liveStroke
+    self.inkColor = inkColor
+    self.revealedTime = revealedTime
+    self.sourceCanvasSize = sourceCanvasSize
+  }
 
   var body: some View {
-    Canvas(opaque: false, rendersAsynchronously: true) { context, _ in
+    Canvas(opaque: false, rendersAsynchronously: true) { context, size in
+      var drawingContext = context
+      if let sourceCanvasSize {
+        let fitted = DoodleDrawingFittedLayout(
+          sourceSize: sourceCanvasSize,
+          containerSize: size
+        )
+        // Transform vector commands inside the final-size Canvas so SwiftUI
+        // rasterizes them at the destination display resolution.
+        drawingContext.translateBy(x: fitted.origin.x, y: fitted.origin.y)
+        drawingContext.scaleBy(x: fitted.scale, y: fitted.scale)
+      }
+
       for stroke in strokes {
-        DoodleStrokeRenderer.draw(stroke, upTo: revealedTime, inkColor: inkColor, in: context)
+        DoodleStrokeRenderer.draw(
+          stroke,
+          upTo: revealedTime,
+          inkColor: inkColor,
+          in: drawingContext
+        )
       }
       if let liveStroke {
-        DoodleStrokeRenderer.draw(liveStroke, upTo: nil, inkColor: inkColor, in: context)
+        DoodleStrokeRenderer.draw(
+          liveStroke,
+          upTo: nil,
+          inkColor: inkColor,
+          in: drawingContext
+        )
       }
     }
   }

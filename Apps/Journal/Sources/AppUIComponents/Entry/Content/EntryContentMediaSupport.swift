@@ -1,6 +1,7 @@
 import ImageIO
 import MuColor
 import SwiftUI
+
 #if canImport(UIKit)
   import UIKit
 #endif
@@ -185,7 +186,8 @@ enum EncodedImageDimensions {
       return nil
     }
 
-    let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.uint32Value
+    let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?
+      .uint32Value
     let swapsDimensions = orientation.map { (5...8).contains($0) } ?? false
     let displaySize =
       swapsDimensions
@@ -248,21 +250,6 @@ extension View {
     }
   }
 
-  /// Adds the export-only media well without making normal content card-shaped.
-  @ViewBuilder
-  func contentMediaWell(isEnabled: Bool) -> some View {
-    if isEnabled {
-      ZStack {
-        RoundedRectangle(cornerRadius: 32, style: .continuous)
-          .fill(.appOnSecondaryContainer.opacity(0.06))
-
-        self
-      }
-      .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-    } else {
-      self
-    }
-  }
 }
 
 extension CGSize {
@@ -291,52 +278,53 @@ extension UIImage {
 
 /// File-system reader used by preview views from SwiftUI lifecycle tasks.
 enum ContentMediaFileReader {
+
+  @concurrent
   nonisolated static func image(from data: Data?) async -> UIImage? {
     guard let data else {
       return nil
     }
 
-    return await Task.detached(priority: .utility) {
-      guard let image = UIImage(data: data) else {
-        return nil
+    guard let image = UIImage(data: data) else {
+      return nil
+    }
+
+    #if canImport(UIKit)
+      if let preparedImage = await image.byPreparingForDisplay() {
+        return preparedImage
       }
+    #endif
 
-      #if canImport(UIKit)
-        if let preparedImage = await image.byPreparingForDisplay() {
-          return preparedImage
-        }
-      #endif
+    return image
 
-      return image
-    }.value
   }
 
+  @concurrent
   nonisolated static func image(at fileURL: URL) async -> UIImage? {
-    await Task.detached(priority: .utility) {
-      guard FileManager.default.fileExists(atPath: fileURL.path),
-        let data = try? Data(contentsOf: fileURL),
-        let image = UIImage(data: data)
-      else {
-        return nil
+    guard FileManager.default.fileExists(atPath: fileURL.path),
+      let data = try? Data(contentsOf: fileURL),
+      let image = UIImage(data: data)
+    else {
+      return nil
+    }
+
+    #if canImport(UIKit)
+      if let preparedImage = await image.byPreparingForDisplay() {
+        return preparedImage
       }
+    #endif
 
-      #if canImport(UIKit)
-        if let preparedImage = await image.byPreparingForDisplay() {
-          return preparedImage
-        }
-      #endif
-
-      return image
-    }.value
+    return image
   }
 
+  @concurrent
   nonisolated static func fileExists(at fileURL: URL) async -> Bool {
-    await Task.detached(priority: .utility) {
-      FileManager.default.fileExists(atPath: fileURL.path)
-    }.value
+    FileManager.default.fileExists(atPath: fileURL.path)
   }
 
+  @concurrent
   nonisolated static func isPlayableMediaURL(_ url: URL) async -> Bool {
+
     guard url.isFileURL else {
       return true
     }
@@ -344,9 +332,8 @@ enum ContentMediaFileReader {
     return await fileExists(at: url)
   }
 
+  @concurrent
   nonisolated static func data(from fileURL: URL) async -> Data? {
-    await Task.detached(priority: .utility) {
-      try? Data(contentsOf: fileURL)
-    }.value
+    try? Data(contentsOf: fileURL)
   }
 }

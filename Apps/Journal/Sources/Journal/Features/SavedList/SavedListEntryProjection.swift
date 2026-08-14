@@ -55,6 +55,98 @@ struct VaultSavedEntry: Identifiable {
   }
 }
 
+/// A cycle-safe tree projection over identified saved-entry values.
+///
+/// The projection is computed from the current live query snapshot and never
+/// persists duplicate child arrays. Each recursive path owns its own visited-id
+/// set, so malformed imported relationships stop at the first repeated edge
+/// without hiding a valid sibling branch.
+struct SavedEntryTreeProjection<Entry: Identifiable>
+where Entry.ID == UUID {
+
+  /// One placement in the projected tree.
+  ///
+  /// `id` delegates to the entry's stable placement identity. For Tinycurve
+  /// this is `CardEdge.edgeID`, not the authored card id.
+  struct Node: TreeNode {
+    let body: Entry
+    let children: [Node]
+
+    var id: UUID { body.id }
+  }
+
+  private let entriesByID: [UUID: Entry]
+  private let childrenByParentID: [UUID: [Entry]]
+  private let rootedEntryIDs: Set<UUID>
+
+  init(
+    entries: [Entry],
+    parentID: (Entry) -> UUID?,
+    areChildrenInIncreasingOrder: (Entry, Entry) -> Bool
+  ) {
+    var entriesByID: [UUID: Entry] = [:]
+    for entry in entries where entriesByID[entry.id] == nil {
+      entriesByID[entry.id] = entry
+    }
+
+    let uniqueEntries = Array(entriesByID.values)
+    var childrenByParentID: [UUID: [Entry]] = [:]
+    for entry in uniqueEntries {
+      guard let parentID = parentID(entry), entriesByID[parentID] != nil else {
+        continue
+      }
+      childrenByParentID[parentID, default: []].append(entry)
+    }
+
+    let sortedChildrenByParentID = childrenByParentID.mapValues {
+      $0.sorted(by: areChildrenInIncreasingOrder)
+    }
+
+    var rootedEntryIDs: Set<UUID> = []
+    func collectRootedEntryIDs(startingAt entry: Entry) {
+      guard rootedEntryIDs.insert(entry.id).inserted else { return }
+      for child in sortedChildrenByParentID[entry.id] ?? [] {
+        collectRootedEntryIDs(startingAt: child)
+      }
+    }
+    for entry in uniqueEntries where parentID(entry) == nil {
+      collectRootedEntryIDs(startingAt: entry)
+    }
+
+    self.entriesByID = entriesByID
+    self.childrenByParentID = sortedChildrenByParentID
+    self.rootedEntryIDs = rootedEntryIDs
+  }
+
+  /// Projects one subtree with `edgeID` as its local root.
+  ///
+  /// `excluding` is used by detail navigation to prevent a malformed edge from
+  /// walking back into an ancestor that is already represented by the route.
+  func tree(
+    startingAt edgeID: UUID,
+    excluding excludedEdgeIDs: Set<UUID> = []
+  ) -> Node? {
+    guard rootedEntryIDs.contains(edgeID), let entry = entriesByID[edgeID]
+    else {
+      return nil
+    }
+    return node(for: entry, visitedEdgeIDs: excludedEdgeIDs)
+  }
+
+  private func node(
+    for entry: Entry,
+    visitedEdgeIDs: Set<UUID>
+  ) -> Node? {
+    var visitedEdgeIDs = visitedEdgeIDs
+    guard visitedEdgeIDs.insert(entry.id).inserted else { return nil }
+
+    let children = (childrenByParentID[entry.id] ?? []).compactMap { child in
+      node(for: child, visitedEdgeIDs: visitedEdgeIDs)
+    }
+    return Node(body: entry, children: children)
+  }
+}
+
 extension VaultSavedEntry {
 
   /// Rehydrates this saved card into the shared editing draft model.
@@ -550,15 +642,23 @@ extension Array where Element == VaultSavedEntry {
   }
 
   func sortedForVaultListSiblings() -> [VaultSavedEntry] {
-    sorted { lhs, rhs in
-      if lhs.sortIndex != rhs.sortIndex {
-        return lhs.sortIndex < rhs.sortIndex
-      }
-      if lhs.createdAt != rhs.createdAt {
-        return lhs.createdAt < rhs.createdAt
-      }
-      return lhs.edgeID.uuidString < rhs.edgeID.uuidString
+    sorted(by: VaultSavedEntry.isOrderedBeforeSibling)
+  }
+}
+
+extension VaultSavedEntry {
+
+  static func isOrderedBeforeSibling(
+    _ lhs: VaultSavedEntry,
+    _ rhs: VaultSavedEntry
+  ) -> Bool {
+    if lhs.sortIndex != rhs.sortIndex {
+      return lhs.sortIndex < rhs.sortIndex
     }
+    if lhs.createdAt != rhs.createdAt {
+      return lhs.createdAt < rhs.createdAt
+    }
+    return lhs.edgeID.uuidString < rhs.edgeID.uuidString
   }
 }
 

@@ -60,7 +60,6 @@ struct DoodleContentView: View {
       }
     }
 
-    var usesMediaWell: Bool { preset == .share }
     var usesCompactLoading: Bool { preset == .composer }
     var isDetail: Bool { preset == .detail }
     var placeholderAspectRatio: CGFloat { 1 }
@@ -76,11 +75,6 @@ struct DoodleContentView: View {
   var body: some View {
     content
       .background(.appSecondaryContainer)
-      .detailMediaFrame(
-        aspectRatio: displayAspectRatio,
-        isDetail: style.isDetail
-      )
-      .contentMediaWell(isEnabled: style.usesMediaWell)
       .task(
         id: ContentFileLoadID(
           fileURL: doodle.fileURL,

@@ -15,6 +15,21 @@ enum SavedListNavigationRoute: Hashable {
   case entry(edgeID: UUID)
 }
 
+/// One continuation reveal owned by the detail route that created it.
+///
+/// Navigation keeps ancestor destinations alive. Carrying the local root with
+/// the appended edge prevents a retained ancestor from consuming a descendant's
+/// one-shot scroll request merely because both surfaces project that edge.
+struct SavedListDetailScrollRequest: Equatable {
+  let ownerDetailRootEdgeID: UUID
+  let targetEdgeID: UUID
+
+  func targetID(ownedBy detailRootEdgeID: UUID) -> UUID? {
+    guard ownerDetailRootEdgeID == detailRootEdgeID else { return nil }
+    return targetEdgeID
+  }
+}
+
 /// Vault-backed entries list.
 ///
 /// This screen intentionally reads only the selected `VaultInstance`. It does
@@ -26,18 +41,18 @@ struct SavedListView: View {
 
   @Binding private var scrollTargetID: UUID?
   @Binding private var navigationPath: [SavedListNavigationRoute]
-  @Binding private var detailScrollTargetID: UUID?
+  @Binding private var detailScrollRequest: SavedListDetailScrollRequest?
   @Binding private var selectedContentKind: JournalVault.Card.Kind?
 
   init(
     scrollTargetID: Binding<UUID?> = .constant(nil),
     navigationPath: Binding<[SavedListNavigationRoute]> = .constant([]),
-    detailScrollTargetID: Binding<UUID?> = .constant(nil),
+    detailScrollRequest: Binding<SavedListDetailScrollRequest?> = .constant(nil),
     selectedContentKind: Binding<JournalVault.Card.Kind?> = .constant(nil)
   ) {
     _scrollTargetID = scrollTargetID
     _navigationPath = navigationPath
-    _detailScrollTargetID = detailScrollTargetID
+    _detailScrollRequest = detailScrollRequest
     _selectedContentKind = selectedContentKind
   }
 
@@ -50,7 +65,7 @@ struct SavedListView: View {
           vault: vault,
           scrollTargetID: $scrollTargetID,
           navigationPath: $navigationPath,
-          detailScrollTargetID: $detailScrollTargetID,
+          detailScrollRequest: $detailScrollRequest,
           selectedContentKind: $selectedContentKind
         )
         .modelContainer(vault.contentStore.container)
@@ -73,7 +88,7 @@ private struct VaultSavedListContentView: View {
 
   @Binding var scrollTargetID: UUID?
   @Binding var navigationPath: [SavedListNavigationRoute]
-  @Binding var detailScrollTargetID: UUID?
+  @Binding var detailScrollRequest: SavedListDetailScrollRequest?
   @Binding var selectedContentKind: JournalVault.Card.Kind?
 
   @Environment(\.calendar) private var calendar
@@ -100,13 +115,13 @@ private struct VaultSavedListContentView: View {
     vault: VaultInstance,
     scrollTargetID: Binding<UUID?>,
     navigationPath: Binding<[SavedListNavigationRoute]>,
-    detailScrollTargetID: Binding<UUID?>,
+    detailScrollRequest: Binding<SavedListDetailScrollRequest?>,
     selectedContentKind: Binding<JournalVault.Card.Kind?>
   ) {
     self.vault = vault
     _scrollTargetID = scrollTargetID
     _navigationPath = navigationPath
-    _detailScrollTargetID = detailScrollTargetID
+    _detailScrollRequest = detailScrollRequest
     _selectedContentKind = selectedContentKind
     _edges = Query(
       filter: #Predicate<JournalVault.CardEdge> { edge in
@@ -121,9 +136,13 @@ private struct VaultSavedListContentView: View {
 
   var body: some View {
     let entries = entries
-    let edgeIDs = Set(entries.map(\.edgeID))
     let rootEntries = entries.filter { $0.parentEdgeID == nil }
     let rootEdgeIDs = Set(rootEntries.map(\.edgeID))
+    let treeProjection = SavedEntryTreeProjection(
+      entries: entries,
+      parentID: { $0.parentEdgeID },
+      areChildrenInIncreasingOrder: VaultSavedEntry.isOrderedBeforeSibling
+    )
     let visibleRootEntries = Self.visibleRootEntries(
       from: rootEntries,
       selectedContentKind: selectedContentKind
@@ -136,48 +155,59 @@ private struct VaultSavedListContentView: View {
       for: visibleRootEntries.sortedForVaultList(),
       calendar: calendar
     )
-    let childEntriesByParentID = Self.childEntriesByParentID(
-      for: entries,
-      edgeIDs: edgeIDs
-    )
+    let visibleTreesByRootID = visibleRootEntries.reduce(
+      into: [UUID: SavedEntryTreeProjection<VaultSavedEntry>.Node]()
+    ) { result, entry in
+      guard let tree = treeProjection.tree(startingAt: entry.edgeID) else {
+        return
+      }
+      result[entry.edgeID] = tree
+    }
     let locationPins = Self.savedLocationPins(for: visibleRootEntries)
 
     ScrollViewReader { proxy in
-      ScrollView {
-        savedListContent(
-          sections: visibleSections,
-          locationPins: locationPins,
-          isMutationDisabled: isMutationDisabled
+      GeometryReader { viewport in
+        ScrollView {
+          savedListContent(
+            sections: visibleSections,
+            treesByRootID: visibleTreesByRootID,
+            viewportWidth: max(
+              0,
+              viewport.size.width - (savedListPadding * 2)
+            ),
+            locationPins: locationPins,
+            isMutationDisabled: isMutationDisabled
+          )
+        }
+        .contentMargins(
+          .bottom,
+          composerOverlayHeight,
+          for: .scrollContent
         )
-      }
-      .contentMargins(
-        .bottom,
-        composerOverlayHeight,
-        for: .scrollContent
-      )
-      .scrollEdgeEffectStyle(.soft, for: .vertical)
-      .scrollDismissesKeyboard(.interactively)
-      .scrollBounceBehavior(.always, axes: .vertical)
-      .onChange(of: scrollTargetID, initial: true) { _, _ in
-        resolvePendingRootScroll(
-          using: proxy,
-          rootEdgeIDs: rootEdgeIDs,
-          visibleEdgeIDs: visibleEdgeIDs
-        )
-      }
-      .onChange(of: rootEdgeIDs) { _, _ in
-        resolvePendingRootScroll(
-          using: proxy,
-          rootEdgeIDs: rootEdgeIDs,
-          visibleEdgeIDs: visibleEdgeIDs
-        )
-      }
-      .onChange(of: visibleEdgeIDs) { _, _ in
-        resolvePendingRootScroll(
-          using: proxy,
-          rootEdgeIDs: rootEdgeIDs,
-          visibleEdgeIDs: visibleEdgeIDs
-        )
+        .scrollEdgeEffectStyle(.soft, for: .vertical)
+        .scrollDismissesKeyboard(.interactively)
+        .scrollBounceBehavior(.always, axes: .vertical)
+        .onChange(of: scrollTargetID, initial: true) { _, _ in
+          resolvePendingRootScroll(
+            using: proxy,
+            rootEdgeIDs: rootEdgeIDs,
+            visibleEdgeIDs: visibleEdgeIDs
+          )
+        }
+        .onChange(of: rootEdgeIDs) { _, _ in
+          resolvePendingRootScroll(
+            using: proxy,
+            rootEdgeIDs: rootEdgeIDs,
+            visibleEdgeIDs: visibleEdgeIDs
+          )
+        }
+        .onChange(of: visibleEdgeIDs) { _, _ in
+          resolvePendingRootScroll(
+            using: proxy,
+            rootEdgeIDs: rootEdgeIDs,
+            visibleEdgeIDs: visibleEdgeIDs
+          )
+        }
       }
     }
     .overlay {
@@ -212,10 +242,9 @@ private struct VaultSavedListContentView: View {
       case .entry(let edgeID):
         VaultSavedEntryDetailDestination(
           edgeID: edgeID,
-          entries: entries,
-          childEntriesByParentID: childEntriesByParentID,
+          treeProjection: treeProjection,
           navigationPath: $navigationPath,
-          detailScrollTargetID: $detailScrollTargetID,
+          detailScrollRequest: $detailScrollRequest,
           isEditingDisabled: isMutationDisabled,
           isDeletingDisabled: isMutationDisabled,
           isTodoCompletionDisabled: isMutationDisabled,
@@ -307,6 +336,8 @@ private struct VaultSavedListContentView: View {
   /// gives the same day grouping inside one stack.
   private func savedListContent(
     sections: [VaultSavedDaySection],
+    treesByRootID: [UUID: SavedEntryTreeProjection<VaultSavedEntry>.Node],
+    viewportWidth: CGFloat,
     locationPins: [VaultSavedLocationPin],
     isMutationDisabled: Bool
   ) -> some View {
@@ -321,17 +352,30 @@ private struct VaultSavedListContentView: View {
       ForEach(sections) { section in
         Section {
           ForEach(section.entries) { entry in
-            VaultSavedEntryRow(
-              entry: entry,
-              isMutationDisabled: isMutationDisabled,
-              transitionNamespace: navigationTransitionNamespace,
-              onShare: presentSharePreview,
-              onEdit: presentEditDraft,
-              onRequestDelete: { entry in
-                deleteCandidate = entry
-              },
-              onToggleTodoCompletion: toggleTodoCompletion
-            )
+            VStack(alignment: .leading) {
+              if let tree = treesByRootID[entry.edgeID] {
+                TreeDisplay(
+                  root: tree,
+                  indentation: VaultSavedEntryTreeMetrics.indentation,
+                  spacing: VaultSavedEntryTreeMetrics.nodeSpacing
+                ) { entry in
+                  VaultSavedEntryTreeCell(
+                    entry: entry,
+                    viewportWidth: viewportWidth,
+                    isNavigationEnabled: true,
+                    isMutationDisabled: isMutationDisabled,
+                    transitionSourceTreeRootEdgeID: nil,
+                    transitionNamespace: navigationTransitionNamespace,
+                    onShare: presentSharePreview,
+                    onEdit: presentEditDraft,
+                    onRequestDelete: { entry in
+                      deleteCandidate = entry
+                    },
+                    onToggleTodoCompletion: toggleTodoCompletion
+                  )
+                }
+              }
+            }
           }
         } header: {
           VaultSavedDayHeader(day: section.day)
@@ -339,23 +383,7 @@ private struct VaultSavedListContentView: View {
         }
       }
     }
-    .padding(.horizontal, 16)
-  }
-
-  /// Groups child placements once for the current query snapshot.
-  private static func childEntriesByParentID(
-    for entries: [VaultSavedEntry],
-    edgeIDs: Set<UUID>
-  ) -> [UUID: [VaultSavedEntry]] {
-    entries
-      .filter { entry in
-        entry.parentEdgeID.map(edgeIDs.contains) ?? false
-      }
-      .reduce(into: [UUID: [VaultSavedEntry]]()) { result, entry in
-        guard let parentEdgeID = entry.parentEdgeID else { return }
-        result[parentEdgeID, default: []].append(entry)
-      }
-      .mapValues { $0.sortedForVaultListSiblings() }
+    .padding(.horizontal, savedListPadding)
   }
 
   private var entries: [VaultSavedEntry] {
@@ -699,7 +727,5 @@ private struct EntrySharePreviewPresentation: Identifiable {
 // MARK: - Layout
 
 private let savedListPadding: CGFloat = 16
-/// Gap between every row of the single saved-list stack.
-private let entrySpacing: CGFloat = 12
-/// Extra lead-in above a day header, on top of `entrySpacing`.
+/// Extra lead-in above each day header in the saved-list stream.
 private let daySectionTopSpacing: CGFloat = 16
