@@ -23,6 +23,7 @@ on:
           - VoiceRecorder
 
 permissions:
+  actions: read
   contents: write
 
 # Queue runs that update the shared release. Cancelling a run while --clobber
