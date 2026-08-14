@@ -16,7 +16,6 @@ on:
           - all
           - Verse
           - Journal
-          - Tone
           - PhotosOrganizer
           - AmbientLight
           - Färg
@@ -26,23 +25,18 @@ on:
 permissions:
   contents: write
 
+# Queue runs that update the shared release. Cancelling a run while --clobber
+# replaces an asset can otherwise leave that app without a published asset.
 concurrency:
-  group: adhoc-ota-main
-  cancel-in-progress: true
-
-env:
-  RELEASE_TAG: adhoc-latest
-
-# Required repository secrets:
-#   - ASC_TEAM_KEY_ID
-#   - ASC_TEAM_KEY_CONTENT
-#   - ASC_TEAM_ISSUER_ID
-#   - TEAM_ID
+  group: adhoc-ota-run-adhoc-latest
+  queue: max
 
 jobs:
-  deploy:
-    name: Build and Publish OTA Assets
-    runs-on: macos-26
+  select-apps:
+    name: Select apps
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
 
     steps:
       - name: Require main branch
@@ -56,351 +50,121 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install mise
-        uses: jdx/mise-action@v2
-        with:
-          install: true
-
-      - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: '26.4'
-
-      - name: Show Xcode version
-        run: xcodebuild -version
-
-      - name: Install dependencies with Tuist
-        run: tuist install
-
-      - name: Generate Xcode workspace with Tuist
-        run: tuist generate --no-open
 
       - name: Select apps
+        id: select
+        shell: bash
         run: |
           set -euo pipefail
 
-          mkdir -p ./build
           requested_app="${{ inputs.app || 'all' }}"
 
-          # Columns: distribution name, project path, scheme, bundle identifier,
-          # IPA filename, and manifest filename. Distribution names and artifact
-          # URLs stay stable even when a project uses a different scheme name.
-          {
-            printf 'Verse\tApps/Verse\tVerse\tapp.muukii.verse\tVerse.ipa\tVerse-manifest.plist\n'
-            printf 'Journal\tApps/Journal\tTinycurve\tapp.muukii.journal\tJournal.ipa\tJournal-manifest.plist\n'
-            printf 'Tone\tApps/Tone\tTone\tapp.muukii.tone\tTone.ipa\tTone-manifest.plist\n'
-            printf 'PhotosOrganizer\tApps/PhotosOrganizer\tPhotosOrganizer\tapp.muukii.PhotosOrganizer\tPhotosOrganizer.ipa\tPhotosOrganizer-manifest.plist\n'
-            printf 'AmbientLight\tApps/AmbientLight\tAmbientLight\tapp.muukii.ambientlight\tAmbientLight.ipa\tAmbientLight-manifest.plist\n'
-            printf 'Färg\tApps/Farg\tFarg\tapp.muukii.farg\tFarg.ipa\tFarg-manifest.plist\n'
-            printf 'PolyReader\tApps/PolyReader\tPolyReader\tapp.muukii.polyreader\tPolyReader.ipa\tPolyReader-manifest.plist\n'
-            printf 'VoiceRecorder\tApps/VoiceRecorder\tVoiceRecorder\tapp.muukii.voicerecorder\tVoiceRecorder.ipa\tVoiceRecorder-manifest.plist\n'
-          } > ./build/all-adhoc-apps.tsv
-
           if [ "$requested_app" = "all" ]; then
-            cp ./build/all-adhoc-apps.tsv ./build/adhoc-apps.tsv
+            selected_apps="$(jq -c '.apps' .github/adhoc-apps.json)"
           else
-            awk -F '\t' -v app="$requested_app" '$1 == app { print }' ./build/all-adhoc-apps.tsv > ./build/adhoc-apps.tsv
+            selected_apps="$(jq -c --arg requested_app "$requested_app" \
+              '[.apps[] | select(.name == $requested_app)]' \
+              .github/adhoc-apps.json)"
           fi
 
-          if [ ! -s ./build/adhoc-apps.tsv ]; then
-            echo "No app selected for: $requested_app"
+          if [ "$selected_apps" = "[]" ]; then
+            echo "::error::No Ad Hoc deploy configuration found for ${requested_app}."
             exit 1
           fi
 
+          jq -e '
+            type == "array" and
+            length > 0 and
+            all(.[];
+              (.name | type == "string" and length > 0) and
+              (.project_path | type == "string" and length > 0) and
+              (.scheme | type == "string" and length > 0) and
+              (.bundle_identifier | type == "string" and length > 0) and
+              (.ipa_name | type == "string" and endswith(".ipa")) and
+              (.manifest_name | type == "string" and endswith("-manifest.plist"))
+            ) and
+            ([.[].name] | length) == ([.[].name] | unique | length) and
+            ([.[].scheme] | length) == ([.[].scheme] | unique | length) and
+            ([.[].ipa_name, .[].manifest_name] | length) ==
+              ([.[].ipa_name, .[].manifest_name] | unique | length)
+          ' <<< "$selected_apps" >/dev/null
+
           echo "Selected apps:"
-          cut -f 1 ./build/adhoc-apps.tsv
+          jq -r '.[].name' <<< "$selected_apps"
 
-      - name: Setup App Store Connect API Key
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_TEAM_KEY_ID }}
-          ASC_KEY_CONTENT: ${{ secrets.ASC_TEAM_KEY_CONTENT }}
-        run: |
-          set -euo pipefail
+          matrix="$(jq -c '{include: .}' <<< "$selected_apps")"
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
 
-          mkdir -p ~/private_keys
-          printf '%s' "$ASC_KEY_CONTENT" > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
-          echo "API Key configured"
+  prepare-release:
+    name: Prepare shared Ad Hoc release
+    needs: select-apps
+    runs-on: ubuntu-latest
 
-      - name: Archive apps
-        run: |
-          set -euo pipefail
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-          while IFS=$'\t' read -r distribution_name project_path scheme bundle_identifier ipa_name manifest_name; do
-            echo "::group::Archive ${distribution_name}"
-            xcodebuild archive \
-              -workspace MuApps.xcworkspace \
-              -scheme "$scheme" \
-              -configuration Release \
-              -destination "generic/platform=iOS" \
-              -archivePath "./build/${distribution_name}.xcarchive" \
-              -skipMacroValidation \
-              CODE_SIGN_STYLE=Manual \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              | xcbeautify --renderer github-actions
-            echo "::endgroup::"
-          done < ./build/adhoc-apps.tsv
-
-      - name: Ad hoc sign archived products before export
-        run: |
-          set -euo pipefail
-
-          find_entitlements() {
-            local project_path="$1"
-            local target_name="$2"
-
-            if [ -f "${project_path}/Derived/Entitlements/${target_name}.entitlements" ]; then
-              printf '%s\n' "${project_path}/Derived/Entitlements/${target_name}.entitlements"
-              return
-            fi
-
-            if [ -f "${project_path}/Sources/${target_name}.entitlements" ]; then
-              printf '%s\n' "${project_path}/Sources/${target_name}.entitlements"
-              return
-            fi
-
-            if [ "$target_name" = "Verse" ] && [ -f "${project_path}/Sources/YouTubeSubtitle.entitlements" ]; then
-              printf '%s\n' "${project_path}/Sources/YouTubeSubtitle.entitlements"
-              return
-            fi
-
-            return 1
-          }
-
-          sign_product() {
-            local product_path="$1"
-            local entitlements_file="$2"
-            local product_name
-            product_name="$(basename "$product_path")"
-
-            if [ -n "$entitlements_file" ] && [ -f "$entitlements_file" ]; then
-              codesign --entitlements "$entitlements_file" --force --sign "-" "$product_path"
-              echo "Signed ${product_name} with entitlements: ${entitlements_file}"
-            else
-              codesign --force --sign "-" "$product_path"
-              echo "Signed ${product_name} without additional entitlements"
-            fi
-          }
-
-          sign_nested_code() {
-            local container_path="$1"
-
-            if [ -d "${container_path}/Frameworks" ]; then
-              for framework_path in "${container_path}"/Frameworks/*.framework; do
-                [ -d "$framework_path" ] || continue
-                sign_product "$framework_path" ""
-              done
-
-              for dylib_path in "${container_path}"/Frameworks/*.dylib; do
-                [ -f "$dylib_path" ] || continue
-                sign_product "$dylib_path" ""
-              done
-            fi
-          }
-
-          while IFS=$'\t' read -r distribution_name project_path scheme bundle_identifier ipa_name manifest_name; do
-            app_path="./build/${distribution_name}.xcarchive/Products/Applications/${scheme}.app"
-
-            if [ ! -d "$app_path" ]; then
-              echo "App not found in archive: $app_path"
-              exit 1
-            fi
-
-            if [ -d "${app_path}/PlugIns" ]; then
-              for extension_path in "${app_path}"/PlugIns/*.appex; do
-                [ -d "$extension_path" ] || continue
-
-                extension_name="$(basename "$extension_path" .appex)"
-                extension_entitlements="$(find_entitlements "$project_path" "$extension_name" || true)"
-                sign_nested_code "$extension_path"
-                sign_product "$extension_path" "$extension_entitlements"
-              done
-            fi
-
-            app_entitlements="$(find_entitlements "$project_path" "$scheme" || true)"
-            sign_nested_code "$app_path"
-            sign_product "$app_path" "$app_entitlements"
-          done < ./build/adhoc-apps.tsv
-
-      - name: Create ExportOptions.plist
-        env:
-          TEAM_ID: ${{ secrets.TEAM_ID }}
-        run: |
-          set -euo pipefail
-
-          mkdir -p ./build/export
-          cat > ./build/ExportOptions.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>release-testing</string>
-              <key>destination</key>
-              <string>export</string>
-              <key>signingStyle</key>
-              <string>automatic</string>
-              <key>teamID</key>
-              <string>$TEAM_ID</string>
-              <key>stripSwiftSymbols</key>
-              <true/>
-              <key>manageAppVersionAndBuildNumber</key>
-              <false/>
-              <key>thinning</key>
-              <string>&lt;none&gt;</string>
-          </dict>
-          </plist>
-          EOF
-
-      - name: Export IPAs
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_TEAM_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_TEAM_ISSUER_ID }}
-        run: |
-          set -euo pipefail
-
-          mkdir -p ./build/release
-
-          while IFS=$'\t' read -r distribution_name project_path scheme bundle_identifier ipa_name manifest_name; do
-            export_path="./build/export/${distribution_name}"
-            rm -rf "$export_path"
-            mkdir -p "$export_path"
-
-            echo "::group::Export ${distribution_name}"
-            xcodebuild -exportArchive \
-              -archivePath "./build/${distribution_name}.xcarchive" \
-              -exportPath "$export_path" \
-              -exportOptionsPlist ./build/ExportOptions.plist \
-              -allowProvisioningUpdates \
-              -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
-              -authenticationKeyID "$ASC_KEY_ID" \
-              -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-              | xcbeautify --renderer github-actions
-            echo "::endgroup::"
-
-            ipa_path="$(find "$export_path" -maxdepth 1 -name '*.ipa' -print -quit)"
-            if [ -z "$ipa_path" ]; then
-              echo "No IPA was exported for ${distribution_name}"
-              exit 1
-            fi
-
-            cp "$ipa_path" "./build/release/${ipa_name}"
-          done < ./build/adhoc-apps.tsv
-
-      - name: Generate OTA manifests
-        run: |
-          set -euo pipefail
-
-          release_base_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
-
-          while IFS=$'\t' read -r distribution_name project_path scheme bundle_identifier ipa_name manifest_name; do
-            app_path="./build/${distribution_name}.xcarchive/Products/Applications/${scheme}.app"
-            app_info_plist="${app_path}/Info.plist"
-            ipa_url="${release_base_url}/${ipa_name}"
-
-            bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_info_plist")"
-            bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_info_plist")"
-            short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_info_plist" 2>/dev/null || printf '%s' '1.0')"
-            title="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$app_info_plist" 2>/dev/null || printf '%s' "$distribution_name")"
-
-            if [ "$bundle_id" != "$bundle_identifier" ]; then
-              echo "Unexpected bundle identifier for ${distribution_name}: ${bundle_id}"
-              exit 1
-            fi
-
-            cat > "./build/release/${manifest_name}" <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>items</key>
-              <array>
-                  <dict>
-                      <key>assets</key>
-                      <array>
-                          <dict>
-                              <key>kind</key>
-                              <string>software-package</string>
-                              <key>url</key>
-                              <string>${ipa_url}</string>
-                          </dict>
-                      </array>
-                      <key>metadata</key>
-                      <dict>
-                          <key>bundle-identifier</key>
-                          <string>${bundle_id}</string>
-                          <key>bundle-version</key>
-                          <string>${bundle_version}</string>
-                          <key>kind</key>
-                          <string>software</string>
-                          <key>subtitle</key>
-                          <string>${short_version} (${bundle_version})</string>
-                          <key>title</key>
-                          <string>${title}</string>
-                      </dict>
-                  </dict>
-              </array>
-          </dict>
-          </plist>
-          EOF
-
-            plutil -lint "./build/release/${manifest_name}"
-          done < ./build/adhoc-apps.tsv
-
-      - name: Publish release assets
+      - name: Create or update shared release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: adhoc-latest
         run: |
           set -euo pipefail
 
           release_notes="$(mktemp)"
+          trap 'rm -f "$release_notes"' EXIT
+
           cat > "$release_notes" <<EOF
-          Ad Hoc OTA assets for the latest main branch MuApps builds.
+          Ad Hoc OTA assets from the latest successful main branch build of each MuApps app.
+
+          Apps publish independently. An archive or export failure leaves that app's
+          previously published assets untouched while successful app jobs update theirs.
+          A failed release upload may require rerunning that app's deploy job.
 
           Install page:
           https://muukii.github.io/MuApps/install.html
 
-          Updated in this run:
+          Currently supported apps:
           EOF
 
-          while IFS=$'\t' read -r distribution_name project_path scheme bundle_identifier ipa_name manifest_name; do
-            printf -- '- %s: https://github.com/%s/releases/download/%s/%s\n' \
-              "$distribution_name" \
-              "$GITHUB_REPOSITORY" \
-              "$RELEASE_TAG" \
-              "$manifest_name" >> "$release_notes"
-          done < ./build/adhoc-apps.tsv
+          jq -r \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg release_tag "$RELEASE_TAG" \
+            '.apps[] | "- \(.name): https://github.com/\($repository)/releases/download/\($release_tag)/\(.manifest_name)"' \
+            .github/adhoc-apps.json >> "$release_notes"
 
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
               --title "Ad Hoc Latest" \
               --notes-file "$release_notes"
           else
             gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
               --title "Ad Hoc Latest" \
               --notes-file "$release_notes"
           fi
 
-          release_assets=()
-          while IFS=$'\t' read -r distribution_name project_path scheme bundle_identifier ipa_name manifest_name; do
-            release_assets+=("./build/release/${ipa_name}")
-            release_assets+=("./build/release/${manifest_name}")
-          done < ./build/adhoc-apps.tsv
-
-          gh release upload "$RELEASE_TAG" \
-            "${release_assets[@]}" \
-            --clobber
-
-      - name: Upload workflow artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: adhoc-ota-assets
-          path: |
-            ./build/release/
-            ./build/adhoc-apps.tsv
-          retention-days: 7
+  deploy-app:
+    name: ${{ matrix.name }}
+    needs:
+      - select-apps
+      - prepare-release
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.select-apps.outputs.matrix) }}
+    uses: ./.github/workflows/reusable-ios-adhoc-ota.yml
+    with:
+      distribution-name: ${{ matrix.name }}
+      project-path: ${{ matrix.project_path }}
+      scheme: ${{ matrix.scheme }}
+      bundle-identifier: ${{ matrix.bundle_identifier }}
+      ipa-name: ${{ matrix.ipa_name }}
+      manifest-name: ${{ matrix.manifest_name }}
+      release-tag: adhoc-latest
+    secrets:
+      ASC_KEY_ID: ${{ secrets.ASC_TEAM_KEY_ID }}
+      ASC_KEY_CONTENT: ${{ secrets.ASC_TEAM_KEY_CONTENT }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_TEAM_ISSUER_ID }}
+      TEAM_ID: ${{ secrets.TEAM_ID }}

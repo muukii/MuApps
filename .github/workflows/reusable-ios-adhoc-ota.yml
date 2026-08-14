@@ -1,0 +1,397 @@
+name: iOS Ad Hoc OTA Archive and Deploy
+
+on:
+  workflow_call:
+    inputs:
+      distribution-name:
+        description: Stable distribution display name
+        required: true
+        type: string
+      project-path:
+        description: Path to the app project directory
+        required: true
+        type: string
+      scheme:
+        description: Xcode scheme name
+        required: true
+        type: string
+      bundle-identifier:
+        description: Expected application bundle identifier
+        required: true
+        type: string
+      ipa-name:
+        description: Stable release IPA filename
+        required: true
+        type: string
+      manifest-name:
+        description: Stable OTA manifest filename
+        required: true
+        type: string
+      release-tag:
+        description: Shared GitHub Release tag
+        required: true
+        type: string
+    secrets:
+      ASC_KEY_ID:
+        description: App Store Connect API Key ID
+        required: true
+      ASC_KEY_CONTENT:
+        description: App Store Connect API Key content
+        required: true
+      ASC_ISSUER_ID:
+        description: App Store Connect API Key issuer ID
+        required: true
+      TEAM_ID:
+        description: Apple Developer Team ID
+        required: true
+
+jobs:
+  archive:
+    name: Archive ${{ inputs.distribution-name }}
+    runs-on: macos-26
+    permissions:
+      contents: read
+    env:
+      DISTRIBUTION_NAME: ${{ inputs.distribution-name }}
+      PROJECT_PATH: ${{ inputs.project-path }}
+      SCHEME: ${{ inputs.scheme }}
+      BUNDLE_IDENTIFIER: ${{ inputs.bundle-identifier }}
+      IPA_NAME: ${{ inputs.ipa-name }}
+      MANIFEST_NAME: ${{ inputs.manifest-name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Validate app configuration
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "${PROJECT_PATH}/Project.swift" ]; then
+            echo "::error::Project manifest not found: ${PROJECT_PATH}/Project.swift"
+            exit 1
+          fi
+
+      - name: Install mise
+        uses: jdx/mise-action@v2
+        with:
+          install: true
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.4'
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install dependencies with Tuist
+        run: tuist install
+
+      - name: Generate Xcode workspace with Tuist
+        run: tuist generate --no-open
+
+      - name: Setup App Store Connect API Key
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/private_keys
+          printf '%s' "$ASC_KEY_CONTENT" > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          echo "API Key configured"
+
+      - name: Archive app
+        run: |
+          set -euo pipefail
+
+          xcodebuild archive \
+            -workspace MuApps.xcworkspace \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "./build/${SCHEME}.xcarchive" \
+            -skipMacroValidation \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+
+      - name: Ad hoc sign archived products before export
+        run: |
+          set -euo pipefail
+
+          find_entitlements() {
+            local project_path="$1"
+            local target_name="$2"
+
+            if [ -f "${project_path}/Derived/Entitlements/${target_name}.entitlements" ]; then
+              printf '%s\n' "${project_path}/Derived/Entitlements/${target_name}.entitlements"
+              return
+            fi
+
+            if [ -f "${project_path}/Sources/${target_name}.entitlements" ]; then
+              printf '%s\n' "${project_path}/Sources/${target_name}.entitlements"
+              return
+            fi
+
+            if [ "$target_name" = "Verse" ] && [ -f "${project_path}/Sources/YouTubeSubtitle.entitlements" ]; then
+              printf '%s\n' "${project_path}/Sources/YouTubeSubtitle.entitlements"
+              return
+            fi
+
+            return 1
+          }
+
+          sign_product() {
+            local product_path="$1"
+            local entitlements_file="$2"
+            local product_name
+            product_name="$(basename "$product_path")"
+
+            if [ -n "$entitlements_file" ] && [ -f "$entitlements_file" ]; then
+              codesign --entitlements "$entitlements_file" --force --sign "-" "$product_path"
+              echo "Signed ${product_name} with entitlements: ${entitlements_file}"
+            else
+              codesign --force --sign "-" "$product_path"
+              echo "Signed ${product_name} without additional entitlements"
+            fi
+          }
+
+          sign_nested_code() {
+            local container_path="$1"
+
+            if [ -d "${container_path}/Frameworks" ]; then
+              for framework_path in "${container_path}"/Frameworks/*.framework; do
+                [ -d "$framework_path" ] || continue
+                sign_product "$framework_path" ""
+              done
+
+              for dylib_path in "${container_path}"/Frameworks/*.dylib; do
+                [ -f "$dylib_path" ] || continue
+                sign_product "$dylib_path" ""
+              done
+            fi
+          }
+
+          app_path="./build/${SCHEME}.xcarchive/Products/Applications/${SCHEME}.app"
+
+          if [ ! -d "$app_path" ]; then
+            echo "App not found in archive: $app_path"
+            exit 1
+          fi
+
+          if [ -d "${app_path}/PlugIns" ]; then
+            for extension_path in "${app_path}"/PlugIns/*.appex; do
+              [ -d "$extension_path" ] || continue
+
+              extension_name="$(basename "$extension_path" .appex)"
+              extension_entitlements="$(find_entitlements "$PROJECT_PATH" "$extension_name" || true)"
+              sign_nested_code "$extension_path"
+              sign_product "$extension_path" "$extension_entitlements"
+            done
+          fi
+
+          app_entitlements="$(find_entitlements "$PROJECT_PATH" "$SCHEME" || true)"
+          sign_nested_code "$app_path"
+          sign_product "$app_path" "$app_entitlements"
+
+      - name: Create ExportOptions.plist
+        env:
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ./build/export
+          cat > ./build/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>release-testing</string>
+              <key>destination</key>
+              <string>export</string>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>teamID</key>
+              <string>$TEAM_ID</string>
+              <key>stripSwiftSymbols</key>
+              <true/>
+              <key>manageAppVersionAndBuildNumber</key>
+              <false/>
+              <key>thinning</key>
+              <string>&lt;none&gt;</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Export IPA
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+
+          export_path="./build/export/${SCHEME}"
+          rm -rf "$export_path"
+          mkdir -p "$export_path" ./build/release
+
+          xcodebuild -exportArchive \
+            -archivePath "./build/${SCHEME}.xcarchive" \
+            -exportPath "$export_path" \
+            -exportOptionsPlist ./build/ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            | xcbeautify --renderer github-actions
+
+          ipa_path="$(find "$export_path" -maxdepth 1 -name '*.ipa' -print -quit)"
+          if [ -z "$ipa_path" ]; then
+            echo "No IPA was exported for ${DISTRIBUTION_NAME}"
+            exit 1
+          fi
+
+          cp "$ipa_path" "./build/release/${IPA_NAME}"
+
+      - name: Generate OTA manifest
+        run: |
+          set -euo pipefail
+
+          app_path="./build/${SCHEME}.xcarchive/Products/Applications/${SCHEME}.app"
+          app_info_plist="${app_path}/Info.plist"
+          ipa_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ inputs.release-tag }}/${IPA_NAME}"
+
+          bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_info_plist")"
+          bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_info_plist")"
+          short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_info_plist" 2>/dev/null || printf '%s' '1.0')"
+          title="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$app_info_plist" 2>/dev/null || printf '%s' "$DISTRIBUTION_NAME")"
+
+          if [ "$bundle_id" != "$BUNDLE_IDENTIFIER" ]; then
+            echo "Unexpected bundle identifier for ${DISTRIBUTION_NAME}: ${bundle_id}"
+            exit 1
+          fi
+
+          cat > "./build/release/${MANIFEST_NAME}" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>items</key>
+              <array>
+                  <dict>
+                      <key>assets</key>
+                      <array>
+                          <dict>
+                              <key>kind</key>
+                              <string>software-package</string>
+                              <key>url</key>
+                              <string>${ipa_url}</string>
+                          </dict>
+                      </array>
+                      <key>metadata</key>
+                      <dict>
+                          <key>bundle-identifier</key>
+                          <string>${bundle_id}</string>
+                          <key>bundle-version</key>
+                          <string>${bundle_version}</string>
+                          <key>kind</key>
+                          <string>software</string>
+                          <key>subtitle</key>
+                          <string>${short_version} (${bundle_version})</string>
+                          <key>title</key>
+                          <string>${title}</string>
+                      </dict>
+                  </dict>
+              </array>
+          </dict>
+          </plist>
+          EOF
+
+          plutil -lint "./build/release/${MANIFEST_NAME}"
+
+      - name: Upload deployable assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: adhoc-ota-assets-${{ inputs.scheme }}-${{ github.run_id }}
+          path: ./build/release/
+          if-no-files-found: error
+          overwrite: true
+          compression-level: 0
+          retention-days: 7
+
+  deploy:
+    name: Deploy ${{ inputs.distribution-name }}
+    needs: archive
+    runs-on: ubuntu-latest
+    # Each app has unique asset names, but release asset replacement is still a
+    # shared mutation. Keep those mutations ordered within the queued workflow run.
+    concurrency:
+      group: adhoc-ota-publish-${{ inputs.release-tag }}
+      queue: max
+    permissions:
+      actions: read
+      contents: write
+    env:
+      IPA_NAME: ${{ inputs.ipa-name }}
+      MANIFEST_NAME: ${{ inputs.manifest-name }}
+      RELEASE_TAG: ${{ inputs.release-tag }}
+
+    steps:
+      - name: Download deployable assets
+        uses: actions/download-artifact@v4
+        with:
+          name: adhoc-ota-assets-${{ inputs.scheme }}-${{ github.run_id }}
+          path: ./build/release
+
+      - name: Validate deployable assets
+        run: |
+          set -euo pipefail
+
+          test -f "./build/release/${IPA_NAME}"
+          test -f "./build/release/${MANIFEST_NAME}"
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Publish the IPA first and the manifest last. The stable manifest URL
+          # should only point at the new build after its package upload succeeds.
+          gh release upload "$RELEASE_TAG" \
+            "./build/release/${IPA_NAME}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+          gh release upload "$RELEASE_TAG" \
+            "./build/release/${MANIFEST_NAME}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+      - name: Verify published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          release_assets="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets)"
+
+          for asset_name in "$IPA_NAME" "$MANIFEST_NAME"; do
+            expected_size="$(wc -c < "./build/release/${asset_name}" | tr -d ' ')"
+            published_size="$(jq -r --arg asset_name "$asset_name" \
+              '[.assets[] | select(.name == $asset_name) | .size] | first // 0' \
+              <<< "$release_assets")"
+
+            if [ "$published_size" -ne "$expected_size" ]; then
+              echo "::error::Published ${asset_name} has size ${published_size}; expected ${expected_size}."
+              exit 1
+            fi
+          done

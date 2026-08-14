@@ -1,0 +1,60 @@
+{
+  "apps": [
+    {
+      "name": "Verse",
+      "project_path": "Apps/Verse",
+      "scheme": "Verse",
+      "bundle_identifier": "app.muukii.verse",
+      "ipa_name": "Verse.ipa",
+      "manifest_name": "Verse-manifest.plist"
+    },
+    {
+      "name": "Journal",
+      "project_path": "Apps/Journal",
+      "scheme": "Tinycurve",
+      "bundle_identifier": "app.muukii.journal",
+      "ipa_name": "Journal.ipa",
+      "manifest_name": "Journal-manifest.plist"
+    },
+    {
+      "name": "PhotosOrganizer",
+      "project_path": "Apps/PhotosOrganizer",
+      "scheme": "PhotosOrganizer",
+      "bundle_identifier": "app.muukii.PhotosOrganizer",
+      "ipa_name": "PhotosOrganizer.ipa",
+      "manifest_name": "PhotosOrganizer-manifest.plist"
+    },
+    {
+      "name": "AmbientLight",
+      "project_path": "Apps/AmbientLight",
+      "scheme": "AmbientLight",
+      "bundle_identifier": "app.muukii.ambientlight",
+      "ipa_name": "AmbientLight.ipa",
+      "manifest_name": "AmbientLight-manifest.plist"
+    },
+    {
+      "name": "Färg",
+      "project_path": "Apps/Farg",
+      "scheme": "Farg",
+      "bundle_identifier": "app.muukii.farg",
+      "ipa_name": "Farg.ipa",
+      "manifest_name": "Farg-manifest.plist"
+    },
+    {
+      "name": "PolyReader",
+      "project_path": "Apps/PolyReader",
+      "scheme": "PolyReader",
+      "bundle_identifier": "app.muukii.polyreader",
+      "ipa_name": "PolyReader.ipa",
+      "manifest_name": "PolyReader-manifest.plist"
+    },
+    {
+      "name": "VoiceRecorder",
+      "project_path": "Apps/VoiceRecorder",
+      "scheme": "VoiceRecorder",
+      "bundle_identifier": "app.muukii.voicerecorder",
+      "ipa_name": "VoiceRecorder.ipa",
+      "manifest_name": "VoiceRecorder-manifest.plist"
+    }
+  ]
+}
