@@ -193,7 +193,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 #### 2.4 Subtitle Actions
 - Swipe actions:
   - Translate, Bookmark (leading)
-  - Ask ChatGPT (trailing) — opens the default browser with the explanation prompt pre-filled (surrounding cues included as context)
+  - Ask ChatGPT (trailing) — opens the default browser with the explanation prompt pre-filled in a temporary chat (surrounding cues included as context)
 - Context menu per cue:
   - Bookmark / Remove Bookmark
   - Copy
@@ -242,9 +242,10 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 - Empty states: prompt before typing; "no results" for unmatched queries; scrolling results dismisses the keyboard
 
 ### 3. AI and Language Tools
-- Word/phrase explanations are delegated to ChatGPT; the app builds the prompt and opens it externally
-  - The prompt asks for a translation and a detailed explanation of meaning, usage, and nuances
-  - Opens in the default browser, so the ChatGPT app takes over when it is installed and handles the link
+- Context-aware English explanations are delegated to ChatGPT; the app builds a versioned prompt and opens it externally
+  - The `verse.explanation.v1` prompt preserves the selected Target, uses surrounding Context only to resolve its intended meaning, and adapts the explanation to a word, multiword expression, clause, sentence, or subtitle fragment
+  - The prompt requests exactly the Markdown sections `Input`, `Translation`, and `Explanation`; Translation prefers one natural contextual rendering and may include an alternative only for material ambiguity or nuance
+  - Opens in the default browser with `temporary-chat=true`, so the ChatGPT app takes over when it is installed and handles the link as a temporary chat
   - There is no in-app explanation UI and no on-device generation
 - AI Response Language (Settings > Language): System / English / Japanese
   - The language the ChatGPT prompt asks for answers in
@@ -300,7 +301,7 @@ Verse (project name: YouTubeSubtitle) is a SwiftUI app for iPhone and iPad that 
 
 ### 6. External Integrations
 - In-app YouTube browser (with iOS sign-in flow)
-- Ask ChatGPT opens the default browser (or the ChatGPT app via universal link)
+- Ask ChatGPT opens a temporary chat in the default browser (or the ChatGPT app via universal link)
 
 ### 7. Live Transcription (Experimental)
 - Real-time microphone transcription (iOS 26+ physical device)
