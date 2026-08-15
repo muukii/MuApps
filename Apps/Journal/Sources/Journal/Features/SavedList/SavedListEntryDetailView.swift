@@ -111,8 +111,9 @@ private struct VaultSavedEntryDetailView: View {
             detailScrollRequest = nil
           }
         }
-      ) { entry in
+      ) { entry, context in
         VaultSavedEntryTreeCell(
+          depth: context.indentationDepth,
           entry: entry,
           viewportWidth: max(
             0,

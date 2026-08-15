@@ -329,12 +329,13 @@ private struct VaultSavedListContentView: View {
     }
   }
 
-  /// Builds the lazy Home stream in its own type-checking boundary.
+  /// Builds the retained Home header and lazy entry stream in one boundary.
   ///
-  /// One lazy stack owns every row. Nesting a second `LazyVStack` per day would
-  /// force the outer stack to size a container that is itself still estimating
-  /// its children, which drifts the content height while scrolling. `Section`
-  /// gives the same day grouping inside one stack.
+  /// The outer stack keeps the Map header alive while it is offscreen. One lazy
+  /// stack still owns every entry row; nesting another `LazyVStack` per day
+  /// would make the outer stack size a container that is itself still
+  /// estimating its children. `Section` provides the day grouping without that
+  /// unstable nested-lazy layout.
   private func savedListContent(
     sections: [VaultSavedDaySection],
     treesByRootID: [UUID: SavedEntryTreeProjection<VaultSavedEntry>.Node],
@@ -342,7 +343,7 @@ private struct VaultSavedListContentView: View {
     locationPins: [VaultSavedLocationPin],
     isMutationDisabled: Bool
   ) -> some View {
-    LazyVStack(alignment: .leading, spacing: 2) {
+    VStack(alignment: .leading, spacing: 2) {
       if locationPins.isEmpty == false {
         VaultSavedLocationsMapNavigationHeader(
           pins: locationPins,
@@ -350,37 +351,40 @@ private struct VaultSavedListContentView: View {
         )
       }
 
-      ForEach(sections) { section in
-        Section {
-          ForEach(section.entries) { entry in
-            VStack(alignment: .leading) {
-              if let tree = treesByRootID[entry.edgeID] {
-                TreeDisplay(
-                  root: tree,
-                  indentation: VaultSavedEntryTreeMetrics.indentation,
-                  spacing: VaultSavedEntryTreeMetrics.nodeSpacing
-                ) { entry in
-                  VaultSavedEntryTreeCell(
-                    entry: entry,
-                    viewportWidth: viewportWidth,
-                    isNavigationEnabled: true,
-                    isMutationDisabled: isMutationDisabled,
-                    transitionSourceTreeRootEdgeID: nil,
-                    transitionNamespace: navigationTransitionNamespace,
-                    onShare: presentSharePreview,
-                    onEdit: presentEditDraft,
-                    onRequestDelete: { entry in
-                      deleteCandidate = entry
-                    },
-                    onToggleTodoCompletion: toggleTodoCompletion
-                  )
+      LazyVStack(alignment: .leading, spacing: 2) {
+        ForEach(sections) { section in
+          Section {
+            ForEach(section.entries) { entry in
+              VStack(alignment: .leading) {
+                if let tree = treesByRootID[entry.edgeID] {
+                  TreeDisplay(
+                    root: tree,
+                    indentation: VaultSavedEntryTreeMetrics.indentation,
+                    spacing: VaultSavedEntryTreeMetrics.nodeSpacing
+                  ) { entry, context in
+                    VaultSavedEntryTreeCell(
+                      depth: context.indentationDepth,
+                      entry: entry,
+                      viewportWidth: viewportWidth,
+                      isNavigationEnabled: true,
+                      isMutationDisabled: isMutationDisabled,
+                      transitionSourceTreeRootEdgeID: nil,
+                      transitionNamespace: navigationTransitionNamespace,
+                      onShare: presentSharePreview,
+                      onEdit: presentEditDraft,
+                      onRequestDelete: { entry in
+                        deleteCandidate = entry
+                      },
+                      onToggleTodoCompletion: toggleTodoCompletion
+                    )                   
+                  }
                 }
               }
             }
+          } header: {
+            VaultSavedDayHeader(day: section.day)
+              .padding(.vertical, daySectionTopSpacing)
           }
-        } header: {
-          VaultSavedDayHeader(day: section.day)
-            .padding(.vertical, daySectionTopSpacing)
         }
       }
     }

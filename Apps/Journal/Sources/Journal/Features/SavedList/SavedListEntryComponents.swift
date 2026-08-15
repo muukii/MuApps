@@ -178,6 +178,7 @@ struct VaultSavedEntryRow: View {
 /// Existing saved-entry card presentation constrained to one tree viewport.
 struct VaultSavedEntryTreeCell: View {
 
+  let depth: Int
   let entry: VaultSavedEntry
   let viewportWidth: CGFloat
   let isNavigationEnabled: Bool
@@ -190,6 +191,7 @@ struct VaultSavedEntryTreeCell: View {
   let onToggleTodoCompletion: @MainActor (VaultSavedEntry) -> Void
 
   var body: some View {
+    
     VaultSavedEntryRow(
       entry: entry,
       isNavigationEnabled: isNavigationEnabled,
@@ -201,7 +203,16 @@ struct VaultSavedEntryTreeCell: View {
       onRequestDelete: onRequestDelete,
       onToggleTodoCompletion: onToggleTodoCompletion
     )
-    .frame(width: viewportWidth)
+    .padding(.leading, depth > 0 ? 16 : 0)
+    .frame(width: viewportWidth)        
+    .overlay(alignment: .topLeading) {
+      HStack(spacing: 1) {
+        ForEach(0..<depth, id: \.self) { _ in
+          Capsule()
+            .frame(width: 6, height: 4)
+        }
+      }
+    }
   }
 }
 

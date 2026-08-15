@@ -14,6 +14,24 @@ public protocol TreeNode: Identifiable {
 
 }
 
+/// Layout information for the tree node currently being rendered.
+///
+/// The context describes the node's semantic position in the supplied tree,
+/// independently from the point-based indentation used to draw the layout.
+public struct TreeLayoutContext: Equatable, Sendable {
+
+  /// The zero-based indentation depth of the node.
+  ///
+  /// A tree root or a top-level node supplied directly to ``TreeLayout`` has
+  /// a depth of `0`. Each generation of descendants increments the value by
+  /// one.
+  public let indentationDepth: Int
+
+  fileprivate init(indentationDepth: Int) {
+    self.indentationDepth = indentationDepth
+  }
+}
+
 /// Recursively places tree nodes without owning a scroll container.
 ///
 /// ``TreeDisplay`` supplies the horizontal viewport around this layout. Keeping
@@ -24,7 +42,8 @@ public struct TreeLayout<Node: TreeNode, Cell: View>: View {
   private let nodes: [Node]
   private let indentation: CGFloat
   private let spacing: CGFloat?
-  private let cell: (Node.Body) -> Cell
+  private let initialIndentationDepth: Int
+  private let cell: (Node.Body, TreeLayoutContext) -> Cell
 
   public init(
     nodes: [Node],
@@ -32,9 +51,43 @@ public struct TreeLayout<Node: TreeNode, Cell: View>: View {
     spacing: CGFloat? = nil,
     @ViewBuilder cell: @escaping (Node.Body) -> Cell
   ) {
+    self.init(
+      nodes: nodes,
+      indentation: indentation,
+      spacing: spacing,
+      initialIndentationDepth: 0
+    ) { body, _ in
+      cell(body)
+    }
+  }
+
+  /// Creates a tree layout whose cells receive their current indentation depth.
+  public init(
+    nodes: [Node],
+    indentation: CGFloat = 20,
+    spacing: CGFloat? = nil,
+    @ViewBuilder cell: @escaping (Node.Body, TreeLayoutContext) -> Cell
+  ) {
+    self.init(
+      nodes: nodes,
+      indentation: indentation,
+      spacing: spacing,
+      initialIndentationDepth: 0,
+      cell: cell
+    )
+  }
+
+  fileprivate init(
+    nodes: [Node],
+    indentation: CGFloat,
+    spacing: CGFloat?,
+    initialIndentationDepth: Int,
+    @ViewBuilder cell: @escaping (Node.Body, TreeLayoutContext) -> Cell
+  ) {
     self.nodes = nodes
     self.indentation = indentation
     self.spacing = spacing
+    self.initialIndentationDepth = initialIndentationDepth
     self.cell = cell
   }
 
@@ -45,11 +98,12 @@ public struct TreeLayout<Node: TreeNode, Cell: View>: View {
           node: node,
           indentation: indentation,
           spacing: spacing,
+          indentationDepth: initialIndentationDepth,
           cell: cell
         )
       }
     }
-    .padding(.leading, indentation)
+//    .padding(.leading, indentation)
   }
 
   private struct TreeNodeLayout: View {
@@ -57,12 +111,16 @@ public struct TreeLayout<Node: TreeNode, Cell: View>: View {
     let node: Node
     let indentation: CGFloat
     let spacing: CGFloat?
-    let cell: (Node.Body) -> Cell
+    let indentationDepth: Int
+    let cell: (Node.Body, TreeLayoutContext) -> Cell
 
     var body: some View {
       VStack(alignment: .leading, spacing: spacing) {
         TreeStickyContainer(dimsWhenPinned: true) {
-          cell(node.body)
+          cell(
+            node.body,
+            TreeLayoutContext(indentationDepth: indentationDepth)
+          )
         }
         .id(node.id)
         .anchorPreference(
@@ -76,6 +134,7 @@ public struct TreeLayout<Node: TreeNode, Cell: View>: View {
             nodes: node.children,
             indentation: indentation,
             spacing: spacing,
+            initialIndentationDepth: indentationDepth + 1,
             cell: cell
           )
         }
@@ -98,21 +157,24 @@ public struct TreeDisplay<Node: TreeNode, Cell: View>: View {
   private let scrollTargetID: Node.ID?
   private let verticalProxy: ScrollViewProxy?
   private let onScrollTargetResolved: @MainActor (Node.ID) -> Void
-  private let cell: (Node.Body) -> Cell
+  private let cell: (Node.Body, TreeLayoutContext) -> Cell
 
+  /// Creates a tree display whose cells receive their current indentation depth.
   public init(
     root: Node,
     indentation: CGFloat = 20,
     spacing: CGFloat? = nil,
-    @ViewBuilder cell: @escaping (Node.Body) -> Cell
+    @ViewBuilder cell: @escaping (Node.Body, TreeLayoutContext) -> Cell
   ) {
-    self.root = root
-    self.indentation = indentation
-    self.spacing = spacing
-    self.scrollTargetID = nil
-    self.verticalProxy = nil
-    self.onScrollTargetResolved = { _ in }
-    self.cell = cell
+    self.init(
+      root: root,
+      indentation: indentation,
+      spacing: spacing,
+      scrollTargetID: nil,
+      verticalProxy: nil,
+      onScrollTargetResolved: { _ in },
+      cell: cell
+    )
   }
 
   fileprivate init(
@@ -120,9 +182,9 @@ public struct TreeDisplay<Node: TreeNode, Cell: View>: View {
     indentation: CGFloat,
     spacing: CGFloat?,
     scrollTargetID: Node.ID?,
-    verticalProxy: ScrollViewProxy,
+    verticalProxy: ScrollViewProxy?,
     onScrollTargetResolved: @escaping @MainActor (Node.ID) -> Void,
-    @ViewBuilder cell: @escaping (Node.Body) -> Cell
+    @ViewBuilder cell: @escaping (Node.Body, TreeLayoutContext) -> Cell
   ) {
     self.root = root
     self.indentation = indentation
@@ -135,8 +197,11 @@ public struct TreeDisplay<Node: TreeNode, Cell: View>: View {
 
   public var body: some View {
     VStack(alignment: .leading, spacing: spacing) {
-      cell(root.body)
-        .id(root.id)
+      cell(
+        root.body,
+        TreeLayoutContext(indentationDepth: 0)
+      )
+      .id(root.id)
 
       if root.children.isEmpty == false {
         TreeBranch(
@@ -161,7 +226,7 @@ public struct TreeDisplay<Node: TreeNode, Cell: View>: View {
     let scrollTargetID: Node.ID?
     let verticalProxy: ScrollViewProxy?
     let onScrollTargetResolved: @MainActor (Node.ID) -> Void
-    let cell: (Node.Body) -> Cell
+    let cell: (Node.Body, TreeLayoutContext) -> Cell
 
     var body: some View {
       ScrollViewReader { horizontalProxy in
@@ -170,6 +235,7 @@ public struct TreeDisplay<Node: TreeNode, Cell: View>: View {
             nodes: nodes,
             indentation: indentation,
             spacing: spacing,
+            initialIndentationDepth: 1,
             cell: cell
           )
         }
@@ -199,7 +265,7 @@ public struct TreeScrollView<Node: TreeNode, Cell: View>: View {
   private let spacing: CGFloat?
   private let scrollTargetID: Node.ID?
   private let onScrollTargetResolved: @MainActor (Node.ID) -> Void
-  private let cell: (Node.Body) -> Cell
+  private let cell: (Node.Body, TreeLayoutContext) -> Cell
 
   public init(
     root: Node,
@@ -208,6 +274,23 @@ public struct TreeScrollView<Node: TreeNode, Cell: View>: View {
     scrollTargetID: Node.ID? = nil,
     onScrollTargetResolved: @escaping @MainActor (Node.ID) -> Void = { _ in },
     @ViewBuilder cell: @escaping (Node.Body) -> Cell
+  ) {
+    self.root = root
+    self.indentation = indentation
+    self.spacing = spacing
+    self.scrollTargetID = scrollTargetID
+    self.onScrollTargetResolved = onScrollTargetResolved
+    self.cell = { body, _ in cell(body) }
+  }
+
+  /// Creates a scrolling tree whose cells receive their indentation depth.
+  public init(
+    root: Node,
+    indentation: CGFloat = 20,
+    spacing: CGFloat? = nil,
+    scrollTargetID: Node.ID? = nil,
+    onScrollTargetResolved: @escaping @MainActor (Node.ID) -> Void = { _ in },
+    @ViewBuilder cell: @escaping (Node.Body, TreeLayoutContext) -> Cell
   ) {
     self.root = root
     self.indentation = indentation
@@ -451,8 +534,11 @@ private struct _Book: View {
     ScrollView(.vertical) {
       LazyVStack {
         ForEach(nodes) { node in
-          TreeDisplay(root: node) {
-            Cell(value: $0)
+          TreeDisplay(root: node) { value, context in
+            Cell(
+              value: value,
+              indentationDepth: context.indentationDepth
+            )
           }
         }
       }
@@ -462,9 +548,10 @@ private struct _Book: View {
   struct Cell: View {
 
     let value: String
+    let indentationDepth: Int
 
     var body: some View {
-      Text(value)
+      Text("\(value) · depth \(indentationDepth)")
         .frame(
           width: 320,
           alignment: .center

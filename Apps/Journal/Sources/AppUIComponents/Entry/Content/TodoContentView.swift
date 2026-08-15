@@ -24,6 +24,15 @@ public struct TodoContentSource: Equatable, Hashable, Sendable {
 /// Content-owned rendering for a Todo entry.
 struct TodoContentView: View {
 
+  /// Describes whether the completion affordance is static or actionable.
+  enum Interaction {
+    /// Displays the completion state without exposing a control.
+    case readOnly
+
+    /// Displays a control that sends the toggle intent to its owner.
+    case interactive(@MainActor () -> Void)
+  }
+
   /// Visual treatment for a Todo in one authored-content placement.
   struct Style {
     let preset: EntryContentStyle
@@ -82,7 +91,7 @@ struct TodoContentView: View {
   let source: TodoContentSource
   let style: Style
   let showsCompletionIndicator: Bool
-  let onToggleCompletion: (@MainActor () -> Void)?
+  let interaction: Interaction
 
   var body: some View {
     HStack(alignment: .center, spacing: style.spacing) {
@@ -91,7 +100,7 @@ struct TodoContentView: View {
           isCompleted: source.isCompleted,
           imageSize: style.indicatorSize,
           frameSize: style.statusSlotSize,
-          onToggleCompletion: onToggleCompletion
+          interaction: interaction
         )
       }
 
@@ -156,6 +165,15 @@ public struct TodoCompletionButton: View {
         frameSize: frameSize
       )
     }
+    .sensoryFeedback(
+      trigger: isCompleted,
+      { oldValue, newValue in
+        if oldValue == false, newValue == true {
+          return .success
+        }
+        return nil
+      }
+    )
     .buttonStyle(.plain)
     .accessibilityLabel(
       isCompleted
@@ -183,23 +201,24 @@ private struct TodoStatusControl: View {
   let isCompleted: Bool
   let imageSize: CGFloat
   let frameSize: CGFloat
-  let onToggleCompletion: (@MainActor () -> Void)?
+  let interaction: TodoContentView.Interaction
 
   var body: some View {
-    if let onToggleCompletion {
-      TodoCompletionButton(
-        isCompleted: isCompleted,
-        imageSize: imageSize,
-        frameSize: frameSize,
-        onToggle: onToggleCompletion
-      )
-    } else {
+    switch interaction {
+    case .readOnly:
       TodoStatusIndicator(
         isCompleted: isCompleted,
         imageSize: imageSize,
         frameSize: frameSize
       )
       .accessibilityHidden(true)
+    case .interactive(let onToggle):
+      TodoCompletionButton(
+        isCompleted: isCompleted,
+        imageSize: imageSize,
+        frameSize: frameSize,
+        onToggle: onToggle
+      )
     }
   }
 }
@@ -226,14 +245,14 @@ private struct TodoStatusIndicator: View {
         source: TodoContentSource(text: "Pick up flowers before dinner"),
         style: .init(.detail),
         showsCompletionIndicator: true,
-        onToggleCompletion: nil
+        interaction: .readOnly
       )
 
       TodoContentView(
         source: TodoContentSource(text: "Book the train", completedAt: .now),
         style: .init(.detail),
         showsCompletionIndicator: true,
-        onToggleCompletion: {}
+        interaction: .interactive {}
       )
     }
   }

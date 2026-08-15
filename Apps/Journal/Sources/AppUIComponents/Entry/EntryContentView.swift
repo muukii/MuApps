@@ -8,21 +8,40 @@ import SwiftUI
 /// shared card-shaped presentation contract.
 public struct EntryContentView: View {
 
+  /// An interaction emitted by rendered authored content.
+  public enum Action: Sendable {
+    /// Requests that the owner toggles the Todo completion state.
+    case toggleTodoCompletion
+  }
+
+  /// Handles interactions emitted by this content renderer.
+  public typealias ActionHandler = @MainActor (Action) -> Void
+
+  /// Controls whether rendered content exposes an interaction to its owner.
+  public enum Interaction {
+    /// Renders content without an interaction affordance.
+    case readOnly
+
+    /// Renders supported interaction affordances and sends their actions to the
+    /// owning feature.
+    case interactive(ActionHandler)
+  }
+
   let content: EntryContent
   let style: EntryContentStyle
   let showsTodoCompletionIndicator: Bool
-  let onToggleTodoCompletion: (@MainActor () -> Void)?
+  let interaction: Interaction
 
   public init(
     content: EntryContent,
     style: EntryContentStyle,
     showsTodoCompletionIndicator: Bool = true,
-    onToggleTodoCompletion: (@MainActor () -> Void)? = nil
+    interaction: Interaction = .readOnly
   ) {
     self.content = content
     self.style = style
     self.showsTodoCompletionIndicator = showsTodoCompletionIndicator
-    self.onToggleTodoCompletion = onToggleTodoCompletion
+    self.interaction = interaction
   }
 
   public var body: some View {
@@ -39,7 +58,7 @@ public struct EntryContentView: View {
           source: todo,
           style: style.todo,
           showsCompletionIndicator: showsTodoCompletionIndicator,
-          onToggleCompletion: onToggleTodoCompletion
+          interaction: todoInteraction
         )
         .frame(minHeight: style.todo.minimumHeight)
       case .link(let urlString):
@@ -75,6 +94,17 @@ public struct EntryContentView: View {
       }
     }
     .clipShape(.rect(cornerRadius: 24))
+  }
+
+  private var todoInteraction: TodoContentView.Interaction {
+    switch interaction {
+    case .readOnly:
+      .readOnly
+    case .interactive(let onAction):
+      .interactive {
+        onAction(.toggleTodoCompletion)
+      }
+    }
   }
 }
 

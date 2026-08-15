@@ -128,17 +128,26 @@ public struct VaultSavedEntryDetailRow: View {
     EntryContentView(
       content: entry.content,
       style: .detail,
-      onToggleTodoCompletion: todoCompletionAction
+      interaction: contentInteraction
     )
     .frame(maxWidth: .infinity, alignment: .center)
     .foregroundStyle(.appOnPrimaryContainer)
   }
 
-  private var todoCompletionAction: (@MainActor () -> Void)? {
-    guard entry.kind == .todo, isTodoCompletionDisabled == false else {
-      return nil
+  private var contentInteraction: EntryContentView.Interaction {
+    guard entry.kind == .todo,
+      isTodoCompletionDisabled == false,
+      let onToggleTodoCompletion
+    else {
+      return .readOnly
     }
-    return onToggleTodoCompletion
+
+    return .interactive { action in
+      switch action {
+      case .toggleTodoCompletion:
+        onToggleTodoCompletion()
+      }
+    }
   }
 }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import MuColor
 
 /// Renders a native link preview with a written-content fallback.
 struct LinkContentView: View {
@@ -50,7 +51,8 @@ struct LinkContentView: View {
         url: linkURL.url,
       )
       .frame(height: style.previewHeight)
-      .allowsHitTesting(style.allowsInteraction)
+      .padding(16)
+      .background(.appSecondaryContainer)
     } else {
       TextContentView(
         text: urlString,

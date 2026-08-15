@@ -54,12 +54,21 @@ struct VaultSavedLocationsMapNavigationHeader: View {
 /// Compact, zoomed-in map that keeps the saved cards visible below it.
 private struct VaultSavedLocationsMapHeader: View {
 
+  @State private var cameraPosition: MapCameraPosition
+
   let pins: [VaultSavedLocationPin]
+
+  init(pins: [VaultSavedLocationPin]) {
+    self.pins = pins
+    _cameraPosition = State(
+      initialValue: VaultSavedLocationsMapCamera.headerPosition(for: pins)
+    )
+  }
 
   var body: some View {
     ZStack {
       Map(
-        initialPosition: VaultSavedLocationsMapCamera.headerPosition(for: pins),
+        position: $cameraPosition,
         interactionModes: []
       ) {
         ForEach(pins.dropFirst()) { pin in
@@ -69,12 +78,13 @@ private struct VaultSavedLocationsMapHeader: View {
           .annotationTitles(.hidden)
         }
       }
-      // A newly posted located card becomes the header's camera subject. Keep
-      // ordinary sync changes stable, but rebuild when that latest pin changes.
-      .id(pins.first)
       .mapStyle(.standard(elevation: .flat))
       .mapControlVisibility(.hidden)
       .allowsHitTesting(false)
+      .onChange(of: pins.first) { _, _ in
+        // Recenter for a new latest pin without replacing the MapKit surface.
+        cameraPosition = VaultSavedLocationsMapCamera.headerPosition(for: pins)
+      }
 
       if let latestPin = pins.first {
         VaultSavedLocationPinMarker(pin: latestPin, markerSize: 28)
