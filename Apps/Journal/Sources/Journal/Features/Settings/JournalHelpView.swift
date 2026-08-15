@@ -152,7 +152,7 @@ private enum JournalHelpContent {
           title: "Developer Builds",
           symbolName: "hammer",
           summary:
-            "Debug builds use CloudKit Development. TestFlight and App Store builds use CloudKit Production.",
+            "Tinycurve uses CloudKit Development. On a device or Mac, Tinycurve Production uses CloudKit Production; Simulator always uses Development.",
           points: [
             JournalHelpPoint(
               id: "separate-environments",

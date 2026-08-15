@@ -8,6 +8,7 @@ struct VaultStoreLayoutTests {
   @Test
   func cloudKitEnvironmentParsesInfoPlistValues() {
     #expect(VaultCloudKitEnvironment(infoPlistValue: "development") == .development)
+    #expect(VaultCloudKitEnvironment(infoPlistValue: "Development") == .development)
     #expect(VaultCloudKitEnvironment(infoPlistValue: "production") == .production)
     #expect(VaultCloudKitEnvironment(infoPlistValue: " Production ") == .production)
     #expect(VaultCloudKitEnvironment(infoPlistValue: "staging") == nil)

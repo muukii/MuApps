@@ -60,8 +60,12 @@ frameworks**. The frameworks live inside the app (not in the repo's
 `Shared/`) because they are app-scoped, not cross-app. All Journal target source
 roots are grouped under `Apps/Journal/Sources/<TargetName>/`; the app icon
 package is `Apps/Journal/Sources/Journal/Icon.icon`. The project, app target,
-scheme, executable, module, and user-facing bundle display name are `Tinycurve`;
-the WidgetKit extension bundle display name is `Tinycurve Widget`.
+default scheme, executable, module, and user-facing bundle display name are
+`Tinycurve`; the WidgetKit extension bundle display name is `Tinycurve Widget`.
+The shared `Tinycurve Production` scheme runs the debug-variant
+`DebugProduction` configuration with a debugger while selecting the CloudKit
+Production database on a physical iOS device or native Mac. Simulator remains
+on CloudKit Development. The scheme intentionally defines no test targets.
 The same app, framework, test, and widget targets compile natively for iPhone,
 iPad, and macOS. The Mac product keeps bundle id `app.muukii.journal`, CloudKit
 container, and App Group identity aligned with iOS. Native macOS app and widget
@@ -126,11 +130,12 @@ not create preset vaults at install time and does not open the old App Group
 SwiftData SQLite store.
 
 The App Group vault tree is scoped by the active CloudKit server environment:
-Debug builds read and write `Journal/development`, while Release, TestFlight,
-and App Store builds read and write `Journal/production`. Each environment owns
-its own catalog, per-vault stores, media files, and CKSyncEngine state so
-development records, production records, change tokens, and archived
-`CKRecord` system fields do not cross environments.
+the standard `Debug` configuration and all iOS Simulator builds read and write
+`Journal/development`, while physical-device/native-Mac `DebugProduction`,
+`Release`, TestFlight, and App Store builds read and write `Journal/production`.
+Each environment owns its own catalog, per-vault stores, media files, and
+CKSyncEngine state so development records, production records, change tokens,
+and archived `CKRecord` system fields do not cross environments.
 
 Because the app has not shipped with user data, Journal does not keep product
 migration APIs or legacy import DTOs. Schema changes can replace the pre-release
@@ -221,16 +226,24 @@ CloudKit engine; widgets are reloaded immediately after the local commit.
 Declared in `Project.swift` on the app target:
 
 - `com.apple.developer.icloud-container-identifiers` = `iCloud.app.muukii.journal`
+- `com.apple.developer.icloud-container-environment` =
+  `$(CLOUDKIT_ENVIRONMENT)` — selects CloudKit `Development` for `Debug` and
+  CloudKit `Production` for `DebugProduction` and `Release` on supported signed
+  destinations. Simulator overrides both to `Development`, matching CloudKit's
+  platform constraint. Declared on the app and Widget targets.
 - `com.apple.developer.icloud-services` = `CloudKit`
 - `com.apple.security.application-groups` = `["group.app.muukii.journal"]` —
   backs vault stores, Quick Capture preferences, and extension access. Declared
   on the app, Widget, App Intents, and Share targets.
 - `aps-environment` = `$(APS_ENVIRONMENT)` — expanded per configuration
-  (`development` for Debug, `production` for Release). Required so shipped builds
-  receive CloudKit's silent pushes for background sync.
-- `JournalCloudKitEnvironment` Info.plist key = `$(APS_ENVIRONMENT)` — lets
-  `JournalVault` scope local App Group storage and launch-routing cache keys to
-  the same CloudKit server environment as the entitlements.
+  (`development` for `Debug` and `DebugProduction`, `production` for `Release`).
+  This signing and push axis is intentionally independent from the CloudKit
+  server environment. Required so shipped builds receive CloudKit's silent
+  pushes for background sync.
+- `JournalCloudKitEnvironment` Info.plist key = `$(CLOUDKIT_ENVIRONMENT)` — set
+  on the app, Widget, App Intents, and Share bundles so every host process scopes
+  local App Group storage and launch-routing cache keys to the same CloudKit
+  server environment as the app's signed entitlement.
 - `com.apple.developer.journal.allow` = `["suggestions"]` — lets
   `CaptureSuggestions` present the system Journaling Suggestions picker. Note the
   value is a **string array**, not a boolean; it must match what the App ID's
@@ -238,9 +251,11 @@ Declared in `Project.swift` on the app target:
   signing fails.
 
 The `JournalWidget` target carries the same App Group, iCloud container,
-CloudKit, and `aps-environment` entitlements as the app. Its live timeline read
-is local App Group storage; CloudKit access remains available for future
-extension-side recovery or summary refresh work.
+CloudKit environment, CloudKit service, and `aps-environment` entitlements as the
+app. Its live timeline read is local App Group storage; CloudKit access remains
+available for future extension-side recovery or summary refresh work. Native
+macOS app and Widget builds declare the same CloudKit environment in their
+static entitlements files because those replace Tuist-generated entitlements.
 The App Intents and Share targets carry only the App Group entitlement; CloudKit,
 push, and background modes remain owned by the containing app.
 
@@ -862,7 +877,10 @@ the gallery's **Lab** section).
   **Write something** text field; in a card detail it becomes **Add to this
   card**. It grows from one to five lines. Home and every visited detail
   placement own separate unpublished drafts, so navigating deeper or back does
-  not retarget or erase another level's input.
+  not retarget or erase another level's input. When the untouched text field
+  receives a complete HTTP(S) URL as its first input update, that same draft
+  switches to Link and uses the existing Link preview. A URL typed incrementally
+  or added after any existing text remains part of the Text entry.
   The trailing glass up-arrow posts that entry and is enabled only when the
   current content is persistable: text and Todo must contain non-whitespace
   content, a link must resolve to a valid HTTP(S) URL, and capture-backed kinds
@@ -1047,8 +1065,8 @@ the gallery's **Lab** section).
   Photo, Video, and Live Photo use the persisted pixel dimensions (falling back
   to decoded media dimensions) and aspect-fit the complete image without crop.
   Doodle saves its authored canvas size alongside its JSON and reserves that
-  geometry too; doodles saved before those dimensions were recorded still resize
-  from a square once their file decodes.
+  geometry too. Doodles without recorded dimensions use the canonical 4:5
+  authored ratio, so idle, loading, and rendered states keep one cell height.
   The bottom composer appends a new direct child to the current detail-root edge
   at every depth. Tree nodes read the full vault media file using the same card
   presentation on Home and detail. Video previews
@@ -1182,7 +1200,15 @@ imports back to the normal sync path. If recovery finds no local or remote
 vaults, the runtime treats the install as a new-user state and leaves the vault
 picker empty until the user creates a vault.
 Live CloudKit account/network behavior, including two-account invite
-acceptance, still needs device or signed simulator verification.
+acceptance, still needs physical-device or signed native-macOS verification.
+
+For a debuggable Production check, select the shared `Tinycurve Production`
+scheme and run it on a physical iOS device or as the signed native macOS app.
+The scheme uses `DebugProduction`, so `DEBUG`, debugger attachment, and debug
+optimization remain enabled while the signed CloudKit entitlement is
+`Production`. The iOS Simulator only accesses CloudKit Development and cannot
+validate this path. `Tinycurve Production` uses the shipping bundle ID and full
+sync engine, so it can create, update, share, and delete real production data.
 
 Todo completion adds the optional `Card.completedAt` date field. Existing or
 older records that omit it import as incomplete. Before release, verify that the
@@ -1193,8 +1219,8 @@ schema to Production together with the rest of the vault record types.
 `iCloud.app.muukii.journal` container, verify the vault record types in the
 CloudKit Console during Development, test private and shared vaults on two
 physical devices, then **Deploy Schema to Production** before any
-Release/TestFlight build (TestFlight + App Store use the Production environment
-only).
+`DebugProduction`, Release, or TestFlight build (`Tinycurve Production`,
+TestFlight, and App Store use the Production environment).
 
 ---
 

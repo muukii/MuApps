@@ -159,6 +159,27 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   /// save time normalizes it.
   var text: String
 
+  /// Text projection used by the compact creation composer.
+  ///
+  /// A complete HTTP(S) URL arriving as the first value promotes the untouched
+  /// text placeholder to Link. Once any text has been entered, later URLs remain
+  /// ordinary text so writing a sentence never changes modality underneath the
+  /// user.
+  var composerText: String {
+    get { text }
+    set {
+      guard isEmptyTextDraft,
+        text.isEmpty,
+        Self.isEntireWebURL(newValue)
+      else {
+        text = newValue
+        return
+      }
+
+      setLinkURLString(newValue)
+    }
+  }
+
   /// Completion timestamp retained while a saved Todo is edited.
   /// New Todo drafts leave this `nil`, and non-Todo drafts ignore it.
   var completedAt: Date?
@@ -473,6 +494,39 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     doodle = nil
     bauhaus = nil
     location = nil
+  }
+
+  /// Returns whether the complete input is one detected HTTP(S) web URL.
+  ///
+  /// `JournalLinkURL` intentionally accepts forgiving host-like values for the
+  /// explicit Link editor. Automatic promotion is stricter so a plain word or
+  /// email address cannot unexpectedly replace the text composer.
+  private static func isEntireWebURL(_ input: String) -> Bool {
+    let candidate = input.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard candidate.isEmpty == false,
+      let detector = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.link.rawValue
+      )
+    else {
+      return false
+    }
+
+    let candidateRange = NSRange(candidate.startIndex..<candidate.endIndex, in: candidate)
+    guard
+      let match = detector.firstMatch(
+        in: candidate,
+        options: [],
+        range: candidateRange
+      ),
+      match.range == candidateRange,
+      let scheme = match.url?.scheme?.lowercased(),
+      scheme == "http" || scheme == "https",
+      JournalLinkURL(candidate) != nil
+    else {
+      return false
+    }
+
+    return true
   }
 }
 

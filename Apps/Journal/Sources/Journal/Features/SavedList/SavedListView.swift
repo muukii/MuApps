@@ -210,6 +210,7 @@ private struct VaultSavedListContentView: View {
         }
       }
     }
+    .frameAdaptive()
     .overlay {
       if visibleSections.isEmpty {
         VaultSavedListEmptyState(

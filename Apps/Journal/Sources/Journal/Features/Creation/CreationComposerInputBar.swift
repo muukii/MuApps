@@ -346,7 +346,7 @@ private struct CreationComposerDraftContent: View {
   var body: some View {
     switch draft.kind {
     case .text:
-      TextField(placement.prompt, text: $draft.text, axis: .vertical)
+      TextField(placement.prompt, text: $draft.composerText, axis: .vertical)
         .textFieldStyle(.plain)
         .lineLimit(1...5)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)

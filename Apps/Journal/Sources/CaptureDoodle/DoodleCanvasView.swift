@@ -293,10 +293,6 @@ public struct DoodleCanvasView: View {
     self.onChange = onChange
   }
 
-  /// Width divided by height for the drawable surface. Matches the canonical
-  /// journal card ratio so exported doodles share the same portrait geometry.
-  private static let aspectRatio: CGFloat = 4 / 5
-
   public var body: some View {
     // Read in `body` so Observation tracks edits and the canvas re-renders.
     let strokes = canvas.strokes
@@ -304,7 +300,7 @@ public struct DoodleCanvasView: View {
 
     VStack {
       drawingSurface(strokes: strokes, live: live)
-        .aspectRatio(Self.aspectRatio, contentMode: .fit)
+        .aspectRatio(DoodleDrawing.canvasAspectRatio, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
           RoundedRectangle(cornerRadius: 12, style: .continuous)

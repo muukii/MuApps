@@ -4,8 +4,10 @@ import Foundation
 ///
 /// ```text
 /// <App Group>/Journal/
-///   development/               Debug builds, CloudKit Development database
-///   production/                Release/TestFlight/App Store, CloudKit Production database
+///   development/               Debug and iOS Simulator, CloudKit Development
+///   production/                DebugProduction on device/Mac,
+///                              Release/TestFlight/App Store,
+///                              CloudKit Production database
 ///     catalog.sqlite           VaultCatalogStore
 ///     Vaults/
 ///       <vault-id>/

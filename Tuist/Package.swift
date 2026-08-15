@@ -23,12 +23,27 @@ let avifDependencyHeaderSearchPaths: ProjectDescription.SettingValue = .array([
   "$(SRCROOT)/../libyuv.swift/Sources/libyuv.xcframework/ios-arm64_x86_64-simulator/Headers",
 ])
 
+/// Build configurations exposed by generated external-package projects.
+///
+/// Tuist-generated package dependencies must know every custom configuration
+/// used by a consuming project. `DebugProduction` retains debug compilation
+/// behavior; only Tinycurve supplies its CloudKit-specific bundle settings.
+let packageConfigurations: [Configuration] = [
+  .debug(name: "Debug"),
+  .debug(name: "DebugProduction"),
+  .release(name: "Release"),
+]
+
 let packageSettings = PackageSettings(
   productTypes: [:],
-  baseSettings: .settings(base: [
-    // Enable Xcode 26's reusable compilation cache for generated Swift package targets.
-    "COMPILATION_CACHE_ENABLE_CACHING": "YES",
-  ]),
+  baseSettings: .settings(
+    base: [
+      // Enable Xcode 26's reusable compilation cache for generated Swift
+      // package targets.
+      "COMPILATION_CACHE_ENABLE_CACHING": "YES",
+    ],
+    configurations: packageConfigurations
+  ),
   targetSettings: [
     "avifc": .settings(base: [
       "HEADER_SEARCH_PATHS": avifDependencyHeaderSearchPaths,

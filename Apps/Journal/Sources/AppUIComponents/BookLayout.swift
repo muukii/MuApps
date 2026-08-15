@@ -1,55 +1,5 @@
 import SwiftUI
 
-private struct _Book: View {
-
-  struct Node: TreeNode {
-
-    let id: UUID
-
-    let body: String
-
-    let children: [Node]
-
-    init(body: String, children: [Node]) {
-      self.id = .init()
-      self.body = body
-      self.children = children
-    }
-  }
-
-  let nodes: [Node]
-
-  var body: some View {
-    ScrollView(.vertical) {
-      LazyVStack {
-        ForEach(nodes) { node in
-          TreeDisplay(root: node) {
-            Cell(value: $0)
-          }
-        }
-      }
-    }
-  }
-
-  struct Cell: View {
-
-    let value: String
-
-    var body: some View {
-      Text(value)
-        .frame(
-          width: 320,
-          alignment: .center
-        )
-        .padding()
-        .background(
-          RoundedRectangle(cornerRadius: 10)
-            .foregroundStyle(.secondary)
-        )
-    }
-  }
-}
-
 /// A recursively nested value rendered by the tree presentation components.
 ///
 /// Identity belongs to the node's placement in the tree. Callers that can show
@@ -223,6 +173,7 @@ public struct TreeDisplay<Node: TreeNode, Cell: View>: View {
             cell: cell
           )
         }
+        .scrollIndicators(.never)
         .modifier(
           TreeScrollCoordinationModifier(
             targetID: scrollTargetID,
@@ -455,7 +406,7 @@ private struct TreeStickyContainer<Content: View>: View {
   var body: some View {
     content
       .opacity(dimsWhenPinned && hasReachedLeadingEdge ? 0.8 : 1)
-      .padding(.leading, offset)
+//      .padding(.leading, offset)
       .background(
         Color.clear
           .onGeometryChange(
@@ -472,6 +423,58 @@ private struct TreeStickyContainer<Content: View>: View {
             offset = newValue
           }
       )
+  }
+}
+
+#if DEBUG
+
+private struct _Book: View {
+
+  struct Node: TreeNode {
+
+    let id: UUID
+
+    let body: String
+
+    let children: [Node]
+
+    init(body: String, children: [Node]) {
+      self.id = .init()
+      self.body = body
+      self.children = children
+    }
+  }
+
+  let nodes: [Node]
+
+  var body: some View {
+    ScrollView(.vertical) {
+      LazyVStack {
+        ForEach(nodes) { node in
+          TreeDisplay(root: node) {
+            Cell(value: $0)
+          }
+        }
+      }
+    }
+  }
+
+  struct Cell: View {
+
+    let value: String
+
+    var body: some View {
+      Text(value)
+        .frame(
+          width: 320,
+          alignment: .center
+        )
+        .padding()
+        .background(
+          RoundedRectangle(cornerRadius: 10)
+            .foregroundStyle(.secondary)
+        )
+    }
   }
 }
 
@@ -525,3 +528,5 @@ private struct TreeStickyContainer<Content: View>: View {
     ),
   ])
 }
+
+#endif

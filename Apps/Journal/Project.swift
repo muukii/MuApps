@@ -36,9 +36,64 @@ let journalDeploymentTargets: DeploymentTargets = .multiplatform(
   macOS: "26.0"
 )
 
+/// Build setting expanded into both the signed CloudKit entitlement and each
+/// host process's runtime storage-routing Info.plist key.
+let journalCloudKitEnvironmentBuildSetting: Plist.Value = "$(CLOUDKIT_ENVIRONMENT)"
+
 /// Runtime key used by `JournalVault` to scope local stores to the active
 /// CloudKit server environment.
 let journalCloudKitEnvironmentInfoPlistKey = "JournalCloudKitEnvironment"
+
+/// Debug-variant configuration that connects supported signed destinations to
+/// CloudKit Production while preserving debugger attachment and `DEBUG`
+/// semantics.
+let journalDebugProductionConfigurationName: ConfigurationName = "DebugProduction"
+
+/// Configuration names shared by every Tinycurve target so dependencies always
+/// build with matching debug or release semantics.
+let journalConfigurations: [Configuration] = [
+  .debug(name: "Debug"),
+  .debug(name: journalDebugProductionConfigurationName),
+  .release(name: "Release"),
+]
+
+/// App and extension configurations that additionally provide versioning,
+/// CloudKit server selection, and APNs signing values.
+///
+/// CloudKit and APNs are independent environment axes. A developer-signed
+/// `DebugProduction` reaches CloudKit Production while retaining the
+/// development APNs entitlement required by its provisioning profile. Because
+/// CloudKit only supports Development in Simulator, simulator builds override
+/// the CloudKit value to keep runtime storage aligned with the server they
+/// actually reach.
+let journalBundleConfigurations: [Configuration] = [
+  .debug(
+    name: "Debug",
+    settings: [
+      "APS_ENVIRONMENT": "development",
+      "CLOUDKIT_ENVIRONMENT": "Development",
+    ],
+    xcconfig: "xcconfig/Version.xcconfig"
+  ),
+  .debug(
+    name: journalDebugProductionConfigurationName,
+    settings: [
+      "APS_ENVIRONMENT": "development",
+      "CLOUDKIT_ENVIRONMENT": "Production",
+      "CLOUDKIT_ENVIRONMENT[sdk=iphonesimulator*]": "Development",
+    ],
+    xcconfig: "xcconfig/Version.xcconfig"
+  ),
+  .release(
+    name: "Release",
+    settings: [
+      "APS_ENVIRONMENT": "production",
+      "CLOUDKIT_ENVIRONMENT": "Production",
+      "CLOUDKIT_ENVIRONMENT[sdk=iphonesimulator*]": "Development",
+    ],
+    xcconfig: "xcconfig/Version.xcconfig"
+  ),
+]
 
 let journalVersionInfoPlistKeys: [String: Plist.Value] = [
   "CFBundleShortVersionString": "$(MARKETING_VERSION)",
@@ -53,7 +108,7 @@ let journalInfoPlist: InfoPlist = .extendingDefault(with: journalVersionInfoPlis
   // Required for CloudKit share URLs to launch the app and deliver
   // CKShare.Metadata to the scene delegate.
   "CKSharingSupported": true,
-  journalCloudKitEnvironmentInfoPlistKey: "$(APS_ENVIRONMENT)",
+  journalCloudKitEnvironmentInfoPlistKey: journalCloudKitEnvironmentBuildSetting,
   // CloudKit pushes remote changes to the device; the explicit vault sync
   // layer consumes these notifications for per-vault zones.
   "UIBackgroundModes": .array(["remote-notification"]),
@@ -92,10 +147,7 @@ func journalFramework(
     dependencies: dependencies,
     settings: .settings(
       base: .frameworkTarget,
-      configurations: [
-        .debug(name: "Debug"),
-        .release(name: "Release"),
-      ]
+      configurations: journalConfigurations
     )
   )
 }
@@ -107,10 +159,7 @@ let project = Project(
   organizationName: AppConstants.organizationName,
   settings: .settings(
     base: .base,
-    configurations: [
-      .debug(name: "Debug"),
-      .release(name: "Release"),
-    ]
+    configurations: journalConfigurations
   ),
   targets: [
     .target(
@@ -126,13 +175,12 @@ let project = Project(
       buildableFolders: ["Sources/Journal"],
       // iCloud + CloudKit for JournalVault's explicit vault sync. The container
       // id is the transport boundary used by `CloudKitVaultSyncEngine`.
-      // `aps-environment` enables the push channel CloudKit uses for live sync;
-      // its value is expanded from $(APS_ENVIRONMENT) per configuration below so
-      // Release builds get `production` (otherwise shipped builds never receive
-      // CloudKit's silent pushes and background sync silently no-ops).
-      // The Info.plist mirrors that value for runtime storage scoping:
-      // development and production keep separate local catalogs, vault stores,
-      // media files, and CKSyncEngine state.
+      // `com.apple.developer.icloud-container-environment` chooses the CloudKit
+      // server database. Its value is independent from `aps-environment`, which
+      // must match the signing profile's push environment. The Info.plist mirrors
+      // the CloudKit value for runtime storage scoping, so development and
+      // production keep separate local catalogs, vault stores, media files, and
+      // CKSyncEngine state.
       // `com.apple.developer.journal.allow` lets `CaptureSuggestions` present the
       // system Journaling Suggestions picker (inert without it; device-only). Its
       // value is the string array `["suggestions"]`, NOT a boolean — it must match
@@ -143,6 +191,8 @@ let project = Project(
       // reads configured vault stores from the same App Group.
       entitlements: .dictionary([
         "com.apple.developer.icloud-container-identifiers": ["iCloud.app.muukii.journal"],
+        "com.apple.developer.icloud-container-environment":
+          journalCloudKitEnvironmentBuildSetting,
         "com.apple.developer.icloud-services": ["CloudKit"],
         "com.apple.security.application-groups": ["group.app.muukii.journal"],
         "aps-environment": "$(APS_ENVIRONMENT)",
@@ -200,18 +250,7 @@ let project = Project(
           "ENABLE_RESOURCE_ACCESS_LOCATION[sdk=macosx*]": "YES",
           "ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY[sdk=macosx*]": "YES",
         ]),
-        configurations: [
-          .debug(
-            name: "Debug",
-            settings: ["APS_ENVIRONMENT": "development"],
-            xcconfig: "xcconfig/Version.xcconfig"
-          ),
-          .release(
-            name: "Release",
-            settings: ["APS_ENVIRONMENT": "production"],
-            xcconfig: "xcconfig/Version.xcconfig"
-          ),
-        ]
+        configurations: journalBundleConfigurations
       )
     ),
 
@@ -240,10 +279,7 @@ let project = Project(
         base: .frameworkTarget.merging([
           "APPLICATION_EXTENSION_API_ONLY": "YES",
         ]),
-        configurations: [
-          .debug(name: "Debug"),
-          .release(name: "Release"),
-        ]
+        configurations: journalConfigurations
       )
     ),
 
@@ -261,10 +297,7 @@ let project = Project(
       ],
       settings: .settings(
         base: [:],
-        configurations: [
-          .debug(name: "Debug"),
-          .release(name: "Release"),
-        ]
+        configurations: journalConfigurations
       )
     ),
 
@@ -281,10 +314,7 @@ let project = Project(
       ],
       settings: .settings(
         base: [:],
-        configurations: [
-          .debug(name: "Debug"),
-          .release(name: "Release"),
-        ]
+        configurations: journalConfigurations
       )
     ),
 
@@ -310,10 +340,7 @@ let project = Project(
         base: .frameworkTarget.merging([
           "APPLICATION_EXTENSION_API_ONLY": "YES",
         ]),
-        configurations: [
-          .debug(name: "Debug"),
-          .release(name: "Release"),
-        ]
+        configurations: journalConfigurations
       )
     ),
 
@@ -330,7 +357,7 @@ let project = Project(
         "CFBundleExecutable": "$(EXECUTABLE_NAME)",
         "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
         "CFBundleName": "TinycurveAct",
-        journalCloudKitEnvironmentInfoPlistKey: "$(APS_ENVIRONMENT)",
+        journalCloudKitEnvironmentInfoPlistKey: journalCloudKitEnvironmentBuildSetting,
         "EXAppExtensionAttributes": .dictionary([
           "EXExtensionPointIdentifier": "com.apple.appintents-extension",
         ]),
@@ -349,18 +376,7 @@ let project = Project(
         base: .base.merging([
           "APPLICATION_EXTENSION_API_ONLY": "YES",
         ]),
-        configurations: [
-          .debug(
-            name: "Debug",
-            settings: ["APS_ENVIRONMENT": "development"],
-            xcconfig: "xcconfig/Version.xcconfig"
-          ),
-          .release(
-            name: "Release",
-            settings: ["APS_ENVIRONMENT": "production"],
-            xcconfig: "xcconfig/Version.xcconfig"
-          ),
-        ]
+        configurations: journalBundleConfigurations
       )
     ),
 
@@ -378,7 +394,7 @@ let project = Project(
         "CFBundleExecutable": "$(EXECUTABLE_NAME)",
         "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
         "CFBundleName": "TinycurveShare",
-        journalCloudKitEnvironmentInfoPlistKey: "$(APS_ENVIRONMENT)",
+        journalCloudKitEnvironmentInfoPlistKey: journalCloudKitEnvironmentBuildSetting,
         "NSExtension": .dictionary([
           "NSExtensionAttributes": .dictionary([
             "NSExtensionActivationRule": .dictionary([
@@ -410,18 +426,7 @@ let project = Project(
         base: .base.merging([
           "APPLICATION_EXTENSION_API_ONLY": "YES",
         ]),
-        configurations: [
-          .debug(
-            name: "Debug",
-            settings: ["APS_ENVIRONMENT": "development"],
-            xcconfig: "xcconfig/Version.xcconfig"
-          ),
-          .release(
-            name: "Release",
-            settings: ["APS_ENVIRONMENT": "production"],
-            xcconfig: "xcconfig/Version.xcconfig"
-          ),
-        ]
+        configurations: journalBundleConfigurations
       )
     ),
 
@@ -439,10 +444,7 @@ let project = Project(
       ],
       settings: .settings(
         base: [:],
-        configurations: [
-          .debug(name: "Debug"),
-          .release(name: "Release"),
-        ]
+        configurations: journalConfigurations
       )
     ),
 
@@ -450,8 +452,8 @@ let project = Project(
 
     // Reads the vault catalog and the configured vault content store from the
     // App Group via `JournalVault`. It carries the same App Group and iCloud
-    // entitlements as the app; the `aps-environment` value is expanded per
-    // configuration like the app's.
+    // entitlements as the app. CloudKit server and APNs environment values are
+    // expanded independently per configuration, just like the app's.
     .target(
       name: "JournalWidget",
       destinations: journalDestinations,
@@ -465,7 +467,7 @@ let project = Project(
         "CFBundleName": journalWidgetBundleName,
         "CFBundleShortVersionString": "$(MARKETING_VERSION)",
         "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
-        journalCloudKitEnvironmentInfoPlistKey: "$(APS_ENVIRONMENT)",
+        journalCloudKitEnvironmentInfoPlistKey: journalCloudKitEnvironmentBuildSetting,
         "NSExtension": .dictionary([
           "NSExtensionPointIdentifier": "com.apple.widgetkit-extension",
         ]),
@@ -476,6 +478,8 @@ let project = Project(
       buildableFolders: ["Sources/JournalWidget"],
       entitlements: .dictionary([
         "com.apple.developer.icloud-container-identifiers": ["iCloud.app.muukii.journal"],
+        "com.apple.developer.icloud-container-environment":
+          journalCloudKitEnvironmentBuildSetting,
         "com.apple.developer.icloud-services": ["CloudKit"],
         "com.apple.security.application-groups": ["group.app.muukii.journal"],
         "aps-environment": "$(APS_ENVIRONMENT)",
@@ -495,18 +499,7 @@ let project = Project(
           "ENABLE_HARDENED_RUNTIME[sdk=macosx*]": "YES",
           "ENABLE_OUTGOING_NETWORK_CONNECTIONS[sdk=macosx*]": "YES",
         ]),
-        configurations: [
-          .debug(
-            name: "Debug",
-            settings: ["APS_ENVIRONMENT": "development"],
-            xcconfig: "xcconfig/Version.xcconfig"
-          ),
-          .release(
-            name: "Release",
-            settings: ["APS_ENVIRONMENT": "production"],
-            xcconfig: "xcconfig/Version.xcconfig"
-          ),
-        ]
+        configurations: journalBundleConfigurations
       )
     ),
 
@@ -567,10 +560,7 @@ let project = Project(
       ],
       settings: .settings(
         base: [:],
-        configurations: [
-          .debug(name: "Debug"),
-          .release(name: "Release"),
-        ]
+        configurations: journalConfigurations
       )
     ),
     // Save-time raster derivatives for large media such as photos and videos.
@@ -619,14 +609,21 @@ let project = Project(
       ],
       settings: .settings(
         base: [:],
-        configurations: [
-          .debug(name: "Debug"),
-          .release(name: "Release"),
-        ]
+        configurations: journalConfigurations
       )
     ),
   ],
   schemes: [
+    .scheme(
+      name: "Tinycurve Production",
+      shared: true,
+      buildAction: .buildAction(targets: ["Tinycurve"]),
+      runAction: .runAction(
+        configuration: journalDebugProductionConfigurationName,
+        attachDebugger: true,
+        executable: .executable(.target("Tinycurve"))
+      )
+    ),
     .scheme(
       name: "TinycurveTests",
       buildAction: .buildAction(targets: ["TinycurveTests"]),

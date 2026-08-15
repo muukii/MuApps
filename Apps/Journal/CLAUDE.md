@@ -92,6 +92,15 @@ xcodebuild -workspace MuApps.xcworkspace -scheme Tinycurve \
   -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```
 
+Use the normal **Tinycurve** scheme for CloudKit Development. Use the shared
+**Tinycurve Production** scheme to keep `DEBUG` behavior and debugger attachment
+while connecting to CloudKit Production through the `DebugProduction`
+configuration. Production CloudKit must be exercised on a physical iOS device or
+the signed native macOS app; the iOS Simulator only accesses Development. The
+build setting also routes Simulator-local stores to Development for consistency.
+Production scheme defines no test targets and uses the shipping bundle ID, so it
+can replace the normal local install and mutate or delete real production records.
+
 Use **iPhone 17 / OS 27.0** (no iPhone 16 simulator on this machine). Capture
 components have their own schemes for isolated runs. `CapturePhoto` is implemented
 directly on AVFoundation.

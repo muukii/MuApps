@@ -58,6 +58,13 @@ public struct DoodleStroke: Sendable, Equatable, Codable {
 /// per-point timestamps make playback possible. The host decides whether to
 /// persist it — this stays persistence-agnostic.
 public struct DoodleDrawing: Sendable, Equatable, Codable {
+
+  /// Width divided by height of the authored Doodle canvas.
+  ///
+  /// Capture and pre-decode display surfaces share this fixed value so they can
+  /// reserve the final portrait geometry before drawing data is available.
+  public static let canvasAspectRatio: CGFloat = 4 / 5
+
   public var strokes: [DoodleStroke]
   /// Point size the strokes were authored in. Lets a consumer scale the vector to
   /// any target size.

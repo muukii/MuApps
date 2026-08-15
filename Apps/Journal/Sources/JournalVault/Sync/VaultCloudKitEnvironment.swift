@@ -6,13 +6,15 @@ import Foundation
 /// Journal uses this value to keep local catalog, vault stores, media files, and
 /// sync-engine state scoped to the same environment as the CloudKit container.
 public enum VaultCloudKitEnvironment: String, CaseIterable, Sendable {
-  /// Development CloudKit database, used by Debug builds.
+  /// Development CloudKit database, used by standard Debug and every iOS
+  /// Simulator build.
   case development
 
-  /// Production CloudKit database, used by Release, TestFlight, and App Store builds.
+  /// Production CloudKit database, used by DebugProduction on a physical device
+  /// or native Mac, and by Release, TestFlight, and App Store builds.
   case production
 
-  /// Info.plist key expanded from `$(APS_ENVIRONMENT)` by the Journal targets.
+  /// Info.plist key expanded from `$(CLOUDKIT_ENVIRONMENT)` by host targets.
   public static let infoPlistKey = "JournalCloudKitEnvironment"
 
   /// Environment for the current app or extension process.

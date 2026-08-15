@@ -51,8 +51,8 @@ enum JournalDefaults {
   /// `RootView` uses this as a presentation cache only. The vault runtime still
   /// starts on every launch, but only the first install launch blocks while the
   /// app decides whether to recover iCloud vaults or continue from local-only state.
-  /// Scoped by CloudKit environment so a Debug recovery decision cannot skip the
-  /// Release/TestFlight production discovery pass.
+  /// Scoped by CloudKit environment so a Development recovery decision cannot
+  /// skip the Production discovery pass.
   static var hasResolvedInitialVaultAvailability: String {
     cloudKitScopedKey("journal.vault.initialAvailability.resolved")
   }

@@ -75,6 +75,10 @@ struct DoodleContentView: View {
   var body: some View {
     content
       .background(.appSecondaryContainer)
+      .detailMediaFrame(
+        aspectRatio: displayAspectRatio,
+        isDetail: style.isDetail
+      )
       .task(
         id: ContentFileLoadID(
           fileURL: doodle.fileURL,
@@ -88,17 +92,15 @@ struct DoodleContentView: View {
   /// Keeps the loading and rendered states on one placement geometry.
   ///
   /// Compact placements impose their own square, so only the unconstrained
-  /// detail placement reserves the authored canvas geometry. Doodles saved
-  /// before canvas dimensions were persisted still resize once decoded.
+  /// detail placement reserves the authored canvas geometry. Persisted metadata
+  /// keeps compatible older drawings at their recorded ratio; missing metadata
+  /// uses the fixed authored ratio without waiting for JSON decoding.
   private var displayAspectRatio: CGFloat {
     guard style.isDetail else {
       return style.placeholderAspectRatio
     }
 
-    return
-      doodle.displayAspectRatio
-      ?? state.loadedPayload?.canvasSize.contentAspectRatio
-      ?? style.placeholderAspectRatio
+    return doodle.displayAspectRatio ?? DoodleDrawing.canvasAspectRatio
   }
 
   @ViewBuilder
