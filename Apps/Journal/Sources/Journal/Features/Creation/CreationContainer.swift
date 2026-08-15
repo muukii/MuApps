@@ -8,6 +8,16 @@ enum CreationComposerPlacement {
   case root
   case continuation
 
+  /// Whether this placement represents the Home root import surface.
+  var acceptsHomeDrop: Bool {
+    switch self {
+    case .root:
+      true
+    case .continuation:
+      false
+    }
+  }
+
   var prompt: LocalizedStringKey {
     switch self {
     case .root:
@@ -40,6 +50,7 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
   private let onOpenDraft: @MainActor @Sendable () -> Void
   private let onDiscardDraft: @MainActor @Sendable () -> Void
   private let onPost: @MainActor @Sendable () -> Void
+  private let onDropItems: @MainActor @Sendable ([HomeDropItem]) -> Void
   private let content: Content
   private let menuContent: MenuContent
 
@@ -51,6 +62,7 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
     onOpenDraft: @escaping @MainActor @Sendable () -> Void,
     onDiscardDraft: @escaping @MainActor @Sendable () -> Void,
     onPost: @escaping @MainActor @Sendable () -> Void,
+    onDropItems: @escaping @MainActor @Sendable ([HomeDropItem]) -> Void,
     @ViewBuilder content: () -> Content,
     @ViewBuilder menuContent: () -> MenuContent
   ) {
@@ -61,6 +73,7 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
     self.onOpenDraft = onOpenDraft
     self.onDiscardDraft = onDiscardDraft
     self.onPost = onPost
+    self.onDropItems = onDropItems
     self.content = content()
     self.menuContent = menuContent()
   }
@@ -85,6 +98,12 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
               onPost: onPost
             ) {
               menuContent
+            }
+            .dropDestination(
+              for: HomeDropItem.self,
+              isEnabled: placement.acceptsHomeDrop && isProcessing == false
+            ) { items, _ in
+              onDropItems(items)
             }
             .frame(maxWidth: CreationContainerMetrics.maximumComposerWidth)
             .frame(maxWidth: .infinity)

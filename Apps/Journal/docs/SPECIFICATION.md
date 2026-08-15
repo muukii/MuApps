@@ -891,6 +891,32 @@ the gallery's **Lab** section).
   macOS, the bar is centered and capped at `720pt`; Command-Shift-V opens Vaults
   and Command-comma opens Settings.
 
+  The complete input bar is also a drop destination on Home only; card-detail
+  composers do not accept drops. It accepts text, HTTP(S) URLs, still images,
+  movies, audio, and individual generic files. A dropped text value that is
+  entirely one detected HTTP(S) URL becomes a Link root, while prose that merely
+  contains a URL remains Text. This does not change the first-input-only rule for
+  typing or pasting into the text field.
+
+  After SwiftUI materializes the accepted values for one drop action, Tinycurve
+  validates each value and automatically posts it as an independent root in the
+  order SwiftUI supplied it. The drop path never replaces, clears, or reuses the
+  unpublished composer draft. It freezes the selected writable Vault when the
+  action begins, so later navigation cannot retarget the import into a detail
+  continuation. Each accepted item uses its own `createThread(cards:)`
+  transaction; one invalid item or failed write does not roll back sibling roots
+  that already succeeded. Provider-owned files are copied while their transfer
+  URLs are valid, classified as Photo, Video, Audio, or File, and removed from
+  app-temporary storage after that item's write attempt. Directories and
+  Live Photo pair reconstruction are not supported by this drop surface.
+
+  After at least one root succeeds, Home refreshes once, reloads the Latest Note
+  widget once, and scrolls toward the last successful root. Complete success
+  uses the normal **Posted to Journal** confirmation. Partial success shows a
+  persistent warning that the remaining items were posted; complete failure
+  shows a persistent drop-specific failure and explicitly says the current
+  input was not changed.
+
   While the input is the untouched empty text entry, the leading `+` opens a
   standard SwiftUI `Menu` containing Todo, Link, Camera, Photos, Bauhaus,
   Doodle, Voice, and feature-flagged Suggestions. Text needs no menu item because

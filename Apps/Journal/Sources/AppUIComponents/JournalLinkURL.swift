@@ -27,15 +27,49 @@ public struct JournalLinkURL: Hashable, Sendable, Codable {
 
     components.scheme = components.scheme?.lowercased()
     guard let scheme = components.scheme,
-          Self.allowedSchemes.contains(scheme),
-          let host = components.host,
-          host.isEmpty == false,
-          let url = components.url
+      Self.allowedSchemes.contains(scheme),
+      let host = components.host,
+      host.isEmpty == false,
+      let url = components.url
     else {
       return nil
     }
 
     self.url = url
+  }
+
+  /// Creates a Link value only when the complete input is one detected web URL.
+  ///
+  /// URL normalization alone is intentionally permissive enough to support a
+  /// bare domain. The data detector adds the authorship boundary needed by
+  /// automatic import surfaces: prose containing a URL must remain Text rather
+  /// than becoming a Link card.
+  public init?(entireWebURL rawValue: String) {
+    let candidate = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard candidate.isEmpty == false,
+      let detector = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.link.rawValue
+      )
+    else {
+      return nil
+    }
+
+    let candidateRange = NSRange(candidate.startIndex..<candidate.endIndex, in: candidate)
+    guard
+      let match = detector.firstMatch(
+        in: candidate,
+        options: [],
+        range: candidateRange
+      ),
+      match.range == candidateRange,
+      let scheme = match.url?.scheme?.lowercased(),
+      Self.allowedSchemes.contains(scheme),
+      let normalizedURL = JournalLinkURL(candidate)
+    else {
+      return nil
+    }
+
+    self = normalizedURL
   }
 
   private static func valueWithDefaultScheme(_ value: String) -> String {
