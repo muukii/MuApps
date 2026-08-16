@@ -6,9 +6,9 @@ import SwiftUI
 private let rootGroupContentPadding: CGFloat = 16
 private let rootGroupCornerRadius: CGFloat = 24
 
-/// Shared geometry for Home trees and re-rooted detail trees.
+/// Shared spacing for Home trees and re-rooted detail trees.
 struct VaultSavedEntryTreeMetrics {
-  static let indentation: CGFloat = 20
+  static let descendantMarkerGutter: CGFloat = 16
   static let nodeSpacing: CGFloat = 2
 }
 
@@ -175,12 +175,14 @@ struct VaultSavedEntryRow: View {
   }
 }
 
-/// Existing saved-entry card presentation constrained to one tree viewport.
+/// Existing saved-entry card presentation within its proposed tree width.
+///
+/// Descendants reserve one marker gutter while the capsule count communicates
+/// their semantic depth without progressively narrowing deeply nested cards.
 struct VaultSavedEntryTreeCell: View {
 
   let depth: Int
   let entry: VaultSavedEntry
-  let viewportWidth: CGFloat
   let isNavigationEnabled: Bool
   let isMutationDisabled: Bool
   let transitionSourceTreeRootEdgeID: UUID?
@@ -191,7 +193,6 @@ struct VaultSavedEntryTreeCell: View {
   let onToggleTodoCompletion: @MainActor (VaultSavedEntry) -> Void
 
   var body: some View {
-    
     VaultSavedEntryRow(
       entry: entry,
       isNavigationEnabled: isNavigationEnabled,
@@ -203,8 +204,11 @@ struct VaultSavedEntryTreeCell: View {
       onRequestDelete: onRequestDelete,
       onToggleTodoCompletion: onToggleTodoCompletion
     )
-    .padding(.leading, depth > 0 ? 16 : 0)
-    .frame(width: viewportWidth)        
+    .padding(
+      .leading,
+      depth > 0 ? VaultSavedEntryTreeMetrics.descendantMarkerGutter : 0
+    )
+    .frame(maxWidth: .infinity, alignment: .leading)
     .overlay(alignment: .topLeading) {
       HStack(spacing: 1) {
         ForEach(0..<depth, id: \.self) { _ in

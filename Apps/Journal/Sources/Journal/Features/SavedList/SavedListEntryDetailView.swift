@@ -98,43 +98,36 @@ private struct VaultSavedEntryDetailView: View {
   @State private var deleteCandidate: VaultSavedEntry?
 
   var body: some View {
-    GeometryReader { viewport in
-      TreeScrollView(
-        root: tree,
-        indentation: VaultSavedEntryTreeMetrics.indentation,
-        spacing: VaultSavedEntryTreeMetrics.nodeSpacing,
-        scrollTargetID: detailScrollRequest?.targetID(ownedBy: tree.id),
-        onScrollTargetResolved: { targetID in
-          if detailScrollRequest?.ownerDetailRootEdgeID == tree.id,
-            detailScrollRequest?.targetEdgeID == targetID
-          {
-            detailScrollRequest = nil
-          }
+    TreeScrollView(
+      root: tree,
+      spacing: VaultSavedEntryTreeMetrics.nodeSpacing,
+      scrollTargetID: detailScrollRequest?.targetID(ownedBy: tree.id),
+      onScrollTargetResolved: { targetID in
+        if detailScrollRequest?.ownerDetailRootEdgeID == tree.id,
+          detailScrollRequest?.targetEdgeID == targetID
+        {
+          detailScrollRequest = nil
         }
-      ) { entry, context in
-        VaultSavedEntryTreeCell(
-          depth: context.indentationDepth,
-          entry: entry,
-          viewportWidth: max(
-            0,
-            viewport.size.width - (detailScreenPadding * 2)
-          ),
-          isNavigationEnabled: entry.edgeID != tree.id,
-          isMutationDisabled: isEditingDisabled || isDeletingDisabled
-            || isTodoCompletionDisabled,
-          transitionSourceTreeRootEdgeID: tree.id,
-          transitionNamespace: transitionNamespace,
-          onShare: onShare,
-          onEdit: onEdit,
-          onRequestDelete: { entry in
-            deleteCandidate = entry
-          },
-          onToggleTodoCompletion: onToggleTodoCompletion
-        )
       }
-      .padding(.horizontal, detailScreenPadding)
-      .contentMargins(.bottom, composerOverlayHeight, for: .scrollContent)
+    ) { entry, context in
+      VaultSavedEntryTreeCell(
+        depth: context.indentationDepth,
+        entry: entry,
+        isNavigationEnabled: entry.edgeID != tree.id,
+        isMutationDisabled: isEditingDisabled || isDeletingDisabled
+          || isTodoCompletionDisabled,
+        transitionSourceTreeRootEdgeID: tree.id,
+        transitionNamespace: transitionNamespace,
+        onShare: onShare,
+        onEdit: onEdit,
+        onRequestDelete: { entry in
+          deleteCandidate = entry
+        },
+        onToggleTodoCompletion: onToggleTodoCompletion
+      )
     }
+    .padding(.horizontal, detailScreenPadding)
+    .contentMargins(.bottom, composerOverlayHeight, for: .scrollContent)
     .background(.background)
     .navigationTitle(tree.body.kind.vaultListDisplayTitle)
     .appInlineNavigationTitle()

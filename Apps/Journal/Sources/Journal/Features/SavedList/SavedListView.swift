@@ -166,48 +166,42 @@ private struct VaultSavedListContentView: View {
     let locationPins = Self.savedLocationPins(for: visibleRootEntries)
 
     ScrollViewReader { proxy in
-      GeometryReader { viewport in
-        ScrollView {
-          savedListContent(
-            sections: visibleSections,
-            treesByRootID: visibleTreesByRootID,
-            viewportWidth: max(
-              0,
-              viewport.size.width - (savedListPadding * 2)
-            ),
-            locationPins: locationPins,
-            isMutationDisabled: isMutationDisabled
-          )
-        }
-        .contentMargins(
-          .bottom,
-          composerOverlayHeight,
-          for: .scrollContent
+      ScrollView {
+        savedListContent(
+          sections: visibleSections,
+          treesByRootID: visibleTreesByRootID,
+          locationPins: locationPins,
+          isMutationDisabled: isMutationDisabled
         )
-        .scrollEdgeEffectStyle(.soft, for: .vertical)
-        .scrollDismissesKeyboard(.interactively)
-        .scrollBounceBehavior(.always, axes: .vertical)
-        .onChange(of: scrollTargetID, initial: true) { _, _ in
-          resolvePendingRootScroll(
-            using: proxy,
-            rootEdgeIDs: rootEdgeIDs,
-            visibleEdgeIDs: visibleEdgeIDs
-          )
-        }
-        .onChange(of: rootEdgeIDs) { _, _ in
-          resolvePendingRootScroll(
-            using: proxy,
-            rootEdgeIDs: rootEdgeIDs,
-            visibleEdgeIDs: visibleEdgeIDs
-          )
-        }
-        .onChange(of: visibleEdgeIDs) { _, _ in
-          resolvePendingRootScroll(
-            using: proxy,
-            rootEdgeIDs: rootEdgeIDs,
-            visibleEdgeIDs: visibleEdgeIDs
-          )
-        }
+      }
+      .contentMargins(
+        .bottom,
+        composerOverlayHeight,
+        for: .scrollContent
+      )
+      .scrollEdgeEffectStyle(.soft, for: .vertical)
+      .scrollDismissesKeyboard(.interactively)
+      .scrollBounceBehavior(.always, axes: .vertical)
+      .onChange(of: scrollTargetID, initial: true) { _, _ in
+        resolvePendingRootScroll(
+          using: proxy,
+          rootEdgeIDs: rootEdgeIDs,
+          visibleEdgeIDs: visibleEdgeIDs
+        )
+      }
+      .onChange(of: rootEdgeIDs) { _, _ in
+        resolvePendingRootScroll(
+          using: proxy,
+          rootEdgeIDs: rootEdgeIDs,
+          visibleEdgeIDs: visibleEdgeIDs
+        )
+      }
+      .onChange(of: visibleEdgeIDs) { _, _ in
+        resolvePendingRootScroll(
+          using: proxy,
+          rootEdgeIDs: rootEdgeIDs,
+          visibleEdgeIDs: visibleEdgeIDs
+        )
       }
     }
     .frameAdaptive()
@@ -339,7 +333,6 @@ private struct VaultSavedListContentView: View {
   private func savedListContent(
     sections: [VaultSavedDaySection],
     treesByRootID: [UUID: SavedEntryTreeProjection<VaultSavedEntry>.Node],
-    viewportWidth: CGFloat,
     locationPins: [VaultSavedLocationPin],
     isMutationDisabled: Bool
   ) -> some View {
@@ -359,13 +352,11 @@ private struct VaultSavedListContentView: View {
                 if let tree = treesByRootID[entry.edgeID] {
                   TreeDisplay(
                     root: tree,
-                    indentation: VaultSavedEntryTreeMetrics.indentation,
                     spacing: VaultSavedEntryTreeMetrics.nodeSpacing
                   ) { entry, context in
                     VaultSavedEntryTreeCell(
                       depth: context.indentationDepth,
                       entry: entry,
-                      viewportWidth: viewportWidth,
                       isNavigationEnabled: true,
                       isMutationDisabled: isMutationDisabled,
                       transitionSourceTreeRootEdgeID: nil,
@@ -376,7 +367,7 @@ private struct VaultSavedListContentView: View {
                         deleteCandidate = entry
                       },
                       onToggleTodoCompletion: toggleTodoCompletion
-                    )                   
+                    )
                   }
                 }
               }

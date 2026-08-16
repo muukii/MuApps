@@ -1055,13 +1055,16 @@ the gallery's **Lab** section).
   reaches the live query so a later filter change cannot cause a delayed jump.
 
   Every tree node reuses the same current saved-entry card presentation at every
-  depth and is constrained to the tree viewport width. Descendant indentation
-  produces horizontal overflow within its root tree; it does not substitute a
-  thumbnail style, suppress video behavior, or introduce a continuation count
-  or other summary label. The tree keeps its outer vertical scroll separate from
-  each root's horizontal descendant scroll. Revealing a newly appended node
-  coordinates those two existing scroll positions without merging them into one
-  two-axis scroll surface. Opening any node pushes `.entry(edgeID:)`. The selected
+  depth and fills the finite width proposed by the vertical tree surface.
+  Descendants reserve one fixed leading marker gutter, while the marker count
+  communicates their semantic depth without progressively narrowing deeper
+  cards. This does not substitute a thumbnail style, suppress video behavior,
+  or introduce a continuation count or other summary label. The tree has no
+  horizontal scroll surface: Home composes maps, day headers, and root trees in
+  its existing vertical stream, while Detail owns one vertical `TreeScrollView`.
+  Revealing a newly appended node waits for that placement to participate in
+  layout, then updates only the owning vertical scroll position. Opening any node
+  pushes `.entry(edgeID:)`. The selected
   placement becomes the local root of the detail screen and its complete active
   descendant subtree remains visible; its ancestors and siblings are not
   repeated. Back returns to the preceding tree view. A descendant can be opened
