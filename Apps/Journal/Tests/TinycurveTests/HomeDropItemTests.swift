@@ -168,7 +168,7 @@ struct HomeDropItemTests {
   @Test("Enables the destination for Home only")
   func enablesHomePlacementOnly() {
     #expect(CreationComposerPlacement.root.acceptsHomeDrop)
-    #expect(CreationComposerPlacement.continuation.acceptsHomeDrop == false)
+    #expect(CreationComposerPlacement.reply.acceptsHomeDrop == false)
   }
 }
 

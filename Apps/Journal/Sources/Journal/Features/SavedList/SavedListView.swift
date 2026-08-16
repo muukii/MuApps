@@ -5,29 +5,9 @@ import SwiftData
 import SwiftUI
 import WidgetKit
 
-/// Value-based destinations owned by Journal's root navigation stack.
-///
-/// Entry routes carry only a stable placement id. Every pushed level resolves
-/// the current SwiftData snapshot again, which lets the same destination render
-/// a root, child, or deeper descendant without a second navigation model.
+/// Value-based destinations retained outside Home's tree interaction.
 enum SavedListNavigationRoute: Hashable {
   case locations
-  case entry(edgeID: UUID)
-}
-
-/// One continuation reveal owned by the detail route that created it.
-///
-/// Navigation keeps ancestor destinations alive. Carrying the local root with
-/// the appended edge prevents a retained ancestor from consuming a descendant's
-/// one-shot scroll request merely because both surfaces project that edge.
-struct SavedListDetailScrollRequest: Equatable {
-  let ownerDetailRootEdgeID: UUID
-  let targetEdgeID: UUID
-
-  func targetID(ownedBy detailRootEdgeID: UUID) -> UUID? {
-    guard ownerDetailRootEdgeID == detailRootEdgeID else { return nil }
-    return targetEdgeID
-  }
 }
 
 /// Vault-backed entries list.
@@ -39,21 +19,24 @@ struct SavedListView: View {
 
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
 
-  @Binding private var scrollTargetID: UUID?
-  @Binding private var navigationPath: [SavedListNavigationRoute]
-  @Binding private var detailScrollRequest: SavedListDetailScrollRequest?
   @Binding private var selectedContentKind: JournalVault.Card.Kind?
+  private let replyTarget: SavedListReplyTarget?
+  @Binding private var scrollRequest: SavedListScrollRequest?
+  private let onSelectReplyTarget: @MainActor (SavedListReplyTarget) -> Void
+  private let onReplyTargetAvailabilityChange: @MainActor (Bool) -> Void
 
   init(
-    scrollTargetID: Binding<UUID?> = .constant(nil),
-    navigationPath: Binding<[SavedListNavigationRoute]> = .constant([]),
-    detailScrollRequest: Binding<SavedListDetailScrollRequest?> = .constant(nil),
-    selectedContentKind: Binding<JournalVault.Card.Kind?> = .constant(nil)
+    selectedContentKind: Binding<JournalVault.Card.Kind?> = .constant(nil),
+    replyTarget: SavedListReplyTarget? = nil,
+    scrollRequest: Binding<SavedListScrollRequest?> = .constant(nil),
+    onSelectReplyTarget: @escaping @MainActor (SavedListReplyTarget) -> Void = { _ in },
+    onReplyTargetAvailabilityChange: @escaping @MainActor (Bool) -> Void = { _ in }
   ) {
-    _scrollTargetID = scrollTargetID
-    _navigationPath = navigationPath
-    _detailScrollRequest = detailScrollRequest
     _selectedContentKind = selectedContentKind
+    self.replyTarget = replyTarget
+    _scrollRequest = scrollRequest
+    self.onSelectReplyTarget = onSelectReplyTarget
+    self.onReplyTargetAvailabilityChange = onReplyTargetAvailabilityChange
   }
 
   var body: some View {
@@ -63,14 +46,21 @@ struct SavedListView: View {
       {
         VaultSavedListContentView(
           vault: vault,
-          scrollTargetID: $scrollTargetID,
-          navigationPath: $navigationPath,
-          detailScrollRequest: $detailScrollRequest,
-          selectedContentKind: $selectedContentKind
+          selectedContentKind: $selectedContentKind,
+          replyTarget: replyTarget,
+          scrollRequest: $scrollRequest,
+          onSelectReplyTarget: onSelectReplyTarget,
+          onReplyTargetAvailabilityChange: onReplyTargetAvailabilityChange
         )
         .modelContainer(vault.contentStore.container)
       } else {
         ContentUnavailableView("Vault Not Ready", systemImage: "externaldrive")
+          .onChange(of: replyTarget, initial: true) { _, replyTarget in
+            // Removing the live query surface must invalidate a retained Reply
+            // immediately. The target stays visible, but cannot post until an
+            // active query validates the placement again.
+            onReplyTargetAvailabilityChange(replyTarget == nil)
+          }
       }
     }
   }
@@ -86,10 +76,11 @@ private struct VaultSavedListContentView: View {
 
   let vault: VaultInstance
 
-  @Binding var scrollTargetID: UUID?
-  @Binding var navigationPath: [SavedListNavigationRoute]
-  @Binding var detailScrollRequest: SavedListDetailScrollRequest?
   @Binding var selectedContentKind: JournalVault.Card.Kind?
+  let replyTarget: SavedListReplyTarget?
+  @Binding var scrollRequest: SavedListScrollRequest?
+  let onSelectReplyTarget: @MainActor (SavedListReplyTarget) -> Void
+  let onReplyTargetAvailabilityChange: @MainActor (Bool) -> Void
 
   @Environment(\.calendar) private var calendar
   @Environment(\.appPalette) private var palette
@@ -113,16 +104,18 @@ private struct VaultSavedListContentView: View {
 
   init(
     vault: VaultInstance,
-    scrollTargetID: Binding<UUID?>,
-    navigationPath: Binding<[SavedListNavigationRoute]>,
-    detailScrollRequest: Binding<SavedListDetailScrollRequest?>,
-    selectedContentKind: Binding<JournalVault.Card.Kind?>
+    selectedContentKind: Binding<JournalVault.Card.Kind?>,
+    replyTarget: SavedListReplyTarget?,
+    scrollRequest: Binding<SavedListScrollRequest?>,
+    onSelectReplyTarget: @escaping @MainActor (SavedListReplyTarget) -> Void,
+    onReplyTargetAvailabilityChange: @escaping @MainActor (Bool) -> Void
   ) {
     self.vault = vault
-    _scrollTargetID = scrollTargetID
-    _navigationPath = navigationPath
-    _detailScrollRequest = detailScrollRequest
     _selectedContentKind = selectedContentKind
+    self.replyTarget = replyTarget
+    _scrollRequest = scrollRequest
+    self.onSelectReplyTarget = onSelectReplyTarget
+    self.onReplyTargetAvailabilityChange = onReplyTargetAvailabilityChange
     _edges = Query(
       filter: #Predicate<JournalVault.CardEdge> { edge in
         edge.deletedAt == nil
@@ -136,8 +129,8 @@ private struct VaultSavedListContentView: View {
 
   var body: some View {
     let entries = entries
+    let allEdgeIDs = Set(entries.map(\.edgeID))
     let rootEntries = entries.filter { $0.parentEdgeID == nil }
-    let rootEdgeIDs = Set(rootEntries.map(\.edgeID))
     let treeProjection = SavedEntryTreeProjection(
       entries: entries,
       parentID: { $0.parentEdgeID },
@@ -147,7 +140,7 @@ private struct VaultSavedListContentView: View {
       from: rootEntries,
       selectedContentKind: selectedContentKind
     )
-    let visibleEdgeIDs = Set(visibleRootEntries.map(\.edgeID))
+    let visibleRootEdgeIDs = Set(visibleRootEntries.map(\.edgeID))
     let isMutationDisabled =
       isEditDraftLoading || isSavingEdit || isDeletingEntry
       || todoCompletionMutationCardIDs.isEmpty == false
@@ -163,6 +156,7 @@ private struct VaultSavedListContentView: View {
       }
       result[entry.edgeID] = tree
     }
+    let projectedEdgeIDsByRootID = visibleTreesByRootID.mapValues(\.edgeIDs)
     let locationPins = Self.savedLocationPins(for: visibleRootEntries)
 
     ScrollViewReader { proxy in
@@ -182,25 +176,15 @@ private struct VaultSavedListContentView: View {
       .scrollEdgeEffectStyle(.soft, for: .vertical)
       .scrollDismissesKeyboard(.interactively)
       .scrollBounceBehavior(.always, axes: .vertical)
-      .onChange(of: scrollTargetID, initial: true) { _, _ in
-        resolvePendingRootScroll(
-          using: proxy,
-          rootEdgeIDs: rootEdgeIDs,
-          visibleEdgeIDs: visibleEdgeIDs
-        )
-      }
-      .onChange(of: rootEdgeIDs) { _, _ in
-        resolvePendingRootScroll(
-          using: proxy,
-          rootEdgeIDs: rootEdgeIDs,
-          visibleEdgeIDs: visibleEdgeIDs
-        )
-      }
-      .onChange(of: visibleEdgeIDs) { _, _ in
-        resolvePendingRootScroll(
-          using: proxy,
-          rootEdgeIDs: rootEdgeIDs,
-          visibleEdgeIDs: visibleEdgeIDs
+      .overlayPreferenceValue(SavedListRenderedEdgeIDsPreferenceKey.self) {
+        renderedEdgeIDs in
+        SavedListScrollCoordinator(
+          request: $scrollRequest,
+          allEdgeIDs: allEdgeIDs,
+          visibleRootEdgeIDs: visibleRootEdgeIDs,
+          projectedEdgeIDsByRootID: projectedEdgeIDsByRootID,
+          renderedEdgeIDs: renderedEdgeIDs,
+          proxy: proxy
         )
       }
     }
@@ -218,6 +202,14 @@ private struct VaultSavedListContentView: View {
     }
     .scrollContentBackground(.hidden)
     .background(.background)
+    .background {
+      SavedListReplyTargetAvailabilityReporter(
+        replyTarget: replyTarget,
+        currentVaultID: vault.vaultID,
+        allEdgeIDs: allEdgeIDs,
+        onAvailabilityChange: onReplyTargetAvailabilityChange
+      )
+    }
     .refreshable {
       await vaultRuntime.refresh()
     }
@@ -234,21 +226,6 @@ private struct VaultSavedListContentView: View {
             sourceID: VaultSavedLocationsMapTransition.id,
             in: navigationTransitionNamespace
           )
-      case .entry(let edgeID):
-        VaultSavedEntryDetailDestination(
-          edgeID: edgeID,
-          treeProjection: treeProjection,
-          navigationPath: $navigationPath,
-          detailScrollRequest: $detailScrollRequest,
-          isEditingDisabled: isMutationDisabled,
-          isDeletingDisabled: isMutationDisabled,
-          isTodoCompletionDisabled: isMutationDisabled,
-          transitionNamespace: navigationTransitionNamespace,
-          onShare: presentSharePreview,
-          onEdit: presentEditDraft,
-          onDelete: deleteEntry,
-          onToggleTodoCompletion: toggleTodoCompletion
-        )
       }
     }
     .sheet(item: $sharePreviewPresentation) { presentation in
@@ -300,7 +277,7 @@ private struct VaultSavedListContentView: View {
       Button("Delete Entry", role: .destructive) {
         deleteCandidate = nil
         Task { @MainActor in
-          _ = await deleteEntry(entry)
+          await deleteEntry(entry)
         }
       }
       Button("Cancel", role: .cancel) {
@@ -357,16 +334,23 @@ private struct VaultSavedListContentView: View {
                     VaultSavedEntryTreeCell(
                       depth: context.indentationDepth,
                       entry: entry,
-                      isNavigationEnabled: true,
                       isMutationDisabled: isMutationDisabled,
-                      transitionSourceTreeRootEdgeID: nil,
-                      transitionNamespace: navigationTransitionNamespace,
+                      onReply: { replyEntry in
+                        selectReplyTarget(
+                          replyEntry,
+                          ownerRootEdgeID: tree.id
+                        )
+                      },
                       onShare: presentSharePreview,
                       onEdit: presentEditDraft,
                       onRequestDelete: { entry in
                         deleteCandidate = entry
                       },
                       onToggleTodoCompletion: toggleTodoCompletion
+                    )
+                    .preference(
+                      key: SavedListRenderedEdgeIDsPreferenceKey.self,
+                      value: [entry.edgeID]
                     )
                   }
                 }
@@ -389,8 +373,8 @@ private struct VaultSavedListContentView: View {
     }
   }
 
-  /// Applies the Home-only content projection without changing the complete
-  /// query snapshot used to construct entry-detail navigation.
+  /// Applies the Home-only content projection without discarding the complete
+  /// query snapshot used for Reply-target availability.
   private static func visibleRootEntries(
     from rootEntries: [VaultSavedEntry],
     selectedContentKind: JournalVault.Card.Kind?
@@ -431,28 +415,20 @@ private struct VaultSavedListContentView: View {
     }
   }
 
-  /// Resolves a root-post scroll after the edge reaches the live query.
-  ///
-  /// A visible root scrolls normally. A root hidden by the active filter clears
-  /// the request without scrolling, so changing filters later cannot produce a
-  /// stale jump. Unknown ids remain pending while persistence is still racing
-  /// the query snapshot.
-  private func resolvePendingRootScroll(
-    using proxy: ScrollViewProxy,
-    rootEdgeIDs: Set<UUID>,
-    visibleEdgeIDs: Set<UUID>
+  /// Detaches the placement selected by a context-menu Reply action from the
+  /// live SwiftData models before lifting it to composer state.
+  private func selectReplyTarget(
+    _ entry: VaultSavedEntry,
+    ownerRootEdgeID: UUID
   ) {
-    guard let targetID = scrollTargetID, rootEdgeIDs.contains(targetID) else {
-      return
-    }
-
-    if visibleEdgeIDs.contains(targetID) {
-      withAnimation(.smooth) {
-        proxy.scrollTo(targetID, anchor: .top)
-      }
-    }
-
-    scrollTargetID = nil
+    onSelectReplyTarget(
+      SavedListReplyTarget(
+        vaultID: vault.vaultID,
+        parentEdgeID: entry.edgeID,
+        ownerRootEdgeID: ownerRootEdgeID,
+        displaySummary: entry.replyDisplaySummary
+      )
+    )
   }
 
   private var editErrorPresentation: Binding<Bool> {
@@ -582,11 +558,11 @@ private struct VaultSavedListContentView: View {
   }
 
   @MainActor
-  private func deleteEntry(_ entry: VaultSavedEntry) async -> Bool {
+  private func deleteEntry(_ entry: VaultSavedEntry) async {
     guard isDeletingEntry == false, isEditDraftLoading == false,
       isSavingEdit == false
     else {
-      return false
+      return
     }
 
     isDeletingEntry = true
@@ -603,11 +579,140 @@ private struct VaultSavedListContentView: View {
       }
       await vaultRuntime.refresh()
       WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
-      return true
     } catch {
       deleteErrorMessage = error.localizedDescription
-      return false
     }
+  }
+}
+
+/// Collects the active Home rows currently materialized by the lazy stack.
+private struct SavedListRenderedEdgeIDsPreferenceKey: PreferenceKey {
+  static var defaultValue: Set<UUID> { [] }
+
+  static func reduce(
+    value: inout Set<UUID>,
+    nextValue: () -> Set<UUID>
+  ) {
+    value.formUnion(nextValue())
+  }
+}
+
+/// Resolves one post-success reveal against Home's query, projection, and lazy
+/// layout state.
+private struct SavedListScrollCoordinator: View {
+
+  @Binding var request: SavedListScrollRequest?
+  let allEdgeIDs: Set<UUID>
+  let visibleRootEdgeIDs: Set<UUID>
+  let projectedEdgeIDsByRootID: [UUID: Set<UUID>]
+  let renderedEdgeIDs: Set<UUID>
+  let proxy: ScrollViewProxy
+
+  @State private var lastMaterializedRequest: SavedListScrollRequest?
+
+  var body: some View {
+    Color.clear
+      .frame(width: 0, height: 0)
+      .onChange(of: request, initial: true) { _, _ in
+        resolveRequestIfPossible()
+      }
+      .onChange(of: allEdgeIDs) { _, _ in
+        resolveRequestIfPossible()
+      }
+      .onChange(of: visibleRootEdgeIDs) { _, _ in
+        resolveRequestIfPossible()
+      }
+      .onChange(of: projectedEdgeIDsByRootID) { _, _ in
+        resolveRequestIfPossible()
+      }
+      .onChange(of: renderedEdgeIDs) { _, _ in
+        resolveRequestIfPossible()
+      }
+      .allowsHitTesting(false)
+      .accessibilityHidden(true)
+  }
+
+  private func resolveRequestIfPossible() {
+    guard let request else {
+      lastMaterializedRequest = nil
+      return
+    }
+
+    switch request.resolution(
+      allEdgeIDs: allEdgeIDs,
+      visibleRootEdgeIDs: visibleRootEdgeIDs,
+      projectedEdgeIDsByRootID: projectedEdgeIDsByRootID,
+      renderedEdgeIDs: renderedEdgeIDs
+    ) {
+    case .waitForQuery:
+      return
+    case .materializeOwnerRoot(let ownerRootEdgeID):
+      guard lastMaterializedRequest != request else { return }
+      lastMaterializedRequest = request
+      withAnimation(.smooth) {
+        proxy.scrollTo(ownerRootEdgeID, anchor: .top)
+      }
+    case .revealRoot(let targetEdgeID):
+      withAnimation(.smooth) {
+        proxy.scrollTo(targetEdgeID, anchor: .top)
+      }
+      consumeRequest()
+    case .revealReply(let targetEdgeID):
+      withAnimation(.smooth) {
+        proxy.scrollTo(targetEdgeID, anchor: .center)
+      }
+      consumeRequest()
+    case .consumeWithoutScrolling:
+      consumeRequest()
+    }
+  }
+
+  private func consumeRequest() {
+    request = nil
+    lastMaterializedRequest = nil
+  }
+}
+
+/// Reports whether the detached Reply parent still exists in the selected
+/// vault, independently of Home's active content filter.
+private struct SavedListReplyTargetAvailabilityReporter: View {
+
+  let replyTarget: SavedListReplyTarget?
+  let currentVaultID: VaultID
+  let allEdgeIDs: Set<UUID>
+  let onAvailabilityChange: @MainActor (Bool) -> Void
+
+  var body: some View {
+    Color.clear
+      .frame(width: 0, height: 0)
+      .onChange(of: observation, initial: true) { _, observation in
+        onAvailabilityChange(observation.isAvailable)
+      }
+      .allowsHitTesting(false)
+      .accessibilityHidden(true)
+  }
+
+  private var observation: SavedListReplyTargetAvailabilityObservation {
+    SavedListReplyTargetAvailabilityObservation(
+      replyTarget: replyTarget,
+      currentVaultID: currentVaultID,
+      allEdgeIDs: allEdgeIDs
+    )
+  }
+}
+
+/// Equatable input keeps the availability callback synchronized when the Reply
+/// target changes between two placements that are both currently available.
+private struct SavedListReplyTargetAvailabilityObservation: Equatable {
+
+  let replyTarget: SavedListReplyTarget?
+  let currentVaultID: VaultID
+  let allEdgeIDs: Set<UUID>
+
+  var isAvailable: Bool {
+    guard let replyTarget else { return true }
+    guard replyTarget.vaultID == currentVaultID else { return false }
+    return allEdgeIDs.contains(replyTarget.parentEdgeID)
   }
 }
 

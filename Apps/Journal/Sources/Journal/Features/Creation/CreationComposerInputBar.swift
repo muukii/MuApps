@@ -53,6 +53,9 @@ struct CreationComposerInputBar<MenuContent: View>: View {
 
   @Bindable private var draft: ThreadDraftCard
   private let placement: CreationComposerPlacement
+  private let isPostDestinationAvailable: Bool
+  private let focusRequestID: UUID?
+  private let onConsumeFocusRequest: @MainActor @Sendable (UUID) -> Bool
   private let isProcessing: Bool
   private let onOpenDraft: @MainActor @Sendable () -> Void
   private let onDiscardDraft: @MainActor @Sendable () -> Void
@@ -62,6 +65,9 @@ struct CreationComposerInputBar<MenuContent: View>: View {
   init(
     draft: ThreadDraftCard,
     placement: CreationComposerPlacement = .root,
+    isPostDestinationAvailable: Bool = true,
+    focusRequestID: UUID? = nil,
+    onConsumeFocusRequest: @escaping @MainActor @Sendable (UUID) -> Bool = { _ in false },
     isProcessing: Bool,
     onOpenDraft: @escaping @MainActor @Sendable () -> Void,
     onDiscardDraft: @escaping @MainActor @Sendable () -> Void,
@@ -70,6 +76,9 @@ struct CreationComposerInputBar<MenuContent: View>: View {
   ) {
     self.draft = draft
     self.placement = placement
+    self.isPostDestinationAvailable = isPostDestinationAvailable
+    self.focusRequestID = focusRequestID
+    self.onConsumeFocusRequest = onConsumeFocusRequest
     self.isProcessing = isProcessing
     self.onOpenDraft = onOpenDraft
     self.onDiscardDraft = onDiscardDraft
@@ -82,6 +91,7 @@ struct CreationComposerInputBar<MenuContent: View>: View {
       CreationComposerExpandedPreviewInputBar(
         draft: draft,
         placement: placement,
+        isPostDestinationAvailable: isPostDestinationAvailable,
         isProcessing: isProcessing,
         onOpenDraft: onOpenDraft,
         onDiscardDraft: onDiscardDraft,
@@ -91,6 +101,9 @@ struct CreationComposerInputBar<MenuContent: View>: View {
       CreationComposerCompactInputBar(
         draft: draft,
         placement: placement,
+        isPostDestinationAvailable: isPostDestinationAvailable,
+        focusRequestID: focusRequestID,
+        onConsumeFocusRequest: onConsumeFocusRequest,
         isProcessing: isProcessing,
         onOpenDraft: onOpenDraft,
         onDiscardDraft: onDiscardDraft,
@@ -107,6 +120,9 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
 
   @Bindable var draft: ThreadDraftCard
   let placement: CreationComposerPlacement
+  let isPostDestinationAvailable: Bool
+  let focusRequestID: UUID?
+  let onConsumeFocusRequest: @MainActor @Sendable (UUID) -> Bool
   let isProcessing: Bool
   let onOpenDraft: @MainActor @Sendable () -> Void
   let onDiscardDraft: @MainActor @Sendable () -> Void
@@ -116,6 +132,9 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
   init(
     draft: ThreadDraftCard,
     placement: CreationComposerPlacement,
+    isPostDestinationAvailable: Bool,
+    focusRequestID: UUID?,
+    onConsumeFocusRequest: @escaping @MainActor @Sendable (UUID) -> Bool,
     isProcessing: Bool,
     onOpenDraft: @escaping @MainActor @Sendable () -> Void,
     onDiscardDraft: @escaping @MainActor @Sendable () -> Void,
@@ -124,6 +143,9 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
   ) {
     self.draft = draft
     self.placement = placement
+    self.isPostDestinationAvailable = isPostDestinationAvailable
+    self.focusRequestID = focusRequestID
+    self.onConsumeFocusRequest = onConsumeFocusRequest
     self.isProcessing = isProcessing
     self.onOpenDraft = onOpenDraft
     self.onDiscardDraft = onDiscardDraft
@@ -144,12 +166,14 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
       CreationComposerDraftContent(
         draft: draft,
         placement: placement,
+        focusRequestID: focusRequestID,
+        onConsumeFocusRequest: onConsumeFocusRequest,
         isProcessing: isProcessing,
         onOpenDraft: onOpenDraft
       )
 
       CreationComposerPostButton(
-        canPost: draft.canSave,
+        canPost: draft.canSave && isPostDestinationAvailable,
         placement: placement,
         isProcessing: isProcessing,
         onPost: onPost
@@ -169,6 +193,7 @@ private struct CreationComposerExpandedPreviewInputBar: View {
 
   let draft: ThreadDraftCard
   let placement: CreationComposerPlacement
+  let isPostDestinationAvailable: Bool
   let isProcessing: Bool
   let onOpenDraft: @MainActor @Sendable () -> Void
   let onDiscardDraft: @MainActor @Sendable () -> Void
@@ -196,7 +221,7 @@ private struct CreationComposerExpandedPreviewInputBar: View {
       .accessibilityValue(Text(draft.kind.displayTitle))
 
       CreationComposerPostButton(
-        canPost: draft.canSave,
+        canPost: draft.canSave && isPostDestinationAvailable,
         placement: placement,
         isProcessing: isProcessing,
         onPost: onPost
@@ -338,10 +363,18 @@ private struct CreationComposerLeadingAction<MenuContent: View>: View {
 private struct CreationComposerDraftContent: View {
 
   @Bindable var draft: ThreadDraftCard
-  @FocusState private var isTodoTextFocused: Bool
+  @FocusState private var focusedField: Field?
   let placement: CreationComposerPlacement
+  let focusRequestID: UUID?
+  let onConsumeFocusRequest: @MainActor @Sendable (UUID) -> Bool
   let isProcessing: Bool
   let onOpenDraft: @MainActor @Sendable () -> Void
+
+  /// Inline editor that should receive one explicit Reply focus request.
+  private enum Field: Hashable {
+    case text
+    case todo
+  }
 
   var body: some View {
     switch draft.kind {
@@ -349,9 +382,13 @@ private struct CreationComposerDraftContent: View {
       TextField(placement.prompt, text: $draft.composerText, axis: .vertical)
         .textFieldStyle(.plain)
         .lineLimit(1...5)
+        .focused($focusedField, equals: .text)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .disabled(isProcessing)
         .accessibilityLabel("Entry text")
+        .task(id: focusRequestID) {
+          await focusIfRequested(.text)
+        }
     case .todo:
       HStack(spacing: 8) {
         Image(systemName: "circle")
@@ -363,14 +400,17 @@ private struct CreationComposerDraftContent: View {
         TextField("Todo", text: $draft.text, axis: .vertical)
           .textFieldStyle(.plain)
           .lineLimit(1...5)
-          .focused($isTodoTextFocused)
+          .focused($focusedField, equals: .todo)
       }
       .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
       .disabled(isProcessing)
       .accessibilityLabel("Todo text")
       .task {
         await Task.yield()
-        isTodoTextFocused = true
+        focusedField = .todo
+      }
+      .task(id: focusRequestID) {
+        await focusIfRequested(.todo)
       }
     case .link, .file, .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus, .unknown:
       Button(action: onOpenDraft) {
@@ -389,6 +429,18 @@ private struct CreationComposerDraftContent: View {
       .accessibilityLabel("Edit Entry")
       .accessibilityValue("Entry")
     }
+  }
+
+  /// Accepts a request before suspension so structural reinsertion cannot run
+  /// it twice, then yields once for the originating context menu to dismiss.
+  private func focusIfRequested(_ field: Field) async {
+    guard let focusRequestID,
+      onConsumeFocusRequest(focusRequestID)
+    else {
+      return
+    }
+    await Task.yield()
+    focusedField = field
   }
 }
 

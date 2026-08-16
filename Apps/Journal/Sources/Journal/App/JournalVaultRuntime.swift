@@ -727,8 +727,8 @@ final class VaultInstance {
 
   /// Appends one card directly below an existing placement.
   ///
-  /// Detail screens use this operation at every navigation depth, so the
-  /// currently displayed card remains the only owner of the new placement.
+  /// Home's explicit Reply target supplies the parent placement identity at
+  /// every tree depth; navigation state never selects this relationship.
   @discardableResult
   func appendCard(
     _ draft: VaultContentStore.CardDraft,

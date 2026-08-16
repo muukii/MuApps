@@ -112,10 +112,6 @@ public struct TreeLayout<Node: TreeNode, Cell: View>: View {
           TreeLayoutContext(indentationDepth: indentationDepth)
         )
         .id(node.id)
-        .preference(
-          key: TreeNodeIDsPreferenceKey<Node.ID>.self,
-          value: [node.id]
-        )
 
         if node.children.isEmpty == false {
           TreeLayout(
@@ -171,10 +167,6 @@ public struct TreeDisplay<Node: TreeNode, Cell: View>: View {
         TreeLayoutContext(indentationDepth: 0)
       )
       .id(root.id)
-      .preference(
-        key: TreeNodeIDsPreferenceKey<Node.ID>.self,
-        value: [root.id]
-      )
 
       if root.children.isEmpty == false {
         TreeLayout(
@@ -189,225 +181,109 @@ public struct TreeDisplay<Node: TreeNode, Cell: View>: View {
   }
 }
 
-/// A standalone vertical scrolling surface for one root tree.
-///
-/// The root is rendered by ``TreeDisplay``. Supplying a target id reveals that
-/// node after it participates in layout, using this view's vertical scroll
-/// position.
-public struct TreeScrollView<Node: TreeNode, Cell: View>: View {
-
-  private let root: Node
-  private let spacing: CGFloat?
-  private let scrollTargetID: Node.ID?
-  private let onScrollTargetResolved: @MainActor (Node.ID) -> Void
-  private let cell: (Node.Body, TreeLayoutContext) -> Cell
-
-  public init(
-    root: Node,
-    spacing: CGFloat? = nil,
-    scrollTargetID: Node.ID? = nil,
-    onScrollTargetResolved: @escaping @MainActor (Node.ID) -> Void = { _ in },
-    @ViewBuilder cell: @escaping (Node.Body) -> Cell
-  ) {
-    self.root = root
-    self.spacing = spacing
-    self.scrollTargetID = scrollTargetID
-    self.onScrollTargetResolved = onScrollTargetResolved
-    self.cell = { body, _ in cell(body) }
-  }
-
-  /// Creates a scrolling tree whose cells receive their indentation depth.
-  public init(
-    root: Node,
-    spacing: CGFloat? = nil,
-    scrollTargetID: Node.ID? = nil,
-    onScrollTargetResolved: @escaping @MainActor (Node.ID) -> Void = { _ in },
-    @ViewBuilder cell: @escaping (Node.Body, TreeLayoutContext) -> Cell
-  ) {
-    self.root = root
-    self.spacing = spacing
-    self.scrollTargetID = scrollTargetID
-    self.onScrollTargetResolved = onScrollTargetResolved
-    self.cell = cell
-  }
-
-  public var body: some View {
-    ScrollViewReader { verticalProxy in
-      ScrollView(.vertical) {
-        TreeDisplay(
-          root: root,
-          spacing: spacing,
-          cell: cell
-        )
-        .overlayPreferenceValue(
-          TreeNodeIDsPreferenceKey<Node.ID>.self
-        ) { availableNodeIDs in
-          TreeScrollCoordinator(
-            targetID: scrollTargetID,
-            availableNodeIDs: availableNodeIDs,
-            verticalProxy: verticalProxy,
-            onResolved: onScrollTargetResolved
-          )
-        }
-      }
-    }
-  }
-}
-
-/// Collects every node that currently participates in tree layout.
-private struct TreeNodeIDsPreferenceKey<ID: Hashable>: PreferenceKey {
-  static var defaultValue: Set<ID> { [] }
-
-  static func reduce(
-    value: inout Set<ID>,
-    nextValue: () -> Set<ID>
-  ) {
-    value.formUnion(nextValue())
-  }
-}
-
-/// Resolves one pending node after it exists in the vertical scroll content.
-private struct TreeScrollCoordinator<ID: Hashable>: View {
-
-  let targetID: ID?
-  let availableNodeIDs: Set<ID>
-  let verticalProxy: ScrollViewProxy
-  let onResolved: @MainActor (ID) -> Void
-
-  @State private var lastResolvedID: ID?
-
-  var body: some View {
-    Color.clear
-      .frame(width: 0, height: 0)
-      .onChange(of: targetID, initial: true) { _, _ in
-        resolveTargetIfPossible()
-      }
-      .onChange(of: availableNodeIDs) { _, _ in
-        resolveTargetIfPossible()
-      }
-      .allowsHitTesting(false)
-  }
-
-  private func resolveTargetIfPossible() {
-    guard let targetID else {
-      lastResolvedID = nil
-      return
-    }
-    guard availableNodeIDs.contains(targetID), lastResolvedID != targetID else {
-      return
-    }
-
-    lastResolvedID = targetID
-    withAnimation(.smooth) {
-      verticalProxy.scrollTo(targetID, anchor: .center)
-    }
-    onResolved(targetID)
-  }
-}
-
 #if DEBUG
 
-private struct _Book: View {
+  private struct _Book: View {
 
-  struct Node: TreeNode {
+    struct Node: TreeNode {
 
-    let id: UUID
+      let id: UUID
 
-    let body: String
+      let body: String
 
-    let children: [Node]
+      let children: [Node]
 
-    init(body: String, children: [Node]) {
-      self.id = .init()
-      self.body = body
-      self.children = children
+      init(body: String, children: [Node]) {
+        self.id = .init()
+        self.body = body
+        self.children = children
+      }
     }
-  }
 
-  let nodes: [Node]
+    let nodes: [Node]
 
-  var body: some View {
-    ScrollView(.vertical) {
-      LazyVStack {
-        ForEach(nodes) { node in
-          TreeDisplay(root: node) { value, context in
-            Cell(
-              value: value,
-              indentationDepth: context.indentationDepth
-            )
+    var body: some View {
+      ScrollView(.vertical) {
+        LazyVStack {
+          ForEach(nodes) { node in
+            TreeDisplay(root: node) { value, context in
+              Cell(
+                value: value,
+                indentationDepth: context.indentationDepth
+              )
+            }
           }
         }
       }
     }
-  }
 
-  struct Cell: View {
+    struct Cell: View {
 
-    let value: String
-    let indentationDepth: Int
+      let value: String
+      let indentationDepth: Int
 
-    var body: some View {
-      Text("\(value) · depth \(indentationDepth)")
-        .padding(.leading, indentationDepth > 0 ? 16 : 0)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(
-          RoundedRectangle(cornerRadius: 10)
-            .foregroundStyle(.secondary)
-        )
+      var body: some View {
+        Text("\(value) · depth \(indentationDepth)")
+          .padding(.leading, indentationDepth > 0 ? 16 : 0)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding()
+          .background(
+            RoundedRectangle(cornerRadius: 10)
+              .foregroundStyle(.secondary)
+          )
+      }
     }
   }
-}
 
-#Preview("Layout") {
-  _Book(nodes: [
-    .init(
-      body: "A",
-      children: [
-        .init(
-          body: "A",
-          children: [
-            .init(
-              body: "A",
-              children: [
-                .init(
-                  body: "A",
-                  children: [
-                    .init(
-                      body: "A",
-                      children: [
-                        .init(
-                          body: "A",
-                          children: [
-                            .init(body: "A", children: [])
-                          ]
-                        )
-                      ])
-                  ]
-                )
-              ])
-          ]
-        ),
-        .init(
-          body: "A",
-          children: [
-            .init(body: "A", children: [])
-          ]
-        ),
-      ]
-    ),
-    .init(
-      body: "A",
-      children: [
-        .init(
-          body: "A",
-          children: [
-            .init(body: "A", children: [])
-          ]
-        )
-      ]
-    ),
-  ])
-}
+  #Preview("Layout") {
+    _Book(nodes: [
+      .init(
+        body: "A",
+        children: [
+          .init(
+            body: "A",
+            children: [
+              .init(
+                body: "A",
+                children: [
+                  .init(
+                    body: "A",
+                    children: [
+                      .init(
+                        body: "A",
+                        children: [
+                          .init(
+                            body: "A",
+                            children: [
+                              .init(body: "A", children: [])
+                            ]
+                          )
+                        ])
+                    ]
+                  )
+                ])
+            ]
+          ),
+          .init(
+            body: "A",
+            children: [
+              .init(body: "A", children: [])
+            ]
+          ),
+        ]
+      ),
+      .init(
+        body: "A",
+        children: [
+          .init(
+            body: "A",
+            children: [
+              .init(body: "A", children: [])
+            ]
+          )
+        ]
+      ),
+    ])
+  }
 
 #endif
