@@ -20,6 +20,22 @@
         }
       }
     },
+    "Cancel Reply" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel Reply"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返信をキャンセル"
+          }
+        }
+      }
+    },
     "Could Not Update Todo" : {
       "localizations" : {
         "en" : {
@@ -84,6 +100,72 @@
         }
       }
     },
+    "Post Reply" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Post Reply"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返信を投稿"
+          }
+        }
+      }
+    },
+    "Reply" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reply"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返信"
+          }
+        }
+      }
+    },
+    "Reply target is no longer available" : {
+      "comment" : "Error shown when the selected parent card was deleted or became unavailable.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reply target is no longer available"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返信先を利用できません"
+          }
+        }
+      }
+    },
+    "Replying to" : {
+      "comment" : "Label above the composer for the selected Reply target.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replying to"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返信先"
+          }
+        }
+      }
+    },
     "Show All Entries" : {
       "localizations" : {
         "en" : {
@@ -144,6 +226,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Todoのテキスト"
+          }
+        }
+      }
+    },
+    "Write a reply" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Write a reply"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返信を書く"
           }
         }
       }

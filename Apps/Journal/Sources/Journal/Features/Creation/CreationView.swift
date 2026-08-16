@@ -71,8 +71,8 @@ struct CreationView: View {
   @State private var quickBauhausGridPresentation: BauhausGridPresentation?
   @State private var quickDoodleSheetDetent: PresentationDetent = .large
   @State private var quickBauhausSheetDetent: PresentationDetent = .large
-  @State private var savedCardScrollTargetID: UUID?
-  @State private var detailCardScrollRequest: SavedListDetailScrollRequest?
+  @State private var navigationPath: [SavedListNavigationRoute] = []
+  @State private var savedListScrollRequest: SavedListScrollRequest?
   #if os(iOS)
     @State private var isSettingsPresented: Bool = false
   #endif
@@ -96,6 +96,13 @@ struct CreationView: View {
   /// request instead of continuously superseding one another.
   @State private var locationRequestID: UUID?
 
+  /// Drafts waiting for the shared in-flight coordinate, keyed by identity.
+  ///
+  /// An async media import can finish after another Reply is selected. Both
+  /// drafts subscribe to the same one-shot fix without either becoming the
+  /// other's location destination.
+  @State private var locationRequestTargets: [ObjectIdentifier: ThreadDraftCard] = [:]
+
   /// Guards the compose surface while a save is in flight, so a card can't be
   /// created twice by a fast double-tap.
   @State private var isSaving: Bool = false
@@ -105,24 +112,35 @@ struct CreationView: View {
   @State private var isPostingHomeDrop: Bool = false
 
   var body: some View {
-    @Bindable var composerState = composerState
-
     CreationContainer(
       draft: composerState.activeDraft,
-      isPresented: composerState.isComposerPresented,
+      isPresented: navigationPath.isEmpty,
       placement: composerState.placement,
+      replyTarget: composerState.replyTarget,
+      isReplyTargetAvailable: composerState.isReplyTargetAvailable,
+      isPostDestinationAvailable: activePostVault != nil,
+      focusRequestID: composerState.focusRequestID,
+      onConsumeFocusRequest: composerState.consumeFocusRequest,
       isProcessing: isSaving || isImportingMediaFromLibrary || isPostingHomeDrop,
       onOpenDraft: presentComposerDraftEditor,
       onDiscardDraft: requestComposerDraftDiscard,
       onPost: post,
+      onCancelReply: {
+        composerState.cancelReply()
+      },
       onDropItems: postDroppedHomeItems
     ) {
-      NavigationStack(path: $composerState.navigationPath) {
+      NavigationStack(path: $navigationPath) {
         SavedListView(
-          scrollTargetID: $savedCardScrollTargetID,
-          navigationPath: $composerState.navigationPath,
-          detailScrollRequest: $detailCardScrollRequest,
-          selectedContentKind: $selectedHomeContentKind
+          selectedContentKind: $selectedHomeContentKind,
+          replyTarget: composerState.replyTarget,
+          scrollRequest: $savedListScrollRequest,
+          onSelectReplyTarget: { target in
+            composerState.selectReplyTarget(target)
+          },
+          onReplyTargetAvailabilityChange: { isAvailable in
+            composerState.setReplyTargetAvailability(isAvailable)
+          }
         )
         .toolbar(content: {
           if onChangeVault != nil {
@@ -376,12 +394,27 @@ struct CreationView: View {
 
   }
 
-  /// Draft selected by the active navigation level.
+  /// Draft selected by the explicit root or Reply placement.
   ///
-  /// Home owns the root draft; every entry destination owns a separate draft
-  /// whose eventual parent is that destination's placement id.
+  /// Home owns the root draft; each selected parent owns a separate Reply draft.
+  /// Map navigation has no effect on this ownership boundary.
   private var composerDraft: ThreadDraftCard {
     composerState.activeDraft
+  }
+
+  /// Selected vault that can safely accept the current root or Reply draft.
+  ///
+  /// The runtime may retain a `VaultInstance` while reopening or after a
+  /// failure. Both the visible post affordance and `post()` use this boundary
+  /// so a retained but inactive instance never accepts a write.
+  private var activePostVault: VaultInstance? {
+    guard vaultRuntime.selectedVaultState == .active,
+      let vault = vaultRuntime.selectedVault,
+      composerState.isActiveDestinationAvailable(in: vault.vaultID)
+    else {
+      return nil
+    }
+    return vault
   }
 
   private var selectedVaultDescriptor: VaultDescriptor? {
@@ -460,8 +493,9 @@ struct CreationView: View {
 
   /// System quick capture always authors a new root card.
   private func prepareHomeForSystemCapture() {
-    composerState.navigateHome()
-    detailCardScrollRequest = nil
+    navigationPath.removeAll(keepingCapacity: false)
+    composerState.cancelReply(requestFocus: false)
+    savedListScrollRequest = nil
   }
 
   private func selectVaultForSystemCapture(_ vaultID: VaultID) async {
@@ -519,7 +553,8 @@ struct CreationView: View {
 
   private func discardAllComposerDrafts() {
     composerState.discardAllDrafts()
-    detailCardScrollRequest = nil
+    navigationPath.removeAll(keepingCapacity: false)
+    savedListScrollRequest = nil
     composerDraftEditorPresentation = nil
   }
 
@@ -589,7 +624,7 @@ struct CreationView: View {
     target: ThreadDraftCard
   ) {
     target.setPhoto(photo)
-    attachLocationToComposerDraftIfNeeded()
+    attachLocationIfNeeded(to: target)
   }
 
   private func importMediaFromLibrary(_ item: PhotosPickerItem) {
@@ -597,6 +632,9 @@ struct CreationView: View {
       return
     }
 
+    // A picker transfer can suspend for seconds. Freeze the owning draft now
+    // so selecting another Reply cannot redirect the imported payload.
+    let target = composerDraft
     isImportingMediaFromLibrary = true
 
     Task { @MainActor in
@@ -604,7 +642,7 @@ struct CreationView: View {
 
       do {
         let media = try await PhotoLibraryImport.importedMedia(from: item)
-        finishLibraryMediaImport(media)
+        finishLibraryMediaImport(media, target: target)
       } catch {
         let supportedContentTypes = item.supportedContentTypes
           .map(\.identifier)
@@ -621,17 +659,20 @@ struct CreationView: View {
     }
   }
 
-  private func finishLibraryMediaImport(_ media: PhotoLibraryImportedMedia) {
+  private func finishLibraryMediaImport(
+    _ media: PhotoLibraryImportedMedia,
+    target: ThreadDraftCard
+  ) {
     switch media {
     case .photo(let photo):
-      composerDraft.setPhoto(photo)
+      target.setPhoto(photo)
     case .video(let video):
-      composerDraft.setVideo(video)
+      target.setVideo(video)
     case .livePhoto(let livePhoto):
-      composerDraft.setLivePhoto(livePhoto)
+      target.setLivePhoto(livePhoto)
     }
 
-    attachLocationToComposerDraftIfNeeded()
+    attachLocationIfNeeded(to: target)
   }
 
   private func updateDoodle(
@@ -644,7 +685,7 @@ struct CreationView: View {
     }
 
     presentation.target.setDoodle(drawing)
-    attachLocationToComposerDraftIfNeeded()
+    attachLocationIfNeeded(to: presentation.target)
   }
 
   private func clearDoodle(for presentation: DoodleCanvasPresentation) {
@@ -661,7 +702,7 @@ struct CreationView: View {
     }
 
     presentation.target.setBauhaus(document)
-    attachLocationToComposerDraftIfNeeded()
+    attachLocationIfNeeded(to: presentation.target)
   }
 
   private func clearBauhaus(for presentation: BauhausGridPresentation) {
@@ -673,7 +714,7 @@ struct CreationView: View {
     target: ThreadDraftCard
   ) {
     target.setAudio(recording)
-    attachLocationToComposerDraftIfNeeded()
+    attachLocationIfNeeded(to: target)
   }
 
   private func finishSuggestionCapture(_ capturedSuggestion: CapturedSuggestion) {
@@ -699,16 +740,26 @@ struct CreationView: View {
   }
 
   private func attachLocationToComposerDraftIfNeeded() {
+    attachLocationIfNeeded(to: composerDraft)
+  }
+
+  /// Attaches one resolved coordinate to the draft that initiated the request.
+  ///
+  /// Reply selection can change while Core Location is suspended. Every draft
+  /// that needs a coordinate subscribes by identity to the shared one-shot fix,
+  /// so the result is never redirected through the currently active composer.
+  private func attachLocationIfNeeded(to target: ThreadDraftCard) {
     guard shouldAttachLocationToNewCards,
-      composerDraft.canSave,
-      composerDraft.location == nil,
-      locationRequestID == nil
+      target.canSave,
+      target.location == nil
     else {
       return
     }
 
+    locationRequestTargets[ObjectIdentifier(target)] = target
+    guard locationRequestID == nil else { return }
+
     let requestID = UUID()
-    let target = composerDraft
     locationRequestID = requestID
 
     Task { @MainActor in
@@ -717,23 +768,14 @@ struct CreationView: View {
       guard locationRequestID == requestID else {
         return
       }
+      let targets = Array(locationRequestTargets.values)
+      locationRequestTargets.removeAll(keepingCapacity: true)
       locationRequestID = nil
 
-      guard let location,
-        shouldAttachLocationToNewCards,
-        composerDraft === target,
-        target.canSave,
-        target.location == nil
-      else {
-        // If posting or discarding replaced the object while Core Location was
-        // resolving, let the new authored card start its own one-shot request.
-        if composerDraft !== target {
-          attachLocationToComposerDraftIfNeeded()
-        }
-        return
+      guard let location, shouldAttachLocationToNewCards else { return }
+      for target in targets where target.canSave && target.location == nil {
+        target.location = location
       }
-
-      target.location = location
     }
   }
 
@@ -755,23 +797,23 @@ struct CreationView: View {
 
   private func post() {
     guard composerDraft.canSave, isSaving == false else { return }
+    guard let vault = activePostVault else {
+      notifications.post(.cardPostFailed)
+      return
+    }
 
-    // Freeze the authored input before persistence converts or moves media.
-    // A failed post keeps the live composer object untouched for another try.
-    let target = composerDraft
+    // Freeze the selected vault, authored draft, and relationship before any
+    // suspension point. A later vault or Reply selection cannot retarget this
+    // in-flight post, and failure leaves the live draft untouched for retry.
+    let targetDraft = composerDraft
     let destination = composerState.activeDestination
-    let snapshot = target.savingSnapshot()
+    let snapshot = targetDraft.savingSnapshot()
     isSaving = true
 
     Task { @MainActor in
       defer { isSaving = false }
 
       do {
-        guard let vault = vaultRuntime.selectedVault else {
-          notifications.post(.cardPostFailed)
-          return
-        }
-
         let vaultDraft = try snapshot.vaultDraft()
         let createdEdge: CardEdge
         switch destination {
@@ -780,21 +822,19 @@ struct CreationView: View {
             throw CreationPostError.missingCreatedEdge
           }
           createdEdge = rootEdge
-          savedCardScrollTargetID = createdEdge.id
-        case .continuation(let parentEdgeID):
-          createdEdge = try vault.appendCard(vaultDraft, to: parentEdgeID)
-          detailCardScrollRequest = SavedListDetailScrollRequest(
-            ownerDetailRootEdgeID: parentEdgeID,
+          savedListScrollRequest = SavedListScrollRequest(
+            ownerRootEdgeID: createdEdge.id,
+            targetEdgeID: createdEdge.id
+          )
+        case .reply(let replyTarget):
+          createdEdge = try vault.appendCard(vaultDraft, to: replyTarget.parentEdgeID)
+          savedListScrollRequest = SavedListScrollRequest(
+            ownerRootEdgeID: replyTarget.ownerRootEdgeID,
             targetEdgeID: createdEdge.id
           )
         }
-        composerState.resetDraft(for: destination, ifMatching: target)
-        composerDraftEditorPresentation = nil
-        linkEditorPresentation = nil
-        photoCapturePresentation = nil
-        voiceRecorderPresentation = nil
-        quickDoodleCanvasPresentation = nil
-        quickBauhausGridPresentation = nil
+        composerState.completePost(for: destination, ifMatching: targetDraft)
+        dismissPresentations(ownedBy: targetDraft)
         notifications.post(.cardPosted)
         await vaultRuntime.refresh()
         if case .root = destination {
@@ -806,10 +846,34 @@ struct CreationView: View {
     }
   }
 
+  /// Dismisses only editors that still belong to the draft that was posted.
+  /// A user may select another Reply while persistence is running; a successful
+  /// older post must not close an editor that now belongs to the newer target.
+  private func dismissPresentations(ownedBy draft: ThreadDraftCard) {
+    if composerDraftEditorPresentation?.target === draft {
+      composerDraftEditorPresentation = nil
+    }
+    if linkEditorPresentation?.target === draft {
+      linkEditorPresentation = nil
+    }
+    if photoCapturePresentation?.target === draft {
+      photoCapturePresentation = nil
+    }
+    if voiceRecorderPresentation?.target === draft {
+      voiceRecorderPresentation = nil
+    }
+    if quickDoodleCanvasPresentation?.target === draft {
+      quickDoodleCanvasPresentation = nil
+    }
+    if quickBauhausGridPresentation?.target === draft {
+      quickBauhausGridPresentation = nil
+    }
+  }
+
   /// Posts every successfully transferred item as its own Home root.
   ///
   /// The selected `VaultInstance` is captured before the asynchronous task
-  /// begins, so navigation or vault selection cannot retarget an in-flight drop.
+  /// begins, so Reply or vault selection cannot retarget an in-flight drop.
   /// No composer draft participates in this path.
   private func postDroppedHomeItems(_ items: [HomeDropItem]) {
     guard items.isEmpty == false else { return }
@@ -851,7 +915,10 @@ struct CreationView: View {
       )
 
       if let newestPostedEdgeID = result.postedEdgeIDs.last {
-        savedCardScrollTargetID = newestPostedEdgeID
+        savedListScrollRequest = SavedListScrollRequest(
+          ownerRootEdgeID: newestPostedEdgeID,
+          targetEdgeID: newestPostedEdgeID
+        )
         await vaultRuntime.refresh()
         WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
       }
@@ -871,80 +938,157 @@ struct CreationView: View {
 
 /// Persistence destination frozen when posting begins.
 ///
-/// The value prevents a navigation change during an asynchronous save from
-/// retargeting authored content to a different card.
-private enum CreationPostDestination {
+/// The value prevents a later Reply selection during an asynchronous save from
+/// retargeting authored content to a different tree placement.
+enum CreationPostDestination: Equatable {
   case root
-  case continuation(parentEdgeID: UUID)
+  case reply(SavedListReplyTarget)
 }
 
 private enum CreationPostError: Error {
   case missingCreatedEdge
 }
 
-/// Owns one unpublished draft for Home and one for every visited detail level.
+/// Owns one unpublished draft for Home and one for every selected Reply parent.
 ///
-/// Keeping drafts per placement preserves text while the user moves through the
-/// graph. A detail draft is never reused for another parent, so posting cannot
-/// create a relationship different from the one shown by the UI.
+/// Reply selection is explicit and independent from navigation. Drafts are
+/// keyed by vault and parent placement so changing context never silently moves
+/// authored content to another relationship. This type is internal so its
+/// ownership and in-flight completion rules can be verified without rendering
+/// the SwiftUI hierarchy.
 @MainActor
 @Observable
-private final class CreationComposerState {
-
-  var navigationPath: [SavedListNavigationRoute] = [] {
-    didSet {
-      ensureContinuationDraftsExist()
-    }
-  }
+final class CreationComposerState {
 
   private var rootDraft = ThreadDraftCard()
-  private var continuationDrafts: [UUID: ThreadDraftCard] = [:]
+  private var replyDrafts: [ReplyDraftKey: ThreadDraftCard] = [:]
+
+  /// Explicit parent selected from an entry context menu.
+  private(set) var replyTarget: SavedListReplyTarget?
+
+  /// Whether the selected parent still exists in the active vault query.
+  ///
+  /// Unavailability never falls back to root; it only disables posting until
+  /// the user cancels Reply or the placement becomes available again.
+  private(set) var isReplyTargetAvailable = true
+
+  /// One-shot identity used to focus an inline Text or Todo field after Reply
+  /// is selected from a context menu.
+  private(set) var focusRequestID: UUID?
 
   var activeDraft: ThreadDraftCard {
-    guard let parentEdgeID = activeParentEdgeID else {
+    guard let replyTarget else {
       return rootDraft
     }
-    guard let draft = continuationDrafts[parentEdgeID] else {
-      assertionFailure("A detail route must own a continuation draft.")
+    let key = ReplyDraftKey(replyTarget)
+    guard let draft = replyDrafts[key] else {
+      assertionFailure("A selected Reply target must own a draft.")
       return rootDraft
     }
     return draft
   }
 
   var activeDestination: CreationPostDestination {
-    guard let activeParentEdgeID else { return .root }
-    return .continuation(parentEdgeID: activeParentEdgeID)
+    guard let replyTarget else { return .root }
+    return .reply(replyTarget)
   }
 
   var placement: CreationComposerPlacement {
-    activeParentEdgeID == nil ? .root : .continuation
-  }
-
-  var isComposerPresented: Bool {
-    guard let route = navigationPath.last else { return true }
-    if case .locations = route {
-      return false
-    }
-    return true
+    replyTarget == nil ? .root : .reply
   }
 
   var hasAuthoredDrafts: Bool {
     rootDraft.isEmptyTextDraft == false
-      || continuationDrafts.values.contains { $0.isEmptyTextDraft == false }
+      || replyDrafts.values.contains { $0.isEmptyTextDraft == false }
   }
 
-  func resetDraft(
+  /// Returns whether the current destination is safe to persist in the
+  /// selected vault. Root only needs an active vault; Reply additionally needs
+  /// its detached vault identity and live placement availability to match.
+  func isActiveDestinationAvailable(in selectedVaultID: VaultID?) -> Bool {
+    guard let selectedVaultID else { return false }
+    guard let replyTarget else { return true }
+    return replyTarget.vaultID == selectedVaultID && isReplyTargetAvailable
+  }
+
+  /// Selects a Reply placement and restores its independent unpublished draft.
+  func selectReplyTarget(_ target: SavedListReplyTarget) {
+    let key = ReplyDraftKey(target)
+    if replyDrafts[key] == nil {
+      replyDrafts[key] = ThreadDraftCard()
+    }
+    replyTarget = target
+    // Context-menu targets originate from a live visible row. SavedList will
+    // revalidate this optimistic value against its next query snapshot.
+    isReplyTargetAvailable = true
+    focusRequestID = UUID()
+  }
+
+  /// Consumes one pending focus request exactly once.
+  ///
+  /// A child consumes synchronously before yielding for context-menu dismissal.
+  /// Clearing the ID here prevents a recreated SwiftUI subtree from accepting
+  /// the same request during Map navigation or other structural changes.
+  @discardableResult
+  func consumeFocusRequest(_ requestID: UUID) -> Bool {
+    guard focusRequestID == requestID else { return false }
+    focusRequestID = nil
+    return true
+  }
+
+  /// Applies the SavedList query's latest availability for the selected parent.
+  func setReplyTargetAvailability(_ isAvailable: Bool) {
+    guard replyTarget != nil else {
+      isReplyTargetAvailable = true
+      return
+    }
+    isReplyTargetAvailable = isAvailable
+  }
+
+  /// Returns the composer to its root draft without discarding the Reply draft.
+  func cancelReply(requestFocus: Bool = true) {
+    replyTarget = nil
+    isReplyTargetAvailable = true
+    focusRequestID = requestFocus ? UUID() : nil
+  }
+
+  /// Completes exactly the draft and destination captured when posting began.
+  ///
+  /// The posted Reply draft is reset even if the user moved elsewhere while the
+  /// save ran. The visible target is cleared only when it still represents the
+  /// same parent, so a later selection is never clobbered by older work.
+  @discardableResult
+  func completePost(
     for destination: CreationPostDestination,
     ifMatching expectedDraft: ThreadDraftCard
-  ) {
+  ) -> Bool {
+    guard resetDraft(for: destination, ifMatching: expectedDraft) else {
+      return false
+    }
+
+    if case .reply(let postedTarget) = destination,
+      replyTarget.map(ReplyDraftKey.init) == ReplyDraftKey(postedTarget)
+    {
+      cancelReply()
+    }
+    return true
+  }
+
+  @discardableResult
+  private func resetDraft(
+    for destination: CreationPostDestination,
+    ifMatching expectedDraft: ThreadDraftCard
+  ) -> Bool {
     switch destination {
     case .root:
-      guard rootDraft === expectedDraft else { return }
+      guard rootDraft === expectedDraft else { return false }
       rootDraft = ThreadDraftCard()
-    case .continuation(let parentEdgeID):
-      guard continuationDrafts[parentEdgeID] === expectedDraft else { return }
-      continuationDrafts[parentEdgeID] = ThreadDraftCard()
+    case .reply(let target):
+      let key = ReplyDraftKey(target)
+      guard replyDrafts[key] === expectedDraft else { return false }
+      replyDrafts[key] = ThreadDraftCard()
     }
+    return true
   }
 
   func discardActiveDraft() {
@@ -955,31 +1099,22 @@ private final class CreationComposerState {
 
   func discardAllDrafts() {
     rootDraft.savingSnapshot().removeTemporaryMediaFiles()
-    for draft in continuationDrafts.values {
+    for draft in replyDrafts.values {
       draft.savingSnapshot().removeTemporaryMediaFiles()
     }
     rootDraft = ThreadDraftCard()
-    continuationDrafts.removeAll(keepingCapacity: false)
-    navigateHome()
+    replyDrafts.removeAll(keepingCapacity: false)
+    cancelReply(requestFocus: false)
   }
 
-  func navigateHome() {
-    navigationPath.removeAll(keepingCapacity: false)
-  }
+  /// Stable draft ownership key for one Reply placement.
+  private struct ReplyDraftKey: Hashable {
+    let vaultID: VaultID
+    let parentEdgeID: UUID
 
-  private var activeParentEdgeID: UUID? {
-    guard let route = navigationPath.last,
-      case .entry(let edgeID) = route
-    else {
-      return nil
-    }
-    return edgeID
-  }
-
-  private func ensureContinuationDraftsExist() {
-    for case .entry(let edgeID) in navigationPath
-    where continuationDrafts[edgeID] == nil {
-      continuationDrafts[edgeID] = ThreadDraftCard()
+    init(_ target: SavedListReplyTarget) {
+      vaultID = target.vaultID
+      parentEdgeID = target.parentEdgeID
     }
   }
 }

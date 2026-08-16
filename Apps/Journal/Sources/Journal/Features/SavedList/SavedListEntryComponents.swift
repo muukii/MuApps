@@ -6,20 +6,10 @@ import SwiftUI
 private let rootGroupContentPadding: CGFloat = 16
 private let rootGroupCornerRadius: CGFloat = 24
 
-/// Shared spacing for Home trees and re-rooted detail trees.
+/// Shared spacing for trees rendered on Home.
 struct VaultSavedEntryTreeMetrics {
   static let descendantMarkerGutter: CGFloat = 16
   static let nodeSpacing: CGFloat = 2
-}
-
-/// Identifies one zoom source inside the tree surface that currently owns it.
-///
-/// The same edge can remain rendered in Home and multiple retained detail
-/// routes. Including the local tree root prevents those hidden surfaces from
-/// registering an ambiguous source for the next navigation transition.
-struct VaultSavedEntryTransitionSourceID: Hashable {
-  let treeRootEdgeID: UUID?
-  let edgeID: UUID
 }
 
 /// Modal editor for an existing vault card.
@@ -58,10 +48,8 @@ struct VaultSavedEntryEditSheet: View {
 struct VaultSavedEntryRow: View {
 
   let entry: VaultSavedEntry
-  let isNavigationEnabled: Bool
   let isMutationDisabled: Bool
-  let transitionSourceTreeRootEdgeID: UUID?
-  let transitionNamespace: Namespace.ID
+  let onReply: @MainActor (VaultSavedEntry) -> Void
   let onShare: @MainActor (VaultSavedEntry) -> Void
   let onEdit: @MainActor (VaultSavedEntry) -> Void
   let onRequestDelete: @MainActor (VaultSavedEntry) -> Void
@@ -69,20 +57,16 @@ struct VaultSavedEntryRow: View {
 
   init(
     entry: VaultSavedEntry,
-    isNavigationEnabled: Bool = true,
     isMutationDisabled: Bool,
-    transitionSourceTreeRootEdgeID: UUID?,
-    transitionNamespace: Namespace.ID,
+    onReply: @escaping @MainActor (VaultSavedEntry) -> Void,
     onShare: @escaping @MainActor (VaultSavedEntry) -> Void,
     onEdit: @escaping @MainActor (VaultSavedEntry) -> Void,
     onRequestDelete: @escaping @MainActor (VaultSavedEntry) -> Void,
     onToggleTodoCompletion: @escaping @MainActor (VaultSavedEntry) -> Void
   ) {
     self.entry = entry
-    self.isNavigationEnabled = isNavigationEnabled
     self.isMutationDisabled = isMutationDisabled
-    self.transitionSourceTreeRootEdgeID = transitionSourceTreeRootEdgeID
-    self.transitionNamespace = transitionNamespace
+    self.onReply = onReply
     self.onShare = onShare
     self.onEdit = onEdit
     self.onRequestDelete = onRequestDelete
@@ -107,7 +91,14 @@ struct VaultSavedEntryRow: View {
         entryPresentation(showsTodoCompletionIndicator: true)
       }
     }
+    .contentShape(.rect)
     .contextMenu {
+      Button {
+        onReply(entry)
+      } label: {
+        Label("Reply", systemImage: "arrowshape.turn.up.left")
+      }
+
       Button {
         onShare(entry)
       } label: {
@@ -128,41 +119,22 @@ struct VaultSavedEntryRow: View {
       }
       .disabled(isMutationDisabled)
     }
+    .accessibilityAction(
+      named: Text(
+        "Reply",
+        comment: "Accessibility action that selects this entry as a Reply parent."
+      )
+    ) {
+      onReply(entry)
+    }
   }
 
-  @ViewBuilder
   private func entryPresentation(
     showsTodoCompletionIndicator: Bool
   ) -> some View {
-    if isNavigationEnabled {
-      entryNavigationLink(
-        showsTodoCompletionIndicator: showsTodoCompletionIndicator
-      )
-    } else {
-      entryContent(
-        showsTodoCompletionIndicator: showsTodoCompletionIndicator
-      )
-    }
-  }
-
-  private func entryNavigationLink(
-    showsTodoCompletionIndicator: Bool
-  ) -> some View {
-    NavigationLink(
-      value: SavedListNavigationRoute.entry(edgeID: entry.edgeID)
-    ) {
-      entryContent(
-        showsTodoCompletionIndicator: showsTodoCompletionIndicator
-      )
-      .appMatchedTransitionSource(
-        id: VaultSavedEntryTransitionSourceID(
-          treeRootEdgeID: transitionSourceTreeRootEdgeID,
-          edgeID: entry.edgeID
-        ),
-        in: transitionNamespace
-      )
-    }
-    .buttonStyle(.plain)
+    entryContent(
+      showsTodoCompletionIndicator: showsTodoCompletionIndicator
+    )
   }
 
   private func entryContent(
@@ -183,10 +155,8 @@ struct VaultSavedEntryTreeCell: View {
 
   let depth: Int
   let entry: VaultSavedEntry
-  let isNavigationEnabled: Bool
   let isMutationDisabled: Bool
-  let transitionSourceTreeRootEdgeID: UUID?
-  let transitionNamespace: Namespace.ID
+  let onReply: @MainActor (VaultSavedEntry) -> Void
   let onShare: @MainActor (VaultSavedEntry) -> Void
   let onEdit: @MainActor (VaultSavedEntry) -> Void
   let onRequestDelete: @MainActor (VaultSavedEntry) -> Void
@@ -195,10 +165,8 @@ struct VaultSavedEntryTreeCell: View {
   var body: some View {
     VaultSavedEntryRow(
       entry: entry,
-      isNavigationEnabled: isNavigationEnabled,
       isMutationDisabled: isMutationDisabled,
-      transitionSourceTreeRootEdgeID: transitionSourceTreeRootEdgeID,
-      transitionNamespace: transitionNamespace,
+      onReply: onReply,
       onShare: onShare,
       onEdit: onEdit,
       onRequestDelete: onRequestDelete,
@@ -220,11 +188,11 @@ struct VaultSavedEntryTreeCell: View {
   }
 }
 
-/// Saved-edge presentation shared by Home and re-rooted detail trees.
+/// Saved-edge presentation shared by every depth of a Home tree.
 ///
 /// The surface belongs to one placement rather than to the authored card. Tree
-/// indentation and navigation stay outside this type so the card's current
-/// media and content behavior is identical at every depth.
+/// indentation stays outside this type so the card's current media and content
+/// behavior is identical at every depth.
 struct VaultSavedRootGroup: View {
 
   let entry: VaultSavedEntryModel

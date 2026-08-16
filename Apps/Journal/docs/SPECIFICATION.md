@@ -417,7 +417,7 @@ additional media-well background or clipping. Text and link content render their
 content renders the original name with a document icon, content type, and size.
 Todo content owns its completion indicator, completed typography, and read-only
 share treatment while feature code supplies the persistence action for editable
-Home and detail placements.
+Home tree placements.
 Doodle and Bauhaus content decode their saved JSON attachment and render
 `DoodleDrawingView` / `BauhausGridArtworkView` directly as SwiftUI content; if
 the vault media file has not arrived locally yet, the UI shows a modality
@@ -427,7 +427,7 @@ and reloads the content projection.
 Large raster media is the exception. Photo summary surfaces and Widget Home
 Screen photo previews use the save-time `Attachment.thumbnail` created by
 `MediaProcessing`, so scrolling lists and Widget timelines do not decode
-original-size image files. Detail and editing flows still read the full media
+original-size image files. Home tree and editing flows still read the full media
 file when they need the original captured payload. Future video content should use
 the same boundary for poster frames.
 
@@ -862,8 +862,10 @@ the gallery's **Lab** section).
   newest first, and groups them by local-calendar day. Each anchor renders its
   complete active subtree inline, using `CardEdge.edgeID` as placement identity;
   descendants do not become independent Home items or day-grouping anchors.
-  Posting on Home creates a root edge and brings that new root into view. Any
-  visible placement can open a detail rooted at that point in the same tree.
+  Home is the sole saved-entry tree surface. Posting with no Reply target creates
+  a root edge and brings that new root into view; tapping a placement does not
+  push a second saved-entry surface. Every visible placement instead exposes
+  **Reply** from its context menu so a continuation can be authored in place.
   When the selected vault is shared — owned or joined as a participant — the
   navigation toolbar also
   shows the same system `SWCollaborationView` control used by the vault picker,
@@ -872,12 +874,27 @@ the gallery's **Lab** section).
   loaded; it disappears after sharing is stopped and
   the runtime refreshes.
 
-  Creation lives in a Book-style glass input bar inset at the bottom of the
-  active Home or card-detail screen. On Home its center is a multiline
-  **Write something** text field; in a card detail it becomes **Add to this
-  card**. It grows from one to five lines. Home and every visited detail
-  placement own separate unpublished drafts, so navigating deeper or back does
-  not retarget or erase another level's input. When the untouched text field
+  Creation lives in one Book-style glass input bar inset at the bottom of Home.
+  Its center is a multiline **Write something** text field that grows from one
+  to five lines. Each Vault owns one root draft plus an isolated Reply draft for
+  each parent placement selected during the current view lifetime. Choosing
+  **Reply** switches to the draft keyed by that Vault and parent edge without
+  erasing or retargeting the root draft or another parent's draft. Cancelling
+  Reply returns to the root draft, and selecting another placement restores that
+  parent's existing draft.
+
+  Reply destination is explicit state, independent of navigation and visibility.
+  The composer holds a detached target value containing the Vault id, parent
+  `CardEdge.edgeID`, owning root edge id, and a small display snapshot; it never
+  retains a live SwiftData model as the posting destination. While Reply is
+  active, a persistent target strip above the input identifies the destination
+  and provides **Cancel Reply**. If the selected parent becomes deleted,
+  unresolved, or otherwise inactive, posting is disabled and the strip explains
+  that the destination is unavailable. Missing targets never fall back to a new
+  root post. Choosing Reply also requests focus for the composer after the
+  context menu closes.
+
+  When the untouched text field
   receives a complete HTTP(S) URL as its first input update, that same draft
   switches to Link and uses the existing Link preview. A URL typed incrementally
   or added after any existing text remains part of the Text entry.
@@ -891,10 +908,11 @@ the gallery's **Lab** section).
   macOS, the bar is centered and capped at `720pt`; Command-Shift-V opens Vaults
   and Command-comma opens Settings.
 
-  The complete input bar is also a drop destination on Home only; card-detail
-  composers do not accept drops. It accepts text, HTTP(S) URLs, still images,
-  movies, audio, and individual generic files. A dropped text value that is
-  entirely one detected HTTP(S) URL becomes a Link root, while prose that merely
+  The complete input bar is also a drop destination while the root composer is
+  active; selecting a Reply target disables drop handling. Root-mode drop accepts
+  text, HTTP(S) URLs, still images, movies, audio, and individual generic files.
+  A dropped text value that is entirely one detected HTTP(S) URL becomes a Link
+  root, while prose that merely
   contains a URL remains Text. This does not change the first-input-only rule for
   typing or pasting into the text field.
 
@@ -902,8 +920,8 @@ the gallery's **Lab** section).
   validates each value and automatically posts it as an independent root in the
   order SwiftUI supplied it. The drop path never replaces, clears, or reuses the
   unpublished composer draft. It freezes the selected writable Vault when the
-  action begins, so later navigation cannot retarget the import into a detail
-  continuation. Each accepted item uses its own `createThread(cards:)`
+  action begins, and every accepted value remains a root regardless of later
+  Reply selection. Each accepted item uses its own `createThread(cards:)`
   transaction; one invalid item or failed write does not roll back sibling roots
   that already succeeded. Provider-owned files are copied while their transfer
   URLs are valid, classified as Photo, Video, Audio, or File, and removed from
@@ -926,15 +944,15 @@ the gallery's **Lab** section).
   accessibility, and dismissal. Once the input is no longer the untouched text
   placeholder — including while it is in Link mode — the `+` becomes an
   `xmark`; choosing it requires destructive confirmation before the unpublished
-  entry is discarded. Changing vaults also requires confirmation while the input
-  contains an unpublished entry.
+  entry is discarded. Changing vaults also requires confirmation while any root
+  or Reply draft for the current Vault contains an unpublished entry.
 
   Quick Capture requests always return to Home and create a root card. They use
-  the same draft-preservation rule. With every draft empty,
+  the same draft-preservation rule. With every root and Reply draft empty,
   they open the focused text editor, camera, voice recorder, doodle
   canvas, or system Suggestions picker directly. If unpublished input exists at
-  any visited level, Journal asks before discarding it; cancelling consumes the
-  system request and leaves every draft unchanged.
+  the current Vault's root or Reply drafts, Journal asks before discarding them;
+  cancelling consumes the system request and leaves every draft unchanged.
 
   Todo, Link, Camera, Photos, Bauhaus, Doodle, Voice, and Suggestions reuse that
   same single entry rather than appending another draft. Link capture uses URL-keyboard
@@ -984,14 +1002,24 @@ the gallery's **Lab** section).
   or overlapping pins automatically group into a count marker and separate into
   individual pins as the user zooms in. The up-arrow freezes one save snapshot,
   including its posting destination, and converts it into one
-  `VaultContentStore.CardDraft`. On Home it calls `createThread(cards:)` with
-  that single value, persists one root `CardEdge`, refreshes the Latest Note
-  widget, and scrolls Home toward the new root. In detail it calls
-  `appendCard(_:to:)` with the displayed detail-root edge as parent and reveals
-  the appended edge in that same re-rooted subtree; continuation posting does
-  not refresh the root-only widget. The one-shot reveal request carries both
-  the owning detail-root edge and appended edge so a retained ancestor detail
-  cannot consume it. The matching level's input clears only after success. The
+  `VaultContentStore.CardDraft`. With no Reply target it calls
+  `createThread(cards:)` with that single value, persists one root `CardEdge`,
+  refreshes the root-only Latest Note widget, and scrolls Home toward the new
+  root. With Reply active it revalidates the detached target against the same
+  Vault and calls `appendCard(_:to:)` with the selected parent edge; a missing
+  or inactive parent fails instead of falling back to `createThread(cards:)`.
+  Continuation posting does not refresh the root-only widget.
+
+  A successful Reply issues one Home reveal request containing the owning root
+  edge and appended edge. Home first scrolls to the root anchor so its lazy day
+  section and subtree are materialized, then scrolls vertically to the appended
+  node once that placement participates in layout. If the current content-type
+  filter excludes the owning root, Home consumes the request when the new edge
+  reaches the live query without scrolling, so a later filter change cannot
+  cause a delayed jump. Success clears only the draft and Reply selection that
+  still match the frozen save destination; a target or draft selected while the
+  write was in flight remains untouched. Root posting follows the same frozen
+  match rule for its draft. Failure retains the Reply target and its draft. The
   Photo, Video, and Live Photo write paths generate or carry a bounded
   thumbnail; Doodle, Bauhaus, and Suggestion retain authored payloads, with
   Suggestion media copied alongside its JSON when available.
@@ -1002,9 +1030,8 @@ the gallery's **Lab** section).
   present, with failure haptics. Notifications appear as an app-wide overlay at
   the top of the screen, then fade, blur, and scale in place with a slight bounce
   instead of sliding from an edge. Each press of the up-arrow posts exactly one
-  card: a root on Home or one direct child of the currently displayed card in
-  detail. It never accumulates several unpublished entries into one creation-time
-  chain.
+  card: either a root or one direct child of the explicit Reply target. It never
+  accumulates several unpublished entries into one creation-time chain.
   Capture demos remain in the dev gallery rather than Settings.
 - **`CaptureGalleryView`** (dev scaffolding, not currently wired into the app
   root) — a `List` with:
@@ -1039,20 +1066,26 @@ the gallery's **Lab** section).
   repeated edge defensively. Tree identity is the placement's stable
   `CardEdge.edgeID`, never the authored card id.
 
+  Making Home the sole tree surface and selecting Reply targets are UI-state
+  changes only. They add no SwiftData schema, migration, CloudKit record, or sync
+  field; root creation continues to use `createThread(cards:)`, and Reply
+  continues to use the existing `CardEdge.parentEdgeID` relationship through
+  `appendCard(_:to:)`.
+
   Home's toolbar provides a single-selection
   content-type filter with **All Entries** plus every supported user-visible
   `Card.Kind`; unknown content
   remains available through All Entries but is not a selectable filter. The
   selection is transient UI state and changes only when the user chooses an
-  option, so vault changes, detail navigation, and posting do not reset it. The
+  option, so vault changes, Reply selection, and posting do not reset it. The
   filter applies only when selecting Home roots and location-map pins. Once a
-  root is selected, descendants remain unfiltered so the thread stays intact;
-  detail projection likewise continues to use every active edge. If a non-empty
-  vault has no roots of the selected type, Home shows a filtered empty state
-  with **Show All Entries**. Posting a matching root keeps the filter and scrolls
-  that root into view. Posting a root outside the current filter still succeeds
-  and remains hidden; its pending Home scroll is cleared as soon as the root
-  reaches the live query so a later filter change cannot cause a delayed jump.
+  root is selected, descendants remain unfiltered so the thread stays intact.
+  If a non-empty vault has no roots of the selected type, Home shows a filtered
+  empty state with **Show All Entries**. Posting a matching root keeps the filter
+  and scrolls that root into view. Posting a root outside the current filter still
+  succeeds and remains hidden; its pending Home scroll is cleared as soon as the
+  root reaches the live query so a later filter change cannot cause a delayed
+  jump.
 
   Every tree node reuses the same current saved-entry card presentation at every
   depth and fills the finite width proposed by the vertical tree surface.
@@ -1060,25 +1093,14 @@ the gallery's **Lab** section).
   communicates their semantic depth without progressively narrowing deeper
   cards. This does not substitute a thumbnail style, suppress video behavior,
   or introduce a continuation count or other summary label. The tree has no
-  horizontal scroll surface: Home composes maps, day headers, and root trees in
-  its existing vertical stream, while Detail owns one vertical `TreeScrollView`.
-  Revealing a newly appended node waits for that placement to participate in
-  layout, then updates only the owning vertical scroll position. Opening any node
-  pushes `.entry(edgeID:)`. The selected
-  placement becomes the local root of the detail screen and its complete active
-  descendant subtree remains visible; its ancestors and siblings are not
-  repeated. Back returns to the preceding tree view. A descendant can be opened
-  again to re-root the same detail surface at any depth. The current local root
-  is not a navigation link to itself, and ancestor ids already represented in
-  the navigation path are excluded defensively so malformed sync cycles cannot
-  navigate forever.
+  horizontal scroll surface: Home composes maps, day headers, and complete root
+  trees in its one existing vertical stream. Tree nodes remain placements in
+  Home; their tap surface does not push another saved-entry destination.
+  Reply reveal uses that same Home scroll surface and only the owning root can
+  consume its two-stage request.
   Pull-to-refresh asks the vault runtime to import fresh CloudKit changes;
-  the old toolbar reload icon is not shown in the normal list surface. Every
-  navigation-enabled node is a matched transition source scoped to its owning
-  tree surface, so opening a detail view uses the system zoom navigation
-  transition from the tapped node without colliding with retained ancestor
-  surfaces. Link content uses iOS's
-  LinkPresentation preview in both Home groups and detail, fetching
+  the old toolbar reload icon is not shown in the normal list surface. Link
+  content uses iOS's LinkPresentation preview in Home groups, fetching
   metadata at display time and caching it in a dedicated device-local SwiftData
   store under the app's Caches directory for up to seven days. The cache is not
   synced or backed up, is bounded to 200 entries / 50 MiB, and may be purged by
@@ -1088,7 +1110,7 @@ the gallery's **Lab** section).
   invalidate intrinsic layout only when the metadata object actually changes.
   Media placeholders reserve the same aspect-ratio geometry as their loaded
   content, so a row keeps one height from its first layout pass through its
-  poster, still image, and inline player. Home and re-rooted detail trees present
+  poster, still image, and inline player. Home trees present
   authored content without a common shape, rounded clipping, stroke, or fixed
   height. Text uses its natural height;
   Photo, Video, and Live Photo use the persisted pixel dimensions (falling back
@@ -1096,21 +1118,22 @@ the gallery's **Lab** section).
   Doodle saves its authored canvas size alongside its JSON and reserves that
   geometry too. Doodles without recorded dimensions use the canonical 4:5
   authored ratio, so idle, loading, and rendered states keep one cell height.
-  The bottom composer appends a new direct child to the current detail-root edge
-  at every depth. Tree nodes read the full vault media file using the same card
-  presentation on Home and detail. Video previews
+  Tree nodes read the full vault media file using the same card presentation at
+  every depth. Video previews
   play as muted inline loops when the media file is local, while keeping the app
   audio session mixed with other audio so external music or podcasts continue.
   Doodle and Bauhaus previews decode the authored JSON attachment file and render
   it with their SwiftUI renderers. When a media file is not local yet, the UI
   shows a modality placeholder; when sync writes the file and bumps the resource
   revision, SwiftData observation re-runs the affected content load. Todo entries
-  show an explicit completion control on Home and every detail level. Completing
+  show an explicit completion control on every visible Home tree node. Completing
   or reopening a Todo changes `completedAt` and `updatedAt` atomically with the
   Card outbox mutation, without moving it in the chronological stream or tree.
   Editing its text preserves the saved completion state; share artifacts and
-  widget surfaces render that state without offering a mutation control. Saved
-  entries can be shared from any visible tree node's context menu. The share
+  widget surfaces render that state without offering a mutation control. Every
+  visible tree node's context menu exposes Reply, Share, Edit, and Delete. Reply
+  selects the explicit composer target described above; it does not navigate or
+  mutate storage by itself. Saved entries can be shared from that menu. The share
   action opens a preview sheet backed
   by a detached `EntryShareSnapshot`, renders the actual temporary PNG artifact
   on a full-bleed branded canvas with the same `.share` leaf styles, and, for
@@ -1128,9 +1151,9 @@ the gallery's **Lab** section).
   deletes are enqueued immediately in the same transaction. Incoming CardEdge
   or placed-Card deletion applies the same local logical deletion; edit-only
   attachment/resource replacement may still physically remove obsolete local
-  rows and files. Deleting the current detail-root edge dismisses that detail
-  level after success; deleting one of its visible descendants leaves the
-  current detail level open.
+  rows and files. Deleting a Reply target makes that detached target unavailable;
+  the view remains on Home and its draft is neither discarded nor posted as a
+  root.
 - **`SettingsView`** — an **Accent Color** picker, an **Appearance** picker, a **Location**
   toggle for automatic location attachment, an explicit **Quick Capture Vault**
   picker, a **Storage** section with **Cloud

@@ -1,19 +1,19 @@
 import SwiftUI
 
-/// Meaning of the currently visible composer.
+/// Persistence relationship represented by the currently visible composer.
 ///
-/// Root composition creates a Home card. Continuation composition appends to
-/// the card represented by the active detail destination.
+/// Root composition creates a Home card. Reply composition appends a child to
+/// an explicitly selected tree placement without depending on navigation.
 enum CreationComposerPlacement {
   case root
-  case continuation
+  case reply
 
   /// Whether this placement represents the Home root import surface.
   var acceptsHomeDrop: Bool {
     switch self {
     case .root:
       true
-    case .continuation:
+    case .reply:
       false
     }
   }
@@ -22,8 +22,8 @@ enum CreationComposerPlacement {
     switch self {
     case .root:
       "Write something"
-    case .continuation:
-      "Add to this card"
+    case .reply:
+      "Write a reply"
     }
   }
 
@@ -31,8 +31,8 @@ enum CreationComposerPlacement {
     switch self {
     case .root:
       "Post Entry"
-    case .continuation:
-      "Add Entry"
+    case .reply:
+      "Post Reply"
     }
   }
 }
@@ -46,10 +46,16 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
   private let draft: ThreadDraftCard
   private let isPresented: Bool
   private let placement: CreationComposerPlacement
+  private let replyTarget: SavedListReplyTarget?
+  private let isReplyTargetAvailable: Bool
+  private let isPostDestinationAvailable: Bool
+  private let focusRequestID: UUID?
+  private let onConsumeFocusRequest: @MainActor @Sendable (UUID) -> Bool
   private let isProcessing: Bool
   private let onOpenDraft: @MainActor @Sendable () -> Void
   private let onDiscardDraft: @MainActor @Sendable () -> Void
   private let onPost: @MainActor @Sendable () -> Void
+  private let onCancelReply: @MainActor @Sendable () -> Void
   private let onDropItems: @MainActor @Sendable ([HomeDropItem]) -> Void
   private let content: Content
   private let menuContent: MenuContent
@@ -58,10 +64,16 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
     draft: ThreadDraftCard,
     isPresented: Bool = true,
     placement: CreationComposerPlacement = .root,
+    replyTarget: SavedListReplyTarget? = nil,
+    isReplyTargetAvailable: Bool = true,
+    isPostDestinationAvailable: Bool = true,
+    focusRequestID: UUID? = nil,
+    onConsumeFocusRequest: @escaping @MainActor @Sendable (UUID) -> Bool = { _ in false },
     isProcessing: Bool,
     onOpenDraft: @escaping @MainActor @Sendable () -> Void,
     onDiscardDraft: @escaping @MainActor @Sendable () -> Void,
     onPost: @escaping @MainActor @Sendable () -> Void,
+    onCancelReply: @escaping @MainActor @Sendable () -> Void = {},
     onDropItems: @escaping @MainActor @Sendable ([HomeDropItem]) -> Void,
     @ViewBuilder content: () -> Content,
     @ViewBuilder menuContent: () -> MenuContent
@@ -69,10 +81,16 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
     self.draft = draft
     self.isPresented = isPresented
     self.placement = placement
+    self.replyTarget = replyTarget
+    self.isReplyTargetAvailable = isReplyTargetAvailable
+    self.isPostDestinationAvailable = isPostDestinationAvailable
+    self.focusRequestID = focusRequestID
+    self.onConsumeFocusRequest = onConsumeFocusRequest
     self.isProcessing = isProcessing
     self.onOpenDraft = onOpenDraft
     self.onDiscardDraft = onDiscardDraft
     self.onPost = onPost
+    self.onCancelReply = onCancelReply
     self.onDropItems = onDropItems
     self.content = content()
     self.menuContent = menuContent()
@@ -89,21 +107,34 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
         // measures as zero, which clears the reservation with the composer.
         Group {
           if isPresented {
-            CreationComposerInputBar(
-              draft: draft,
-              placement: placement,
-              isProcessing: isProcessing,
-              onOpenDraft: onOpenDraft,
-              onDiscardDraft: onDiscardDraft,
-              onPost: onPost
-            ) {
-              menuContent
-            }
-            .dropDestination(
-              for: HomeDropItem.self,
-              isEnabled: placement.acceptsHomeDrop && isProcessing == false
-            ) { items, _ in
-              onDropItems(items)
+            VStack(spacing: 8) {
+              if let replyTarget {
+                CreationReplyTargetStrip(
+                  summary: replyTarget.displaySummary,
+                  isAvailable: isReplyTargetAvailable,
+                  onCancelReply: onCancelReply
+                )
+              }
+
+              CreationComposerInputBar(
+                draft: draft,
+                placement: placement,
+                isPostDestinationAvailable: isPostDestinationAvailable,
+                focusRequestID: focusRequestID,
+                onConsumeFocusRequest: onConsumeFocusRequest,
+                isProcessing: isProcessing,
+                onOpenDraft: onOpenDraft,
+                onDiscardDraft: onDiscardDraft,
+                onPost: onPost
+              ) {
+                menuContent
+              }
+              .dropDestination(
+                for: HomeDropItem.self,
+                isEnabled: placement.acceptsHomeDrop && isProcessing == false
+              ) { items, _ in
+                onDropItems(items)
+              }
             }
             .frame(maxWidth: CreationContainerMetrics.maximumComposerWidth)
             .frame(maxWidth: .infinity)
@@ -117,6 +148,58 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
           composerHeight = height
         }
       }
+  }
+}
+
+/// Detached Reply context displayed independently above the input bar.
+///
+/// The target summary is a value captured when Reply was selected. An
+/// unavailable target remains visible so authored input never silently changes
+/// from a child Reply into a new Home root.
+struct CreationReplyTargetStrip: View {
+
+  let summary: String
+  let isAvailable: Bool
+  let onCancelReply: @MainActor @Sendable () -> Void
+
+  var body: some View {
+    HStack(spacing: 10) {
+      Image(systemName: isAvailable ? "arrowshape.turn.up.left" : "exclamationmark.triangle")
+        .foregroundStyle(isAvailable ? Color.secondary : Color.orange)
+        .accessibilityHidden(true)
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Replying to", comment: "Label above the composer for the selected Reply target.")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.secondary)
+
+        Text(summary)
+          .font(.subheadline)
+          .lineLimit(1)
+
+        if isAvailable == false {
+          Text(
+            "Reply target is no longer available",
+            comment: "Error shown when the selected parent card was deleted or became unavailable."
+          )
+          .font(.caption)
+          .foregroundStyle(.orange)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      Button(action: onCancelReply) {
+        Label(
+          "Cancel Reply",
+          systemImage: "xmark"
+        )
+        .font(.caption.weight(.semibold))
+      }
+      .buttonStyle(.plain)
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 10)
+    .background(.regularMaterial, in: .rect(cornerRadius: 18, style: .continuous))
   }
 }
 

@@ -28,27 +28,6 @@ struct SavedEntryTreeProjectionTests {
     #expect(tree.children[0].children.map(\.id) == [grandchild.id])
   }
 
-  @Test("Re-rooting returns only the selected entry and its descendants")
-  func rerootsAtSelectedEntry() throws {
-    let root = Entry(id: id(1), parentID: nil, sortIndex: 0)
-    let selectedChild = Entry(id: id(2), parentID: root.id, sortIndex: 0)
-    let sibling = Entry(id: id(3), parentID: root.id, sortIndex: 1)
-    let grandchild = Entry(
-      id: id(4),
-      parentID: selectedChild.id,
-      sortIndex: 0
-    )
-    let projection = projection(
-      entries: [root, sibling, selectedChild, grandchild]
-    )
-
-    let tree = try #require(
-      projection.tree(startingAt: selectedChild.id)
-    )
-
-    #expect(depthFirstIDs(in: tree) == [selectedChild.id, grandchild.id])
-  }
-
   @Test("Orphans remain outside a valid root subtree")
   func omitsOrphansFromRootSubtree() throws {
     let root = Entry(id: id(1), parentID: nil, sortIndex: 0)
@@ -62,48 +41,6 @@ struct SavedEntryTreeProjectionTests {
     #expect(depthFirstIDs(in: tree) == [root.id, child.id])
     #expect(projection.tree(startingAt: orphan.id) == nil)
     #expect(projection.tree(startingAt: orphanChild.id) == nil)
-  }
-
-  @Test("Detail exclusions remove an ancestor path without pruning siblings")
-  func excludesDetailAncestors() throws {
-    let root = Entry(id: id(1), parentID: nil, sortIndex: 0)
-    let excludedChild = Entry(id: id(2), parentID: root.id, sortIndex: 0)
-    let visibleChild = Entry(id: id(3), parentID: root.id, sortIndex: 1)
-    let projection = projection(entries: [visibleChild, excludedChild, root])
-
-    let tree = try #require(
-      projection.tree(startingAt: root.id, excluding: [excludedChild.id])
-    )
-
-    #expect(tree.children.map(\.id) == [visibleChild.id])
-  }
-
-  @Test("Zoom sources are scoped to the tree that currently owns the edge")
-  func scopesZoomSourcesByTreeRoot() {
-    let edgeID = id(1)
-    let homeSource = VaultSavedEntryTransitionSourceID(
-      treeRootEdgeID: nil,
-      edgeID: edgeID
-    )
-    let detailSource = VaultSavedEntryTransitionSourceID(
-      treeRootEdgeID: id(2),
-      edgeID: edgeID
-    )
-
-    #expect(homeSource != detailSource)
-  }
-
-  @Test("Continuation reveal requests are consumed only by their detail root")
-  func scopesContinuationRevealToOwningDetailRoot() {
-    let ownerEdgeID = id(1)
-    let targetEdgeID = id(2)
-    let request = SavedListDetailScrollRequest(
-      ownerDetailRootEdgeID: ownerEdgeID,
-      targetEdgeID: targetEdgeID
-    )
-
-    #expect(request.targetID(ownedBy: ownerEdgeID) == targetEdgeID)
-    #expect(request.targetID(ownedBy: id(3)) == nil)
   }
 
   @Test("A rootless cyclic component cannot become a display subtree")

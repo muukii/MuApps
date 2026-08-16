@@ -16,7 +16,7 @@ import SwiftUI
 
 // MARK: - Live Entry Projection
 
-/// Live saved-entry handle used by the list and detail UI.
+/// Live saved-entry handle used by the Home tree and saved-entry actions.
 ///
 /// The handle carries SwiftData model references. Display, share, and edit
 /// values are derived at the edge of each operation, so CloudKit imports update
@@ -40,6 +40,29 @@ struct VaultSavedEntry: Identifiable {
   var createdAt: Date { card.createdAt }
   var updatedAt: Date { card.updatedAt }
   var location: JournalVault.Coordinate? { card.location }
+
+  /// Detached one-line text used to identify this placement after its context
+  /// menu closes.
+  ///
+  /// Text-like cards retain a short excerpt of authored content. Media cards
+  /// use their localized kind instead of exposing persisted payload text that
+  /// is not intended for display.
+  var replyDisplaySummary: String {
+    switch kind {
+    case .text, .todo, .link, .file, .unknown:
+      let normalizedBody = body.split(whereSeparator: \.isWhitespace)
+        .joined(separator: " ")
+      if normalizedBody.isEmpty == false {
+        return String(normalizedBody.prefix(120))
+      }
+    case .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus:
+      break
+    @unknown default:
+      break
+    }
+
+    return String(localized: kind.vaultListDisplayTitle)
+  }
 
   private var attachment: VaultSavedAttachment? {
     card.attachments
@@ -73,6 +96,20 @@ where Entry.ID == UUID {
     let children: [Node]
 
     var id: UUID { body.id }
+
+    /// Every stable placement identity represented by this subtree.
+    var edgeIDs: Set<UUID> {
+      var result: Set<UUID> = []
+      collectEdgeIDs(into: &result)
+      return result
+    }
+
+    private func collectEdgeIDs(into result: inout Set<UUID>) {
+      guard result.insert(id).inserted else { return }
+      for child in children {
+        child.collectEdgeIDs(into: &result)
+      }
+    }
   }
 
   private let entriesByID: [UUID: Entry]
@@ -118,19 +155,13 @@ where Entry.ID == UUID {
     self.rootedEntryIDs = rootedEntryIDs
   }
 
-  /// Projects one subtree with `edgeID` as its local root.
-  ///
-  /// `excluding` is used by detail navigation to prevent a malformed edge from
-  /// walking back into an ancestor that is already represented by the route.
-  func tree(
-    startingAt edgeID: UUID,
-    excluding excludedEdgeIDs: Set<UUID> = []
-  ) -> Node? {
+  /// Projects one cycle-safe subtree with `edgeID` as its root.
+  func tree(startingAt edgeID: UUID) -> Node? {
     guard rootedEntryIDs.contains(edgeID), let entry = entriesByID[edgeID]
     else {
       return nil
     }
-    return node(for: entry, visitedEdgeIDs: excludedEdgeIDs)
+    return node(for: entry, visitedEdgeIDs: [])
   }
 
   private func node(
