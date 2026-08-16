@@ -29,6 +29,9 @@ import WidgetKit
 private let photoLibraryImportLog = Logger(
   subsystem: "app.muukii.journal", category: "PhotoLibraryImport")
 
+private let homeDropImportLog = Logger(
+  subsystem: "app.muukii.journal", category: "HomeDropImport")
+
 struct CreationView: View {
 
   @Binding private var systemCaptureRequest: JournalCaptureRequest?
@@ -97,6 +100,10 @@ struct CreationView: View {
   /// created twice by a fast double-tap.
   @State private var isSaving: Bool = false
 
+  /// Guards the Home drop importer while its independent root transactions are
+  /// being committed. The authored composer draft remains separately owned.
+  @State private var isPostingHomeDrop: Bool = false
+
   var body: some View {
     @Bindable var composerState = composerState
 
@@ -104,10 +111,11 @@ struct CreationView: View {
       draft: composerState.activeDraft,
       isPresented: composerState.isComposerPresented,
       placement: composerState.placement,
-      isProcessing: isSaving || isImportingMediaFromLibrary,
+      isProcessing: isSaving || isImportingMediaFromLibrary || isPostingHomeDrop,
       onOpenDraft: presentComposerDraftEditor,
       onDiscardDraft: requestComposerDraftDiscard,
-      onPost: post
+      onPost: post,
+      onDropItems: postDroppedHomeItems
     ) {
       NavigationStack(path: $composerState.navigationPath) {
         SavedListView(
@@ -794,6 +802,67 @@ struct CreationView: View {
         }
       } catch {
         notifications.post(.cardPostFailed)
+      }
+    }
+  }
+
+  /// Posts every successfully transferred item as its own Home root.
+  ///
+  /// The selected `VaultInstance` is captured before the asynchronous task
+  /// begins, so navigation or vault selection cannot retarget an in-flight drop.
+  /// No composer draft participates in this path.
+  private func postDroppedHomeItems(_ items: [HomeDropItem]) {
+    guard items.isEmpty == false else { return }
+    guard composerState.placement.acceptsHomeDrop, isPostingHomeDrop == false else {
+      for item in items {
+        item.cleanUpTemporaryFiles()
+      }
+      return
+    }
+    guard let vault = vaultRuntime.selectedVault,
+      vault.descriptor.permission != .readOnly
+    else {
+      for item in items {
+        item.cleanUpTemporaryFiles()
+      }
+      notifications.post(.droppedContentPostFailed)
+      return
+    }
+
+    HomeDropItem.cleanUpStaleTemporaryFiles()
+    isPostingHomeDrop = true
+
+    Task { @MainActor in
+      defer { isPostingHomeDrop = false }
+
+      let result = HomeDropPostingCoordinator.post(
+        items: items,
+        postCard: { draft in
+          guard let rootEdge = try vault.createThread(cards: [draft]).first else {
+            throw CreationPostError.missingCreatedEdge
+          }
+          return rootEdge.id
+        },
+        onFailure: { index, diagnostic in
+          homeDropImportLog.error(
+            "Dropped item \(index, privacy: .public) failed: \(diagnostic, privacy: .private)"
+          )
+        }
+      )
+
+      if let newestPostedEdgeID = result.postedEdgeIDs.last {
+        savedCardScrollTargetID = newestPostedEdgeID
+        await vaultRuntime.refresh()
+        WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
+      }
+
+      switch (result.postedCount, result.failedCount) {
+      case (0, _):
+        notifications.post(.droppedContentPostFailed)
+      case (_, 0):
+        notifications.post(.cardPosted)
+      default:
+        notifications.post(.droppedContentPartiallyPosted)
       }
     }
   }

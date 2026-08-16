@@ -502,31 +502,7 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   /// explicit Link editor. Automatic promotion is stricter so a plain word or
   /// email address cannot unexpectedly replace the text composer.
   private static func isEntireWebURL(_ input: String) -> Bool {
-    let candidate = input.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard candidate.isEmpty == false,
-      let detector = try? NSDataDetector(
-        types: NSTextCheckingResult.CheckingType.link.rawValue
-      )
-    else {
-      return false
-    }
-
-    let candidateRange = NSRange(candidate.startIndex..<candidate.endIndex, in: candidate)
-    guard
-      let match = detector.firstMatch(
-        in: candidate,
-        options: [],
-        range: candidateRange
-      ),
-      match.range == candidateRange,
-      let scheme = match.url?.scheme?.lowercased(),
-      scheme == "http" || scheme == "https",
-      JournalLinkURL(candidate) != nil
-    else {
-      return false
-    }
-
-    return true
+    JournalLinkURL(entireWebURL: input) != nil
   }
 }
 

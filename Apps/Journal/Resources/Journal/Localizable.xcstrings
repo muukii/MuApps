@@ -1449,6 +1449,22 @@
         }
       }
     },
+    "Could not post dropped content" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not post dropped content"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ドロップした内容を投稿できませんでした"
+          }
+        }
+      }
+    },
     "Could not rename vault." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3695,6 +3711,22 @@
         }
       }
     },
+    "Some items could not be posted" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Some items could not be posted"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一部のアイテムを投稿できませんでした"
+          }
+        }
+      }
+    },
     "Sparkles" : {
       "localizations" : {
         "en" : {
@@ -3961,6 +3993,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "現在の入力内容はまだ投稿されていません。"
+          }
+        }
+      }
+    },
+    "The other dropped items were posted." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The other dropped items were posted."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "その他のドロップしたアイテムは投稿されました。"
           }
         }
       }
@@ -4766,6 +4814,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "思ったことを書いてみる..."
+          }
+        }
+      }
+    },
+    "Your current input was not changed." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your current input was not changed."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "入力中の内容は変更されていません。"
           }
         }
       }

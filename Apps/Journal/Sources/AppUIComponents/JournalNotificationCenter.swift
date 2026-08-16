@@ -167,6 +167,28 @@ public extension JournalNotification {
     )
   }
 
+  /// Warning shown when a multi-item drop posts some roots but rejects others.
+  static var droppedContentPartiallyPosted: JournalNotification {
+    JournalNotification(
+      semantics: .warning,
+      title: "Some items could not be posted",
+      message: "The other dropped items were posted.",
+      systemImage: "exclamationmark.triangle.fill",
+      lifetime: .persistent
+    )
+  }
+
+  /// Failure shown when no value from a Home drop could be committed.
+  static var droppedContentPostFailed: JournalNotification {
+    JournalNotification(
+      semantics: .failure,
+      title: "Could not post dropped content",
+      message: "Your current input was not changed.",
+      systemImage: "exclamationmark.triangle.fill",
+      lifetime: .persistent
+    )
+  }
+
   /// Failure shown when the selected Photos item cannot become a media card.
   static var mediaImportFailed: JournalNotification {
     JournalNotification(
