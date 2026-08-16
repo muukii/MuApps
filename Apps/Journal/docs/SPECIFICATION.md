@@ -617,6 +617,14 @@ exposing live duration and a normalized input level for a scrolling waveform.
   `requestPermission()` / `permission`. `start()` throws; `stop()` returns the
   `AudioRecording`. Level mapping is linear-in-dB above a −50dB silence floor so
   the meter tracks perceived loudness.
+- On iOS, the recording category enables Bluetooth HFP input. The recorder's
+  default **Automatic** choice prefers a connected wireless microphone such as
+  AirPods, otherwise preserving a valid current route before falling back to
+  the built-in microphone. The recording surface shows the resolved microphone
+  and lets the user choose any currently available input before recording.
+  Input choice is transient to that recording surface; a disconnected explicit
+  input falls back to Automatic. Native macOS input selection and output-route
+  selection are outside this contract.
 
 ### CaptureSuggestions → `CapturedSuggestion`
 

@@ -87,31 +87,34 @@ struct CreationComposerInputBar<MenuContent: View>: View {
   }
 
   var body: some View {
-    if draft.usesExpandedComposerPreview {
-      CreationComposerExpandedPreviewInputBar(
-        draft: draft,
-        placement: placement,
-        isPostDestinationAvailable: isPostDestinationAvailable,
-        isProcessing: isProcessing,
-        onOpenDraft: onOpenDraft,
-        onDiscardDraft: onDiscardDraft,
-        onPost: onPost
-      )
-    } else {
-      CreationComposerCompactInputBar(
-        draft: draft,
-        placement: placement,
-        isPostDestinationAvailable: isPostDestinationAvailable,
-        focusRequestID: focusRequestID,
-        onConsumeFocusRequest: onConsumeFocusRequest,
-        isProcessing: isProcessing,
-        onOpenDraft: onOpenDraft,
-        onDiscardDraft: onDiscardDraft,
-        onPost: onPost
-      ) {
-        menuContent
+    ZStack {
+      if draft.usesExpandedComposerPreview {
+        CreationComposerExpandedPreviewInputBar(
+          draft: draft,
+          placement: placement,
+          isPostDestinationAvailable: isPostDestinationAvailable,
+          isProcessing: isProcessing,
+          onOpenDraft: onOpenDraft,
+          onDiscardDraft: onDiscardDraft,
+          onPost: onPost
+        )
+      } else {
+        CreationComposerCompactInputBar(
+          draft: draft,
+          placement: placement,
+          isPostDestinationAvailable: isPostDestinationAvailable,
+          focusRequestID: focusRequestID,
+          onConsumeFocusRequest: onConsumeFocusRequest,
+          isProcessing: isProcessing,
+          onOpenDraft: onOpenDraft,
+          onDiscardDraft: onDiscardDraft,
+          onPost: onPost
+        ) {
+          menuContent
+        }
       }
     }
+    .contentShape(Rectangle())
   }
 }
 

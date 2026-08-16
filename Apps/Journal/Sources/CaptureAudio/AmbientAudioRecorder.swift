@@ -39,6 +39,17 @@ public final class AmbientAudioRecorder {
   /// padded with zeros before any audio arrives so the meter has a resting shape.
   public private(set) var samples: [Float] = Array(repeating: 0, count: sampleCount)
 
+  #if os(iOS)
+    /// Microphones currently reported by the configured iOS audio session.
+    private(set) var availableInputs: [AudioRecordingInput] = []
+
+    /// Transient user choice for this recorder presentation.
+    private(set) var inputSelection: AudioRecordingInputSelection = .automatic
+
+    /// Input that Automatic or the explicit choice currently resolves to.
+    private(set) var resolvedInput: AudioRecordingInput?
+  #endif
+
   /// Number of amplitude samples kept in `samples`. At `pollInterval` cadence
   /// this is the width of the waveform's time window (~2.4s).
   public static let sampleCount = 48
@@ -65,13 +76,54 @@ public final class AmbientAudioRecorder {
     AVAudioApplication.shared.recordPermission
   }
 
+  #if os(iOS)
+    /// Refreshes the microphones available to the iOS recording category.
+    ///
+    /// Calling this method doesn't activate recording or interrupt another app's
+    /// audio. If a route changes during a recording, the current selection is
+    /// reapplied to the active session.
+    func refreshAudioInputs() throws {
+      let session = AVAudioSession.sharedInstance()
+      try Self.configureAudioSession(session)
+      try reloadAudioInputs(
+        from: session,
+        applyingPreferredInput: state == .recording
+      )
+    }
+
+    /// Stores a transient input choice. The live port is resolved again when
+    /// recording starts so a stale device reference is never retained.
+    func selectInput(_ selection: AudioRecordingInputSelection) {
+      switch selection {
+      case .automatic:
+        inputSelection = .automatic
+      case .input(let id) where availableInputs.contains(where: { $0.id == id }):
+        inputSelection = selection
+      case .input:
+        inputSelection = .automatic
+      }
+
+      resolvedInput = AudioRecordingInputSelectionPolicy.resolvedInput(
+        for: inputSelection,
+        availableInputs: availableInputs,
+        currentInputID: AVAudioSession.sharedInstance().currentRoute.inputs.first?.uid
+      )
+    }
+  #endif
+
   public func start() throws {
     guard state != .recording else { return }
 
     #if os(iOS)
-    let session = AVAudioSession.sharedInstance()
-    try session.setCategory(.record, mode: .default)
-    try session.setActive(true)
+      let session = AVAudioSession.sharedInstance()
+      do {
+        try Self.configureAudioSession(session)
+        try session.setActive(true)
+        try reloadAudioInputs(from: session, applyingPreferredInput: true)
+      } catch {
+        Self.deactivateAudioSession(session)
+        throw error
+      }
     #endif
 
     let url = FileManager.default.temporaryDirectory
@@ -85,7 +137,15 @@ public final class AmbientAudioRecorder {
       AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
     ]
 
-    let recorder = try AVAudioRecorder(url: url, settings: settings)
+    let recorder: AVAudioRecorder
+    do {
+      recorder = try AVAudioRecorder(url: url, settings: settings)
+    } catch {
+      #if os(iOS)
+        Self.deactivateAudioSession(session)
+      #endif
+      throw error
+    }
     recorder.isMeteringEnabled = true
     recorder.record()
 
@@ -107,7 +167,7 @@ public final class AmbientAudioRecorder {
     recorder.stop()
     stopPolling()
     #if os(iOS)
-    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+      Self.deactivateAudioSession(AVAudioSession.sharedInstance())
     #endif
 
     self.recorder = nil
@@ -140,6 +200,60 @@ public final class AmbientAudioRecorder {
     pollTask?.cancel()
     pollTask = nil
   }
+
+  #if os(iOS)
+    /// Configures an input-only category while making Bluetooth HFP microphones
+    /// available. No output route, including the built-in speaker, is selected.
+    private static func configureAudioSession(_ session: AVAudioSession) throws {
+      try session.setCategory(
+        .record,
+        mode: .default,
+        options: [.allowBluetoothHFP]
+      )
+    }
+
+    /// Rebuilds value inputs and optionally applies the resolved live port.
+    private func reloadAudioInputs(
+      from session: AVAudioSession,
+      applyingPreferredInput: Bool
+    ) throws {
+      let ports = session.availableInputs ?? []
+      let inputs = ports.map(AudioRecordingInput.init(port:))
+      availableInputs = inputs
+
+      if case .input(let id) = inputSelection,
+        inputs.contains(where: { $0.id == id }) == false
+      {
+        inputSelection = .automatic
+      }
+
+      let requestedInput = AudioRecordingInputSelectionPolicy.resolvedInput(
+        for: inputSelection,
+        availableInputs: inputs,
+        currentInputID: session.currentRoute.inputs.first?.uid
+      )
+
+      guard applyingPreferredInput else {
+        resolvedInput = requestedInput
+        return
+      }
+
+      let preferredPort = ports.first { $0.uid == requestedInput?.id }
+      if session.preferredInput?.uid != preferredPort?.uid {
+        try session.setPreferredInput(preferredPort)
+      }
+      resolvedInput =
+        session.currentRoute.inputs.first.map(AudioRecordingInput.init(port:))
+        ?? requestedInput
+    }
+
+    /// Releases Tinycurve's shared-session preference before notifying other apps
+    /// that recording no longer owns the audio session.
+    private static func deactivateAudioSession(_ session: AVAudioSession) {
+      try? session.setPreferredInput(nil)
+      try? session.setActive(false, options: .notifyOthersOnDeactivation)
+    }
+  #endif
 
   /// Decibel level treated as silence. Average power runs −160...0 dB, but the
   /// usable range for voice/ambient sound sits near the top; flooring here keeps

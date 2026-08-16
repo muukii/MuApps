@@ -4,248 +4,6 @@
     "" : {
 
     },
-    "All Entries" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "All Entries"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "すべての記録"
-          }
-        }
-      }
-    },
-    "Cancel Reply" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cancel Reply"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "返信をキャンセル"
-          }
-        }
-      }
-    },
-    "Could Not Update Todo" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Could Not Update Todo"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Todoを更新できませんでした"
-          }
-        }
-      }
-    },
-    "Filter Entries" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Filter Entries"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "記録を絞り込む"
-          }
-        }
-      }
-    },
-    "No Entries" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No Entries"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "記録がありません"
-          }
-        }
-      }
-    },
-    "No Matching Entries" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No Matching Entries"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "一致する記録がありません"
-          }
-        }
-      }
-    },
-    "Post Reply" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Post Reply"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "返信を投稿"
-          }
-        }
-      }
-    },
-    "Reply" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reply"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "返信"
-          }
-        }
-      }
-    },
-    "Reply target is no longer available" : {
-      "comment" : "Error shown when the selected parent card was deleted or became unavailable.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reply target is no longer available"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "返信先を利用できません"
-          }
-        }
-      }
-    },
-    "Replying to" : {
-      "comment" : "Label above the composer for the selected Reply target.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Replying to"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "返信先"
-          }
-        }
-      }
-    },
-    "Show All Entries" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Show All Entries"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "すべての記録を表示"
-          }
-        }
-      }
-    },
-    "This vault has no entries of the selected content type." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This vault has no entries of the selected content type."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このVaultには選択した種類の記録がありません。"
-          }
-        }
-      }
-    },
-    "Todo" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Todo"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Todo"
-          }
-        }
-      }
-    },
-    "Todo text" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Todo text"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Todoのテキスト"
-          }
-        }
-      }
-    },
-    "Write a reply" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Write a reply"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "返信を書く"
-          }
-        }
-      }
-    },
     "%@, %@" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -383,6 +141,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ウィジェットを追加"
+          }
+        }
+      }
+    },
+    "All Entries" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All Entries"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべての記録"
           }
         }
       }
@@ -878,6 +652,23 @@
         }
       }
     },
+    "Automatic" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatic"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動"
+          }
+        }
+      }
+    },
     "Background" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1062,6 +853,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "キャンセル"
+          }
+        }
+      }
+    },
+    "Cancel Reply" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel Reply"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返信をキャンセル"
           }
         }
       }
@@ -1548,6 +1355,7 @@
       }
     },
     "Could not post dropped content" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1598,6 +1406,22 @@
     },
     "Could Not Update Icon" : {
 
+    },
+    "Could Not Update Todo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could Not Update Todo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Todoを更新できませんでした"
+          }
+        }
+      }
     },
     "Create" : {
       "localizations" : {
@@ -2211,6 +2035,22 @@
     },
     "Files shared to Tinycurve stay attached to their original entry." : {
 
+    },
+    "Filter Entries" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter Entries"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記録を絞り込む"
+          }
+        }
+      }
     },
     "Finish artwork" : {
       "extractionState" : "stale",
@@ -2982,6 +2822,38 @@
         }
       }
     },
+    "No Entries" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Entries"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記録がありません"
+          }
+        }
+      }
+    },
+    "No Matching Entries" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Matching Entries"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一致する記録がありません"
+          }
+        }
+      }
+    },
     "No media files" : {
       "localizations" : {
         "en" : {
@@ -3226,6 +3098,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "カードを投稿"
+          }
+        }
+      }
+    },
+    "Post Reply" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Post Reply"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返信を投稿"
           }
         }
       }
@@ -3488,6 +3376,56 @@
         }
       }
     },
+    "Reply" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reply"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返信"
+          }
+        }
+      }
+    },
+    "Reply target is no longer available" : {
+      "comment" : "Error shown when the selected parent card was deleted or became unavailable.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reply target is no longer available"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返信先を利用できません"
+          }
+        }
+      }
+    },
+    "Replying to" : {
+      "comment" : "Label above the composer for the selected Reply target.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replying to"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返信先"
+          }
+        }
+      }
+    },
     "Retake Photo" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3726,6 +3664,22 @@
         }
       }
     },
+    "Show All Entries" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show All Entries"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべての記録を表示"
+          }
+        }
+      }
+    },
     "Show Onboarding" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3810,6 +3764,7 @@
       }
     },
     "Some items could not be posted" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4096,6 +4051,7 @@
       }
     },
     "The other dropped items were posted." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4372,6 +4328,22 @@
         }
       }
     },
+    "This vault has no entries of the selected content type." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This vault has no entries of the selected content type."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このVaultには選択した種類の記録がありません。"
+          }
+        }
+      }
+    },
     "This vault is read-only." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4438,6 +4410,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "今日"
+          }
+        }
+      }
+    },
+    "Todo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Todo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Todo"
+          }
+        }
+      }
+    },
+    "Todo text" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Todo text"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Todoのテキスト"
           }
         }
       }
@@ -4899,6 +4903,22 @@
         }
       }
     },
+    "Write a reply" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Write a reply"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返信を書く"
+          }
+        }
+      }
+    },
     "Write your thoughts..." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4917,6 +4937,7 @@
       }
     },
     "Your current input was not changed." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

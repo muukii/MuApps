@@ -1,6 +1,10 @@
 import AVFoundation
 import SwiftUI
 
+#if os(iOS)
+  import Combine
+#endif
+
 /// A self-contained ambient-sound capture surface: a record/stop control, a live
 /// elapsed timer, and an input-level meter. Emits the finished recording through
 /// `onFinish`.
@@ -29,6 +33,17 @@ public struct AudioCaptureView: View {
         .frame(height: 64)
         .padding(.horizontal, 32)
 
+      #if os(iOS)
+        AudioInputSelector(
+          inputs: recorder.availableInputs,
+          selection: recorder.inputSelection,
+          resolvedInputName: recorder.resolvedInput?.name ?? String(localized: "Automatic"),
+          isEnabled: recorder.state != .recording && recorder.availableInputs.isEmpty == false,
+          onSelect: { recorder.selectInput($0) }
+        )
+        .padding(.horizontal, 32)
+      #endif
+
       Spacer()
 
       recordButton
@@ -46,6 +61,23 @@ public struct AudioCaptureView: View {
     } message: {
       Text("Enable microphone access in Settings to record ambient sound.")
     }
+    #if os(iOS)
+      .onAppear {
+        refreshAudioInputs(reportingErrors: false)
+      }
+      .onReceive(
+        NotificationCenter.default.publisher(
+          for: AVAudioSession.availableInputsChangeNotification
+        )
+      ) { _ in
+        refreshAudioInputs(reportingErrors: recorder.state == .recording)
+      }
+      .onReceive(
+        NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)
+      ) { _ in
+        refreshAudioInputs(reportingErrors: recorder.state == .recording)
+      }
+    #endif
   }
 
   private var recordButton: some View {
@@ -93,11 +125,86 @@ public struct AudioCaptureView: View {
     }
   }
 
+  #if os(iOS)
+    private func refreshAudioInputs(reportingErrors: Bool) {
+      do {
+        try recorder.refreshAudioInputs()
+      } catch {
+        if reportingErrors {
+          errorMessage = error.localizedDescription
+        }
+        // An inactive session may not expose inputs until permission or hardware
+        // is ready. `start()` repeats configuration and reports actionable errors.
+      }
+    }
+  #endif
+
   private static func formatted(_ duration: TimeInterval) -> String {
     let total = Int(duration)
     return String(format: "%02d:%02d", total / 60, total % 60)
   }
 }
+
+#if os(iOS)
+  /// Stateless microphone selector. The recorder owns route state; this view only
+  /// renders narrow values and sends the user's next transient selection upward.
+  private struct AudioInputSelector: View {
+    let inputs: [AudioRecordingInput]
+    let selection: AudioRecordingInputSelection
+    let resolvedInputName: String
+    let isEnabled: Bool
+    let onSelect: @MainActor @Sendable (AudioRecordingInputSelection) -> Void
+
+    var body: some View {
+      Menu {
+        Picker(
+          "Microphone",
+          selection: Binding(
+            get: { selection },
+            set: { onSelect($0) }
+          )
+        ) {
+          Text("Automatic")
+            .tag(AudioRecordingInputSelection.automatic)
+
+          ForEach(inputs) { input in
+            Text(verbatim: input.name)
+              .tag(AudioRecordingInputSelection.input(id: input.id))
+          }
+        }
+      } label: {
+        HStack(spacing: 12) {
+          Image(systemName: "mic")
+            .imageScale(.large)
+
+          VStack(alignment: .leading, spacing: 2) {
+            Text("Microphone")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            Text(verbatim: resolvedInputName)
+              .font(.body)
+              .foregroundStyle(.primary)
+              .lineLimit(1)
+          }
+
+          Spacer(minLength: 8)
+
+          Image(systemName: "chevron.up.chevron.down")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+        .contentShape(.rect)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
+      }
+      .buttonStyle(.plain)
+      .disabled(isEnabled == false)
+      .accessibilityLabel("Microphone")
+      .accessibilityValue(Text(verbatim: resolvedInputName))
+    }
+  }
+#endif
 
 // MARK: - Waveform Meter
 

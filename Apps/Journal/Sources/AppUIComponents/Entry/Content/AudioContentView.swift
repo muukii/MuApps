@@ -43,32 +43,35 @@ struct AudioContentView: View {
 
   @ViewBuilder
   var body: some View {
-    switch style.preset {
-    case .composer:
-      waveform
-        .frame(maxWidth: .infinity, minHeight: 68, alignment: .center)
-    case .overview, .detail:
-      VStack(alignment: .leading, spacing: 14) {
-        Label("Audio", systemImage: "waveform")
-          .font(.headline.weight(.semibold))
-
+    ZStack {
+      switch style.preset {
+      case .composer:
         waveform
-          .frame(
-            maxWidth: .infinity,
-            minHeight: 52,
-            alignment: .center
-          )
+          .frame(maxWidth: .infinity, minHeight: 68, alignment: .center)
+      case .overview, .detail:
+        VStack(alignment: .leading, spacing: 14) {
+          Label("Audio", systemImage: "waveform")
+            .font(.headline.weight(.semibold))
+          
+          waveform
+            .frame(
+              maxWidth: .infinity,
+              minHeight: 52,
+              alignment: .center
+            )
+        }
+      case .share:
+        VStack(alignment: .leading, spacing: 36) {
+          Image(systemName: "waveform")
+            .font(.system(size: 96, weight: .semibold))
+          
+          waveform
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       }
-    case .share:
-      VStack(alignment: .leading, spacing: 36) {
-        Image(systemName: "waveform")
-          .font(.system(size: 96, weight: .semibold))
-
-        waveform
-          .frame(maxWidth: .infinity, alignment: .leading)
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
+    .background(.appSecondaryContainer)
   }
 
   private var waveform: some View {

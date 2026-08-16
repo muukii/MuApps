@@ -526,7 +526,8 @@ let project = Project(
         .target(name: "CaptureDoodle"),
         .target(name: "JournalVault"),
         .target(name: "MuColor"),
-        .external(name: "GaussianLinearGradient")
+        .external(name: "GaussianLinearGradient"),
+        .external(name: "SwiftUISnapDraggingModifier"),
       ]
     ),
     journalFramework(name: "MuHaptics"),
@@ -587,6 +588,22 @@ let project = Project(
       dependencies: [
         .sdk(name: "AVFoundation", type: .framework),
       ]
+    ),
+    .target(
+      name: "CaptureAudioTests",
+      destinations: journalDestinations,
+      product: .unitTests,
+      bundleId: "app.muukii.journal.CaptureAudioTests",
+      deploymentTargets: journalDeploymentTargets,
+      infoPlist: .default,
+      buildableFolders: ["Tests/CaptureAudioTests"],
+      dependencies: [
+        .target(name: "CaptureAudio"),
+      ],
+      settings: .settings(
+        base: [:],
+        configurations: journalConfigurations
+      )
     ),
     // `JournalingSuggestions` (and `HealthKit`, used to read workout quantities)
     // ship only in the device SDK — they are absent from the Simulator SDK, so an
@@ -650,6 +667,16 @@ let project = Project(
       testAction: .targets([
         .testableTarget(
           target: "CapturePhotoTests",
+          parallelization: .swiftTestingOnly
+        ),
+      ])
+    ),
+    .scheme(
+      name: "CaptureAudioTests",
+      buildAction: .buildAction(targets: ["CaptureAudioTests"]),
+      testAction: .targets([
+        .testableTarget(
+          target: "CaptureAudioTests",
           parallelization: .swiftTestingOnly
         ),
       ])
