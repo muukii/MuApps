@@ -527,7 +527,10 @@ let project = Project(
         .target(name: "JournalVault"),
         .target(name: "MuColor"),
         .external(name: "GaussianLinearGradient"),
-        .external(name: "SwiftUISnapDraggingModifier"),
+        .external(
+          name: "SwiftUISnapDraggingModifier",
+          condition: .when([.ios])
+        ),
       ]
     ),
     journalFramework(name: "MuHaptics"),

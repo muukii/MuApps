@@ -163,15 +163,19 @@ struct VaultSavedEntryTreeCell: View {
   let onToggleTodoCompletion: @MainActor (VaultSavedEntry) -> Void
 
   var body: some View {
-    VaultSavedEntryRow(
-      entry: entry,
-      isMutationDisabled: isMutationDisabled,
-      onReply: onReply,
-      onShare: onShare,
-      onEdit: onEdit,
-      onRequestDelete: onRequestDelete,
-      onToggleTodoCompletion: onToggleTodoCompletion
-    )
+    SwipeCell {
+      VaultSavedEntryRow(
+        entry: entry,
+        isMutationDisabled: isMutationDisabled,
+        onReply: onReply,
+        onShare: onShare,
+        onEdit: onEdit,
+        onRequestDelete: onRequestDelete,
+        onToggleTodoCompletion: onToggleTodoCompletion
+      )
+    } onTrigger: {
+      onReply(entry)
+    }
     .padding(
       .leading,
       depth > 0 ? VaultSavedEntryTreeMetrics.descendantMarkerGutter : 0

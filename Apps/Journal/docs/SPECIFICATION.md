@@ -1141,7 +1141,18 @@ the gallery's **Lab** section).
   widget surfaces render that state without offering a mutation control. Every
   visible tree node's context menu exposes Reply, Share, Edit, and Delete. Reply
   selects the explicit composer target described above; it does not navigate or
-  mutate storage by itself. Saved entries can be shared from that menu. The share
+  mutate storage by itself. On iPhone and iPad, each individual tree node also
+  exposes Reply through a physical-left `SwipeCell` gesture. The row gesture
+  begins only when horizontal movement is dominant, so vertical or equal-axis
+  movement remains owned by Home's vertical scroll. The row continues to
+  rubber-band within its existing `-50...0pt` horizontal range. Crossing `-44pt`
+  reveals the same 44-point trailing circular Reply affordance and produces
+  impact feedback. A normally ended gesture past that threshold selects the same
+  explicit Reply target exactly once; ending below the threshold, cancellation,
+  or failure restores the row without selecting Reply. Native macOS renders the
+  cell content unchanged, without installing that swipe interaction; context-menu
+  and accessibility Reply remain available. Saved entries can be shared from
+  that menu. The share
   action opens a preview sheet backed
   by a detached `EntryShareSnapshot`, renders the actual temporary PNG artifact
   on a full-bleed branded canvas with the same `.share` leaf styles, and, for
