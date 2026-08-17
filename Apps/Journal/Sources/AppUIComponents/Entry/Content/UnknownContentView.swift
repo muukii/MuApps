@@ -11,18 +11,26 @@ struct UnknownContentView: View {
       self.preset = preset
     }
 
-    var minimumHeight: CGFloat? { preset == .detail ? 120 : nil }
+    var minimumHeight: CGFloat? {
+      switch preset {
+      case .composer:
+        return nil
+      case .cell:
+        return 120
+      }
+    }
   }
 
   let style: Style
 
   var body: some View {
-    if style.preset == .composer {
+    switch style.preset {
+    case .composer:
       ContentMediaPlaceholder(
         systemImage: "questionmark.square.dashed",
         aspectRatio: 1
       )
-    } else {
+    case .cell:
       ContentMediaPlaceholder(systemImage: "questionmark.square.dashed")
     }
   }
@@ -30,6 +38,6 @@ struct UnknownContentView: View {
 
 #Preview("Unknown Content") {
   EntryContentPreviewCanvas {
-    UnknownContentView(style: .init(.detail))
+    UnknownContentView(style: .init(.cell))
   }
 }

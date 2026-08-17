@@ -30,7 +30,14 @@ struct TodoContentView: View {
     case readOnly
 
     /// Displays a control that sends the toggle intent to its owner.
-    case interactive(@MainActor () -> Void)
+    ///
+    /// - Parameters:
+    ///   - isEnabled: Whether the placement currently accepts a mutation.
+    ///   - onToggle: Sends the requested state change to the owning feature.
+    case interactive(
+      isEnabled: Bool = true,
+      onToggle: @MainActor () -> Void
+    )
   }
 
   /// Visual treatment for a Todo in one authored-content placement.
@@ -42,67 +49,43 @@ struct TodoContentView: View {
     }
 
     var font: Font {
-      switch preset {
-      case .composer, .overview, .detail:
-        return .headline.weight(.semibold)
-      case .share:
-        return .system(size: 64, weight: .bold)
-      }
+      .headline.weight(.semibold)
     }
 
-    var indicatorSize: CGFloat {
-      preset == .share ? 52 : 24
-    }
+    var indicatorSize: CGFloat { 24 }
 
-    var statusSlotSize: CGFloat {
-      preset == .share ? 72 : 44
-    }
+    var statusSlotSize: CGFloat { 44 }
 
-    var spacing: CGFloat {
-      preset == .share ? 28 : 8
-    }
+    var spacing: CGFloat { 6 }
 
     var lineLimit: Int? {
       switch preset {
-      case .composer, .overview:
+      case .composer:
         return 8
-      case .detail:
+      case .cell:
         return nil
-      case .share:
-        return 10
       }
     }
 
-    var lineSpacing: CGFloat {
-      preset == .share ? 8 : 0
-    }
+    var lineSpacing: CGFloat { 0 }
 
-    var minimumScaleFactor: CGFloat {
-      preset == .share ? 0.62 : 1
-    }
-
-    var fillsAvailableSpace: Bool {
-      preset == .share
-    }
+    var minimumScaleFactor: CGFloat { 1 }
 
     var minimumHeight: CGFloat? { nil }
   }
 
   let source: TodoContentSource
   let style: Style
-  let showsCompletionIndicator: Bool
   let interaction: Interaction
 
   var body: some View {
     HStack(alignment: .center, spacing: style.spacing) {
-      if showsCompletionIndicator {
-        TodoStatusControl(
-          isCompleted: source.isCompleted,
-          imageSize: style.indicatorSize,
-          frameSize: style.statusSlotSize,
-          interaction: interaction
-        )
-      }
+      TodoStatusControl(
+        isCompleted: source.isCompleted,
+        imageSize: style.indicatorSize,
+        frameSize: style.statusSlotSize,
+        interaction: interaction
+      )
 
       Text(displayText)
         .font(style.font)
@@ -111,41 +94,28 @@ struct TodoContentView: View {
         .minimumScaleFactor(style.minimumScaleFactor)
         .strikethrough(source.isCompleted)
         .opacity(source.isCompleted ? 0.58 : 1)
-        .frame(
-          maxWidth: style.fillsAvailableSpace ? .infinity : nil,
-          maxHeight: style.fillsAvailableSpace ? .infinity : nil,
-          alignment: .leading
-        )
     }
-    .padding(16)
-    .frame(
-      maxWidth: .infinity,
-      maxHeight: style.fillsAvailableSpace ? .infinity : nil,
-      alignment: .leading
-    )
+    .padding(.horizontal, 8)
+    .padding(.vertical, 6)
+    .frame(maxWidth: .infinity, alignment: .leading)
     .background(.appSecondaryContainer)
   }
 
   private var displayText: String {
     guard source.text.isEmpty else { return source.text }
-    switch style.preset {
-    case .share:
-      return String(localized: "Untitled Todo", bundle: #bundle)
-    case .composer, .overview, .detail:
-      return String(localized: "Todo", bundle: #bundle)
-    }
+    return String(localized: "Todo", bundle: #bundle)
   }
 }
 
-/// Completion affordance shared by Todo content and navigation-row overlays.
-public struct TodoCompletionButton: View {
+/// Actionable completion affordance owned by Todo content.
+private struct TodoCompletionButton: View {
 
   private let isCompleted: Bool
   private let imageSize: CGFloat
   private let frameSize: CGFloat
   private let onToggle: @MainActor () -> Void
 
-  public init(
+  init(
     isCompleted: Bool,
     imageSize: CGFloat = 24,
     frameSize: CGFloat = 44,
@@ -157,7 +127,7 @@ public struct TodoCompletionButton: View {
     self.onToggle = onToggle
   }
 
-  public var body: some View {
+  var body: some View {
     Button(action: onToggle) {
       TodoStatusIndicator(
         isCompleted: isCompleted,
@@ -212,13 +182,14 @@ private struct TodoStatusControl: View {
         frameSize: frameSize
       )
       .accessibilityHidden(true)
-    case .interactive(let onToggle):
+    case .interactive(let isEnabled, let onToggle):
       TodoCompletionButton(
         isCompleted: isCompleted,
         imageSize: imageSize,
         frameSize: frameSize,
         onToggle: onToggle
       )
+      .disabled(isEnabled == false)
     }
   }
 }
@@ -243,15 +214,13 @@ private struct TodoStatusIndicator: View {
     VStack(spacing: 20) {
       TodoContentView(
         source: TodoContentSource(text: "Pick up flowers before dinner"),
-        style: .init(.detail),
-        showsCompletionIndicator: true,
+        style: .init(.cell),
         interaction: .readOnly
       )
 
       TodoContentView(
         source: TodoContentSource(text: "Book the train", completedAt: .now),
-        style: .init(.detail),
-        showsCompletionIndicator: true,
+        style: .init(.cell),
         interaction: .interactive {}
       )
     }

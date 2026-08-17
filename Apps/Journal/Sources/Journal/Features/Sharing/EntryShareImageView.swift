@@ -1,13 +1,12 @@
 import AppUIComponents
-import JournalVault
 import MuColor
 import SwiftUI
 
-/// Export-only layout for one saved entry.
+/// Export-only composition for one detached entry snapshot.
 ///
-/// This view is intentionally independent from the saved-list tile. Sharing has
-/// a fixed canvas, stronger typography, and later needs to match video frames;
-/// the list tile stays optimized for dense in-app browsing.
+/// The share feature owns only the vertical frame. Authored content keeps its
+/// ordinary read-only presentation and is centered without receiving an
+/// export-specific style.
 struct EntryShareImageView: View {
 
   let snapshot: EntryShareSnapshot
@@ -19,51 +18,45 @@ struct EntryShareImageView: View {
   }
 
   var body: some View {
-    EntryShareExportFrame(snapshot: snapshot, palette: palette) {
-      EntryContentView(content: snapshot.content, style: .share)
+    EntryShareFrame(palette: palette) {
+      EntryContentView(content: snapshot.content)
     }
   }
 }
 
-/// Export frame used as the static background for Doodle replay videos.
+/// Static background shared by Doodle and Bauhaus replay-video frames.
 ///
-/// The moving stroke layer is intentionally omitted so the video writer can
-/// render this SwiftUI frame once, then composite only the time-varying Doodle
-/// vector content for each generated frame.
-struct EntryShareDoodleVideoBaseFrameView: View {
+/// The video writer composites animated authored content into the bounds from
+/// `EntryShareFrameLayout`; the SwiftUI base therefore renders only the frame.
+struct EntryShareVideoBaseFrameView: View {
 
-  let snapshot: EntryShareSnapshot
   let palette: Palette
 
-  init(snapshot: EntryShareSnapshot, palette: Palette = .default) {
-    self.snapshot = snapshot
+  init(palette: Palette = .default) {
     self.palette = palette
   }
 
   var body: some View {
-    EntryShareExportFrame(snapshot: snapshot, palette: palette) {
-      EntryShareReplayVideoBaseContent()
+    EntryShareFrame(palette: palette) {
+      Color.clear
     }
   }
 }
 
-/// Shared export canvas used by still-image and replay previews.
+/// A vertical share canvas that centers ordinary authored content.
 ///
-/// The canvas provides shared branding and metadata while each authored content
-/// style owns its actual visual treatment.
-struct EntryShareExportFrame<Content: View>: View {
+/// Layout, safe inset, theme, and raster scale belong to this boundary. The
+/// child content does not know whether it is being displayed or exported.
+struct EntryShareFrame<Content: View>: View {
 
-  let snapshot: EntryShareSnapshot
   let palette: Palette
 
   private let content: Content
 
   init(
-    snapshot: EntryShareSnapshot,
     palette: Palette = .default,
     @ViewBuilder content: () -> Content
   ) {
-    self.snapshot = snapshot
     self.palette = palette
     self.content = content()
   }
@@ -74,157 +67,98 @@ struct EntryShareExportFrame<Content: View>: View {
         Rectangle()
           .fill(.appSecondaryContainer)
 
-        VStack(alignment: .leading, spacing: 36) {
-          EntryShareHeader(kind: snapshot.kind, createdAt: snapshot.createdAt)
-
-          content
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-          EntryShareFooter(location: snapshot.location)
-        }
-        .padding(96)
-        .foregroundStyle(.appOnSecondaryContainer)
+        content
+          .frame(maxWidth: .infinity)
+          .foregroundStyle(.appOnSecondaryContainer)
+          .padding(EntryShareFrameLayout.contentInset)
       }
+      .clipped()
     }
   }
 }
 
-/// Export frame used as the static background for Bauhaus replay videos.
+/// Geometry contract shared by SwiftUI stills and Core Graphics video frames.
 ///
-/// The animated grid is drawn by the video writer, while this view keeps the
-/// surrounding share chrome identical to image export.
-struct EntryShareBauhausVideoBaseFrameView: View {
+/// The logical frame uses phone-sized points. Raster output scales the complete
+/// hierarchy uniformly, so content typography and spacing stay identical to the
+/// normal Cell presentation instead of carrying share-only enlarged values.
+enum EntryShareFrameLayout {
 
-  let snapshot: EntryShareSnapshot
-  let palette: Palette
+  /// Logical 9:16 canvas rendered by SwiftUI before raster scaling.
+  nonisolated static let pointSize = CGSize(width: 360, height: 640)
 
-  init(snapshot: EntryShareSnapshot, palette: Palette = .default) {
-    self.snapshot = snapshot
-    self.palette = palette
-  }
+  /// Safe distance between the canvas edge and centered authored content.
+  nonisolated static let contentInset: CGFloat = 32
 
-  var body: some View {
-    EntryShareExportFrame(snapshot: snapshot, palette: palette) {
-      EntryShareReplayVideoBaseContent()
+  /// Corner radius inherited from the ordinary `EntryContentView` presentation.
+  nonisolated static let contentCornerRadius: CGFloat = 24
+
+  /// Padding used by the ordinary Bauhaus Cell renderer around its grid.
+  nonisolated static let bauhausGridPadding: CGFloat = 20
+
+  /// Returns the uniform raster scale required for an output pixel size.
+  ///
+  /// Non-9:16 sizes return `nil` because stretching one axis would make still
+  /// and video content disagree about geometry.
+  nonisolated static func rasterScale(for pixelSize: CGSize) -> CGFloat? {
+    guard pixelSize.width.isFinite,
+      pixelSize.height.isFinite,
+      pixelSize.width > 0,
+      pixelSize.height > 0
+    else {
+      return nil
     }
-  }
-}
 
-/// Empty media well used by static video base frames.
-private struct EntryShareReplayVideoBaseContent: View {
-
-  var body: some View {
-    RoundedRectangle(cornerRadius: 32, style: .continuous)
-      .fill(.appOnSecondaryContainer.opacity(0.06))
-      .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-  }
-}
-
-/// Kind and timestamp row shown at the top of the export.
-private struct EntryShareHeader: View {
-
-  let kind: JournalVault.Card.Kind
-  let createdAt: Date
-
-  var body: some View {
-    HStack(alignment: .firstTextBaseline, spacing: 18) {
-      Label {
-        Text(kind.shareTitle)
-      } icon: {
-        Image(systemName: kind.shareSymbolName)
-      }
-      .font(.system(size: 30, weight: .semibold))
-      .labelStyle(.titleAndIcon)
-
-      Spacer(minLength: 0)
-
-      Text(createdAt, format: .dateTime.year().month().day().hour().minute())
-        .font(.system(size: 24, weight: .medium))
-        .foregroundStyle(.appOnSecondaryContainer.opacity(0.56))
+    let horizontalScale = pixelSize.width / pointSize.width
+    let verticalScale = pixelSize.height / pointSize.height
+    let tolerance = max(horizontalScale, verticalScale) * 0.000_1
+    guard abs(horizontalScale - verticalScale) <= tolerance else {
+      return nil
     }
-  }
-}
 
-/// Optional metadata row at the bottom of the export.
-private struct EntryShareFooter: View {
-
-  let location: JournalVault.Coordinate?
-
-  var body: some View {
-    HStack(spacing: 10) {
-      Text("Tinycurve")
-
-      if location != nil {
-        Image(systemName: "location.fill")
-      }
-    }
-    .font(.system(size: 24, weight: .semibold))
-    .foregroundStyle(.appOnSecondaryContainer.opacity(0.52))
-  }
-}
-
-extension JournalVault.Card.Kind {
-
-  fileprivate var shareTitle: LocalizedStringResource {
-    switch self {
-    case .text:
-      return "Text"
-    case .todo:
-      return "Todo"
-    case .link:
-      return "Link"
-    case .file:
-      return "File"
-    case .photo:
-      return "Photo"
-    case .video:
-      return "Video"
-    case .livePhoto:
-      return "Live Photo"
-    case .audio:
-      return "Audio"
-    case .suggestion:
-      return "Suggestion"
-    case .doodle:
-      return "Doodle"
-    case .bauhaus:
-      return "Bauhaus"
-    case .unknown:
-      return "Unknown"
-    @unknown default:
-      return "Unknown"
-    }
+    return (horizontalScale + verticalScale) / 2
   }
 
-  fileprivate var shareSymbolName: String {
-    switch self {
-    case .text:
-      return "text.alignleft"
-    case .todo:
-      return "checkmark.circle"
-    case .link:
-      return "link"
-    case .file:
-      return "doc"
-    case .photo:
-      return "photo"
-    case .video:
-      return "video"
-    case .livePhoto:
-      return "livephoto"
-    case .audio:
-      return "waveform"
-    case .suggestion:
-      return "sparkles"
-    case .doodle:
-      return "scribble.variable"
-    case .bauhaus:
-      return "square.grid.3x3.square"
-    case .unknown:
-      return "questionmark"
-    @unknown default:
-      return "questionmark"
+  /// Returns the safe content bounds in output-pixel coordinates.
+  nonisolated static func contentBounds(in pixelSize: CGSize) -> CGRect? {
+    guard let scale = rasterScale(for: pixelSize) else { return nil }
+    return CGRect(origin: .zero, size: pixelSize)
+      .insetBy(dx: contentInset * scale, dy: contentInset * scale)
+  }
+
+  /// Aspect-fits authored content into `bounds` while keeping it centered.
+  nonisolated static func aspectFitRect(
+    aspectRatio: CGFloat,
+    in bounds: CGRect
+  ) -> CGRect {
+    guard aspectRatio.isFinite,
+      aspectRatio > 0,
+      bounds.width > 0,
+      bounds.height > 0
+    else {
+      return .zero
     }
+
+    let boundsAspectRatio = bounds.width / bounds.height
+    let fittedSize: CGSize
+    if aspectRatio > boundsAspectRatio {
+      fittedSize = CGSize(
+        width: bounds.width,
+        height: bounds.width / aspectRatio
+      )
+    } else {
+      fittedSize = CGSize(
+        width: bounds.height * aspectRatio,
+        height: bounds.height
+      )
+    }
+
+    return CGRect(
+      x: bounds.midX - fittedSize.width / 2,
+      y: bounds.midY - fittedSize.height / 2,
+      width: fittedSize.width,
+      height: fittedSize.height
+    )
   }
 }
 
@@ -232,17 +166,11 @@ extension JournalVault.Card.Kind {
   EntryShareImageView(
     snapshot: EntryShareSnapshot(
       id: UUID(uuidString: "D86B20CE-D183-47D8-9795-552F6B00C40B")!,
-      kind: .text,
-      createdAt: Date(timeIntervalSinceReferenceDate: 805_766_400),
-      content: .text("A quiet morning, warm light, and a thought worth keeping."),
-      location: JournalVault.Coordinate(
-        latitude: 35.6812,
-        longitude: 139.7671
-      )
+      content: .text("A quiet morning, warm light, and a thought worth keeping.")
     )
   )
   .frame(
-    width: EntryShareImageRenderer.defaultPixelSize.width,
-    height: EntryShareImageRenderer.defaultPixelSize.height
+    width: EntryShareFrameLayout.pointSize.width,
+    height: EntryShareFrameLayout.pointSize.height
   )
 }

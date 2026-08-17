@@ -3,14 +3,14 @@ import JournalVault
 
 /// One request to present an in-app Journal capture flow.
 ///
-/// A `nil` `vaultID` means the Quick Capture Vault was not configured or could
-/// not be read. The app must present setup or an error; it must not substitute
-/// the currently selected or first catalog vault.
+/// A `nil` `vaultID` means no successful Share destination or explicit Intent
+/// destination could be resolved. The app must present an error; it must not
+/// substitute the currently selected or first catalog vault.
 public struct JournalCaptureRequest: Identifiable, Hashable, Sendable {
   /// Unique identity used by UI coordinators to consume a request once.
   public let id: UUID
 
-  /// Explicit destination resolved by the intent or shared preferences.
+  /// Destination resolved from the intent or remembered Share history.
   public let vaultID: VaultID?
 
   /// Capture surface to present after destination validation.

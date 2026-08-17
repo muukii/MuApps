@@ -51,7 +51,12 @@ extension CardEditDraft {
         )
       )
     case .audio:
-      return .audio(AudioContentSource(fileURL: audio?.fileURL))
+      return .audio(
+        AudioContentSource(
+          fileURL: audio?.fileURL,
+          waveformLevels: audio?.waveform?.levels
+        )
+      )
     case .suggestion:
       return .suggestion(
         SuggestionContentSource(

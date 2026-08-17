@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Generic file values rendered by compact, detail, and export styles.
+/// Generic file values rendered by composer and Cell styles.
 ///
 /// `displayName` comes from the card body, while `fileURL` points at the
 /// primary `.file` attachment resource when it is locally available.
@@ -37,66 +37,48 @@ struct FileContentView: View {
 
     var spacing: CGFloat {
       switch preset {
-      case .composer, .overview:
+      case .composer:
         return 10
-      case .detail:
+      case .cell:
         return 14
-      case .share:
-        return 28
       }
     }
 
     var iconFont: Font {
       switch preset {
-      case .composer, .overview:
+      case .composer:
         return .system(size: 34, weight: .regular)
-      case .detail:
+      case .cell:
         return .system(size: 52, weight: .regular)
-      case .share:
-        return .system(size: 112, weight: .regular)
       }
     }
 
     var titleFont: Font {
-      switch preset {
-      case .composer, .overview, .detail:
-        return .headline.weight(.semibold)
-      case .share:
-        return .system(size: 52, weight: .bold)
-      }
+      .headline.weight(.semibold)
     }
 
     var titleLineLimit: Int {
       switch preset {
-      case .composer, .overview:
+      case .composer:
         return 3
-      case .detail, .share:
+      case .cell:
         return 4
       }
     }
 
-    var metadataFont: Font {
-      preset == .share ? .system(size: 26, weight: .medium) : .caption
-    }
+    var metadataFont: Font { .caption }
 
-    var minimumScaleFactor: CGFloat {
-      preset == .share ? 0.62 : 0.8
-    }
+    var minimumScaleFactor: CGFloat { 0.8 }
 
-    var padding: CGFloat {
-      preset == .share ? 36 : 16
-    }
-
-    var showsUnavailableState: Bool {
-      preset == .share
-    }
-
-    var fillsAvailableHeight: Bool {
-      preset == .share
-    }
+    var padding: CGFloat { 16 }
 
     var minimumHeight: CGFloat? {
-      preset == .detail ? 120 : nil
+      switch preset {
+      case .composer:
+        return nil
+      case .cell:
+        return 120
+      }
     }
   }
 
@@ -123,18 +105,9 @@ struct FileContentView: View {
           .multilineTextAlignment(.center)
       }
 
-      if style.showsUnavailableState, file.fileURL == nil {
-        Label("File unavailable", systemImage: "icloud.slash")
-          .font(.system(size: 24, weight: .medium))
-          .foregroundStyle(.secondary)
-      }
     }
     .padding(style.padding)
-    .frame(
-      maxWidth: .infinity,
-      maxHeight: style.fillsAvailableHeight ? .infinity : nil,
-      alignment: .center
-    )
+    .frame(maxWidth: .infinity, alignment: .center)
     .accessibilityElement(children: .combine)
   }
 
@@ -183,7 +156,7 @@ struct FileContentView: View {
         contentType: "application/pdf",
         byteSize: 2_400_000
       ),
-      style: .init(.detail)
+      style: .init(.cell)
     )
   }
 }

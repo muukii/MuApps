@@ -70,6 +70,36 @@ struct SavedListScrollRequestTests {
     )
   }
 
+  @Test("Keeps one materialization action while unrelated rows enter layout")
+  func coalescesUnrelatedRenderedEdges() {
+    let ownerRootID = id(1)
+    let targetID = id(2)
+    let unrelatedID = id(3)
+    let request = request(ownerRootID: ownerRootID, targetID: targetID)
+
+    let initialResolution = request.resolution(
+      allEdgeIDs: [ownerRootID, targetID, unrelatedID],
+      visibleRootEdgeIDs: [ownerRootID, unrelatedID],
+      projectedEdgeIDsByRootID: [
+        ownerRootID: [ownerRootID, targetID],
+        unrelatedID: [unrelatedID],
+      ],
+      renderedEdgeIDs: []
+    )
+    let updatedResolution = request.resolution(
+      allEdgeIDs: [ownerRootID, targetID, unrelatedID],
+      visibleRootEdgeIDs: [ownerRootID, unrelatedID],
+      projectedEdgeIDsByRootID: [
+        ownerRootID: [ownerRootID, targetID],
+        unrelatedID: [unrelatedID],
+      ],
+      renderedEdgeIDs: [unrelatedID]
+    )
+
+    #expect(initialResolution == .materializeOwnerRoot(ownerRootID))
+    #expect(updatedResolution == initialResolution)
+  }
+
   @Test("Reveals a rendered root at the root anchor")
   func revealsRoot() {
     let rootID = id(1)

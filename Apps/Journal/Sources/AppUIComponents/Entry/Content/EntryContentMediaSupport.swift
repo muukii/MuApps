@@ -197,12 +197,12 @@ enum EncodedImageDimensions {
   }
 }
 
-/// Synchronous image decoding used only by the one-shot export renderer.
+/// Immediately renders image data that is already detached from file loading.
 ///
-/// Interactive app surfaces decode in cancellable tasks. Share rendering must
-/// produce its complete first frame synchronously because `ImageRenderer` does
-/// not wait for SwiftUI lifecycle tasks before capturing the canvas.
-struct SynchronousImageContentView: View {
+/// File-backed interactive surfaces decode in cancellable tasks. Detached
+/// in-memory content can also be consumed by one-shot rasterizers that do not
+/// wait for SwiftUI lifecycle tasks before capturing their first frame.
+struct InlineImageDataContentView: View {
 
   let imageData: Data?
   let fallbackSystemImage: String
@@ -212,44 +212,40 @@ struct SynchronousImageContentView: View {
       Image(uiImage: image)
         .resizable()
         .scaledToFit()
-        .padding(32)
     } else {
       Image(systemName: fallbackSystemImage)
-        .font(.system(size: 108, weight: .semibold))
+        .font(.system(size: 34, weight: .semibold))
         .foregroundStyle(.appOnSecondaryContainer.opacity(0.42))
     }
   }
 }
 
-extension View {
+/// Stable authored-media geometry shared by loading and rendered states.
+///
+/// The frame derives its height from the proposed width before an asynchronous
+/// poster, still, drawing, or player is ready. It describes media geometry only;
+/// it does not know whether the content is shown in Home or exported by Share.
+struct ContentMediaFrame<Content: View>: View {
 
-  /// Reserves the eventual uncropped media geometry for every load state.
-  ///
-  /// Compact placements receive their geometry from the host that lays them out.
-  /// The detail placement has no such host, so each media view claims its final
-  /// box here before loading and keeps it once a poster, still, or player
-  /// replaces the placeholder.
-  @ViewBuilder
-  func detailMediaFrame(
+  let aspectRatio: CGFloat
+  private let content: Content
+
+  init(
     aspectRatio: CGFloat,
-    isDetail: Bool
-  ) -> some View {
-    if isDetail,
-      aspectRatio.isFinite,
-      aspectRatio > 0
-    {
-      // The ratio is anchored to a shape so the box stays derived from the
-      // available width. Measuring the media itself would hand the geometry
-      // back to whichever load state happens to be on screen.
-      Rectangle()
-        .fill(.clear)
-        .aspectRatio(aspectRatio, contentMode: .fit)
-        .overlay { self }
-    } else {
-      self
-    }
+    @ViewBuilder content: () -> Content
+  ) {
+    self.aspectRatio = aspectRatio
+    self.content = content()
   }
 
+  var body: some View {
+    Rectangle()
+      .fill(.clear)
+      .aspectRatio(aspectRatio, contentMode: .fit)
+      .overlay {
+        content
+      }
+  }
 }
 
 extension CGSize {

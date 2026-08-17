@@ -6,7 +6,7 @@ import JournalVault
 
 struct JournalQuickCapturePreferencesTests {
   @Test
-  func selectedVault_isEnvironmentScopedAndResolvesWritableDescriptor() throws {
+  func shareDestination_isEnvironmentScopedAndResolvesWritableDescriptor() throws {
     let suiteName = "JournalQuickCapturePreferencesTests.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suiteName))
     defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -28,7 +28,7 @@ struct JournalQuickCapturePreferencesTests {
   }
 
   @Test
-  func selectedVault_doesNotFallbackWhenStoredVaultIsNoLongerWritable() throws {
+  func shareDestination_doesNotFallbackWhenStoredVaultIsNoLongerWritable() throws {
     let suiteName = "JournalQuickCapturePreferencesTests.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suiteName))
     defer { defaults.removePersistentDomain(forName: suiteName) }

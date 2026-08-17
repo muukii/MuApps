@@ -4,8 +4,8 @@ import JournalVault
 
 /// A lightweight, sendable description of a vault that accepts new posts.
 ///
-/// This is the non-App-Intents model used by Settings and Share Extension UI.
-/// Keeping it separate from `VaultDescriptor` prevents those surfaces from
+/// This is the non-App-Intents model used by posting services and Share UI.
+/// Keeping it separate from `VaultDescriptor` prevents those callers from
 /// accidentally treating read-only vaults as valid posting destinations.
 public struct JournalWritableVault: Identifiable, Hashable, Sendable {
   /// Stable identity of the destination vault.
@@ -130,7 +130,7 @@ public struct JournalWritableVaultEntity: AppEntity, Identifiable, Hashable {
     VaultID(uuidString: id)
   }
 
-  /// Non-App-Intents descriptor for Settings and extension UI.
+  /// Non-App-Intents descriptor for posting services and extension UI.
   public var writableVault: JournalWritableVault? {
     vaultID.map { JournalWritableVault(id: $0, title: title) }
   }
@@ -144,8 +144,8 @@ public struct JournalWritableVaultEntity: AppEntity, Identifiable, Hashable {
 /// Query used by system actions that create Journal content.
 ///
 /// Unlike `JournalVaultEntityQuery`, this query excludes vaults whose catalog
-/// permission is `.readOnly`. Its default is the explicit Quick Capture Vault;
-/// it deliberately does not fall back to the first writable vault.
+/// permission is `.readOnly`. Its default is the most recent successful Share
+/// destination; it deliberately does not fall back to the first writable vault.
 public struct JournalWritableVaultEntityQuery: EntityQuery, EntityStringQuery {
   public init() {}
 

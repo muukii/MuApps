@@ -24,23 +24,27 @@ public struct EntryContentView: View {
 
     /// Renders supported interaction affordances and sends their actions to the
     /// owning feature.
-    case interactive(ActionHandler)
+    ///
+    /// - Parameters:
+    ///   - isEnabled: Whether mutation controls currently accept input.
+    ///   - onAction: Handles an action emitted by the rendered content.
+    case interactive(
+      isEnabled: Bool = true,
+      onAction: ActionHandler
+    )
   }
 
   let content: EntryContent
   let style: EntryContentStyle
-  let showsTodoCompletionIndicator: Bool
   let interaction: Interaction
 
   public init(
     content: EntryContent,
-    style: EntryContentStyle,
-    showsTodoCompletionIndicator: Bool = true,
+    style: EntryContentStyle = .cell,
     interaction: Interaction = .readOnly
   ) {
     self.content = content
     self.style = style
-    self.showsTodoCompletionIndicator = showsTodoCompletionIndicator
     self.interaction = interaction
   }
 
@@ -57,7 +61,6 @@ public struct EntryContentView: View {
         TodoContentView(
           source: todo,
           style: style.todo,
-          showsCompletionIndicator: showsTodoCompletionIndicator,
           interaction: todoInteraction
         )
         .frame(minHeight: style.todo.minimumHeight)
@@ -78,7 +81,7 @@ public struct EntryContentView: View {
           .frame(minHeight: style.livePhoto.minimumHeight)
       case .audio(let audio):
         AudioContentView(audio: audio, style: style.audio)
-          .frame(minHeight: style.audio.minimumHeight)
+      //          .frame(minHeight: style.audio.minimumHeight)
       case .suggestion(let suggestion):
         SuggestionContentView(suggestion: suggestion, style: style.suggestion)
           .frame(minHeight: style.suggestion.minimumHeight)
@@ -100,8 +103,8 @@ public struct EntryContentView: View {
     switch interaction {
     case .readOnly:
       .readOnly
-    case .interactive(let onAction):
-      .interactive {
+    case .interactive(let isEnabled, let onAction):
+      .interactive(isEnabled: isEnabled) {
         onAction(.toggleTodoCompletion)
       }
     }
@@ -113,10 +116,11 @@ public struct EntryContentView: View {
 /// This public type selects a preset only. The concrete visual values live on
 /// each leaf view's `Style`, keeping unrelated content formats independent.
 public enum EntryContentStyle: Hashable, Sendable {
+  /// Compact preview embedded in the entry composer.
   case composer
-  case overview
-  case detail
-  case share
+
+  /// Natural-height authored content used by every Home tree placement.
+  case cell
 
   fileprivate var text: TextContentView.Style { .init(self) }
   fileprivate var todo: TodoContentView.Style { .init(self) }
@@ -217,7 +221,9 @@ public enum EntryContent: Equatable, Sendable {
     case .audio:
       self = .audio(
         AudioContentSource(
-          fileURL: attachment?.kind == .audio ? attachment?.fileURL : nil
+          fileURL: attachment?.kind == .audio ? attachment?.fileURL : nil,
+          waveformLevels: attachment?.kind == .audio
+            ? attachment?.waveformLevels : nil
         )
       )
     case .suggestion:
@@ -278,6 +284,8 @@ public struct EntryContentAttachment: Hashable, Sendable {
   public let pixelSize: CGSize?
   public let contentType: String?
   public let byteSize: Int?
+  /// Validated, quantized audio levels ordered from recording start to end.
+  public let waveformLevels: Data?
   public let suggestionMediaFileURLsByResourceID: [UUID: URL]
 
   public init(
@@ -289,6 +297,7 @@ public struct EntryContentAttachment: Hashable, Sendable {
     pixelSize: CGSize? = nil,
     contentType: String? = nil,
     byteSize: Int? = nil,
+    waveformLevels: Data? = nil,
     suggestionMediaFileURLsByResourceID: [UUID: URL] = [:]
   ) {
     self.kind = kind
@@ -299,6 +308,7 @@ public struct EntryContentAttachment: Hashable, Sendable {
     self.pixelSize = pixelSize
     self.contentType = contentType
     self.byteSize = byteSize
+    self.waveformLevels = waveformLevels
     self.suggestionMediaFileURLsByResourceID =
       suggestionMediaFileURLsByResourceID
   }

@@ -15,66 +15,51 @@ enum EntryShareImageRenderer {
   ///
   /// The ratio follows Instagram Reels' vertical 9:16 canvas while staying at
   /// the platform-common 1080p width.
-  static let defaultPixelSize = CGSize(width: 1080, height: 1920)
+  nonisolated static let defaultPixelSize = CGSize(width: 1080, height: 1920)
 
   /// Renders a prepared share snapshot into a `UIImage`.
   static func image(
     for snapshot: EntryShareSnapshot,
     palette: Palette = .default,
     colorScheme: ColorScheme = .light,
-    pixelSize: CGSize = defaultPixelSize,
-    scale: CGFloat = 1
+    pixelSize: CGSize = defaultPixelSize
   ) -> UIImage? {
-    let renderer = ImageRenderer(
+    rasterImage(
       content: EntryShareImageView(snapshot: snapshot, palette: palette)
-        .environment(\.colorScheme, colorScheme)
-        .frame(width: pixelSize.width, height: pixelSize.height)
+        .environment(\.colorScheme, colorScheme),
+      pixelSize: pixelSize
     )
-    renderer.scale = max(scale, 1)
-    renderer.isOpaque = true
-    #if canImport(UIKit)
-      return renderer.uiImage
-    #else
-      return renderer.nsImage
-    #endif
   }
 
-  /// Renders the static SwiftUI frame used behind Doodle replay video frames.
-  static func doodleVideoBaseImage(
-    for snapshot: EntryShareSnapshot,
+  /// Renders the static SwiftUI frame used behind replay video frames.
+  static func videoBaseImage(
     palette: Palette = .default,
     colorScheme: ColorScheme = .light,
-    pixelSize: CGSize = defaultPixelSize,
-    scale: CGFloat = 1
+    pixelSize: CGSize = defaultPixelSize
   ) -> UIImage? {
-    let renderer = ImageRenderer(
-      content: EntryShareDoodleVideoBaseFrameView(snapshot: snapshot, palette: palette)
-        .environment(\.colorScheme, colorScheme)
-        .frame(width: pixelSize.width, height: pixelSize.height)
+    rasterImage(
+      content: EntryShareVideoBaseFrameView(palette: palette)
+        .environment(\.colorScheme, colorScheme),
+      pixelSize: pixelSize
     )
-    renderer.scale = max(scale, 1)
-    renderer.isOpaque = true
-    #if canImport(UIKit)
-      return renderer.uiImage
-    #else
-      return renderer.nsImage
-    #endif
   }
 
-  /// Renders the static SwiftUI frame used behind Bauhaus replay video frames.
-  static func bauhausVideoBaseImage(
-    for snapshot: EntryShareSnapshot,
-    palette: Palette = .default,
-    colorScheme: ColorScheme = .light,
-    pixelSize: CGSize = defaultPixelSize,
-    scale: CGFloat = 1
+  /// Renders `content` at phone-sized points and scales it to exact pixels.
+  private static func rasterImage<Content: View>(
+    content: Content,
+    pixelSize: CGSize
   ) -> UIImage? {
+    guard let scale = EntryShareFrameLayout.rasterScale(for: pixelSize) else {
+      return nil
+    }
+
     let renderer = ImageRenderer(
-      content: EntryShareBauhausVideoBaseFrameView(snapshot: snapshot, palette: palette)
-        .environment(\.colorScheme, colorScheme)
-        .frame(width: pixelSize.width, height: pixelSize.height)
+      content: content.frame(
+        width: EntryShareFrameLayout.pointSize.width,
+        height: EntryShareFrameLayout.pointSize.height
+      )
     )
-    renderer.scale = max(scale, 1)
+    renderer.scale = scale
     renderer.isOpaque = true
     #if canImport(UIKit)
       return renderer.uiImage

@@ -608,47 +608,43 @@ private struct SavedListScrollCoordinator: View {
   let renderedEdgeIDs: Set<UUID>
   let proxy: ScrollViewProxy
 
-  @State private var lastMaterializedRequest: SavedListScrollRequest?
-
   var body: some View {
+    let resolution = resolution
+
     Color.clear
       .frame(width: 0, height: 0)
-      .onChange(of: request, initial: true) { _, _ in
-        resolveRequestIfPossible()
-      }
-      .onChange(of: allEdgeIDs) { _, _ in
-        resolveRequestIfPossible()
-      }
-      .onChange(of: visibleRootEdgeIDs) { _, _ in
-        resolveRequestIfPossible()
-      }
-      .onChange(of: projectedEdgeIDsByRootID) { _, _ in
-        resolveRequestIfPossible()
-      }
-      .onChange(of: renderedEdgeIDs) { _, _ in
-        resolveRequestIfPossible()
+      .task(id: resolution) {
+        await apply(resolution)
       }
       .allowsHitTesting(false)
       .accessibilityHidden(true)
   }
 
-  private func resolveRequestIfPossible() {
-    guard let request else {
-      lastMaterializedRequest = nil
-      return
-    }
-
-    switch request.resolution(
+  /// Coalesces volatile query and lazy-layout inputs into the next semantic
+  /// action. Intermediate rendered-id sets that resolve identically therefore
+  /// do not restart the task within one layout frame.
+  private var resolution: SavedListScrollResolution? {
+    request?.resolution(
       allEdgeIDs: allEdgeIDs,
       visibleRootEdgeIDs: visibleRootEdgeIDs,
       projectedEdgeIDsByRootID: projectedEdgeIDsByRootID,
       renderedEdgeIDs: renderedEdgeIDs
-    ) {
+    )
+  }
+
+  /// Crosses the current layout update boundary before applying the latest
+  /// resolution. A changed resolution cancels this task before it can act on
+  /// stale query or materialization state.
+  private func apply(_ resolution: SavedListScrollResolution?) async {
+    guard let resolution else { return }
+
+    await Task.yield()
+    guard Task.isCancelled == false else { return }
+
+    switch resolution {
     case .waitForQuery:
       return
     case .materializeOwnerRoot(let ownerRootEdgeID):
-      guard lastMaterializedRequest != request else { return }
-      lastMaterializedRequest = request
       withAnimation(.smooth) {
         proxy.scrollTo(ownerRootEdgeID, anchor: .top)
       }
@@ -669,7 +665,6 @@ private struct SavedListScrollCoordinator: View {
 
   private func consumeRequest() {
     request = nil
-    lastMaterializedRequest = nil
   }
 }
 

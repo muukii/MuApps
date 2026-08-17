@@ -29,6 +29,9 @@ final class JournalShareModel {
   private let contentLoader: JournalShareContentLoader
 
   @ObservationIgnored
+  private let quickCapturePreferences: JournalQuickCapturePreferences
+
+  @ObservationIgnored
   private let onComplete: @MainActor () -> Void
 
   @ObservationIgnored
@@ -43,11 +46,13 @@ final class JournalShareModel {
   init(
     postingService: JournalPostingService = .init(),
     contentLoader: JournalShareContentLoader = .init(),
+    quickCapturePreferences: JournalQuickCapturePreferences = .init(),
     onComplete: @escaping @MainActor () -> Void,
     onCancel: @escaping @MainActor () -> Void
   ) {
     self.postingService = postingService
     self.contentLoader = contentLoader
+    self.quickCapturePreferences = quickCapturePreferences
     self.onComplete = onComplete
     self.onCancel = onCancel
   }
@@ -62,7 +67,7 @@ final class JournalShareModel {
       guard let self else { return }
       do {
         writableVaults = try postingService.writableVaults()
-        selectedVaultID = try JournalQuickCapturePreferences()
+        selectedVaultID = try quickCapturePreferences
           .selectedVault(from: writableVaults)?.id
         let result = try await contentLoader.load(from: inputItems)
         try Task.checkCancellation()
@@ -106,6 +111,9 @@ final class JournalShareModel {
 
     do {
       try postingService.post(cards: cards, to: selectedVaultID)
+      // The Card transaction is already durable. Preference failure must not
+      // invite a retry that would duplicate the successfully posted content.
+      try? quickCapturePreferences.setSelectedVaultID(selectedVaultID)
       hasFinished = true
       cleanUpTemporaryFiles()
       onComplete()

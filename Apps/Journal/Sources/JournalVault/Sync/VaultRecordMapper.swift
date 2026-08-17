@@ -55,6 +55,7 @@ enum VaultRecordMapper {
     static let pixelWidth = "pixelWidth"
     static let pixelHeight = "pixelHeight"
     static let duration = "duration"
+    static let waveformData = "waveformData"
     static let isHDR = "isHDR"
     static let colorSpaceName = "colorSpaceName"
     static let createdAt = "createdAt"
@@ -120,6 +121,7 @@ enum VaultRecordMapper {
     resourceRecord.pixelWidth = resource.pixelWidth
     resourceRecord.pixelHeight = resource.pixelHeight
     resourceRecord.duration = resource.duration
+    resourceRecord.waveformData = resource.waveformData
     resourceRecord.isHDR = resource.isHDR
     resourceRecord.colorSpaceName = resource.colorSpaceName
     resourceRecord.createdAt = resource.createdAt
@@ -235,6 +237,7 @@ enum VaultRecordMapper {
     resource.pixelWidth = resourceRecord.pixelWidth
     resource.pixelHeight = resourceRecord.pixelHeight
     resource.duration = resourceRecord.duration
+    resource.waveformData = resourceRecord.waveformData
     resource.isHDR = resourceRecord.isHDR
     resource.colorSpaceName = resourceRecord.colorSpaceName
     if record[AttachmentResourceKey.createdAt] != nil {

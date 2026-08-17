@@ -1,6 +1,7 @@
 import JournalVault
 import MuColor
 import SwiftUI
+
 #if canImport(UIKit)
   import UIKit
 #endif
@@ -38,16 +39,16 @@ struct SuggestionContentView: View {
 
     var additionalElementLimit: Int {
       switch preset {
-      case .detail, .share:
+      case .cell:
         return .max
-      case .composer, .overview:
+      case .composer:
         return 2
       }
     }
 
     var mediaContentMode: ContentMode {
       switch preset {
-      case .overview, .detail, .share:
+      case .cell:
         return .fit
       case .composer:
         return .fill
@@ -55,27 +56,31 @@ struct SuggestionContentView: View {
     }
 
     var titleFont: Font {
-      preset == .share
-        ? .system(size: 52, weight: .bold)
-        : .title3.weight(.semibold)
+      .title3.weight(.semibold)
     }
 
-    var subtitleFont: Font {
-      preset == .share ? .system(size: 26, weight: .medium) : .caption
-    }
+    var subtitleFont: Font { .caption }
 
     var mediaAspectRatio: CGFloat { 1 }
 
     var showsFullTitle: Bool {
-      preset == .detail || preset == .share
+      switch preset {
+      case .composer:
+        return false
+      case .cell:
+        return true
+      }
     }
 
-    var contentPadding: CGFloat {
-      preset == .share ? 36 : 16
-    }
+    var contentPadding: CGFloat { 16 }
 
     var minimumHeight: CGFloat? {
-      preset == .detail ? 120 : nil
+      switch preset {
+      case .composer:
+        return nil
+      case .cell:
+        return 120
+      }
     }
   }
 
@@ -853,34 +858,34 @@ extension SuggestionCardElement {
     case .contact(_, _, let photoURL) where kind == .contactPhoto:
       fileURL = photoURL
     case .eventPoster(_, _, let imageURL, _, _, _, _)
-      where kind == .eventPosterImage:
+    where kind == .eventPosterImage:
       fileURL = imageURL
     case .genericMedia(_, _, _, _, _, let appIconURL)
-      where kind == .genericMediaAppIcon:
+    where kind == .genericMediaAppIcon:
       fileURL = appIconURL
     case .livePhoto(_, let imageURL, _, _)
-      where kind == .livePhotoImage:
+    where kind == .livePhotoImage:
       fileURL = imageURL
     case .motion(_, _, _, let iconURL, _)
-      where kind == .motionIcon:
+    where kind == .motionIcon:
       fileURL = iconURL
     case .photo(_, let imageURL, _)
-      where kind == .photoImage:
+    where kind == .photoImage:
       fileURL = imageURL
     case .podcast(_, _, _, let artworkURL, _)
-      where kind == .podcastArtwork:
+    where kind == .podcastArtwork:
       fileURL = artworkURL
     case .song(_, _, _, _, let artworkURL, _)
-      where kind == .songArtwork:
+    where kind == .songArtwork:
       fileURL = artworkURL
     case .stateOfMind(_, _, let iconURL)
-      where kind == .stateOfMindIcon:
+    where kind == .stateOfMindIcon:
       fileURL = iconURL
     case .workout(_, let workout)
-      where kind == .workoutIcon:
+    where kind == .workoutIcon:
       fileURL = workout.iconURL
     case .workoutGroup(_, let group)
-      where kind == .workoutGroupIcon:
+    where kind == .workoutGroupIcon:
       fileURL = group.iconURL
     default:
       fileURL = nil
@@ -1037,7 +1042,7 @@ extension TimeInterval {
   EntryContentPreviewCanvas {
     SuggestionContentView(
       suggestion: SuggestionContentSource(),
-      style: .init(.detail)
+      style: .init(.cell)
     )
   }
 }

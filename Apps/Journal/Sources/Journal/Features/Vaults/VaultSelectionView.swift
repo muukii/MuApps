@@ -569,30 +569,23 @@ private struct VaultSelectionRow: View {
       .buttonStyle(.plain)
       .accessibilityAddTraits(isSelected ? .isSelected : [])
 
-      if canShare || collaborationShare != nil {
-        HStack(spacing: 6) {
-          if let collaborationShare {
-            VaultCollaborationControl(
-              vaultID: vaultID,
-              title: title,
-              share: collaborationShare,
-              onShareUpdated: onCollaborationShareUpdated,
-              onSharingStopped: onCollaborationSharingStopped,
-              onError: onCollaborationError
-            )
-            .id(VaultCollaborationControl.viewIdentity(vaultID: vaultID, share: collaborationShare))
-            .frame(width: 36, height: 36)
-          }
-
-          if canShare {
-            VaultShareButton(
-              isShared: isShared,
-              isPreparing: isPreparingShare,
-              onShare: onShare
-            )
-          }
-        }
-        .fixedSize()
+      if let collaborationShare {
+        VaultCollaborationControl(
+          vaultID: vaultID,
+          title: title,
+          share: collaborationShare,
+          onShareUpdated: onCollaborationShareUpdated,
+          onSharingStopped: onCollaborationSharingStopped,
+          onError: onCollaborationError
+        )
+        .id(VaultCollaborationControl.viewIdentity(vaultID: vaultID, share: collaborationShare))
+        .frame(width: 36, height: 36)
+      } else if canShare {
+        VaultShareButton(
+          isShared: isShared,
+          isPreparing: isPreparingShare,
+          onShare: onShare
+        )
       }
     }
     .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
@@ -696,12 +689,14 @@ private struct VaultSelectionRowPreview: View {
   }
 }
 
-/// Explicit vault invite button shown next to the system collaboration control.
+/// Explicit Vault sharing action shown until the system control is available.
 ///
-/// The icon carries the sharing state: an unshared vault offers the share
-/// glyph, a shared vault switches to a people glyph. Both states open the same
-/// `UICloudSharingController` sheet, which manages the existing share once one
-/// exists.
+/// The icon carries the sharing state: an unshared Vault uses
+/// `person.fill.badge.plus`, while a catalog-known share that is still being
+/// fetched uses `person.2.fill`. Both states open the direct
+/// `UICloudSharingController` flow.
+/// Once the live share arrives, the row replaces this button with
+/// `VaultCollaborationControl` rather than displaying two management actions.
 private struct VaultShareButton: View {
 
   let isShared: Bool
@@ -715,7 +710,7 @@ private struct VaultShareButton: View {
           ProgressView()
             .controlSize(.small)
         } else {
-          Image(systemName: isShared ? "personalhotspot.circle.fill" : "personalhotspot.circle")
+          Image(systemName: isShared ? "person.2.fill" : "person.fill.badge.plus")
             .font(.title3)
         }
       }

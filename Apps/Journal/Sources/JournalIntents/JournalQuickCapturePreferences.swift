@@ -1,11 +1,13 @@
 import Foundation
 import JournalVault
 
-/// App Group preferences for the user-selected Quick Capture destination.
+/// App Group preferences for the most recent successful Share destination.
 ///
 /// Development and production catalog stores are independent, so the key is
 /// scoped by `VaultCloudKitEnvironment`. Only a vault identifier is persisted;
-/// its current title and permission are always resolved from the catalog.
+/// its current title and permission are always resolved from the catalog. Other
+/// system capture entry points may use this destination only when they do not
+/// carry an explicit Vault selection of their own.
 public struct JournalQuickCapturePreferences: Sendable {
   private let injectedSuiteName: String?
 
@@ -21,7 +23,7 @@ public struct JournalQuickCapturePreferences: Sendable {
     injectedSuiteName = suiteName
   }
 
-  /// Returns the explicitly selected vault, or `nil` when setup is incomplete.
+  /// Returns the remembered destination, or `nil` before a Share post succeeds.
   ///
   /// A malformed stored identifier is reported instead of being replaced with
   /// another vault. System entry points must never silently post elsewhere.
@@ -38,7 +40,7 @@ public struct JournalQuickCapturePreferences: Sendable {
     return vaultID
   }
 
-  /// Persists a writable-vault descriptor as the Quick Capture destination.
+  /// Persists a writable-vault descriptor as the successful Share destination.
   public func setSelectedVault(
     _ vault: JournalWritableVault?,
     environment: VaultCloudKitEnvironment = .current
@@ -46,7 +48,7 @@ public struct JournalQuickCapturePreferences: Sendable {
     try setSelectedVaultID(vault?.id, environment: environment)
   }
 
-  /// Persists a typed vault identifier as the Quick Capture destination.
+  /// Persists a typed vault identifier as the successful Share destination.
   ///
   /// Callers accepting arbitrary ids should validate them with
   /// `JournalPostingService.writableVaults()` before storing the selection.
@@ -65,8 +67,8 @@ public struct JournalQuickCapturePreferences: Sendable {
 
   /// Resolves the stored id against an already-validated writable vault list.
   ///
-  /// Returning `nil` for a stale or now-read-only selection lets Settings show
-  /// that configuration is required without choosing a replacement.
+  /// Returning `nil` for a stale or now-read-only selection leaves the Share
+  /// destination unselected without choosing a replacement.
   public func selectedVault(
     from writableVaults: [JournalWritableVault],
     environment: VaultCloudKitEnvironment = .current
@@ -91,7 +93,7 @@ public struct JournalQuickCapturePreferences: Sendable {
 }
 
 extension JournalQuickCapturePreferences {
-  /// Failures reading or resolving the shared Quick Capture preference.
+  /// Failures reading or resolving the shared Share-destination preference.
   public enum Error: Swift.Error, LocalizedError, Sendable {
     case appGroupPreferencesUnavailable
     case invalidStoredVaultIdentifier(String)
@@ -99,9 +101,9 @@ extension JournalQuickCapturePreferences {
     public var errorDescription: String? {
       switch self {
       case .appGroupPreferencesUnavailable:
-        return "Journal's shared Quick Capture settings are unavailable."
+        return "Journal's shared destination history is unavailable."
       case .invalidStoredVaultIdentifier:
-        return "The configured Quick Capture Vault is invalid. Choose it again in Journal Settings."
+        return "The remembered Share destination is invalid. Choose a Vault in the Share sheet."
       }
     }
   }

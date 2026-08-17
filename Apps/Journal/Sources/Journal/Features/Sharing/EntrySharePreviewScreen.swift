@@ -895,8 +895,7 @@ enum EntryShareVideoRenderer {
     directory: URL = FileManager.default.temporaryDirectory
   ) async throws -> URL {
     guard
-      let baseFrameImage = EntryShareImageRenderer.doodleVideoBaseImage(
-        for: snapshot,
+      let baseFrameImage = EntryShareImageRenderer.videoBaseImage(
         palette: palette,
         colorScheme: colorScheme,
         pixelSize: pixelSize
@@ -915,7 +914,7 @@ enum EntryShareVideoRenderer {
       baseFrame: EntryShareVideoBaseFrame(image: baseFrameImage),
       drawing: drawing,
       recipe: recipe,
-      inkColor: EntryShareVideoRGBA(color: palette.onSecondaryContainer)
+      inkColor: EntryShareVideoRGBA(color: palette.tint)
     )
 
     return try await EntryShareVideoRenderWorker().mp4File(
@@ -939,8 +938,7 @@ enum EntryShareVideoRenderer {
     }
 
     guard
-      let baseFrameImage = EntryShareImageRenderer.bauhausVideoBaseImage(
-        for: snapshot,
+      let baseFrameImage = EntryShareImageRenderer.videoBaseImage(
         palette: palette,
         colorScheme: colorScheme,
         pixelSize: pixelSize
@@ -1201,11 +1199,24 @@ private actor EntryShareVideoRenderWorker {
     let frameRect = CGRect(origin: .zero, size: pixelSize)
     context.interpolationQuality = .high
     drawBaseFrame(request.baseFrame.image, in: frameRect, context: context)
+    guard
+      let contentBounds = EntryShareFrameLayout.contentBounds(in: pixelSize),
+      let rasterScale = EntryShareFrameLayout.rasterScale(for: pixelSize),
+      request.drawing.canvasSize.width > 0,
+      request.drawing.canvasSize.height > 0
+    else {
+      throw EntryShareVideoRendererError.renderingFailed
+    }
+    let contentRect = EntryShareFrameLayout.aspectFitRect(
+      aspectRatio: request.drawing.canvasSize.width / request.drawing.canvasSize.height,
+      in: contentBounds
+    )
     drawDoodleFrame(
       drawing: request.drawing,
       sourceTime: sourceTime,
       inkColor: request.inkColor,
-      in: Self.shareContentRect(in: pixelSize),
+      in: contentRect,
+      cornerRadius: EntryShareFrameLayout.contentCornerRadius * rasterScale,
       context: context
     )
   }
@@ -1243,12 +1254,22 @@ private actor EntryShareVideoRenderWorker {
     let frameRect = CGRect(origin: .zero, size: pixelSize)
     context.interpolationQuality = .high
     drawBaseFrame(request.baseFrame.image, in: frameRect, context: context)
+    guard
+      let contentBounds = EntryShareFrameLayout.contentBounds(in: pixelSize),
+      let rasterScale = EntryShareFrameLayout.rasterScale(for: pixelSize)
+    else {
+      throw EntryShareVideoRendererError.renderingFailed
+    }
     drawBauhausFrame(
       replay: request.replay,
       videoTime: videoTime,
       recipe: request.recipe.replayRecipe,
       colors: request.colors,
-      in: Self.shareContentRect(in: pixelSize),
+      in: EntryShareFrameLayout.aspectFitRect(
+        aspectRatio: 1,
+        in: contentBounds
+      ),
+      rasterScale: rasterScale,
       context: context
     )
   }
@@ -1268,35 +1289,18 @@ private actor EntryShareVideoRenderWorker {
     context.restoreGState()
   }
 
-  /// Content rect that mirrors the media well in `EntryShareExportFrame`.
-  private nonisolated static func shareContentRect(in pixelSize: CGSize) -> CGRect {
-    let frameRect = CGRect(origin: .zero, size: pixelSize)
-    let paperRect = frameRect.insetBy(dx: 72, dy: 72)
-    let innerRect = paperRect.insetBy(dx: 56, dy: 56)
-    let headerHeight: CGFloat = 42
-    let footerHeight: CGFloat = 30
-    let verticalSpacing: CGFloat = 36
-    let contentMinY = innerRect.minY + headerHeight + verticalSpacing
-    let contentMaxY = innerRect.maxY - footerHeight - verticalSpacing
-    return CGRect(
-      x: innerRect.minX,
-      y: contentMinY,
-      width: innerRect.width,
-      height: contentMaxY - contentMinY
-    )
-  }
-
   private func drawDoodleFrame(
     drawing: DoodleDrawing,
     sourceTime: TimeInterval,
     inkColor: EntryShareVideoRGBA,
     in rect: CGRect,
+    cornerRadius: CGFloat,
     context: CGContext
   ) {
     let contentPath = CGPath(
       roundedRect: rect,
-      cornerWidth: 32,
-      cornerHeight: 32,
+      cornerWidth: cornerRadius,
+      cornerHeight: cornerRadius,
       transform: nil
     )
 
@@ -1304,18 +1308,17 @@ private actor EntryShareVideoRenderWorker {
       return
     }
 
-    let drawingRect = rect.insetBy(dx: 32, dy: 32)
     let scale = min(
-      drawingRect.width / drawing.canvasSize.width,
-      drawingRect.height / drawing.canvasSize.height
+      rect.width / drawing.canvasSize.width,
+      rect.height / drawing.canvasSize.height
     )
     let fittedSize = CGSize(
       width: drawing.canvasSize.width * scale,
       height: drawing.canvasSize.height * scale
     )
     let origin = CGPoint(
-      x: drawingRect.minX + (drawingRect.width - fittedSize.width) / 2,
-      y: drawingRect.minY + (drawingRect.height - fittedSize.height) / 2
+      x: rect.minX + (rect.width - fittedSize.width) / 2,
+      y: rect.minY + (rect.height - fittedSize.height) / 2
     )
 
     context.saveGState()
@@ -1341,22 +1344,22 @@ private actor EntryShareVideoRenderWorker {
     recipe: BauhausGridReplayRecipe,
     colors: EntryShareBauhausVideoColors,
     in rect: CGRect,
+    rasterScale: CGFloat,
     context: CGContext
   ) {
     let contentPath = CGPath(
       roundedRect: rect,
-      cornerWidth: 32,
-      cornerHeight: 32,
+      cornerWidth: EntryShareFrameLayout.contentCornerRadius * rasterScale,
+      cornerHeight: EntryShareFrameLayout.contentCornerRadius * rasterScale,
       transform: nil
     )
 
-    let drawingRect = rect.insetBy(dx: 32, dy: 32)
-    let boardSide = min(drawingRect.width, drawingRect.height)
+    let boardSide = min(rect.width, rect.height)
     guard boardSide > 0 else { return }
 
     let boardRect = CGRect(
-      x: drawingRect.midX - boardSide / 2,
-      y: drawingRect.midY - boardSide / 2,
+      x: rect.midX - boardSide / 2,
+      y: rect.midY - boardSide / 2,
       width: boardSide,
       height: boardSide
     )
@@ -1375,7 +1378,11 @@ private actor EntryShareVideoRenderWorker {
       videoTime: videoTime,
       recipe: recipe,
       colors: colors,
-      in: boardRect.insetBy(dx: 8, dy: 8),
+      in: boardRect.insetBy(
+        dx: EntryShareFrameLayout.bauhausGridPadding * rasterScale,
+        dy: EntryShareFrameLayout.bauhausGridPadding * rasterScale
+      ),
+      rasterScale: rasterScale,
       context: context
     )
     context.restoreGState()
@@ -1387,9 +1394,10 @@ private actor EntryShareVideoRenderWorker {
     recipe: BauhausGridReplayRecipe,
     colors: EntryShareBauhausVideoColors,
     in rect: CGRect,
+    rasterScale: CGFloat,
     context: CGContext
   ) {
-    let spacing: CGFloat = 2
+    let spacing = CGFloat(2) * rasterScale
     let dimension = CGFloat(BauhausGridArtwork.dimension)
     let cellSide = (min(rect.width, rect.height) - spacing * (dimension - 1)) / dimension
     guard cellSide > 0 else { return }

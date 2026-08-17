@@ -503,7 +503,7 @@ struct CreationView: View {
       systemCaptureRequest = nil
       onSystemCaptureFailure(
         String(
-          localized: "The Quick Capture Vault could not be opened. Try again from Journal Settings."
+          localized: "The selected Vault could not be opened. Choose it again for this action."
         )
       )
       return

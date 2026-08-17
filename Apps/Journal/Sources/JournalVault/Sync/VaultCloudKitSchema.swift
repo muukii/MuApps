@@ -218,6 +218,11 @@ public enum VaultCloudKitSchema {
       optionalField(VaultRecordMapper.AttachmentResourceKey.pixelWidth, .int),
       optionalField(VaultRecordMapper.AttachmentResourceKey.pixelHeight, .int),
       optionalField(VaultRecordMapper.AttachmentResourceKey.duration, .double),
+      optionalField(
+        VaultRecordMapper.AttachmentResourceKey.waveformData,
+        .data,
+        notes: ["Versioned Codable JSON for recorded-audio meter history."]
+      ),
       field(
         VaultRecordMapper.AttachmentResourceKey.isHDR,
         .bool,

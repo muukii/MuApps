@@ -14,8 +14,6 @@ struct EntryShareSource: Sendable, Equatable {
   let kind: JournalVault.Card.Kind
   let body: String
   let completedAt: Date?
-  let createdAt: Date
-  let location: JournalVault.Coordinate?
   let attachment: EntryShareAttachmentSource?
 }
 
@@ -38,17 +36,8 @@ struct EntryShareSnapshot: Identifiable, Sendable, Equatable {
   /// Stable entry identity, reused for temporary export file names.
   var id: UUID
 
-  /// The persisted modality that determines how `content` should render.
-  var kind: JournalVault.Card.Kind
-
-  /// User-facing creation date shown in exported entries.
-  var createdAt: Date
-
-  /// Shared authored-content value used by app, detail, and export styles.
+  /// Authored-content value reused by Home Cell and export rendering.
   var content: EntryContent
-
-  /// Coordinate attached to the entry, when the user opted in.
-  var location: JournalVault.Coordinate?
 
   /// Creates a detached snapshot from already-resolved content.
   ///
@@ -56,16 +45,10 @@ struct EntryShareSnapshot: Identifiable, Sendable, Equatable {
   /// vault's file-backed attachment resolution path.
   init(
     id: UUID,
-    kind: JournalVault.Card.Kind,
-    createdAt: Date,
-    content: EntryContent,
-    location: JournalVault.Coordinate?
+    content: EntryContent
   ) {
     self.id = id
-    self.kind = kind
-    self.createdAt = createdAt
     self.content = content
-    self.location = location
   }
 
   /// Builds a snapshot from saved vault-entry values.
@@ -78,9 +61,6 @@ struct EntryShareSnapshot: Identifiable, Sendable, Equatable {
     let body = source.body.trimmingCharacters(in: .whitespacesAndNewlines)
 
     self.id = source.id
-    self.kind = source.kind
-    self.createdAt = source.createdAt
-    self.location = source.location
     self.content = Self.makeContent(
       kind: source.kind,
       body: body,

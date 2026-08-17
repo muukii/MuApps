@@ -395,7 +395,9 @@ private struct RootView: View {
 
     guard let vaultID = request.vaultID else {
       presentSystemCaptureFailure(
-        String(localized: "Choose a Quick Capture Vault in Settings before using this action.")
+        String(
+          localized: "Choose a Vault for this action or post once from Tinycurve Share."
+        )
       )
       return
     }
@@ -403,7 +405,8 @@ private struct RootView: View {
     guard let descriptor = vaultRuntime.vaults.first(where: { $0.vaultID == vaultID }) else {
       presentSystemCaptureFailure(
         String(
-          localized: "The Quick Capture Vault is no longer available. Choose it again in Settings.")
+          localized: "The selected Vault is unavailable. Choose another Vault for this action."
+        )
       )
       return
     }
@@ -412,7 +415,7 @@ private struct RootView: View {
       presentSystemCaptureFailure(
         String(
           localized:
-            "The Quick Capture Vault is read-only. Choose a vault you can edit in Settings.")
+            "The selected Vault is read-only. Choose a Vault you can edit for this action.")
       )
       return
     }

@@ -75,6 +75,13 @@ public struct VaultCollaborationControl: VaultCollaborationViewRepresentable {
   public func updateUIView(_ view: SWCollaborationView, context: Context) {
     configure(view, context: context)
   }
+
+  public static func dismantleUIView(
+    _ view: SWCollaborationView,
+    coordinator: Coordinator
+  ) {
+    coordinator.dismantle(view)
+  }
   #else
   public func makeNSView(context: Context) -> SWCollaborationView {
     let view = SWCollaborationView(itemProvider: makeItemProvider())
@@ -84,6 +91,13 @@ public struct VaultCollaborationControl: VaultCollaborationViewRepresentable {
 
   public func updateNSView(_ view: SWCollaborationView, context: Context) {
     configure(view, context: context)
+  }
+
+  public static func dismantleNSView(
+    _ view: SWCollaborationView,
+    coordinator: Coordinator
+  ) {
+    coordinator.dismantle(view)
   }
   #endif
 
@@ -115,8 +129,7 @@ public struct VaultCollaborationControl: VaultCollaborationViewRepresentable {
   }
 
   private func configure(_ view: SWCollaborationView, context: Context) {
-    context.coordinator.title = title
-    view.headerTitle = title
+    context.coordinator.updateTitle(title, in: view)
     #if canImport(UIKit)
     view.accessibilityLabel = String(localized: "Manage Collaboration")
     view.cloudSharingControllerDelegate = context.coordinator
@@ -126,13 +139,22 @@ public struct VaultCollaborationControl: VaultCollaborationViewRepresentable {
     #endif
   }
 
+  /// Bridges sharing callbacks and serialized collaboration-header updates.
   public final class Coordinator: NSObject, VaultCollaborationSharingDelegate {
 
     private let vaultID: VaultID
-    var title: String
+    private var title: String
     private let onShareUpdated: @MainActor @Sendable (VaultID) async -> Void
     private let onSharingStopped: @MainActor @Sendable (VaultID) async -> Void
     private let onError: @MainActor @Sendable (any Error) -> Void
+    private weak var headerTitleView: SWCollaborationView?
+    private var appliedHeaderTitle: String?
+    private var pendingHeaderTitle: String?
+    private var headerTitleUpdateTask: Task<Void, Never>? {
+      didSet {
+        oldValue?.cancel()
+      }
+    }
 
     init(
       vaultID: VaultID,
@@ -146,6 +168,63 @@ public struct VaultCollaborationControl: VaultCollaborationViewRepresentable {
       self.onShareUpdated = onShareUpdated
       self.onSharingStopped = onSharingStopped
       self.onError = onError
+    }
+
+    /// Applies a changed header title after the active representable update.
+    ///
+    /// The system collaboration view forwards this setter into SwiftUI-backed
+    /// state. Deferring the write prevents that internal publication from
+    /// occurring while SwiftUI is updating the enclosing representable. The
+    /// latest-title check prevents a queued stale rename from winning.
+    func updateTitle(_ title: String, in view: SWCollaborationView) {
+      if headerTitleView !== view {
+        cancelPendingHeaderTitleUpdate()
+        headerTitleView = view
+        appliedHeaderTitle = nil
+      }
+
+      self.title = title
+
+      guard appliedHeaderTitle != title else {
+        cancelPendingHeaderTitleUpdate()
+        return
+      }
+      guard pendingHeaderTitle != title else { return }
+
+      let expectedTitle = title
+      pendingHeaderTitle = expectedTitle
+      headerTitleUpdateTask = Task { @MainActor [weak self, weak view] in
+        await Task.yield()
+
+        guard
+          Task.isCancelled == false,
+          let self,
+          self.title == expectedTitle,
+          self.pendingHeaderTitle == expectedTitle,
+          let view,
+          self.headerTitleView === view
+        else {
+          return
+        }
+
+        view.headerTitle = expectedTitle
+        self.appliedHeaderTitle = expectedTitle
+        self.pendingHeaderTitle = nil
+      }
+    }
+
+    /// Ends title-update ownership when SwiftUI removes the represented view.
+    func dismantle(_ view: SWCollaborationView) {
+      guard headerTitleView === view else { return }
+
+      cancelPendingHeaderTitleUpdate()
+      headerTitleView = nil
+      appliedHeaderTitle = nil
+    }
+
+    private func cancelPendingHeaderTitleUpdate() {
+      headerTitleUpdateTask = nil
+      pendingHeaderTitle = nil
     }
 
     #if canImport(UIKit)

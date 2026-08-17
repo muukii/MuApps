@@ -32,20 +32,24 @@ struct BauhausContentView: View {
       self.preset = preset
     }
 
-    var artworkPadding: CGFloat {
+    var usesCompactLoading: Bool {
       switch preset {
-      case .composer, .detail:
-        return 0
-      case .overview:
-        return 8
-      case .share:
-        return 32
+      case .composer:
+        return true
+      case .cell:
+        return false
       }
     }
 
-    var usesCompactLoading: Bool { preset == .composer }
     var placeholderAspectRatio: CGFloat { 1 }
-    var minimumHeight: CGFloat? { preset == .detail ? 180 : nil }
+    var minimumHeight: CGFloat? {
+      switch preset {
+      case .composer:
+        return nil
+      case .cell:
+        return 180
+      }
+    }
   }
 
   let bauhaus: BauhausContentSource
@@ -77,8 +81,8 @@ struct BauhausContentView: View {
       case .loading:
         ContentLoadingMedia(isCompact: style.usesCompactLoading)
       case .idle, .unavailable:
-        if style.preset == .share, bauhaus.thumbnailData != nil {
-          SynchronousImageContentView(
+        if bauhaus.fileURL == nil, bauhaus.thumbnailData != nil {
+          InlineImageDataContentView(
             imageData: bauhaus.thumbnailData,
             fallbackSystemImage: "square.grid.3x3.square"
           )
@@ -95,10 +99,9 @@ struct BauhausContentView: View {
   @ViewBuilder
   private func rendered(_ document: BauhausGridDocument) -> some View {
     BauhausGridArtworkView(
-      padding: 20, 
+      padding: 20,
       artwork: document.artwork
     )
-    .padding(style.artworkPadding)
   }
 
   @MainActor
@@ -140,7 +143,7 @@ struct BauhausContentView: View {
       bauhaus: BauhausContentSource(
         document: BauhausContentPreview.document
       ),
-      style: .init(.detail)
+      style: .init(.cell)
     )
   }
 }

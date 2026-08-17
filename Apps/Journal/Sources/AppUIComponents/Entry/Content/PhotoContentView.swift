@@ -1,4 +1,5 @@
 import SwiftUI
+
 #if canImport(UIKit)
   import UIKit
 #endif
@@ -45,15 +46,20 @@ struct PhotoContentView: View {
       switch preset {
       case .composer:
         return .fill
-      case .overview, .detail, .share:
+      case .cell:
         return .fit
       }
     }
 
-    var isDetail: Bool { preset == .detail }
-    var usesPrimaryData: Bool { preset == .composer || preset == .share }
     var placeholderAspectRatio: CGFloat { 1 }
-    var minimumHeight: CGFloat? { isDetail ? 180 : nil }
+    var minimumHeight: CGFloat? {
+      switch preset {
+      case .composer:
+        return nil
+      case .cell:
+        return 180
+      }
+    }
   }
 
   let photo: PhotoContentSource
@@ -64,19 +70,33 @@ struct PhotoContentView: View {
 
   @ViewBuilder
   var body: some View {
-    switch style.preset {
-    case .composer, .overview, .detail:
+    if let inlineImageData {
+      ContentMediaFrame(aspectRatio: displayAspectRatio(for: nil)) {
+        InlineImageDataContentView(
+          imageData: inlineImageData,
+          fallbackSystemImage: "photo"
+        )
+      }
+    } else {
       content
         .task(id: imageLoadID) {
           await refreshImages()
         }
-
-    case .share:
-      SynchronousImageContentView(
-        imageData: photo.imageData ?? photo.thumbnailData,
-        fallbackSystemImage: "photo"
-      )
     }
+  }
+
+  /// In-memory Cell values are already detached from file-backed loading.
+  /// Rendering them immediately also keeps one-shot raster consumers independent
+  /// from SwiftUI lifecycle task scheduling.
+  private var inlineImageData: Data? {
+    guard photo.fileURL == nil else { return nil }
+    switch style.preset {
+    case .composer:
+      return nil
+    case .cell:
+      break
+    }
+    return photo.imageData ?? photo.thumbnailData
   }
 
   @ViewBuilder
@@ -98,11 +118,9 @@ struct PhotoContentView: View {
 
   private var image: UIImage? {
     switch style.preset {
-    case .composer, .share:
+    case .composer:
       return decodedImageDataImage
-    case .overview:
-      return decodedThumbnailImage
-    case .detail:
+    case .cell:
       return loadedFullSizeImage ?? decodedThumbnailImage
     }
   }
@@ -119,14 +137,15 @@ struct PhotoContentView: View {
 
   /// Keeps loading and decoded states on the same placement geometry.
   private func displayAspectRatio(for image: UIImage?) -> CGFloat {
-    guard style.isDetail else {
+    switch style.preset {
+    case .composer:
       return image?.contentAspectRatio ?? style.placeholderAspectRatio
+    case .cell:
+      return
+        photo.displayAspectRatio
+        ?? image?.contentAspectRatio
+        ?? style.placeholderAspectRatio
     }
-
-    return
-      photo.displayAspectRatio
-      ?? image?.contentAspectRatio
-      ?? style.placeholderAspectRatio
   }
 
   @MainActor
@@ -136,7 +155,7 @@ struct PhotoContentView: View {
     loadedFullSizeImage = nil
 
     switch style.preset {
-    case .composer, .share:
+    case .composer:
       let image = await ContentMediaFileReader.image(from: photo.imageData)
       guard Task.isCancelled == false else {
         return
@@ -144,17 +163,7 @@ struct PhotoContentView: View {
 
       decodedImageDataImage = image
 
-    case .overview:
-      let image = await ContentMediaFileReader.image(
-        from: photo.thumbnailData
-      )
-      guard Task.isCancelled == false else {
-        return
-      }
-
-      decodedThumbnailImage = image
-
-    case .detail:
+    case .cell:
       let thumbnailImage = await ContentMediaFileReader.image(
         from: photo.thumbnailData
       )
@@ -184,7 +193,7 @@ struct PhotoContentView: View {
       photo: PhotoContentSource(
         pixelSize: CGSize(width: 1_200, height: 800)
       ),
-      style: .init(.detail)
+      style: .init(.cell)
     )
   }
 }

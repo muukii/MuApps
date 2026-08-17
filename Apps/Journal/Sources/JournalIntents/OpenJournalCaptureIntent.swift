@@ -42,7 +42,7 @@ public struct OpenJournalCaptureIntent: UISceneAppIntent {
     let destinationVaultID: VaultID?
     if let vault {
       // A corrupt explicit selection is surfaced as an unconfigured request;
-      // it must not redirect content to the separate Quick Capture preference.
+      // it must not redirect content to the remembered Share destination.
       destinationVaultID = vault.vaultID
     } else {
       destinationVaultID = try? JournalQuickCapturePreferences().selectedVaultID()

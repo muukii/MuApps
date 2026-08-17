@@ -4,12 +4,6 @@
     "+ %@ more" : {
 
     },
-    "BL" : {
-
-    },
-    "BR" : {
-
-    },
     "Completed" : {
       "localizations" : {
         "en" : {
@@ -79,9 +73,6 @@
     "Suggestion" : {
 
     },
-    "TL" : {
-
-    },
     "Todo" : {
       "localizations" : {
         "en" : {
@@ -98,10 +89,8 @@
         }
       }
     },
-    "TR" : {
-
-    },
     "Untitled Todo" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

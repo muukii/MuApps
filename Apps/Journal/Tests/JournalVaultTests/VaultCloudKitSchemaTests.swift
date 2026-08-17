@@ -57,6 +57,7 @@ struct VaultCloudKitSchemaTests {
         VaultRecordMapper.AttachmentResourceKey.pixelWidth,
         VaultRecordMapper.AttachmentResourceKey.pixelHeight,
         VaultRecordMapper.AttachmentResourceKey.duration,
+        VaultRecordMapper.AttachmentResourceKey.waveformData,
         VaultRecordMapper.AttachmentResourceKey.isHDR,
         VaultRecordMapper.AttachmentResourceKey.colorSpaceName,
         VaultRecordMapper.AttachmentResourceKey.createdAt,

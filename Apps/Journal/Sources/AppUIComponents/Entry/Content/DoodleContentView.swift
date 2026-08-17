@@ -42,28 +42,31 @@ struct DoodleContentView: View {
 
     var displayAspectRatio: CGFloat? {
       switch preset {
-      case .composer, .overview:
+      case .composer:
         return 1
-      case .detail, .share:
+      case .cell:
         return nil
       }
     }
 
-    var artworkPadding: CGFloat {
+    var usesCompactLoading: Bool {
       switch preset {
-      case .composer, .detail:
-        return 0
-      case .overview:
-        return 10
-      case .share:
-        return 32
+      case .composer:
+        return true
+      case .cell:
+        return false
       }
     }
 
-    var usesCompactLoading: Bool { preset == .composer }
-    var isDetail: Bool { preset == .detail }
     var placeholderAspectRatio: CGFloat { 1 }
-    var minimumHeight: CGFloat? { preset == .detail ? 180 : nil }
+    var minimumHeight: CGFloat? {
+      switch preset {
+      case .composer:
+        return nil
+      case .cell:
+        return 180
+      }
+    }
   }
 
   let doodle: DoodleContentSource
@@ -73,34 +76,33 @@ struct DoodleContentView: View {
   @State private var state: ContentMediaLoadState<DoodleDrawing> = .idle
 
   var body: some View {
-    content
-      .background(.appSecondaryContainer)
-      .detailMediaFrame(
-        aspectRatio: displayAspectRatio,
-        isDetail: style.isDetail
+    ContentMediaFrame(aspectRatio: displayAspectRatio) {
+      content
+        .background(.appSecondaryContainer)
+    }
+    .task(
+      id: ContentFileLoadID(
+        fileURL: doodle.fileURL,
+        fileRevision: doodle.fileRevision
       )
-      .task(
-        id: ContentFileLoadID(
-          fileURL: doodle.fileURL,
-          fileRevision: doodle.fileRevision
-        )
-      ) {
-        await loadDrawing()
-      }
+    ) {
+      await loadDrawing()
+    }
   }
 
   /// Keeps the loading and rendered states on one placement geometry.
   ///
-  /// Compact placements impose their own square, so only the unconstrained
-  /// detail placement reserves the authored canvas geometry. Persisted metadata
-  /// keeps compatible older drawings at their recorded ratio; missing metadata
-  /// uses the fixed authored ratio without waiting for JSON decoding.
+  /// Composer previews use a square while a Cell reserves the authored canvas
+  /// geometry. Persisted metadata keeps compatible older drawings at their
+  /// recorded ratio; missing metadata uses the fixed authored ratio without
+  /// waiting for JSON decoding.
   private var displayAspectRatio: CGFloat {
-    guard style.isDetail else {
+    switch style.preset {
+    case .composer:
       return style.placeholderAspectRatio
+    case .cell:
+      return doodle.displayAspectRatio ?? DoodleDrawing.canvasAspectRatio
     }
-
-    return doodle.displayAspectRatio ?? DoodleDrawing.canvasAspectRatio
   }
 
   @ViewBuilder
@@ -114,8 +116,8 @@ struct DoodleContentView: View {
       case .loading:
         ContentLoadingMedia(isCompact: style.usesCompactLoading)
       case .idle, .unavailable:
-        if style.preset == .share, doodle.thumbnailData != nil {
-          SynchronousImageContentView(
+        if doodle.fileURL == nil, doodle.thumbnailData != nil {
+          InlineImageDataContentView(
             imageData: doodle.thumbnailData,
             fallbackSystemImage: "scribble"
           )
@@ -136,7 +138,6 @@ struct DoodleContentView: View {
       inkColor: palette.tint,
       displayAspectRatio: style.displayAspectRatio
     )
-    .padding(style.artworkPadding)
   }
 
   @MainActor
@@ -175,7 +176,7 @@ struct DoodleContentView: View {
       doodle: DoodleContentSource(
         pixelSize: CGSize(width: 2_048, height: 1_536)
       ),
-      style: .init(.detail)
+      style: .init(.cell)
     )
   }
 }

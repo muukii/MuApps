@@ -44,6 +44,13 @@ public final class AttachmentResource {
   /// Duration in seconds for video/audio resources when known.
   public var duration: Double?
 
+  /// Versioned Codable JSON describing the measured audio waveform.
+  ///
+  /// This is derived presentation data; the audio file remains the source of
+  /// truth. It is optional for non-audio resources and records from older app
+  /// versions.
+  public var waveformData: Data?
+
   /// Whether the resource contains HDR media.
   public var isHDR: Bool
 
@@ -69,6 +76,7 @@ public final class AttachmentResource {
     pixelWidth: Int? = nil,
     pixelHeight: Int? = nil,
     duration: Double? = nil,
+    waveformData: Data? = nil,
     isHDR: Bool = false,
     colorSpaceName: String? = nil,
     localFileRevision: Int = 0,
@@ -82,6 +90,7 @@ public final class AttachmentResource {
     self.pixelWidth = pixelWidth
     self.pixelHeight = pixelHeight
     self.duration = duration
+    self.waveformData = waveformData
     self.isHDR = isHDR
     self.colorSpaceName = colorSpaceName
     self.localFileRevision = localFileRevision

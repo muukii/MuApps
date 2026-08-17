@@ -1,5 +1,6 @@
 import AVFoundation
 import SwiftUI
+
 #if canImport(UIKit)
   import UIKit
 #endif
@@ -48,15 +49,38 @@ struct LivePhotoContentView: View {
       switch preset {
       case .composer:
         return .fill
-      case .overview, .detail, .share:
+      case .cell:
         return .fit
       }
     }
 
-    var isDetail: Bool { preset == .detail }
-    var usesPrimaryData: Bool { preset == .composer || preset == .share }
+    var videoGravity: AVLayerVideoGravity {
+      switch preset {
+      case .composer:
+        return .resizeAspectFill
+      case .cell:
+        return .resizeAspect
+      }
+    }
+
+    var allowsPlayback: Bool {
+      switch preset {
+      case .composer:
+        return false
+      case .cell:
+        return true
+      }
+    }
+
     var placeholderAspectRatio: CGFloat { 1 }
-    var minimumHeight: CGFloat? { isDetail ? 180 : nil }
+    var minimumHeight: CGFloat? {
+      switch preset {
+      case .composer:
+        return nil
+      case .cell:
+        return 180
+      }
+    }
   }
 
   let livePhoto: LivePhotoContentSource
@@ -68,18 +92,16 @@ struct LivePhotoContentView: View {
   @GestureState private var isLivePhotoPlaybackActive = false
 
   var body: some View {
-    content
-      .detailMediaFrame(
-        aspectRatio: displayAspectRatio,
-        isDetail: style.isDetail
-      )
-      .task(id: imageLoadID) {
-        await refreshImages()
-      }
-      .onChange(of: isLivePhotoPlaybackActive) { _, isActive in
-        guard isActive == false else { return }
-        isPairedVideoReady = false
-      }
+    ContentMediaFrame(aspectRatio: displayAspectRatio) {
+      content
+    }
+    .task(id: imageLoadID) {
+      await refreshImages()
+    }
+    .onChange(of: isLivePhotoPlaybackActive) { _, isActive in
+      guard isActive == false else { return }
+      isPairedVideoReady = false
+    }
   }
 
   @ViewBuilder
@@ -96,8 +118,7 @@ struct LivePhotoContentView: View {
         {
           MutedLoopingVideoPlayer(
             fileURL: pairedVideoFileURL,
-            videoGravity: style.isDetail
-              ? .resizeAspect : .resizeAspectFill,
+            videoGravity: style.videoGravity,
             onReadyForPlayback: {
               withAnimation(.easeInOut(duration: 0.16)) {
                 isPairedVideoReady = true
@@ -110,7 +131,7 @@ struct LivePhotoContentView: View {
       .contentShape(Rectangle())
       .gesture(
         livePhotoPlaybackGesture,
-        isEnabled: style.isDetail
+        isEnabled: style.allowsPlayback
       )
       .overlay(alignment: .bottomTrailing) {
         ContentMediaBadge(systemImage: "livephoto")
@@ -135,11 +156,9 @@ struct LivePhotoContentView: View {
 
   private var image: UIImage? {
     switch style.preset {
-    case .composer, .share:
+    case .composer:
       return decodedStillImage ?? decodedThumbnailImage
-    case .overview:
-      return decodedThumbnailImage
-    case .detail:
+    case .cell:
       return loadedFullSizeImage ?? decodedThumbnailImage
     }
   }
@@ -157,21 +176,22 @@ struct LivePhotoContentView: View {
   /// Keeps the placeholder, still, and paired-video states on one geometry.
   ///
   /// Persisted pixel dimensions describe the Live Photo before its still image
-  /// decodes, so the detail placement can reserve its final box on the first
+  /// decodes, so the Cell can reserve its final box on the first
   /// layout pass instead of resizing once bytes arrive.
   private var displayAspectRatio: CGFloat {
     let decodedAspectRatio =
       decodedThumbnailImage?.contentAspectRatio
       ?? decodedStillImage?.contentAspectRatio
       ?? loadedFullSizeImage?.contentAspectRatio
-    guard style.isDetail else {
-      return decodedAspectRatio ?? style.placeholderAspectRatio
+    switch style.preset {
+    case .composer:
+      return style.placeholderAspectRatio
+    case .cell:
+      return
+        livePhoto.displayAspectRatio
+        ?? decodedAspectRatio
+        ?? style.placeholderAspectRatio
     }
-
-    return
-      livePhoto.displayAspectRatio
-      ?? decodedAspectRatio
-      ?? style.placeholderAspectRatio
   }
 
   @MainActor
@@ -181,7 +201,7 @@ struct LivePhotoContentView: View {
     loadedFullSizeImage = nil
 
     switch style.preset {
-    case .composer, .share:
+    case .composer:
       let stillImage = await ContentMediaFileReader.image(
         from: livePhoto.stillImageData
       )
@@ -204,17 +224,7 @@ struct LivePhotoContentView: View {
 
       decodedThumbnailImage = thumbnailImage
 
-    case .overview:
-      let thumbnailImage = await ContentMediaFileReader.image(
-        from: livePhoto.thumbnailData
-      )
-      guard Task.isCancelled == false else {
-        return
-      }
-
-      decodedThumbnailImage = thumbnailImage
-
-    case .detail:
+    case .cell:
       let thumbnailImage = await ContentMediaFileReader.image(
         from: livePhoto.thumbnailData
       )
@@ -244,7 +254,7 @@ struct LivePhotoContentView: View {
       livePhoto: LivePhotoContentSource(
         pixelSize: CGSize(width: 3_024, height: 4_032)
       ),
-      style: .init(.detail)
+      style: .init(.cell)
     )
   }
 }

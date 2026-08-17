@@ -33,6 +33,9 @@ public struct VaultCloudStorageEstimate: Equatable, Sendable {
   /// Bytes stored inline as save-time thumbnail fields.
   public var thumbnailBytes: Int
 
+  /// Bytes stored inline as versioned recorded-audio waveform payloads.
+  public var waveformBytes: Int
+
   /// Attachment file bytes grouped by media modality.
   public var mediaBreakdowns: [MediaBreakdown]
 
@@ -45,6 +48,7 @@ public struct VaultCloudStorageEstimate: Equatable, Sendable {
     cardBodyBytes: Int = 0,
     mediaBytes: Int = 0,
     thumbnailBytes: Int = 0,
+    waveformBytes: Int = 0,
     mediaBreakdowns: [MediaBreakdown] = []
   ) {
     self.vaultInfoCount = vaultInfoCount
@@ -55,6 +59,7 @@ public struct VaultCloudStorageEstimate: Equatable, Sendable {
     self.cardBodyBytes = cardBodyBytes
     self.mediaBytes = mediaBytes
     self.thumbnailBytes = thumbnailBytes
+    self.waveformBytes = waveformBytes
     self.mediaBreakdowns = mediaBreakdowns
   }
 
@@ -65,7 +70,7 @@ public struct VaultCloudStorageEstimate: Equatable, Sendable {
 
   /// Inline bytes stored directly on CloudKit records.
   public var inlinePayloadBytes: Int {
-    cardBodyBytes + thumbnailBytes
+    cardBodyBytes + thumbnailBytes + waveformBytes
   }
 
   /// Authored payload bytes Journal can estimate locally.
@@ -134,6 +139,10 @@ extension VaultContentStore {
       partialResult + (attachment.thumbnail?.count ?? 0)
     }
 
+    let waveformBytes = resources.reduce(0) { partialResult, resource in
+      partialResult + (resource.waveformData?.count ?? 0)
+    }
+
     var mediaBytesByKind: [Attachment.Kind: (count: Int, byteSize: Int)] = [:]
     for resource in resources {
       guard let attachment = attachmentsByID[resource.attachmentID] else { continue }
@@ -164,6 +173,7 @@ extension VaultContentStore {
       cardBodyBytes: cardBodyBytes,
       mediaBytes: mediaBreakdowns.reduce(0) { $0 + $1.byteSize },
       thumbnailBytes: thumbnailBytes,
+      waveformBytes: waveformBytes,
       mediaBreakdowns: mediaBreakdowns
     )
   }

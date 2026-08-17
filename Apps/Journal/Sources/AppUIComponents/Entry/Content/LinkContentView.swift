@@ -1,5 +1,5 @@
-import SwiftUI
 import MuColor
+import SwiftUI
 
 /// Renders a native link preview with a written-content fallback.
 struct LinkContentView: View {
@@ -12,28 +12,31 @@ struct LinkContentView: View {
       self.preset = preset
     }
 
-    /// Finite native-preview height for the unconstrained detail placement.
+    /// Finite native-preview height for the natural-height Cell placement.
     ///
     /// The host intentionally has no intrinsic size because its native width
     /// can exceed a SwiftUI grid column. Compact placements already receive
     /// their geometry from their parent and must not be resized here.
     var previewHeight: CGFloat? {
       switch preset {
-      case .detail:
+      case .cell:
         return 240
-      case .composer, .overview, .share:
+      case .composer:
         return nil
       }
-    }
-
-    var allowsInteraction: Bool {
-      preset == .detail
     }
 
     var fallbackTextStyle: TextContentView.Style {
       .init(
         preset,
-        emptyTitle: preset == .composer ? "Link" : "Empty link"
+        emptyTitle: {
+          switch preset {
+          case .composer:
+            return "Link"
+          case .cell:
+            return "Empty link"
+          }
+        }()
       )
     }
 
@@ -66,7 +69,7 @@ struct LinkContentView: View {
   EntryContentPreviewCanvas {
     LinkContentView(
       urlString: "https://rivet.design/",
-      style: .init(.detail)
+      style: .init(.cell)
     )
   }
 }

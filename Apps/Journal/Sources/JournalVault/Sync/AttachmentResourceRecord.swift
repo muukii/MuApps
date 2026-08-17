@@ -29,6 +29,9 @@ final class AttachmentResourceRecord {
   @CKField("duration", .double)
   var duration: Double?
 
+  @CKField("waveformData", .data)
+  var waveformData: Data?
+
   @CKField("isHDR", .bool, default: false)
   var isHDR: Bool
 

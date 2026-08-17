@@ -218,6 +218,12 @@ extension VaultContentStore {
     /// Duration in seconds for video/audio resources when known.
     public var duration: Double?
 
+    /// Versioned Codable JSON for the audio resource's measured waveform.
+    ///
+    /// The payload stays optional so imported media and legacy audio resources
+    /// remain valid without a derived waveform.
+    public var waveformData: Data?
+
     /// Whether this resource contains HDR media.
     public var isHDR: Bool
 
@@ -235,6 +241,7 @@ extension VaultContentStore {
       pixelWidth: Int? = nil,
       pixelHeight: Int? = nil,
       duration: Double? = nil,
+      waveformData: Data? = nil,
       isHDR: Bool = false,
       colorSpaceName: String? = nil
     ) {
@@ -248,6 +255,7 @@ extension VaultContentStore {
       self.pixelWidth = pixelWidth
       self.pixelHeight = pixelHeight
       self.duration = duration
+      self.waveformData = waveformData
       self.isHDR = isHDR
       self.colorSpaceName = colorSpaceName
     }
@@ -783,6 +791,7 @@ extension VaultContentStore {
           pixelWidth: resourceDraft.pixelWidth,
           pixelHeight: resourceDraft.pixelHeight,
           duration: resourceDraft.duration,
+          waveformData: resourceDraft.waveformData,
           isHDR: resourceDraft.isHDR,
           colorSpaceName: resourceDraft.colorSpaceName,
           createdAt: attachment.createdAt

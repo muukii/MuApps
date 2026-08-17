@@ -3,9 +3,6 @@ import JournalVault
 import MuColor
 import SwiftUI
 
-private let rootGroupContentPadding: CGFloat = 16
-private let rootGroupCornerRadius: CGFloat = 24
-
 /// Shared spacing for trees rendered on Home.
 struct VaultSavedEntryTreeMetrics {
   static let descendantMarkerGutter: CGFloat = 16
@@ -74,23 +71,15 @@ struct VaultSavedEntryRow: View {
   }
 
   var body: some View {
-    Group {
-      if entry.kind == .todo {
-        HStack(alignment: .center, spacing: 0) {
-          TodoCompletionButton(isCompleted: entry.isCompleted) {
-            onToggleTodoCompletion(entry)
-          }
-          .padding(.leading, 8)
-          .disabled(isMutationDisabled)
-
-          entryPresentation(showsTodoCompletionIndicator: false)
+    VaultSavedRootGroup(
+      entry: entry.entryModel,
+      interaction: .interactive(isEnabled: isMutationDisabled == false) { action in
+        switch action {
+        case .toggleTodoCompletion:
+          onToggleTodoCompletion(entry)
         }
-        .background(.appSecondaryContainer)
-        .clipShape(.rect(cornerRadius: rootGroupCornerRadius))
-      } else {
-        entryPresentation(showsTodoCompletionIndicator: true)
       }
-    }
+    )
     .contentShape(.rect)
     .contextMenu {
       Button {
@@ -129,22 +118,6 @@ struct VaultSavedEntryRow: View {
     }
   }
 
-  private func entryPresentation(
-    showsTodoCompletionIndicator: Bool
-  ) -> some View {
-    entryContent(
-      showsTodoCompletionIndicator: showsTodoCompletionIndicator
-    )
-  }
-
-  private func entryContent(
-    showsTodoCompletionIndicator: Bool
-  ) -> some View {
-    VaultSavedRootGroup(
-      entry: entry.entryModel,
-      showsTodoCompletionIndicator: showsTodoCompletionIndicator
-    )
-  }
 }
 
 /// Existing saved-entry card presentation within its proposed tree width.
@@ -200,25 +173,16 @@ struct VaultSavedEntryTreeCell: View {
 struct VaultSavedRootGroup: View {
 
   let entry: VaultSavedEntryModel
-  let showsTodoCompletionIndicator: Bool
-
-  init(
-    entry: VaultSavedEntryModel,
-    showsTodoCompletionIndicator: Bool = true
-  ) {
-    self.entry = entry
-    self.showsTodoCompletionIndicator = showsTodoCompletionIndicator
-  }
+  let interaction: EntryContentView.Interaction
 
   var body: some View {
     EntryContentView(
       content: entry.content,
-      style: .detail,
-      showsTodoCompletionIndicator: showsTodoCompletionIndicator
+      style: .cell,
+      interaction: interaction
     )
     .frame(maxWidth: .infinity, alignment: .leading)
     .foregroundStyle(.appOnSecondaryContainer)
-    .allowsHitTesting(false)
     .contentShape(.rect)
   }
 }

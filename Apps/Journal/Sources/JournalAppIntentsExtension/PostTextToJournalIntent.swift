@@ -3,7 +3,7 @@ import Foundation
 import JournalIntents
 import JournalVault
 
-/// Posts supplied text directly to the explicitly selected Quick Capture Vault.
+/// Posts supplied text to an explicit Vault or the last successful Share destination.
 ///
 /// Success means the card and its durable CloudKit outbox rows committed to the
 /// shared local vault. The containing app owns eventual CloudKit transport and
@@ -25,7 +25,7 @@ struct PostTextToJournalIntent: AppIntent {
 
   @Parameter(
     title: "Vault",
-    description: "Leave empty to use the Quick Capture Vault from Journal Settings."
+    description: "Leave empty to use the most recent Tinycurve Share Vault."
   )
   var vault: JournalWritableVaultEntity?
 
@@ -74,7 +74,7 @@ struct PostTextToJournalIntent: AppIntent {
     guard let destination = try JournalQuickCapturePreferences().selectedVault(
       from: writableVaults
     ) else {
-      throw PostTextToJournalError.quickCaptureVaultRequired
+      throw PostTextToJournalError.destinationVaultRequired
     }
     return destination
   }
@@ -84,7 +84,7 @@ struct PostTextToJournalIntent: AppIntent {
 private enum PostTextToJournalError: Error, LocalizedError {
   case emptyText
   case invalidVault
-  case quickCaptureVaultRequired
+  case destinationVaultRequired
 
   var errorDescription: String? {
     switch self {
@@ -92,8 +92,8 @@ private enum PostTextToJournalError: Error, LocalizedError {
       "Add text before posting to Journal."
     case .invalidVault:
       "The selected Journal Vault is invalid. Choose it again."
-    case .quickCaptureVaultRequired:
-      "Choose a Quick Capture Vault in Journal Settings first."
+    case .destinationVaultRequired:
+      "Choose a Vault for this Shortcut or post once from the Tinycurve Share sheet."
     }
   }
 }

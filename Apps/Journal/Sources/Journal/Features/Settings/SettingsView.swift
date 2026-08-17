@@ -1,4 +1,3 @@
-import JournalIntents
 import JournalVault
 import MuColor
 import SwiftUI
@@ -152,9 +151,6 @@ struct SettingsView: View {
 
       AppearanceSection(selectionID: $appearancePreferenceID)
       LocationSection(isEnabled: $shouldAttachLocationToNewCards)
-      #if os(iOS)
-        QuickCaptureVaultSection()
-      #endif
       CloudStorageEstimateSection(runtime: vaultRuntime)
       WidgetInstructionsSection()
 
@@ -271,106 +267,6 @@ private struct LocationSection: View {
       )
     }
     .settingsListRowBackground()
-  }
-}
-
-/// A form section for the explicit destination shared by Action Button,
-/// Shortcuts, App Intents, and the Share extension.
-///
-/// The choice lives in App Group preferences rather than standard app defaults
-/// because each system entry point runs in a separate process. Journal never
-/// substitutes the last-opened vault when this selection is missing or stale.
-private struct QuickCaptureVaultSection: View {
-
-  @State private var writableVaults: [JournalWritableVault] = []
-  @State private var selectionID = ""
-  @State private var didLoad = false
-  @State private var statusMessage: String?
-
-  var body: some View {
-    Section {
-      Picker("Quick Capture Vault", selection: $selectionID) {
-        Text("Choose a Vault")
-          .tag("")
-
-        ForEach(writableVaults) { vault in
-          Text(displayTitle(for: vault))
-            .tag(vault.id.uuidString)
-        }
-      }
-      .disabled(writableVaults.isEmpty)
-
-      if writableVaults.isEmpty {
-        Label("No writable vaults are available.", systemImage: "exclamationmark.triangle")
-          .foregroundStyle(.secondary)
-      }
-    } header: {
-      Text("Quick Capture")
-    } footer: {
-      if let statusMessage {
-        Text(statusMessage)
-      } else {
-        Text(
-          "Used by the Action Button, Shortcuts, and system sharing. Journal never chooses another vault automatically."
-        )
-      }
-    }
-    .settingsListRowBackground()
-    .task { loadSelection() }
-    .onChange(of: selectionID) { _, newValue in
-      guard didLoad else { return }
-      saveSelection(newValue)
-    }
-  }
-
-  @MainActor
-  private func loadSelection() {
-    didLoad = false
-    defer { didLoad = true }
-
-    do {
-      let service = JournalPostingService()
-      writableVaults = try service.writableVaults()
-      let storedID = try JournalQuickCapturePreferences().selectedVaultID()
-
-      if let storedID,
-        writableVaults.contains(where: { $0.id == storedID })
-      {
-        selectionID = storedID.uuidString
-        statusMessage = nil
-      } else {
-        selectionID = ""
-        statusMessage =
-          storedID == nil
-          ? nil
-          : String(
-            localized:
-              "The previous Quick Capture Vault is no longer writable. Choose another vault.")
-      }
-    } catch {
-      writableVaults = []
-      selectionID = ""
-      statusMessage = error.localizedDescription
-    }
-  }
-
-  @MainActor
-  private func saveSelection(_ id: String) {
-    do {
-      let vault = writableVaults.first { $0.id.uuidString == id }
-      try JournalQuickCapturePreferences().setSelectedVault(vault)
-      statusMessage =
-        vault == nil
-        ? String(localized: "Choose a vault before using Quick Capture.")
-        : nil
-    } catch {
-      statusMessage = error.localizedDescription
-    }
-  }
-
-  private func displayTitle(for vault: JournalWritableVault) -> String {
-    let title = vault.title.trimmingCharacters(in: .whitespacesAndNewlines)
-    return title.isEmpty ? String(localized: "Untitled Vault") : title
   }
 }
 
@@ -569,6 +465,13 @@ private struct CloudStorageEstimateBreakdownSection: View {
         byteSize: estimate.thumbnailBytes
       )
 
+      StorageBreakdownRow(
+        title: "Audio Waveforms",
+        systemImage: "waveform",
+        detail: nil,
+        byteSize: estimate.waveformBytes
+      )
+
       ForEach(estimate.mediaBreakdowns) { breakdown in
         StorageBreakdownRow(
           title: breakdown.kind.storageTitle,
@@ -700,6 +603,12 @@ private struct VaultCloudStorageEstimateDetailView: View {
           systemImage: "photo.on.rectangle",
           detail: nil,
           byteSize: vaultEstimate.estimate.thumbnailBytes
+        )
+        StorageBreakdownRow(
+          title: "Audio Waveforms",
+          systemImage: "waveform",
+          detail: nil,
+          byteSize: vaultEstimate.estimate.waveformBytes
         )
       } header: {
         Text("By Type")

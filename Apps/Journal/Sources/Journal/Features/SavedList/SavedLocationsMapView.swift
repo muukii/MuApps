@@ -54,42 +54,18 @@ struct VaultSavedLocationsMapNavigationHeader: View {
 /// Compact, zoomed-in map that keeps the saved cards visible below it.
 private struct VaultSavedLocationsMapHeader: View {
 
-  @State private var cameraPosition: MapCameraPosition
+  @Environment(\.appPalette) private var palette
 
   let pins: [VaultSavedLocationPin]
 
-  init(pins: [VaultSavedLocationPin]) {
-    self.pins = pins
-    _cameraPosition = State(
-      initialValue: VaultSavedLocationsMapCamera.headerPosition(for: pins)
-    )
-  }
-
   var body: some View {
-    ZStack {
-      Map(
-        position: $cameraPosition,
-        interactionModes: []
-      ) {
-        ForEach(pins.dropFirst()) { pin in
-          Annotation("Saved Entry", coordinate: pin.coordinate.clCoordinate) {
-            VaultSavedLocationPinMarker(pin: pin, markerSize: 24)
-          }
-          .annotationTitles(.hidden)
-        }
-      }
-      .mapStyle(.standard(elevation: .flat))
-      .mapControlVisibility(.hidden)
-      .allowsHitTesting(false)
-      .onChange(of: pins.first) { _, _ in
-        // Recenter for a new latest pin without replacing the MapKit surface.
-        cameraPosition = VaultSavedLocationsMapCamera.headerPosition(for: pins)
-      }
-
-      if let latestPin = pins.first {
-        VaultSavedLocationPinMarker(pin: latestPin, markerSize: 28)
-      }
-    }
+    VaultSavedLocationsPlatformMap(
+      pins: pins,
+      markerColor: palette.tint,
+      glyphColor: palette.onTint,
+      presentation: .header
+    )
+    .allowsHitTesting(false)
     .overlay(alignment: .topTrailing) {
       Image(systemName: "arrow.up.left.and.arrow.down.right")
         .font(.caption.weight(.semibold))
@@ -125,10 +101,11 @@ struct VaultSavedLocationsMapView: View {
   let pins: [VaultSavedLocationPin]
 
   var body: some View {
-    VaultSavedLocationsClusterMap(
+    VaultSavedLocationsPlatformMap(
       pins: pins,
       markerColor: palette.tint,
-      glyphColor: palette.onTint
+      glyphColor: palette.onTint,
+      presentation: .overview
     )
     .ignoresSafeArea()
     .navigationTitle("Map")
@@ -148,14 +125,29 @@ struct VaultSavedLocationsMapView: View {
   private typealias VaultSavedLocationsMapPlatformColor = NSColor
 #endif
 
-/// Native MapKit bridge that enables automatic annotation clustering.
-private struct VaultSavedLocationsClusterMap:
+/// Native MapKit bridge shared by the compact Home header and full overview.
+///
+/// The presentation owns MapKit interaction and camera policy. SwiftUI keeps
+/// navigation and chrome outside this bridge, so the header remains a passive
+/// `NavigationLink` label while the overview retains direct map interaction.
+private struct VaultSavedLocationsPlatformMap:
   VaultSavedLocationsMapRepresentable
 {
+
+  /// Selects the map surface's interaction and camera ownership.
+  ///
+  /// `.header` follows the newest visible pin without accepting gestures.
+  /// `.overview` fits the first non-empty dataset once, then preserves the
+  /// user's camera while cards or filters update the annotations.
+  enum Presentation: Sendable {
+    case header
+    case overview
+  }
 
   let pins: [VaultSavedLocationPin]
   let markerColor: Color
   let glyphColor: Color
+  let presentation: Presentation
 
   func makeCoordinator() -> VaultSavedLocationsMapCoordinator {
     VaultSavedLocationsMapCoordinator()
@@ -205,6 +197,7 @@ private struct VaultSavedLocationsClusterMap:
       pins: pins,
       markerColor: platformColor(markerColor),
       glyphColor: platformColor(glyphColor),
+      presentation: presentation,
       on: mapView
     )
   }
@@ -220,7 +213,7 @@ private struct VaultSavedLocationsClusterMap:
   }
 }
 
-/// MapKit delegate and annotation store for the interactive saved-locations map.
+/// MapKit delegate and annotation store shared by both saved-locations maps.
 @MainActor
 private final class VaultSavedLocationsMapCoordinator: NSObject,
   MKMapViewDelegate
@@ -232,6 +225,7 @@ private final class VaultSavedLocationsMapCoordinator: NSObject,
 
   private var annotationsByID: [UUID: VaultSavedLocationMapPoint] = [:]
   private var hasFittedInitialPins = false
+  private var lastHeaderFocus: HeaderFocus?
   private var markerColor: VaultSavedLocationsMapPlatformColor
   private var glyphColor: VaultSavedLocationsMapPlatformColor
 
@@ -266,10 +260,12 @@ private final class VaultSavedLocationsMapCoordinator: NSObject,
     pins: [VaultSavedLocationPin],
     markerColor: VaultSavedLocationsMapPlatformColor,
     glyphColor: VaultSavedLocationsMapPlatformColor,
+    presentation: VaultSavedLocationsPlatformMap.Presentation,
     on mapView: MKMapView
   ) {
     self.markerColor = markerColor
     self.glyphColor = glyphColor
+    configureInteraction(for: presentation, on: mapView)
 
     let desiredIDs = Set(pins.map(\.id))
     let removedAnnotations = annotationsByID.compactMap { id, annotation in
@@ -293,9 +289,54 @@ private final class VaultSavedLocationsMapCoordinator: NSObject,
     mapView.addAnnotations(newAnnotations)
     refreshVisibleAnnotationViews(on: mapView)
 
-    guard hasFittedInitialPins == false, pins.isEmpty == false else { return }
-    fitInitialPins(pins, on: mapView)
-    hasFittedInitialPins = true
+    switch presentation {
+    case .header:
+      recenterHeaderIfNeeded(for: pins.first, on: mapView)
+    case .overview:
+      guard hasFittedInitialPins == false, pins.isEmpty == false else { return }
+      fitInitialPins(pins, on: mapView)
+      hasFittedInitialPins = true
+    }
+  }
+
+  private func configureInteraction(
+    for presentation: VaultSavedLocationsPlatformMap.Presentation,
+    on mapView: MKMapView
+  ) {
+    switch presentation {
+    case .header:
+      mapView.isScrollEnabled = false
+      mapView.isZoomEnabled = false
+      mapView.isPitchEnabled = false
+      mapView.isRotateEnabled = false
+      mapView.showsCompass = false
+      mapView.showsScale = false
+      #if canImport(AppKit)
+        mapView.showsZoomControls = false
+        mapView.showsPitchControl = false
+      #endif
+    case .overview:
+      mapView.isScrollEnabled = true
+      mapView.isZoomEnabled = true
+      mapView.isPitchEnabled = true
+      mapView.isRotateEnabled = true
+    }
+  }
+
+  private func recenterHeaderIfNeeded(
+    for pin: VaultSavedLocationPin?,
+    on mapView: MKMapView
+  ) {
+    guard let pin else { return }
+
+    let focus = HeaderFocus(pin: pin)
+    guard focus != lastHeaderFocus else { return }
+
+    mapView.setRegion(
+      VaultSavedLocationsMapCamera.headerRegion(for: pin),
+      animated: false
+    )
+    lastHeaderFocus = focus
   }
 
   func mapView(
@@ -422,6 +463,19 @@ private final class VaultSavedLocationsMapCoordinator: NSObject,
       view.setAccessibilityLabel(label)
     #endif
   }
+
+  /// Header camera input that changes only when its visible newest pin changes.
+  private struct HeaderFocus: Equatable {
+    let id: UUID
+    let latitude: CLLocationDegrees
+    let longitude: CLLocationDegrees
+
+    init(pin: VaultSavedLocationPin) {
+      id = pin.id
+      latitude = pin.coordinate.latitude
+      longitude = pin.coordinate.longitude
+    }
+  }
 }
 
 /// Mutable MapKit annotation retained across SwiftUI representable updates.
@@ -504,33 +558,6 @@ private final class VaultSavedLocationClusterAnnotationView:
   }
 }
 
-/// Location pin that remains legible over both light and dark map tiles.
-private struct VaultSavedLocationPinMarker: View {
-
-  let pin: VaultSavedLocationPin
-  let markerSize: CGFloat
-
-  var body: some View {
-    Image(systemName: "mappin")
-      .font(.system(size: markerSize * 0.48, weight: .semibold))
-      .foregroundStyle(.appOnTint)
-      .frame(width: markerSize, height: markerSize)
-      .background(Color.accentColor, in: Circle())
-      .overlay {
-        Circle()
-          .stroke(.white.opacity(0.88), lineWidth: 1.5)
-      }
-      .shadow(color: .black.opacity(0.22), radius: 3, y: 1)
-      .accessibilityLabel("Saved Entry")
-      .accessibilityValue(
-        Text(
-          pin.createdAt,
-          format: .dateTime.year().month().day().hour().minute()
-        )
-      )
-  }
-}
-
 /// Camera policies for the zoomed header and the all-pins overview.
 private enum VaultSavedLocationsMapCamera {
 
@@ -538,19 +565,11 @@ private enum VaultSavedLocationsMapCamera {
   private static let minimumOverviewSpanMeters: CLLocationDistance = 1_200
   private static let overviewPaddingScale: Double = 1.5
 
-  static func headerPosition(for pins: [VaultSavedLocationPin])
-    -> MapCameraPosition
-  {
-    guard let latestPin = pins.first else {
-      return .automatic
-    }
-
-    return .region(
-      MKCoordinateRegion(
-        center: latestPin.coordinate.clCoordinate,
-        latitudinalMeters: headerSpanMeters,
-        longitudinalMeters: headerSpanMeters
-      )
+  static func headerRegion(for pin: VaultSavedLocationPin) -> MKCoordinateRegion {
+    MKCoordinateRegion(
+      center: pin.coordinate.clCoordinate,
+      latitudinalMeters: headerSpanMeters,
+      longitudinalMeters: headerSpanMeters
     )
   }
 
@@ -614,6 +633,18 @@ enum VaultSavedLocationsMapTransition {
   }
 }
 
+#Preview("Saved Locations Map Dense Header") {
+  PrimaryContainer(accentColor: .default) {
+    ScrollView {
+      VaultSavedLocationsMapHeader(
+        pins: VaultSavedLocationsMapPreviewFixtures.densePins
+      )
+      .padding(savedLocationsMapPreviewPadding)
+    }
+    .background(.background)
+  }
+}
+
 /// In-memory locations used only to validate map composition in Preview.
 private enum VaultSavedLocationsMapPreviewFixtures {
 
@@ -631,6 +662,26 @@ private enum VaultSavedLocationsMapPreviewFixtures {
     VaultSavedLocationPin(
       id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
       coordinate: Coordinate(latitude: 35.7148, longitude: 139.7745),
+      createdAt: Date(timeIntervalSinceReferenceDate: 799_992_800)
+    ),
+  ]
+
+  /// Coincident and nearby points make the native cluster marker visible when
+  /// Preview happens to render the MapKit surface; this is not runtime proof.
+  static let densePins: [VaultSavedLocationPin] = [
+    VaultSavedLocationPin(
+      id: UUID(uuidString: "00000000-0000-0000-0000-000000000011")!,
+      coordinate: Coordinate(latitude: 35.6812, longitude: 139.7671),
+      createdAt: Date(timeIntervalSinceReferenceDate: 800_000_000)
+    ),
+    VaultSavedLocationPin(
+      id: UUID(uuidString: "00000000-0000-0000-0000-000000000012")!,
+      coordinate: Coordinate(latitude: 35.6812, longitude: 139.7671),
+      createdAt: Date(timeIntervalSinceReferenceDate: 799_996_400)
+    ),
+    VaultSavedLocationPin(
+      id: UUID(uuidString: "00000000-0000-0000-0000-000000000013")!,
+      coordinate: Coordinate(latitude: 35.6813, longitude: 139.7672),
       createdAt: Date(timeIntervalSinceReferenceDate: 799_992_800)
     ),
   ]

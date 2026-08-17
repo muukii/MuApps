@@ -233,6 +233,48 @@ struct VaultContentStoreTests {
   }
 
   @Test
+  func createThread_audioDraftPersistsWaveformBesideAudioResource() throws {
+    let store = try makeStore()
+    let sourceURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("waveform-audio-\(UUID().uuidString)")
+      .appendingPathExtension("m4a")
+    let audioBytes = Data([0x00, 0x01, 0x02])
+    let waveformData = Data(#"{"formatVersion":1}"#.utf8)
+    try audioBytes.write(to: sourceURL)
+    defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+    try store.createThread(cards: [
+      .init(
+        kind: .audio,
+        mediaResources: [
+          .init(
+            role: .audio,
+            fileURL: sourceURL,
+            contentType: "public.mpeg-4-audio",
+            duration: 2.5,
+            waveformData: waveformData
+          )
+        ]
+      )
+    ])
+
+    let resource = try #require(
+      try store.container.mainContext.fetch(
+        FetchDescriptor<JournalVault.AttachmentResource>()
+      ).first
+    )
+    #expect(resource.role == .audio)
+    #expect(resource.duration == 2.5)
+    #expect(resource.waveformData == waveformData)
+    #expect(try Data(contentsOf: store.fileURL(for: resource)) == audioBytes)
+
+    let estimate = try store.cloudStorageEstimate()
+    #expect(estimate.waveformBytes == waveformData.count)
+    #expect(estimate.inlinePayloadBytes == waveformData.count)
+    #expect(estimate.estimatedPayloadBytes == waveformData.count + audioBytes.count)
+  }
+
+  @Test
   func latestRootCard_ignoresNewerContinuations() throws {
     let store = try makeStore()
     _ = try store.createThread(cards: [.init(kind: .text, text: "older root")])
@@ -629,7 +671,10 @@ struct VaultContentStoreTests {
     )
     #expect(estimate.mediaBytes == photoBytes.count)
     #expect(estimate.thumbnailBytes == thumbnailBytes.count)
-    #expect(estimate.inlinePayloadBytes == estimate.cardBodyBytes + thumbnailBytes.count)
+    #expect(
+      estimate.inlinePayloadBytes
+        == estimate.cardBodyBytes + thumbnailBytes.count + estimate.waveformBytes
+    )
     #expect(estimate.estimatedPayloadBytes == estimate.inlinePayloadBytes + photoBytes.count)
 
     let photoBreakdown = try #require(estimate.mediaBreakdowns.first { $0.kind == .photo })

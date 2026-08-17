@@ -652,6 +652,22 @@
         }
       }
     },
+    "Audio Waveforms" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audio Waveforms"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音声波形"
+          }
+        }
+      }
+    },
     "Automatic" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1011,9 +1027,6 @@
           }
         }
       }
-    },
-    "Choose a Vault" : {
-
     },
     "Choose Icon" : {
       "localizations" : {
@@ -3201,9 +3214,6 @@
         }
       }
     },
-    "Quick Capture" : {
-
-    },
     "Quick Capture Is Not Ready" : {
 
     },
@@ -3377,6 +3387,7 @@
       }
     },
     "Reply" : {
+      "comment" : "Accessibility action that selects this entry as a Reply parent.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4361,9 +4372,6 @@
         }
       }
     },
-    "Tinycurve" : {
-
-    },
     "Tinycurve does not include developer-operated analytics, advertising SDKs, third-party trackers, or cross-app tracking." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4564,9 +4572,6 @@
           }
         }
       }
-    },
-    "Used by the Action Button, Shortcuts, and system sharing. Journal never chooses another vault automatically." : {
-
     },
     "Variations" : {
       "localizations" : {

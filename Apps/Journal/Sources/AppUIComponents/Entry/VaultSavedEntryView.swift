@@ -1,11 +1,6 @@
+import CoreGraphics
+import Foundation
 import JournalVault
-import MapKit
-import MuColor
-import SwiftUI
-
-#if canImport(UIKit)
-  import UIKit
-#endif
 
 /// Display value consumed by saved-entry components.
 ///
@@ -63,6 +58,8 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
   public let pixelSize: CGSize?
   public let contentType: String?
   public let byteSize: Int?
+  /// Validated, quantized audio levels ordered from recording start to end.
+  public let waveformLevels: Data?
   public let suggestionMediaFileURLsByResourceID: [UUID: URL]
 
   public init(
@@ -74,6 +71,7 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
     pixelSize: CGSize? = nil,
     contentType: String? = nil,
     byteSize: Int? = nil,
+    waveformLevels: Data? = nil,
     suggestionMediaFileURLsByResourceID: [UUID: URL] = [:]
   ) {
     self.kind = kind
@@ -84,70 +82,8 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
     self.pixelSize = pixelSize
     self.contentType = contentType
     self.byteSize = byteSize
+    self.waveformLevels = waveformLevels
     self.suggestionMediaFileURLsByResourceID = suggestionMediaFileURLsByResourceID
-  }
-}
-
-/// Standalone authored content and its record metadata in the detail screen.
-///
-/// Unlike a compact tile, the detail row has no shared card silhouette. Each
-/// authored format owns its natural height and media aspect ratio; record
-/// metadata and mutation controls remain a separate footer below it.
-public struct VaultSavedEntryDetailRow: View {
-
-  let entry: VaultSavedEntryModel
-  let isEditingDisabled: Bool
-  let isDeletingDisabled: Bool
-  let isTodoCompletionDisabled: Bool
-  let onEdit: @MainActor () -> Void
-  let onDelete: @MainActor () -> Void
-  let onOpen: (@MainActor () -> Void)?
-  let onToggleTodoCompletion: (@MainActor () -> Void)?
-
-  public init(
-    entry: VaultSavedEntryModel,
-    isEditingDisabled: Bool,
-    isDeletingDisabled: Bool,
-    isTodoCompletionDisabled: Bool = false,
-    onEdit: @escaping @MainActor () -> Void,
-    onDelete: @escaping @MainActor () -> Void,
-    onOpen: (@MainActor () -> Void)? = nil,
-    onToggleTodoCompletion: (@MainActor () -> Void)? = nil
-  ) {
-    self.entry = entry
-    self.isEditingDisabled = isEditingDisabled
-    self.isDeletingDisabled = isDeletingDisabled
-    self.isTodoCompletionDisabled = isTodoCompletionDisabled
-    self.onEdit = onEdit
-    self.onDelete = onDelete
-    self.onOpen = onOpen
-    self.onToggleTodoCompletion = onToggleTodoCompletion
-  }
-
-  public var body: some View {
-    EntryContentView(
-      content: entry.content,
-      style: .detail,
-      interaction: contentInteraction
-    )
-    .frame(maxWidth: .infinity, alignment: .center)
-    .foregroundStyle(.appOnPrimaryContainer)
-  }
-
-  private var contentInteraction: EntryContentView.Interaction {
-    guard entry.kind == .todo,
-      isTodoCompletionDisabled == false,
-      let onToggleTodoCompletion
-    else {
-      return .readOnly
-    }
-
-    return .interactive { action in
-      switch action {
-      case .toggleTodoCompletion:
-        onToggleTodoCompletion()
-      }
-    }
   }
 }
 
@@ -163,6 +99,7 @@ extension VaultSavedEntryAttachmentModel {
       pixelSize: pixelSize,
       contentType: contentType,
       byteSize: byteSize,
+      waveformLevels: waveformLevels,
       suggestionMediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID
     )
   }
@@ -230,189 +167,5 @@ extension JournalVault.Card.Kind {
     @unknown default:
       "questionmark.square.dashed"
     }
-  }
-}
-
-#Preview("Vault Saved Entry Detail Row") {
-  PrimaryContainer(accentColor: .default) {
-    ScrollView {
-      VaultSavedEntryDetailRow(
-        entry: VaultSavedEntryPreviewFixtures.detailEntry,
-        isEditingDisabled: false,
-        isDeletingDisabled: false,
-        onEdit: {},
-        onDelete: {}
-      )
-      .frame(maxWidth: 720)
-      .padding(16)
-    }
-    .background(.background)
-  }
-}
-
-#Preview("Vault Saved Entry Detail Media Ratios") {
-  PrimaryContainer(accentColor: .default) {
-    ScrollView {
-      LazyVStack(spacing: 40) {
-        ForEach(VaultSavedEntryPreviewFixtures.detailMediaEntries) { entry in
-          VaultSavedEntryDetailRow(
-            entry: entry,
-            isEditingDisabled: false,
-            isDeletingDisabled: false,
-            onEdit: {},
-            onDelete: {}
-          )
-          .frame(maxWidth: 720)
-        }
-      }
-      .padding(16)
-    }
-    .background(.background)
-  }
-}
-
-#Preview("Vault Saved Entry Portrait Video Detail") {
-  PrimaryContainer(accentColor: .default) {
-    ScrollView {
-      VaultSavedEntryDetailRow(
-        entry: VaultSavedEntryPreviewFixtures.portraitVideoEntry,
-        isEditingDisabled: false,
-        isDeletingDisabled: false,
-        onEdit: {},
-        onDelete: {}
-      )
-      .frame(maxWidth: 300)
-      .frame(maxWidth: .infinity)
-      .padding(16)
-    }
-    .background(.background)
-  }
-}
-
-@MainActor
-private enum VaultSavedEntryPreviewFixtures {
-
-  static let day = Date(timeIntervalSinceReferenceDate: 789_004_800)
-
-  static let detailEntry = entry(
-    kind: .text,
-    body:
-      "Small notes can use the width they need. The detail view drops the paper frame and lets the authored content define its own height.",
-    createdAt: day.addingTimeInterval(-7_200),
-    updatedAt: day.addingTimeInterval(-1_800),
-    location: JournalVault.Coordinate(
-      latitude: 35.6812,
-      longitude: 139.7671
-    )
-  )
-
-  static let landscapePhotoEntry = entry(
-    kind: .photo,
-    body: "",
-    createdAt: day.addingTimeInterval(-10_800),
-    attachment: mediaAttachment(
-      kind: .photo,
-      pixelSize: CGSize(width: 640, height: 360),
-      title: "LANDSCAPE"
-    )
-  )
-
-  static let portraitVideoEntry = entry(
-    kind: .video,
-    body: "",
-    createdAt: day.addingTimeInterval(-14_400),
-    attachment: mediaAttachment(
-      kind: .video,
-      pixelSize: CGSize(width: 270, height: 480),
-      title: "PORTRAIT"
-    )
-  )
-
-  static let detailMediaEntries: [VaultSavedEntryModel] = [
-    landscapePhotoEntry,
-    portraitVideoEntry,
-  ]
-
-  private static func entry(
-    kind: JournalVault.Card.Kind,
-    body: String,
-    createdAt: Date,
-    updatedAt: Date? = nil,
-    location: JournalVault.Coordinate? = nil,
-    attachment: VaultSavedEntryAttachmentModel? = nil
-  ) -> VaultSavedEntryModel {
-    VaultSavedEntryModel(
-      id: UUID(),
-      kind: kind,
-      body: body,
-      createdAt: createdAt,
-      updatedAt: updatedAt ?? createdAt,
-      location: location,
-      attachment: attachment
-    )
-  }
-
-  private static func mediaAttachment(
-    kind: JournalVault.Attachment.Kind,
-    pixelSize: CGSize,
-    title: String
-  ) -> VaultSavedEntryAttachmentModel {
-    VaultSavedEntryAttachmentModel(
-      kind: kind,
-      fileURL: URL(fileURLWithPath: "/preview/\(title.lowercased())"),
-      thumbnail: previewImageData(pixelSize: pixelSize, title: title),
-      pixelSize: pixelSize
-    )
-  }
-
-  /// Produces an edge-marked raster whose four corners expose accidental crop.
-  private static func previewImageData(
-    pixelSize: CGSize,
-    title: String
-  ) -> Data? {
-    #if canImport(UIKit)
-      let markerInset = max(8, min(pixelSize.width, pixelSize.height) * 0.04)
-      let renderer = ImageRenderer(
-        content: ZStack {
-          LinearGradient(
-            colors: [.pink, .orange, .blue, .purple],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-          )
-
-          Text(title)
-            .font(
-              .system(
-                size: min(pixelSize.width, pixelSize.height) * 0.09,
-                weight: .black,
-                design: .rounded
-              )
-            )
-            .foregroundStyle(.white)
-
-          VStack {
-            HStack {
-              Text("TL")
-              Spacer()
-              Text("TR")
-            }
-            Spacer()
-            HStack {
-              Text("BL")
-              Spacer()
-              Text("BR")
-            }
-          }
-          .font(.system(size: 22, weight: .black, design: .rounded))
-          .foregroundStyle(.white)
-          .padding(markerInset)
-        }
-        .frame(width: pixelSize.width, height: pixelSize.height)
-      )
-      renderer.scale = 1
-      return renderer.uiImage?.pngData()
-    #else
-      return nil
-    #endif
   }
 }

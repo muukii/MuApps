@@ -1,7 +1,7 @@
 import MuColor
 import SwiftUI
 
-/// Provides a consistent detail-placement canvas for content renderer previews.
+/// Provides a consistent Cell-width canvas for content renderer previews.
 ///
 /// Concrete sample values remain beside the renderer they exercise. This host
 /// owns only the shared app palette, scroll behavior, and readable maximum width.

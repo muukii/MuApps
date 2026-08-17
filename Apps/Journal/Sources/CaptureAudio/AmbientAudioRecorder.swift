@@ -9,10 +9,20 @@ import Observation
 public struct AudioRecording: Sendable, Equatable, Codable {
   public var fileURL: URL
   public var duration: TimeInterval
+  /// Meter history measured while the audio file was recorded.
+  ///
+  /// Imported audio and recordings produced by older builds may not have a
+  /// waveform, so persistence and rendering must treat this value as optional.
+  public var waveform: AudioWaveform?
 
-  public init(fileURL: URL, duration: TimeInterval) {
+  public init(
+    fileURL: URL,
+    duration: TimeInterval,
+    waveform: AudioWaveform? = nil
+  ) {
     self.fileURL = fileURL
     self.duration = duration
+    self.waveform = waveform
   }
 }
 
@@ -57,8 +67,11 @@ public final class AmbientAudioRecorder {
   private var recorder: AVAudioRecorder?
   private var fileURL: URL?
   private var pollTask: Task<Void, Never>?
+  /// Complete quantized history for the active recording.
+  private var recordedLevels = Data()
 
   private static let pollInterval: Duration = .milliseconds(50)
+  private static let waveformSampleInterval: TimeInterval = 0.05
 
   public init() {}
 
@@ -153,6 +166,7 @@ public final class AmbientAudioRecorder {
     self.fileURL = url
     self.duration = 0
     self.samples = Array(repeating: 0, count: Self.sampleCount)
+    self.recordedLevels.removeAll(keepingCapacity: true)
     self.state = .recording
     startPolling()
   }
@@ -170,13 +184,26 @@ public final class AmbientAudioRecorder {
       Self.deactivateAudioSession(AVAudioSession.sharedInstance())
     #endif
 
+    let waveform =
+      recordedLevels.isEmpty
+      ? nil
+      : AudioWaveform(
+        sampleInterval: Self.waveformSampleInterval,
+        levels: recordedLevels
+      )
+
     self.recorder = nil
     self.fileURL = nil
     self.samples = Array(repeating: 0, count: Self.sampleCount)
+    self.recordedLevels.removeAll(keepingCapacity: true)
     self.duration = finalDuration
     self.state = .finished
 
-    return AudioRecording(fileURL: fileURL, duration: finalDuration)
+    return AudioRecording(
+      fileURL: fileURL,
+      duration: finalDuration,
+      waveform: waveform
+    )
   }
 
   private func startPolling() {
@@ -186,10 +213,12 @@ public final class AmbientAudioRecorder {
         guard let self, let recorder = self.recorder else { return }
         recorder.updateMeters()
         let power = recorder.averagePower(forChannel: 0)
+        let normalizedLevel = Self.normalizedLevel(fromDecibels: power)
         var next = self.samples
         next.removeFirst()
-        next.append(Self.normalizedLevel(fromDecibels: power))
+        next.append(normalizedLevel)
         self.samples = next
+        self.recordedLevels.append(AudioWaveform.quantizedLevel(normalizedLevel))
         self.duration = recorder.currentTime
         try? await Task.sleep(for: Self.pollInterval)
       }

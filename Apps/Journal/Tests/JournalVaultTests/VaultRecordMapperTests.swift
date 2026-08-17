@@ -212,6 +212,7 @@ struct VaultRecordMapperTests {
       pixelWidth: 640,
       pixelHeight: 480,
       duration: 1.25,
+      waveformData: Data([0x01, 0x02, 0x03]),
       isHDR: true,
       colorSpaceName: "Display P3"
     )
@@ -232,6 +233,7 @@ struct VaultRecordMapperTests {
     #expect(imported.pixelWidth == 640)
     #expect(imported.pixelHeight == 480)
     #expect(imported.duration == 1.25)
+    #expect(imported.waveformData == Data([0x01, 0x02, 0x03]))
     #expect(imported.isHDR)
     #expect(imported.colorSpaceName == "Display P3")
     #expect(record[VaultRecordMapper.AttachmentResourceKey.file] == nil)
@@ -249,6 +251,7 @@ struct VaultRecordMapperTests {
       pixelWidth: 320,
       pixelHeight: 200,
       duration: 3.5,
+      waveformData: Data([0xFF]),
       isHDR: true,
       colorSpaceName: "Display P3",
       createdAt: createdAt
@@ -264,6 +267,7 @@ struct VaultRecordMapperTests {
     #expect(resource.pixelWidth == nil)
     #expect(resource.pixelHeight == nil)
     #expect(resource.duration == nil)
+    #expect(resource.waveformData == nil)
     #expect(!resource.isHDR)
     #expect(resource.colorSpaceName == nil)
     #expect(resource.createdAt == createdAt)

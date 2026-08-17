@@ -533,6 +533,22 @@ let project = Project(
         ),
       ]
     ),
+    .target(
+      name: "AppUIComponentsTests",
+      destinations: journalDestinations,
+      product: .unitTests,
+      bundleId: "app.muukii.journal.AppUIComponentsTests",
+      deploymentTargets: journalDeploymentTargets,
+      infoPlist: .default,
+      buildableFolders: ["Tests/AppUIComponentsTests"],
+      dependencies: [
+        .target(name: "AppUIComponents"),
+      ],
+      settings: .settings(
+        base: [:],
+        configurations: journalConfigurations
+      )
+    ),
     journalFramework(name: "MuHaptics"),
     journalFramework(
       name: "CaptureText",
@@ -650,6 +666,16 @@ let project = Project(
       testAction: .targets([
         .testableTarget(
           target: "TinycurveTests",
+          parallelization: .swiftTestingOnly
+        ),
+      ])
+    ),
+    .scheme(
+      name: "AppUIComponentsTests",
+      buildAction: .buildAction(targets: ["AppUIComponentsTests"]),
+      testAction: .targets([
+        .testableTarget(
+          target: "AppUIComponentsTests",
           parallelization: .swiftTestingOnly
         ),
       ])

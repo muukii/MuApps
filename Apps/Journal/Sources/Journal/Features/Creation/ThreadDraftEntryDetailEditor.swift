@@ -145,13 +145,13 @@ private struct EntryContentKindEditor: View {
       case .photo:
         ThreadDraftPhotoDetailEditor(card: draft)
       case .video, .livePhoto:
-        EntryContentView(content: draft.entryContent, style: .detail)
+        EntryContentView(content: draft.entryContent, style: .cell)
           .padding(16)
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       case .audio:
         ThreadDraftAudioDetailEditor(card: draft)
       case .suggestion:
-        EntryContentView(content: draft.entryContent, style: .detail)
+        EntryContentView(content: draft.entryContent, style: .cell)
           .padding(16)
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       case .doodle:

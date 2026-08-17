@@ -263,13 +263,17 @@ extension VaultSavedEntry {
       let editableURL = try VaultSavedEntryEditMediaPreparer.audioCopy(
         from: fileURL
       )
+      let waveform = attachment?.primaryResource?.waveformData.flatMap {
+        AudioWaveform.decode(from: $0)
+      }
       return CardEditDraft(
         kind: .audio,
         audio: AudioRecording(
           fileURL: editableURL,
           duration: VaultSavedEntryEditMediaPreparer.audioDuration(
             from: editableURL
-          )
+          ),
+          waveform: waveform
         ),
         location: location
       )
@@ -446,6 +450,7 @@ private struct VaultSavedAttachmentResource {
   let pixelWidth: Int?
   let pixelHeight: Int?
   let duration: Double?
+  let waveformData: Data?
   let fileURL: URL
   let localFileRevision: Int
 
@@ -457,6 +462,7 @@ private struct VaultSavedAttachmentResource {
     self.pixelWidth = resource.pixelWidth
     self.pixelHeight = resource.pixelHeight
     self.duration = resource.duration
+    self.waveformData = resource.waveformData
     self.fileURL = store.fileURL(for: resource)
     self.localFileRevision = resource.localFileRevision
   }
@@ -588,8 +594,6 @@ extension VaultSavedEntry {
       kind: kind,
       body: body,
       completedAt: completedAt,
-      createdAt: createdAt,
-      location: location,
       attachment: attachment?.shareSource
     )
   }
@@ -634,8 +638,24 @@ extension VaultSavedAttachment {
       pixelSize: primaryResource?.pixelSize,
       contentType: primaryResource?.contentType,
       byteSize: primaryResource?.byteSize,
+      waveformLevels: waveformLevels,
       suggestionMediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID
     )
+  }
+
+  /// Validated meter levels for rendering an audio attachment.
+  ///
+  /// Decoding at this projection boundary keeps persistence-version handling
+  /// out of the reusable UI component module.
+  private var waveformLevels: Data? {
+    guard kind == .audio,
+      let data = primaryResource?.waveformData,
+      let waveform = AudioWaveform.decode(from: data)
+    else {
+      return nil
+    }
+
+    return waveform.levels
   }
 
   private var suggestionMediaFileURLsByResourceID: [UUID: URL] {

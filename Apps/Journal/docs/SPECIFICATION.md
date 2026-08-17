@@ -38,9 +38,11 @@ exists today is:
 - A **vault-selectable widget**: `JournalWidget` lets each widget instance choose
   one vault and reads the latest entry from that vault's App Group store.
 - **System capture entry points**: a configurable Control for Action Button /
-  Control Center, App Shortcuts and a background text-posting intent, an explicit
-  Quick Capture Vault, and an iOS Share Extension for text, links, photos, videos,
-  and files. Locked Camera Capture is intentionally not part of this feature.
+  Control Center, App Shortcuts and a background text-posting intent, and an iOS
+  Share Extension for text, links, photos, videos, and files. The most recent
+  successful Share destination becomes the implicit Vault for system capture
+  entry points that do not carry an explicit Vault. Locked Camera Capture is
+  intentionally not part of this feature.
 
 Because the product shell is undecided, capture components are deliberately
 **persistence-agnostic**: each emits a plain `Sendable` value through a
@@ -203,17 +205,21 @@ camera image while the phone remains locked.
 `JournalAppIntentsExtension` exposes **Quick Capture** and **Post Text to
 Journal** to Shortcuts, Siri, Spotlight, and Action Button action selection.
 Post Text runs in the background, accepts text from actions such as Dictate Text,
-and commits to either its explicit writable Vault parameter or the Quick Capture
-Vault. Its success boundary is the local Card transaction plus durable outbox;
-it does not claim CloudKit upload is already complete.
+and commits to either its explicit writable Vault parameter or the Vault used by
+the most recent successful Share post. An explicit per-action Vault always wins.
+Its success boundary is the local Card transaction plus durable outbox; it does
+not claim CloudKit upload is already complete.
 
 `JournalShareExtension` presents a custom SwiftUI review sheet for text, web and
 Maps URLs, images, movies, and individual files. The user can choose any writable
 Vault, add an optional comment as the root Card, review skipped inputs, and post
 all accepted items in one `createThread(cards:)` transaction. Generic files are
 real `.file` Cards with their original display name, bytes, content type, and
-size preserved. The explicit Quick Capture Vault is preselected when valid, but
-the extension never silently substitutes another destination.
+size preserved. The Vault from the most recent successful Share post is
+preselected when it remains writable. The preference changes only after the local
+post transaction succeeds; cancellation and failed posting leave it unchanged.
+The extension never silently substitutes another destination when the remembered
+Vault is missing or read-only.
 
 All system entry points share `JournalPostingService`. App extensions receive
 only the App Group entitlement, never start CKSyncEngine, and open shared stores
@@ -401,6 +407,7 @@ directory before the CloudKit temporary file disappears.
 | `contentType` | `String?` | UTI/MIME-style content type when known. |
 | `pixelWidth` / `pixelHeight` | `Int?` | Image/video dimensions when known. |
 | `duration` | `Double?` | Video/audio duration in seconds when known. |
+| `waveformData` | `Data?` | Optional versioned Codable JSON containing the recorded-audio meter history. The audio file remains the source of truth. |
 | `isHDR` | `Bool` | Whether the resource contains HDR media. |
 | `colorSpaceName` | `String?` | Color space name when known. |
 | `localFileRevision` | `Int` | Local-only revision bumped when a mirrored file lands or changes at the same URL. |
@@ -410,14 +417,22 @@ directory before the CloudKit temporary file disappears.
 
 `EntryContentView` performs only exhaustive routing. Text, Todo, Link, File,
 Photo, Video, Live Photo, Audio, Suggestion, Doodle, Bauhaus, and Unknown leaf
-views each own a concrete `Style`. The `.composer`, `.savedGrid`, `.detail`, and
-`.share` presets select those leaf styles without reintroducing shared card
-chrome. Shared media renders directly on the branded export canvas without an
-additional media-well background or clipping. Text and link content render their stored body/URL in SwiftUI; file
+views each own a concrete `Style`. The `.composer` preset serves the compact
+authoring preview, while `.cell` is the ordinary Home-tree presentation.
+Share/export does not add a content preset: a 360 x 640pt `ShareFrame` wraps the
+ordinary read-only content, centers it inside a 32pt safe inset, and
+rasterizes the complete hierarchy uniformly to the default 1080 x 1920px
+artifact. Text and link content render their stored body/URL in SwiftUI; file
 content renders the original name with a document icon, content type, and size.
 Todo content owns its completion indicator, completed typography, and read-only
-share treatment while feature code supplies the persistence action for editable
-Home tree placements.
+presentation while feature code supplies the persistence action for editable
+Home tree placements and export remains noninteractive.
+Audio content receives only validated quantized levels from the feature
+projection. It summarizes the full recording with peak-per-time-bucket bars for
+the current placement; missing, malformed, or unsupported waveform payloads use
+the existing decorative fallback waveform without making the audio unavailable.
+The CloudKit storage estimate counts the encoded payload as inline record data
+and exposes it under **Audio Waveforms** in the app-wide and per-vault breakdowns.
 Doodle and Bauhaus content decode their saved JSON attachment and render
 `DoodleDrawingView` / `BauhausGridArtworkView` directly as SwiftUI content; if
 the vault media file has not arrived locally yet, the UI shows a modality
@@ -609,14 +624,20 @@ and generated mp4 use the same per-frame values.
 soundscape to an AAC (`.m4a`) file in the temp directory via `AVAudioRecorder`,
 exposing live duration and a normalized input level for a scrolling waveform.
 
-- `AudioRecording`: `Sendable, Equatable` — `fileURL: URL` (temp dir; host must
-  move it to keep it), `duration: TimeInterval`.
+- `AudioRecording`: `Sendable, Equatable, Codable` — `fileURL: URL` (temp dir;
+  host must move it to keep it), `duration: TimeInterval`, and optional
+  `waveform: AudioWaveform`.
+- `AudioWaveform`: versioned `Codable` value with a nominal sample interval and
+  the complete ordered meter history quantized from `0...1` to `0...255`. Its
+  JSON representation encodes the byte `Data` as Base64.
 - `AmbientAudioRecorder`: `@MainActor @Observable` — `state` (`idle` /
   `recording` / `finished`), `duration`, `samples: [Float]` (rolling
   normalized-amplitude window, fixed length 48, ~2.4s at a 50ms poll). Static
   `requestPermission()` / `permission`. `start()` throws; `stop()` returns the
-  `AudioRecording`. Level mapping is linear-in-dB above a −50dB silence floor so
-  the meter tracks perceived loudness.
+  `AudioRecording` with every level measured during that take. The rolling UI
+  window resets after stop while the completed waveform stays on the returned
+  value. Level mapping is linear-in-dB above a −50dB silence floor so the meter
+  tracks perceived loudness.
 - On iOS, the recording category enables Bluetooth HFP input. The recorder's
   default **Automatic** choice prefers a connected wireless microphone such as
   AirPods, otherwise preserving a valid current route before falling back to
@@ -783,15 +804,15 @@ the gallery's **Lab** section).
   **Done** and **New Vault** actions. Creating a vault calls
   `JournalVaultRuntime.createVault(title:icon:)`, seeds the local vault store,
   reloads the catalog, opens the new vault, and then dismisses the Vault sheet.
-  Owned vault rows always show a share button inside the cell whose icon
-  carries the sharing state: an unshared vault shows the outline glyph
-  (`personalhotspot.circle`), a shared vault switches to the filled variant
-  (`personalhotspot.circle.fill`). Both states open the same
-  `UICloudSharingController` sheet,
-  which acts as the invite sheet before sharing and as the participant
-  management sheet once a share exists. Once the runtime has fetched the
-  zone-wide share, the row additionally shows a compact (36pt) system
-  `SWCollaborationView` control. The
+  Vault rows show at most one inline sharing action. Until a live zone-wide
+  share has been fetched, owned vault rows show an explicit share button whose
+  icon carries the catalog sharing state: an unshared vault uses
+  `person.fill.badge.plus`, while a catalog-known shared vault uses
+  `person.2.fill`. It opens the direct
+  `UICloudSharingController` flow, which acts as the invite sheet before
+  sharing and can manage an existing share while its live record is being
+  fetched. Once the runtime has fetched the zone-wide share, the row replaces
+  that button with a compact (36pt) system `SWCollaborationView` control. The
   collaboration control registers the saved zone-wide `CKShare` on its
   `NSItemProvider` (an existing-share registration, not a lazy preparation
   handler), so the system treats the vault as already collaborated and its
@@ -803,8 +824,8 @@ the gallery's **Lab** section).
   vault discovery, sync-engine record fetches, and invite acceptance all mirror
   the zone-wide `CKShare` (shared flag, participant count, this user's
   permission) into the catalog, so a reinstall or the user's second device shows
-  correct status without opening the share sheet. The share button and the row
-  context menu both present the direct
+  correct status without opening the share sheet. The explicit share button
+  and the row context menu both present the direct
   `UICloudSharingController` invite sheet; participant vault rows do not offer
   invite issuance but do show the collaboration control for their accepted
   share. New vault creation keeps icon selection to one compact row
@@ -971,7 +992,8 @@ the gallery's **Lab** section).
   failure notification. Doodle and Bauhaus present native sheets at the large
   detent and stream non-empty vector/grid changes into the entry; clearing the
   canvas or grid restores the empty text input. Voice writes the completed
-  `AudioRecording`. After a non-text capture completes, the input bar shows a
+  `AudioRecording`, including its measured waveform history. After a non-text
+  capture completes, the input bar shows a
   preview rendered from the actual authored payload. Valid Links use a large
   native rich-link surface; Photo, Video, Live Photo, Doodle, and Bauhaus use a
   large square visual; Audio uses a wide horizontal waveform. These expanded
@@ -1003,9 +1025,11 @@ the gallery's **Lab** section).
   authorization clears the in-progress coordinate; posting still succeeds
   without location when no coordinate is available. The saved-entry list shows a
   compact, wide map header whenever the selected vault contains located entries.
-  This header stays zoomed around the most recently created located entry and
-  overlays pins for saved entries in that area while the normal content grid remains
-  directly below it. Tapping the header pushes an interactive **Map** screen
+  This noninteractive header stays zoomed around the most recently created
+  located entry and uses the same native pin clustering as the full map, so
+  nearby or overlapping entries appear as a count marker rather than duplicate
+  pins while the normal content grid remains directly below it. Tapping the
+  header pushes an interactive **Map** screen
   whose initial camera frames every located entry in the selected vault. Nearby
   or overlapping pins automatically group into a count marker and separate into
   individual pins as the user zooms in. The up-arrow freezes one save snapshot,
@@ -1120,7 +1144,9 @@ the gallery's **Lab** section).
   content, so a row keeps one height from its first layout pass through its
   poster, still image, and inline player. Home trees present
   authored content without a common shape, rounded clipping, stroke, or fixed
-  height. Text uses its natural height;
+  height. Text uses its natural height. In Home, Text detects HTTP(S) URL ranges
+  at display time and exposes them as underlined native links without changing
+  the Card kind or persisted body;
   Photo, Video, and Live Photo use the persisted pixel dimensions (falling back
   to decoded media dimensions) and aspect-fit the complete image without crop.
   Doodle saves its authored canvas size alongside its JSON and reserves that
@@ -1133,7 +1159,10 @@ the gallery's **Lab** section).
   Doodle and Bauhaus previews decode the authored JSON attachment file and render
   it with their SwiftUI renderers. When a media file is not local yet, the UI
   shows a modality placeholder; when sync writes the file and bumps the resource
-  revision, SwiftData observation re-runs the affected content load. Todo entries
+  revision, SwiftData observation re-runs the affected content load. Audio cells
+  summarize their recording's persisted measured levels into the available bars;
+  recordings created before waveform persistence retain the decorative fallback.
+  Todo entries
   show an explicit completion control on every visible Home tree node. Completing
   or reopening a Todo changes `completedAt` and `updatedAt` atomically with the
   Card outbox mutation, without moving it in the chronological stream or tree.
@@ -1155,10 +1184,14 @@ the gallery's **Lab** section).
   that menu. The share
   action opens a preview sheet backed
   by a detached `EntryShareSnapshot`, renders the actual temporary PNG artifact
-  on a full-bleed branded canvas with the same `.share` leaf styles, and, for
-  Doodle or Bauhaus entries with authored replay data, also offers a
-  generated mp4 replay before handing the selected file to the system activity
-  sheet. Saved entries can be edited from any visible tree node's context menu.
+  as ordinary Home-cell content centered inside a vertical `ShareFrame`, and
+  does not add kind/date or Tinycurve/location chrome. The frame is authored at
+  360 x 640pt and uniformly rasterized at 3x for the default 1080 x 1920px
+  output. For Doodle or Bauhaus entries with authored replay data, the preview
+  also offers a generated mp4 whose vector replay is aspect-fitted into the same
+  centered 32pt-inset bounds before handing the selected file to the system
+  activity sheet. Saved entries can be edited from any visible tree node's
+  context menu.
   Editing rehydrates the saved entry into
   `EntryDraftEditor`, requires the full media file for media content, and saves
   back through `VaultContentStore.updateCard(cardID:with:)`; thumbnails are not
@@ -1174,8 +1207,7 @@ the gallery's **Lab** section).
   the view remains on Home and its draft is neither discarded nor posted as a
   root.
 - **`SettingsView`** — an **Accent Color** picker, an **Appearance** picker, a **Location**
-  toggle for automatic location attachment, an explicit **Quick Capture Vault**
-  picker, a **Storage** section with **Cloud
+  toggle for automatic location attachment, a **Storage** section with **Cloud
   Storage** estimates, a **Widgets** section with an **Add Widgets** guide,
   optional Debug-only **Vault Runtime** and Lab links, and About actions.
   Settings is a grouped `Form`, but every cell background opts into the
@@ -1187,10 +1219,7 @@ the gallery's **Lab** section).
   setting, while **Light** and **Dark** request a fixed scene color scheme for
   Journal and update the neutral palette immediately. The **Attach Location**
   toggle writes `JournalDefaults.shouldAttachLocationToNewCards`; it defaults on,
-  and when disabled new draft entries are saved without location metadata. The
-  Quick Capture selection is environment-scoped App Group state and lists only
-  writable Vaults. Missing, deleted, or read-only selections require an explicit
-  replacement instead of falling back to the last-opened Vault. **Cloud
+  and when disabled new draft entries are saved without location metadata. **Cloud
   Storage** opens a Settings detail screen that estimates Journal's CloudKit
   payload from active local vault rows (logically deleted retained rows are
   excluded): owned vaults are grouped as data that counts
@@ -1285,6 +1314,11 @@ Todo completion adds the optional `Card.completedAt` date field. Existing or
 older records that omit it import as incomplete. Before release, verify that the
 field exists with the Date type in the Development schema and deploy the updated
 schema to Production together with the rest of the vault record types.
+
+Recorded audio adds the optional `AttachmentResource.waveformData` Bytes field.
+Existing records that omit it remain valid and render the legacy fallback. Before
+release, verify the field in the Development schema and deploy it to Production;
+otherwise Production uploads cannot carry the waveform metadata to other devices.
 
 **Before sync works on real devices:** create/let Xcode auto-create the
 `iCloud.app.muukii.journal` container, verify the vault record types in the

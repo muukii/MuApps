@@ -43,7 +43,7 @@ struct QuickCaptureControlConfiguration: ControlConfigurationIntent {
 
   @Parameter(
     title: "Vault",
-    description: "Leave empty to use the Quick Capture Vault from Journal Settings."
+    description: "Leave empty to use the most recent Tinycurve Share Vault."
   )
   var vault: JournalWritableVaultEntity?
 

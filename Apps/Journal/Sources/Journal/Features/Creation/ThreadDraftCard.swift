@@ -624,6 +624,7 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       )
     case .audio:
       guard let audio else { throw CardEditDraftSnapshotError.missingMediaPayload }
+      let waveformData = try audio.waveform?.encodedData()
       return VaultContentStore.CardDraft(
         kind: .audio,
         mediaResources: [
@@ -631,7 +632,8 @@ struct CardEditDraftSnapshot: Sendable, Codable {
             role: .audio,
             fileURL: audio.fileURL,
             contentType: "public.mpeg-4-audio",
-            duration: audio.duration
+            duration: audio.duration,
+            waveformData: waveformData
           )
         ],
         location: location

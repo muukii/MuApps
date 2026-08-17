@@ -1,5 +1,6 @@
 import AVFoundation
 import SwiftUI
+
 #if canImport(UIKit)
   import UIKit
 #endif
@@ -41,36 +42,27 @@ struct VideoContentView: View {
     }
 
     var contentMode: ContentMode {
-      switch preset {
-      case .composer:
-        return .fill
-      case .overview, .detail, .share:
-        return .fill
-      }
+      .fill
     }
-
-    var videoGravity: AVLayerVideoGravity {
-      switch preset {
-      case .composer, .share:
-        return .resizeAspectFill
-      case .overview, .detail:
-        return .resizeAspectFill
-      }
-    }
-
-    var isDetail: Bool { preset == .detail }
 
     /// Geometry used until any dimensions are known for this video.
     var placeholderAspectRatio: CGFloat {
       switch preset {
-      case .composer, .overview, .share:
+      case .composer:
         return 1
-      case .detail:
+      case .cell:
         return 16 / 9
       }
     }
 
-    var minimumHeight: CGFloat? { isDetail ? 180 : nil }
+    var minimumHeight: CGFloat? {
+      switch preset {
+      case .composer:
+        return nil
+      case .cell:
+        return 180
+      }
+    }
   }
 
   let video: VideoContentSource
@@ -80,14 +72,12 @@ struct VideoContentView: View {
   @State private var readyFileURL: URL?
 
   var body: some View {
-    content
-      .detailMediaFrame(
-        aspectRatio: displayAspectRatio,
-        isDetail: style.isDetail
-      )
-      .task(id: imageLoadID) {
-        await refreshMedia()
-      }
+    ContentMediaFrame(aspectRatio: displayAspectRatio) {
+      content
+    }
+    .task(id: imageLoadID) {
+      await refreshMedia()
+    }
   }
 
   @ViewBuilder
@@ -107,17 +97,18 @@ struct VideoContentView: View {
   /// Keeps the placeholder, poster, and player states on one placement geometry.
   ///
   /// Persisted pixel dimensions describe the video before its poster decodes and
-  /// long before `AVPlayerLayer` reports a presentation size, so the detail
-  /// placement can reserve its final box on the first layout pass.
+  /// long before `AVPlayerLayer` reports a presentation size, so the Cell can
+  /// reserve its final box on the first layout pass.
   private var displayAspectRatio: CGFloat {
-    guard style.isDetail else {
+    switch style.preset {
+    case .composer:
       return thumbnailImage?.contentAspectRatio ?? style.placeholderAspectRatio
+    case .cell:
+      return
+        video.displayAspectRatio
+        ?? thumbnailImage?.contentAspectRatio
+        ?? style.placeholderAspectRatio
     }
-
-    return
-      video.displayAspectRatio
-      ?? thumbnailImage?.contentAspectRatio
-      ?? style.placeholderAspectRatio
   }
 
   private func playableVideo(_ fileURL: URL) -> some View {
@@ -208,7 +199,7 @@ struct VideoContentView: View {
       video: VideoContentSource(
         pixelSize: CGSize(width: 1_080, height: 1_920)
       ),
-      style: .init(.detail)
+      style: .init(.cell)
     )
   }
 }
