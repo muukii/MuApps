@@ -18,10 +18,25 @@ struct TinycurveApp: App {
   #endif
 
   let vaultRuntime: JournalVaultRuntime
+  private let systemNotificationAuthorization: SystemNotificationAuthorization
+  private let systemSharingCoordinator: VaultSystemSharingCoordinator
+  private let sharedWithYouNoticeDeliveryCoordinator: SharedWithYouNoticeDeliveryCoordinator
   private let hasCachedInitialVaultAvailability: Bool
+  #if TINYCURVE_PROFILE_IMAGE
+    @State private var userProfile: JournalUserProfile
+  #endif
 
   init() {
+    systemNotificationAuthorization = .shared
     VideoPlaybackObservationConfiguration.configure()
+
+    #if TINYCURVE_PROFILE_IMAGE
+      _userProfile = State(
+        initialValue: JournalUserProfile(
+          client: .live(containerIdentifier: VaultCloudKitContainer.identifier)
+        )
+      )
+    #endif
 
     let defaults = UserDefaults.standard
     let hasCachedInitialVaultAvailability = defaults.bool(
@@ -29,7 +44,7 @@ struct TinycurveApp: App {
     )
 
     do {
-      let vaultRuntime = try JournalVaultRuntime.appGroupCloudKitRuntime()
+      let vaultRuntime = try TinycurveRuntimeLaunchPolicy.makeVaultRuntime()
       if hasCachedInitialVaultAvailability {
         let preferredVaultID = defaults.string(forKey: JournalDefaults.lastSelectedVaultID)
           .flatMap { VaultID(uuidString: $0) }
@@ -37,6 +52,13 @@ struct TinycurveApp: App {
       }
 
       self.vaultRuntime = vaultRuntime
+      self.systemSharingCoordinator = VaultSystemSharingCoordinator(
+        vaultRuntime: vaultRuntime,
+        systemNotificationAuthorization: systemNotificationAuthorization
+      )
+      self.sharedWithYouNoticeDeliveryCoordinator = SharedWithYouNoticeDeliveryCoordinator(
+        runtime: vaultRuntime
+      )
       self.hasCachedInitialVaultAvailability = hasCachedInitialVaultAvailability
     } catch {
       fatalError("Failed to create Journal vault runtime: \(error)")
@@ -45,43 +67,67 @@ struct TinycurveApp: App {
 
   var body: some Scene {
     WindowGroup {
-      #if DEBUG
-        switch TinycurveDebugLaunchRoute.activeRoute {
-        case .textAnimationSandbox:
-          TinycurveTextAnimationSandbox()
+      Group {
+        #if DEBUG
+          switch TinycurveDebugLaunchRoute.activeRoute {
+          case .textAnimationSandbox:
+            TinycurveTextAnimationSandbox()
 
-        case .bookInputMorphSandbox(let initialState):
-          BookInputMorphSandbox(initialState: initialState)
-            .preferredColorScheme(.dark)
+          case .bookInputMorphSandbox(let initialState):
+            BookInputMorphSandbox(initialState: initialState)
+              .preferredColorScheme(.dark)
 
-        case .bookAttachmentMenuPreview:
-          BookAttachmentMenuPreview(initialMenuState: .expanded)
-            .preferredColorScheme(.dark)
+          case .bookAttachmentMenuPreview:
+            BookAttachmentMenuPreview(initialMenuState: .expanded)
+              .preferredColorScheme(.dark)
 
-        case nil:
+          case nil:
+            JournalSceneAppearanceHost {
+              RootView(
+                vaultRuntime: vaultRuntime,
+                hasCachedInitialVaultAvailability: hasCachedInitialVaultAvailability,
+                systemNotificationAuthorization: systemNotificationAuthorization,
+                systemSharingCoordinator: systemSharingCoordinator,
+                sharedWithYouNoticeDeliveryCoordinator: sharedWithYouNoticeDeliveryCoordinator
+              )
+              .task { DoodleHaptics.prepareForDrawing() }
+            }
+          }
+        #else
           JournalSceneAppearanceHost {
             RootView(
               vaultRuntime: vaultRuntime,
-              hasCachedInitialVaultAvailability: hasCachedInitialVaultAvailability
+              hasCachedInitialVaultAvailability: hasCachedInitialVaultAvailability,
+              systemNotificationAuthorization: systemNotificationAuthorization,
+              systemSharingCoordinator: systemSharingCoordinator,
+              sharedWithYouNoticeDeliveryCoordinator: sharedWithYouNoticeDeliveryCoordinator
             )
             .task { DoodleHaptics.prepareForDrawing() }
           }
-        }
-      #else
-        JournalSceneAppearanceHost {
-          RootView(
-            vaultRuntime: vaultRuntime,
-            hasCachedInitialVaultAvailability: hasCachedInitialVaultAvailability
-          )
-          .task { DoodleHaptics.prepareForDrawing() }
-        }
+        #endif
+      }
+      #if TINYCURVE_PROFILE_IMAGE
+        // The unfinished public-profile client exists only in the explicitly
+        // enabled development build; production configurations own no instance.
+        .environment(userProfile)
       #endif
     }
 
     #if os(macOS)
       Settings {
         JournalSceneAppearanceHost {
-          TinycurveSettingsSceneRoot(vaultRuntime: vaultRuntime)
+          #if TINYCURVE_PROFILE_IMAGE
+            TinycurveSettingsSceneRoot(
+              vaultRuntime: vaultRuntime,
+              systemNotificationAuthorization: systemNotificationAuthorization,
+              userProfile: userProfile
+            )
+          #else
+            TinycurveSettingsSceneRoot(
+              vaultRuntime: vaultRuntime,
+              systemNotificationAuthorization: systemNotificationAuthorization
+            )
+          #endif
         }
       }
     #endif
@@ -97,6 +143,10 @@ struct TinycurveApp: App {
   private struct TinycurveSettingsSceneRoot: View {
 
     let vaultRuntime: JournalVaultRuntime
+    let systemNotificationAuthorization: SystemNotificationAuthorization
+    #if TINYCURVE_PROFILE_IMAGE
+      let userProfile: JournalUserProfile
+    #endif
 
     @AppStorage(JournalDefaults.accentColorID)
     private var accentColorID: String = AccentColor.default.id
@@ -106,6 +156,15 @@ struct TinycurveApp: App {
         SettingsScreen()
       }
       .environment(vaultRuntime)
+      // Settings is an independent native macOS scene. Explicitly inject the
+      // same app-lifetime system authorization owner as the main window.
+      .environment(systemNotificationAuthorization)
+      #if TINYCURVE_PROFILE_IMAGE
+        // A macOS Settings scene does not inherit the main window's environment.
+        // Inject the same app-lifetime public profile model only for the
+        // development configuration that exposes its Settings destination.
+        .environment(userProfile)
+      #endif
       .frame(minWidth: 520, minHeight: 520)
     }
   }
@@ -209,15 +268,26 @@ private struct RootView: View {
   @Environment(\.scenePhase) private var scenePhase
   @State private var notificationCenter = JournalNotificationCenter()
   @State private var vaultRuntime: JournalVaultRuntime
+  private let systemNotificationAuthorization: SystemNotificationAuthorization
+  private let systemSharingCoordinator: VaultSystemSharingCoordinator
+  private let sharedWithYouNoticeDeliveryCoordinator: SharedWithYouNoticeDeliveryCoordinator
   @State private var initialVaultActivationState: InitialVaultActivationState = .pending
   @State private var systemCaptureRequest: JournalCaptureRequest?
   @State private var systemCaptureRoutingError: SystemCaptureRoutingError?
+  @State private var sceneID = UUID()
+  @State private var isSystemNotificationPrimerPresented = false
 
   init(
     vaultRuntime: JournalVaultRuntime,
-    hasCachedInitialVaultAvailability: Bool
+    hasCachedInitialVaultAvailability: Bool,
+    systemNotificationAuthorization: SystemNotificationAuthorization,
+    systemSharingCoordinator: VaultSystemSharingCoordinator,
+    sharedWithYouNoticeDeliveryCoordinator: SharedWithYouNoticeDeliveryCoordinator
   ) {
     _vaultRuntime = State(initialValue: vaultRuntime)
+    self.systemNotificationAuthorization = systemNotificationAuthorization
+    self.systemSharingCoordinator = systemSharingCoordinator
+    self.sharedWithYouNoticeDeliveryCoordinator = sharedWithYouNoticeDeliveryCoordinator
     _initialVaultActivationState = State(
       initialValue: hasCachedInitialVaultAvailability ? .resolved : .pending
     )
@@ -250,12 +320,34 @@ private struct RootView: View {
       }
     }
     .environment(vaultRuntime)
-    .task { await startRootRouting() }
+    .environment(systemNotificationAuthorization)
+    .environment(systemSharingCoordinator)
+    .task {
+      await startRootRouting()
+      await sharedWithYouNoticeDeliveryCoordinator.start(
+        sceneID: sceneID,
+        isSceneActive: scenePhase == .active
+      )
+      claimSystemNotificationPrimerIfAvailable()
+    }
+    .task { await systemNotificationAuthorization.refreshSettings() }
     .task { await acceptIncomingCloudKitShares() }
     .task { await acceptSystemCaptureRequests() }
+    .task(id: systemNotificationAuthorization.primerPresentationRevision) {
+      claimSystemNotificationPrimerIfAvailable()
+    }
     .onChange(of: scenePhase) { _, phase in
-      guard phase == .active else { return }
-      Task { await resumeAfterSceneActivation() }
+      guard phase == .active else {
+        sharedWithYouNoticeDeliveryCoordinator.sceneDidBecomeInactive(sceneID)
+        releaseSystemNotificationPrimerIfNeeded()
+        return
+      }
+      Task {
+        await sharedWithYouNoticeDeliveryCoordinator.sceneDidBecomeActive(sceneID)
+        await resumeAfterSceneActivation()
+        await systemNotificationAuthorization.refresh()
+        claimSystemNotificationPrimerIfAvailable()
+      }
     }
     .onChange(of: initialVaultActivationState) { _, state in
       guard state == .resolved else { return }
@@ -267,6 +359,36 @@ private struct RootView: View {
         message: Text(error.message),
         dismissButton: .default(Text("OK"))
       )
+    }
+    .alert(
+      "Stay updated with a shared Vault",
+      isPresented: Binding(
+        get: { isSystemNotificationPrimerPresented },
+        set: { isPresented in
+          if isPresented == false {
+            isSystemNotificationPrimerPresented = false
+            systemNotificationAuthorization.dismissPrimer(from: sceneID)
+          }
+        }
+      )
+    ) {
+      Button("Not Now", role: .cancel) {
+        isSystemNotificationPrimerPresented = false
+        systemNotificationAuthorization.deferPrimer(from: sceneID)
+      }
+
+      Button("Enable Notifications") {
+        isSystemNotificationPrimerPresented = false
+        Task { await systemNotificationAuthorization.requestAuthorizationFromPrimer(from: sceneID) }
+      }
+    } message: {
+      Text(
+        "Get notified when someone adds to a shared Vault. You can change this anytime in Settings."
+      )
+    }
+    .onDisappear {
+      sharedWithYouNoticeDeliveryCoordinator.sceneDidBecomeInactive(sceneID)
+      releaseSystemNotificationPrimerIfNeeded()
     }
   }
 
@@ -303,6 +425,29 @@ private struct RootView: View {
     }
 
     await vaultRuntime.resumeAfterExternalCapture()
+  }
+
+  /// Claims the app-scoped primer only from this active scene.
+  ///
+  /// macOS can keep multiple windows active. The authorization controller
+  /// serializes the claim so this view's local alert binding never mirrors into
+  /// a second window.
+  private func claimSystemNotificationPrimerIfAvailable() {
+    guard scenePhase == .active, isSystemNotificationPrimerPresented == false else {
+      return
+    }
+    isSystemNotificationPrimerPresented = systemNotificationAuthorization.claimPrimer(
+      for: sceneID,
+      whenSceneIsActive: true
+    )
+  }
+
+  /// Releases a claim if this scene disappears before a user action resolves
+  /// it, allowing another active scene to become the single presenter.
+  private func releaseSystemNotificationPrimerIfNeeded() {
+    guard isSystemNotificationPrimerPresented else { return }
+    isSystemNotificationPrimerPresented = false
+    systemNotificationAuthorization.releasePrimerClaim(for: sceneID)
   }
 
   /// Applies a CloudKit availability resolution to app routing and activates
@@ -429,6 +574,7 @@ private struct RootView: View {
   private func acceptCloudKitShare(_ metadata: CKShare.Metadata) async {
     do {
       try await vaultRuntime.acceptShare(metadata: metadata)
+      await systemNotificationAuthorization.offerPrimer(after: .participantInitialImportCompleted)
       notificationCenter.post(.vaultInviteAccepted)
 
       if vaultRuntime.selectedVaultState != .active,
@@ -467,6 +613,7 @@ private struct JournalHomeView: View {
   private let onActiveVaultChanged: @MainActor @Sendable () -> Void
 
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
+  @Environment(SystemNotificationAuthorization.self) private var systemNotificationAuthorization
   #if os(macOS)
     @Environment(\.openSettings) private var openSettings
   #endif
@@ -506,6 +653,14 @@ private struct JournalHomeView: View {
       onRetryVaultActivation: retryVaultActivation,
       onOpenSettings: presentSettings
     )
+    .task(
+      id: SystemNotificationPrimerOpenIdentity(
+        vaultID: vaultRuntime.selectedVault?.vaultID,
+        selectedVaultState: vaultRuntime.selectedVaultState
+      )
+    ) {
+      await offerSystemNotificationPrimerAfterCollaborativeVaultOpen()
+    }
     .sheet(isPresented: $isVaultSelectionPresented) {
       VaultSelectionView(
         onVaultSelected: finishVaultSelection,
@@ -622,6 +777,55 @@ private struct JournalHomeView: View {
     await vaultRuntime.selectVault(firstVaultID)
     onActiveVaultChanged()
   }
+
+  /// Offers the existing-user primer only after a Vault is actually open and a
+  /// fresh CloudKit collaboration-share refresh confirms participant facts.
+  ///
+  /// It does not use a cached descriptor or the broader `isShared` presentation
+  /// flag: an owner-only prepared share is not notification-worthy
+  /// collaboration, and a transient refresh failure is not evidence that an
+  /// old participant count remains authoritative.
+  private func offerSystemNotificationPrimerAfterCollaborativeVaultOpen() async {
+    switch vaultRuntime.selectedVaultState {
+    case .active:
+      break
+    case .inactive, .opening, .failed:
+      return
+    }
+
+    guard let selectedVaultID = vaultRuntime.selectedVault?.vaultID else {
+      return
+    }
+
+    let refreshResult = await vaultRuntime.refreshCollaborationShares()
+    guard SystemNotificationPrimerPolicy.shouldEvaluateExistingVault(after: refreshResult) else {
+      return
+    }
+
+    guard
+      vaultRuntime.selectedVaultState == .active,
+      vaultRuntime.selectedVault?.vaultID == selectedVaultID,
+      let descriptor = vaultRuntime.vaults.first(where: {
+        $0.vaultID == selectedVaultID
+      })
+    else {
+      return
+    }
+
+    await systemNotificationAuthorization.offerPrimer(
+      after: .existingCollaborativeVaultOpened(
+        .init(descriptor: descriptor)
+      )
+    )
+  }
+}
+
+/// Identity for the first-open contextual notification check. A vault switch
+/// may keep the runtime in `.active`, so the vault ID and lifecycle state both
+/// participate in the task identity.
+private struct SystemNotificationPrimerOpenIdentity: Equatable {
+  let vaultID: VaultID?
+  let selectedVaultState: JournalVaultRuntime.SelectedVaultState
 }
 
 /// Render states for the persistent Journal home.
@@ -801,9 +1005,20 @@ private struct JournalVaultUnavailableView: View {
 }
 
 #Preview {
+  let vaultRuntime = JournalVaultRuntime.previewRuntime()
+  let systemNotificationAuthorization = SystemNotificationAuthorization.shared
+  let sharedWithYouNoticeDeliveryCoordinator = SharedWithYouNoticeDeliveryCoordinator(
+    runtime: vaultRuntime
+  )
   RootView(
-    vaultRuntime: .previewRuntime(),
-    hasCachedInitialVaultAvailability: false
+    vaultRuntime: vaultRuntime,
+    hasCachedInitialVaultAvailability: false,
+    systemNotificationAuthorization: systemNotificationAuthorization,
+    systemSharingCoordinator: VaultSystemSharingCoordinator(
+      vaultRuntime: vaultRuntime,
+      systemNotificationAuthorization: systemNotificationAuthorization
+    ),
+    sharedWithYouNoticeDeliveryCoordinator: sharedWithYouNoticeDeliveryCoordinator
   )
 }
 

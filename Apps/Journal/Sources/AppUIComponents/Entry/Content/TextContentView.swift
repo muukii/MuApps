@@ -63,8 +63,6 @@ struct TextContentView: View {
         return false
       }
     }
-
-    var minimumHeight: CGFloat? { nil }
   }
 
   let text: String
@@ -87,8 +85,6 @@ struct TextContentView: View {
     }
     .padding(16)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.appSecondaryContainer)
-
   }
 
   @ViewBuilder

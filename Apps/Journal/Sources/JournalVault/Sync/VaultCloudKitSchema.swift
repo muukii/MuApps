@@ -7,6 +7,18 @@ import Foundation
 /// the app-side contract next to the mapper so reviews, tests, and future macro
 /// work can reason about record types without reading every `CKRecord` subscript.
 public enum VaultCloudKitSchema {
+
+  /// Bump when a newly released build must replay all CloudKit record-zone
+  /// changes to understand data that an earlier build safely skipped.
+  ///
+  /// Adding a record type, changing a previously rejected remote shape into a
+  /// materializable one, or changing record-identity collision handling all
+  /// require a bump. Merely adding an optional field that older builds already
+  /// preserve does not. `VaultSyncEngineStateEnvelope` uses this value to
+  /// invalidate only its local `CKSyncEngine` change-token cache; it never
+  /// deletes vault content or the durable outbox.
+  public static let syncStateCompatibilityGeneration = 1
+
   /// Descriptors for all record types currently uploaded by the vault sync
   /// boundary.
   public static let records: [CloudKitRecordDescriptor] = [
@@ -15,6 +27,8 @@ public enum VaultCloudKitSchema {
     cardEdge,
     attachment,
     attachmentResource,
+    activity,
+    notificationPulse,
   ]
 
   /// Returns the descriptor for one vault record type.
@@ -30,6 +44,10 @@ public enum VaultCloudKitSchema {
       attachment
     case .attachmentResource:
       attachmentResource
+    case .activity:
+      activity
+    case .notificationPulse:
+      notificationPulse
     }
   }
 
@@ -247,6 +265,71 @@ public enum VaultCloudKitSchema {
     ],
     notes: [
       "`localFileRevision` is intentionally local-only and is not a CloudKit field."
+    ]
+  )
+
+  /// Immutable, user-meaningful history event. It intentionally stores only
+  /// placement IDs and an action kind, not a duplicate Card body or media.
+  public static let activity = CloudKitRecordDescriptor(
+    recordType: VaultRecordType.activity.rawValue,
+    fields: [
+      field(
+        VaultRecordMapper.VaultActivityKey.kindRawValue,
+        .string,
+        missing: .rejectRecord,
+        notes: ["Raw Activity kind; unknown future values must round-trip."]
+      ),
+      optionalField(
+        VaultRecordMapper.VaultActivityKey.subjectEdgeID,
+        .string,
+        missing: .clearValue,
+        notes: ["Optional placement UUID; target content may already be deleted."]
+      ),
+      optionalField(
+        VaultRecordMapper.VaultActivityKey.rootEdgeID,
+        .string,
+        missing: .clearValue,
+        notes: ["Optional owning root placement UUID."]
+      ),
+      field(
+        VaultRecordMapper.VaultActivityKey.createdAt,
+        .date,
+        missing: .rejectRecord,
+        indexExpectation: .sortable,
+        notes: ["Retention cleanup queries and sorts this field in each vault zone."]
+      ),
+    ],
+    notes: [
+      "Record name is the Activity UUID string.",
+      "Activity is append-only; existing local rows are never field-updated by import.",
+    ]
+  )
+
+  /// The one mutable generic-attention trigger per vault zone.
+  public static let notificationPulse = CloudKitRecordDescriptor(
+    recordType: VaultRecordType.notificationPulse.rawValue,
+    fields: [
+      field(
+        VaultRecordMapper.VaultNotificationPulseKey.latestActivityRecordName,
+        .string,
+        missing: .rejectRecord,
+        notes: ["The Activity record name that most recently re-armed this Pulse."]
+      ),
+      field(
+        VaultRecordMapper.VaultNotificationPulseKey.kindRawValue,
+        .string,
+        missing: .rejectRecord,
+        notes: ["Raw Activity kind used only for generic notification routing."]
+      ),
+      field(
+        VaultRecordMapper.VaultNotificationPulseKey.updatedAt,
+        .date,
+        missing: .rejectRecord
+      ),
+    ],
+    notes: [
+      "Record name is always notification-pulse; one row exists per vault zone.",
+      "Pulse is a coalescible attention signal, never an unread cursor or durable history.",
     ]
   )
 }

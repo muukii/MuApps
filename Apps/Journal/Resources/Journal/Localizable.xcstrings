@@ -145,6 +145,16 @@
         }
       }
     },
+    "Alerts" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知"
+          }
+        }
+      }
+    },
     "All Entries" : {
       "localizations" : {
         "en" : {
@@ -874,6 +884,7 @@
       }
     },
     "Cancel Reply" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -978,6 +989,16 @@
         }
       }
     },
+    "Change Photo" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真を変更"
+          }
+        }
+      }
+    },
     "Change Vault" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -995,6 +1016,16 @@
         }
       }
     },
+    "Checking" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認中"
+          }
+        }
+      }
+    },
     "Checking Vaults" : {
       "localizations" : {
         "en" : {
@@ -1007,6 +1038,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vaultを確認中"
+          }
+        }
+      }
+    },
+    "Choose a photo to create your Tinycurve profile." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真を選んでTinycurveプロフィールを作成します。"
           }
         }
       }
@@ -1125,6 +1166,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "セルを消去"
+          }
+        }
+      }
+    },
+    "CloudKit did not confirm the profile image update." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CloudKitからプロフィール画像の更新を確認できませんでした。"
           }
         }
       }
@@ -1401,6 +1452,16 @@
         }
       }
     },
+    "Could Not Save Profile Image" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィール画像を保存できませんでした"
+          }
+        }
+      }
+    },
     "Could Not Share Vault" : {
       "localizations" : {
         "en" : {
@@ -1432,6 +1493,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Todoを更新できませんでした"
+          }
+        }
+      }
+    },
+    "Could Not Use Photo" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真を使用できませんでした"
           }
         }
       }
@@ -1471,6 +1542,16 @@
     },
     "Create your first vault to start preserving moments." : {
 
+    },
+    "Crop Profile Photo" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィール写真をクロップ"
+          }
+        }
+      }
     },
     "Dark" : {
       "extractionState" : "stale",
@@ -1929,6 +2010,16 @@
         }
       }
     },
+    "Enable alerts and sounds for updates in shared Vaults." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共有Vaultの更新に対する通知とサウンドを有効にします。"
+          }
+        }
+      }
+    },
     "Enable microphone access in Settings to record ambient sound." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1942,6 +2033,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "環境音を録音するには、設定でマイクへのアクセスを有効にしてください。"
+          }
+        }
+      }
+    },
+    "Enable Notifications" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知を有効にする"
           }
         }
       }
@@ -2099,6 +2200,16 @@
         }
       }
     },
+    "Get notified when someone adds to a shared Vault. You can change this anytime in Settings." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共有Vaultに誰かが追加したときに通知を受け取れます。いつでもSettingsで変更できます。"
+          }
+        }
+      }
+    },
     "Get Started" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2176,6 +2287,16 @@
         }
       }
     },
+    "iCloud is temporarily unavailable. Try again later." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloudは一時的に利用できません。しばらくしてからもう一度お試しください。"
+          }
+        }
+      }
+    },
     "iCloud Recovery Deferred" : {
       "localizations" : {
         "en" : {
@@ -2221,6 +2342,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ジャーナリング提案を選ぶ場合、Appleのシステムピッカーが表示されます。Tinycurveが受け取るのは、あなたが選択した提案内容だけです。例として、タイトル、日付、写真参照、メディアメタデータ、ワークアウト概要、場所、モーション概要、連絡先名、リフレクションの問いなどが含まれます。"
+          }
+        }
+      }
+    },
+    "If you save a profile photo, Tinycurve uploads the cropped image to the public CloudKit database on your Tinycurve user record. It is separate from your private journal content and may be retrieved by other Tinycurve users to identify you in collaborative features. You can remove the profile photo from Settings, which clears it from your Tinycurve user record." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィール写真を保存すると、Tinycurveはクロップした画像をTinycurveユーザーレコード上の公開CloudKitデータベースにアップロードします。これはプライベートなジャーナル内容とは別に保存され、コラボレーション機能であなたを識別するために他のTinycurveユーザーから取得される場合があります。Settingsからプロフィール写真を削除すると、Tinycurveユーザーレコードから写真が消去されます。"
           }
         }
       }
@@ -2377,6 +2508,16 @@
         }
       }
     },
+    "Last updated: August 18, 2026" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最終更新日：2026年8月18日"
+          }
+        }
+      }
+    },
     "Last updated: July 4, 2026" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2509,6 +2650,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Live Photos"
+          }
+        }
+      }
+    },
+    "Loading Profile" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィールを読み込み中"
           }
         }
       }
@@ -2916,6 +3067,26 @@
         }
       }
     },
+    "Not Now" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今はしない"
+          }
+        }
+      }
+    },
+    "Notifications" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知"
+          }
+        }
+      }
+    },
     "now" : {
       "localizations" : {
         "en" : {
@@ -2932,6 +3103,17 @@
         }
       }
     },
+    "Off" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オフ"
+          }
+        }
+      }
+    },
     "OK" : {
       "localizations" : {
         "en" : {
@@ -2944,6 +3126,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "OK"
+          }
+        }
+      }
+    },
+    "On" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オン"
+          }
+        }
+      }
+    },
+    "Open Notification Settings" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知設定を開く"
+          }
+        }
+      }
+    },
+    "Open System Settings" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "システム設定を開く"
+          }
+        }
+      }
+    },
+    "Open System Settings, then choose Notifications > Tinycurve to turn on shared Vault notifications." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "システム設定を開き、「通知」>「Tinycurve」で共有Vaultの更新通知をオンにしてください。"
           }
         }
       }
@@ -3064,6 +3286,16 @@
         }
       }
     },
+    "Photos access is used through Apple's system picker. Tinycurve receives only the photo you choose in the picker." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真へのアクセスにはAppleのシステムピッカーを使用します。Tinycurveが受け取るのは、ピッカーで選択した写真だけです。"
+          }
+        }
+      }
+    },
     "Pick a color theme. You can change it anytime in Settings." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3148,6 +3380,16 @@
         }
       }
     },
+    "Preparing Photo" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真を準備中"
+          }
+        }
+      }
+    },
     "Preparing Vaults" : {
       "localizations" : {
         "en" : {
@@ -3197,6 +3439,56 @@
         }
       }
     },
+    "Profile" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィール"
+          }
+        }
+      }
+    },
+    "Profile Image Unavailable" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィール画像を利用できません"
+          }
+        }
+      }
+    },
+    "Profile Photo" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィール写真"
+          }
+        }
+      }
+    },
+    "Profile photos require an available iCloud account." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィール写真を使うには、利用可能なiCloudアカウントが必要です。"
+          }
+        }
+      }
+    },
+    "Public profile photo" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "公開プロフィール写真"
+          }
+        }
+      }
+    },
     "Quarter Circle" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3216,6 +3508,16 @@
     },
     "Quick Capture Is Not Ready" : {
 
+    },
+    "Quiet" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "控えめ"
+          }
+        }
+      }
     },
     "Record Again" : {
       "extractionState" : "stale",
@@ -3314,6 +3616,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Entriesを再読み込み"
+          }
+        }
+      }
+    },
+    "Reload Profile" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィールを再読み込み"
+          }
+        }
+      }
+    },
+    "Remove Photo" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真を削除"
+          }
+        }
+      }
+    },
+    "Remove Profile Photo?" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィール写真を削除しますか？"
           }
         }
       }
@@ -3507,6 +3839,16 @@
     "Saved locations: %@" : {
       "comment" : "Accessibility value for the saved-entry map; the variable is the number of location pins."
     },
+    "Saving" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存中"
+          }
+        }
+      }
+    },
     "Search Icons" : {
       "localizations" : {
         "en" : {
@@ -3570,6 +3912,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "半円フラット"
+          }
+        }
+      }
+    },
+    "Set the photo that can identify you in collaborative Tinycurve features." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycurveのコラボレーション機能であなたを識別するための写真を設定します。"
           }
         }
       }
@@ -3740,6 +4092,16 @@
         }
       }
     },
+    "Sign in to iCloud to use a Tinycurve profile image." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycurveのプロフィール画像を使うにはiCloudにサインインしてください。"
+          }
+        }
+      }
+    },
     "Sketch a quick ink drawing." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3787,6 +4149,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "一部のアイテムを投稿できませんでした"
+          }
+        }
+      }
+    },
+    "Sound" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サウンド"
           }
         }
       }
@@ -3854,6 +4226,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "録音を開始"
+          }
+        }
+      }
+    },
+    "Status" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ステータス"
+          }
+        }
+      }
+    },
+    "Stay updated with a shared Vault" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共有Vaultの更新を受け取る"
           }
         }
       }
@@ -4045,6 +4437,16 @@
         }
       }
     },
+    "The cropped profile image could not be rendered." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "クロップしたプロフィール画像を生成できませんでした。"
+          }
+        }
+      }
+    },
     "The current input has not been posted." : {
       "localizations" : {
         "en" : {
@@ -4078,6 +4480,26 @@
         }
       }
     },
+    "The profile could not be loaded." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィールを読み込めませんでした。"
+          }
+        }
+      }
+    },
+    "The saved profile image could not be downloaded." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存済みのプロフィール画像をダウンロードできませんでした。"
+          }
+        }
+      }
+    },
     "The selected palette applies across the entire app, including Light and Dark modes." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4091,6 +4513,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "選択したパレットは、ライトモードとダークモードを含むアプリ全体に適用されます。"
+          }
+        }
+      }
+    },
+    "The selected photo could not be prepared for cropping." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選択した写真をクロップ用に準備できませんでした。"
           }
         }
       }
@@ -4305,6 +4737,26 @@
     "This entry has not been posted." : {
 
     },
+    "This iCloud account cannot use Tinycurve profile images." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiCloudアカウントではTinycurveのプロフィール画像を使用できません。"
+          }
+        }
+      }
+    },
+    "This photo can identify you in collaborative Tinycurve features." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この写真はTinycurveのコラボレーション機能であなたを識別するために使われます。"
+          }
+        }
+      }
+    },
     "This policy may be updated as Tinycurve changes. The Last updated date shows when this copy was last revised." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4318,6 +4770,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "このポリシーはTinycurveの変更に合わせて更新される場合があります。最終更新日は、この文面が最後に改訂された日を示します。"
+          }
+        }
+      }
+    },
+    "This removes the photo from your public Tinycurve profile." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "公開Tinycurveプロフィールから写真を削除します。"
           }
         }
       }
@@ -4372,6 +4834,16 @@
         }
       }
     },
+    "Tinycurve could not determine the current iCloud status. Try again." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在のiCloud状態を確認できませんでした。もう一度お試しください。"
+          }
+        }
+      }
+    },
     "Tinycurve does not include developer-operated analytics, advertising SDKs, third-party trackers, or cross-app tracking." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4402,6 +4874,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tinycurveは個人のためのジャーナリングアプリです。開発者があなたの記録内容を扱うサーバーを運営せず、あなたのデータを販売、追跡、広告利用しない設計です。"
+          }
+        }
+      }
+    },
+    "Tinycurve uses notifications only for updates in shared Vaults." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycurveは共有Vaultの更新にのみ通知を使用します。"
           }
         }
       }
@@ -4518,6 +5000,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "招待をもう一度開いてみてください。"
+          }
+        }
+      }
+    },
+    "Turn on Allow Notifications in Settings to receive shared Vault updates." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共有Vaultの更新通知を受け取るには、Settingsで「通知を許可」をオンにしてください。"
           }
         }
       }
@@ -4655,6 +5147,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vault Runtime"
+          }
+        }
+      }
+    },
+    "VAULT_ACTIVITY_NOTIFICATION_BODY" : {
+      "comment" : "CloudKit remote-notification body for a visible shared-Vault activity Pulse.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "There's an update in a shared Vault."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共有Vaultに更新があります。"
+          }
+        }
+      }
+    },
+    "VAULT_ACTIVITY_NOTIFICATION_TITLE" : {
+      "comment" : "CloudKit remote-notification title for a visible shared-Vault activity Pulse.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycurve"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tinycurve"
           }
         }
       }
@@ -4941,6 +5469,16 @@
         }
       }
     },
+    "You may also choose an optional profile photo. Tinycurve crops the selected photo on your device before you explicitly save it." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任意でプロフィール写真を選択することもできます。Tinycurveは、明示的に保存する前に選択した写真をデバイス上でクロップします。"
+          }
+        }
+      }
+    },
     "Your current input was not changed." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4988,6 +5526,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "あなたのジャーナルデータベースと添付ファイルは、TinycurveのアプリコンテナとApp Groupコンテナ内のデバイス上に保存されます。これにより、アプリとウィジェットが同じEntriesを読み取れます。"
+          }
+        }
+      }
+    },
+    "Your optional public profile photo remains until you remove it in Settings or it is removed through iCloud behavior controlled by Apple." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任意の公開プロフィール写真は、Settingsで削除するか、Appleが管理するiCloudの動作によって削除されるまで保持されます。"
+          }
+        }
+      }
+    },
+    "Your profile photo is stored in Tinycurve's public CloudKit database and may be shown to other Tinycurve users." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロフィール写真はTinycurveの公開CloudKitデータベースに保存され、他のTinycurveユーザーに表示される場合があります。"
           }
         }
       }

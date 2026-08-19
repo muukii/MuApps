@@ -35,6 +35,10 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
   private var localMutationTask: Task<Void, Never>?
   private var backgroundFetchTask: Task<Void, Never>?
   private var foregroundSyncTasks: [VaultID: Task<Void, Never>] = [:]
+  private var visiblePulseSubscriptionReconciliationTask: Task<Void, Never>?
+  private var needsVisiblePulseSubscriptionReconciliation = false
+  private var activityRetentionCoordinator: VaultActivityRetentionCoordinator?
+  private let activityRetentionGeneration = VaultActivityRetentionGeneration()
 
   public init(
     containerIdentifier: String = VaultCloudKitContainer.identifier,
@@ -60,10 +64,18 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
       return
     }
 
+    // Load exact zone/scope routing before CKSyncEngine construction. Its
+    // delegate can request a batch immediately, and a delete must fail closed
+    // rather than escape during a descriptor-less startup window.
+    await refreshDescriptors()
+
     engines[.private] = makeEngine(scope: .private)
     engines[.shared] = makeEngine(scope: .shared)
 
-    await refreshDescriptors()
+    // Build both sync engines with their explicit silent IDs before scheduling
+    // a visible subscription. This prevents CKSyncEngine's automatic discovery
+    // from adopting a Pulse alert subscription as its sync wake-up transport.
+    scheduleVisiblePulseSubscriptionReconciliation()
 
     // Reseed the engines' pending sets from each vault's durable outbox. This
     // recovers work enqueued right before a crash and survives engine state
@@ -146,6 +158,9 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
   }
 
   public func rescanPendingChanges() async {
+    // App activation reaches this existing lifecycle seam. Retrying here keeps
+    // a transient subscription failure from blocking content sync indefinitely.
+    scheduleVisiblePulseSubscriptionReconciliation()
     await ensureDescriptorsLoaded()
     await refreshDescriptors()
 
@@ -170,7 +185,9 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     await seedPendingChanges(for: descriptor, unstagingAll: false)
 
     let share: CKShare
-    if let existingShare = try await fetchZoneWideShare(zoneID: descriptor.zoneID, database: database) {
+    if let existingShare = try await fetchZoneWideShare(
+      zoneID: descriptor.zoneID, database: database)
+    {
       share = existingShare
     } else {
       let newShare = CKShare(recordZoneID: descriptor.zoneID)
@@ -273,12 +290,24 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
 
     switch event {
     case .stateUpdate(let update):
+      // Engines are recreated after a state reset. A late state update from
+      // the replaced instance must not restore its stale token over the new
+      // compatibility envelope.
+      guard Self.isCurrentEngine(syncEngine, currentEngine: engines[scope]) else {
+        return
+      }
       saveEngineState(update.stateSerialization, scope: scope)
 
     case .accountChange(let change):
       // Vault data outlives account changes locally for now; the sign-out
       // policy (wipe vs keep) is an open product decision.
       log.notice("account change: \(String(describing: change.changeType), privacy: .public)")
+      // Invalidate synchronously before awaiting cancellation. An old account
+      // query can otherwise return during this suspension and enqueue deletes
+      // for a same-UUID zone in the new private account.
+      activityRetentionGeneration.invalidate()
+      await activityRetentionCoordinator?.cancelAll()
+      scheduleVisiblePulseSubscriptionReconciliation()
 
     case .fetchedDatabaseChanges(let changes):
       await handleFetchedDatabaseChanges(changes, scope: scope)
@@ -309,8 +338,210 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     let pending = syncEngine.state.pendingRecordZoneChanges.filter { scope.contains($0) }
     guard pending.isEmpty == false else { return nil }
 
-    return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: pending) { recordID in
+    let eligiblePending = await removingUnknownOutboxDeletes(
+      from: pending,
+      databaseScope: syncEngine.database.databaseScope,
+      engine: syncEngine
+    )
+    guard eligiblePending.isEmpty == false else { return nil }
+
+    // CKSyncEngine persists a set-like pending state and does not promise to
+    // preserve the array order used while seeding it. Reapply each vault
+    // outbox's content -> Activity -> Pulse priority at batch handoff. This is
+    // only a local presentation preference: CloudKit can still commit distinct
+    // records in another order, so Pulse remains a generic attention signal.
+    let orderedPending = await orderedBatchChanges(
+      eligiblePending,
+      databaseScope: syncEngine.database.databaseScope
+    )
+    let batchPending = Self.limitingDeleteChanges(orderedPending)
+    guard batchPending.isEmpty == false else { return nil }
+
+    return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: batchPending) { recordID in
       await self.record(for: recordID, engine: syncEngine)
+    }
+  }
+
+  /// Classifies every engine delete before it can enter an outgoing batch.
+  ///
+  /// A confirmed future-type row is removed from engine state but retained in
+  /// the durable outbox. Missing routing or a failed lookup is indeterminate:
+  /// the delete is omitted now and stays engine-pending for a later retry.
+  private func removingUnknownOutboxDeletes(
+    from pendingChanges: [CKSyncEngine.PendingRecordZoneChange],
+    databaseScope: CKDatabase.Scope,
+    engine: CKSyncEngine
+  ) async -> [CKSyncEngine.PendingRecordZoneChange] {
+    var decisions: [CKRecord.ID: OutboxDeleteSafetyDecision] = [:]
+
+    for pendingChange in pendingChanges {
+      guard case .deleteRecord(let recordID) = pendingChange else { continue }
+      do {
+        guard
+          let database = try syncDatabase(
+            forZone: recordID.zoneID,
+            scope: databaseScope
+          )
+        else {
+          decisions[recordID] = .indeterminate
+          continue
+        }
+        decisions[recordID] =
+          try await database.hasUnknownDeletePendingMutation(
+            recordName: recordID.recordName
+          ) ? .unknownFutureType : .eligible
+      } catch {
+        decisions[recordID] = .indeterminate
+      }
+    }
+
+    let unknownDeleteRecordIDs = Set(
+      decisions.compactMap { recordID, decision in
+        decision == .unknownFutureType ? recordID : nil
+      }
+    )
+    let indeterminateDeleteCount = decisions.values.count { $0 == .indeterminate }
+
+    let filteredPendingChanges = Self.filteringOutboxDeletes(
+      pendingChanges,
+      decisions: decisions
+    )
+    if unknownDeleteRecordIDs.isEmpty == false {
+      let removedPendingChanges = pendingChanges.filter { change in
+        switch change {
+        case .deleteRecord(let recordID):
+          unknownDeleteRecordIDs.contains(recordID)
+        case .saveRecord:
+          false
+        @unknown default:
+          false
+        }
+      }
+      engine.state.remove(pendingRecordZoneChanges: removedPendingChanges)
+      log.notice(
+        "retained \(unknownDeleteRecordIDs.count, privacy: .public) unknown outbox delete(s) for a future Tinycurve build"
+      )
+    }
+    if indeterminateDeleteCount > 0 {
+      log.notice(
+        "deferred \(indeterminateDeleteCount, privacy: .public) outbox delete(s) until exact routing can be confirmed"
+      )
+    }
+    return filteredPendingChanges
+  }
+
+  /// A delete is eligible only after both exact routing and durable-outbox
+  /// classification succeed. Missing decisions intentionally fail closed.
+  enum OutboxDeleteSafetyDecision: Equatable, Sendable {
+    case eligible
+    case unknownFutureType
+    case indeterminate
+  }
+
+  /// Filters a persisted engine batch without changing durable outbox rows.
+  /// Unknown future deletes are removed from engine state by the caller;
+  /// indeterminate deletes stay engine-pending for a later, routable batch.
+  static func filteringOutboxDeletes(
+    _ pendingChanges: [CKSyncEngine.PendingRecordZoneChange],
+    decisions: [CKRecord.ID: OutboxDeleteSafetyDecision]
+  ) -> [CKSyncEngine.PendingRecordZoneChange] {
+    pendingChanges.filter { pendingChange in
+      switch pendingChange {
+      case .deleteRecord(let recordID):
+        decisions[recordID] == .eligible
+      case .saveRecord:
+        true
+      @unknown default:
+        false
+      }
+    }
+  }
+
+  /// Maximum number of record deletes handed to one CKSyncEngine batch.
+  ///
+  /// Saves are deliberately not counted: a foreground authored change can
+  /// proceed beside history cleanup, while large retention windows drain over
+  /// successive engine batches without a single delete burst dominating one
+  /// outgoing operation.
+  static let maximumDeletesPerBatch = 200
+
+  /// Preserves the caller's durable ordering while allowing at most the given
+  /// number of delete requests through. The remaining deletes stay pending in
+  /// CKSyncEngine and are offered to its next batch unchanged.
+  static func limitingDeleteChanges(
+    _ pendingChanges: [CKSyncEngine.PendingRecordZoneChange],
+    maximumDeletes: Int = maximumDeletesPerBatch
+  ) -> [CKSyncEngine.PendingRecordZoneChange] {
+    var includedDeleteCount = 0
+    let deleteLimit = max(0, maximumDeletes)
+
+    return pendingChanges.filter { pendingChange in
+      guard case .deleteRecord = pendingChange else { return true }
+      guard includedDeleteCount < deleteLimit else { return false }
+      includedDeleteCount += 1
+      return true
+    }
+  }
+
+  /// Returns the engine's current pending changes in durable per-vault outbox
+  /// order. Changes whose local row disappeared since the engine was seeded
+  /// retain the engine's existing relative order and are handled by its normal
+  /// stale-change cleanup path.
+  private func orderedBatchChanges(
+    _ pending: [CKSyncEngine.PendingRecordZoneChange],
+    databaseScope: CKDatabase.Scope
+  ) async -> [CKSyncEngine.PendingRecordZoneChange] {
+    var rankByChange: [CKSyncEngine.PendingRecordZoneChange: Int] = [:]
+    var nextRank = 0
+    var visitedZoneIDs = Set<CKRecordZone.ID>()
+
+    for change in pending {
+      guard let recordID = Self.recordID(for: change) else { continue }
+      guard visitedZoneIDs.insert(recordID.zoneID).inserted else { continue }
+      guard
+        let database = try? syncDatabase(forZone: recordID.zoneID, scope: databaseScope)
+      else {
+        continue
+      }
+      guard let outbox = try? await database.pendingChanges() else { continue }
+
+      for mutation in outbox {
+        let outboxRecordID = CKRecord.ID(
+          recordName: mutation.recordName,
+          zoneID: recordID.zoneID
+        )
+        let outboxChange: CKSyncEngine.PendingRecordZoneChange
+        switch mutation.kind {
+        case .save:
+          outboxChange = .saveRecord(outboxRecordID)
+        case .delete:
+          outboxChange = .deleteRecord(outboxRecordID)
+        }
+
+        guard pending.contains(outboxChange) else { continue }
+        rankByChange[outboxChange] = nextRank
+        nextRank += 1
+      }
+    }
+
+    return pending.enumerated().sorted { lhs, rhs in
+      let lhsRank = rankByChange[lhs.element] ?? .max
+      let rhsRank = rankByChange[rhs.element] ?? .max
+      if lhsRank != rhsRank {
+        return lhsRank < rhsRank
+      }
+      return lhs.offset < rhs.offset
+    }.map(\.element)
+  }
+
+  private static func recordID(
+    for change: CKSyncEngine.PendingRecordZoneChange
+  ) -> CKRecord.ID? {
+    switch change {
+    case .saveRecord(let recordID), .deleteRecord(let recordID):
+      recordID
+    @unknown default:
+      nil
     }
   }
 
@@ -320,7 +551,12 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
   /// the row no longer exists (deleted before its upload ran).
   private func record(for recordID: CKRecord.ID, engine: CKSyncEngine) async -> CKRecord? {
     do {
-      guard let database = try syncDatabase(forZone: recordID.zoneID) else {
+      guard
+        let database = try syncDatabase(
+          forZone: recordID.zoneID,
+          scope: engine.database.databaseScope
+        )
+      else {
         engine.state.remove(pendingRecordZoneChanges: [.saveRecord(recordID)])
         return nil
       }
@@ -344,9 +580,34 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     _ sent: CKSyncEngine.Event.SentRecordZoneChanges,
     engine: CKSyncEngine
   ) async {
+    let databaseScope = engine.database.databaseScope
+
     for record in sent.savedRecords {
       do {
-        try await syncDatabase(forZone: record.recordID.zoneID)?.handleSavedRecord(record)
+        guard
+          let database = try syncDatabase(
+            forZone: record.recordID.zoneID,
+            scope: databaseScope
+          )
+        else {
+          continue
+        }
+        let outcome = try await database.handleSavedRecord(record)
+        if outcome.didAcknowledgeLocalActivity {
+          await scheduleActivityRetention(
+            for: record.recordID.zoneID,
+            scope: databaseScope
+          )
+        }
+        if outcome.didMakeSharedWithYouNoticeReady,
+          let vaultID = VaultID(zoneName: record.recordID.zoneID.zoneName)
+        {
+          // `handleSavedRecord` has already committed the waiting-to-ready
+          // transition under the vault transaction lock. Broadcast only after
+          // that durable boundary; remote imports and duplicate ACKs report a
+          // false outcome and never trigger a Shared with You post.
+          registry.notifySharedWithYouNoticeReady(for: vaultID)
+        }
       } catch {
         log.error("confirm save failed \(record.recordID.recordName, privacy: .public): \(error)")
       }
@@ -354,14 +615,21 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
 
     for failure in sent.failedRecordSaves {
       let recordID = failure.record.recordID
-      let database = try? syncDatabase(forZone: recordID.zoneID)
+      guard
+        let database = try? syncDatabase(forZone: recordID.zoneID, scope: databaseScope)
+      else {
+        log.notice(
+          "ignored stale save callback for unroutable zone \(recordID.zoneID.zoneName, privacy: .public)"
+        )
+        continue
+      }
 
       switch failure.error.code {
       case .serverRecordChanged:
         // Conflict. Policy lives in VaultSyncDatabase.handleServerRecordChanged
         // (local wins); re-queue so the merged save goes out again.
         if let serverRecord = failure.error.serverRecord {
-          try? await database?.handleServerRecordChanged(serverRecord: serverRecord)
+          try? await database.handleServerRecordChanged(serverRecord: serverRecord)
           engine.state.add(pendingRecordZoneChanges: [.saveRecord(recordID)])
         }
 
@@ -370,18 +638,18 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
         // vanished — (re)create it and retry the record.
         engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: recordID.zoneID))])
         engine.state.add(pendingRecordZoneChanges: [.saveRecord(recordID)])
-        try? await database?.unstage(recordName: recordID.recordName)
+        try? await database.unstage(recordName: recordID.recordName)
 
       default:
         // Transient failures (network, throttling) are retried by CKSyncEngine
         // itself; unstage so the row re-stages into the retry batch.
-        try? await database?.unstage(recordName: recordID.recordName)
+        try? await database.unstage(recordName: recordID.recordName)
         log.error("record save failed \(recordID.recordName, privacy: .public): \(failure.error)")
       }
     }
 
     for recordID in sent.deletedRecordIDs {
-      try? await syncDatabase(forZone: recordID.zoneID)?
+      try? await syncDatabase(forZone: recordID.zoneID, scope: databaseScope)?
         .handleCompletedDelete(recordName: recordID.recordName)
     }
 
@@ -389,12 +657,125 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
       switch error.code {
       case .unknownItem, .zoneNotFound, .userDeletedZone:
         // Nothing to delete remotely — the tombstone has served its purpose.
-        try? await syncDatabase(forZone: recordID.zoneID)?
+        try? await syncDatabase(forZone: recordID.zoneID, scope: databaseScope)?
           .handleCompletedDelete(recordName: recordID.recordName)
       default:
         log.error("record delete failed \(recordID.recordName, privacy: .public): \(error)")
       }
     }
+  }
+
+  // MARK: - Activity retention
+
+  /// Coalesces cleanup after a locally authored Activity reaches CloudKit.
+  ///
+  /// This is intentionally an acknowledgement-only trigger. Incoming Activity
+  /// imports are observations, and duplicate save callbacks must not create
+  /// independent retention tasks or mutate Activity/Pulse/notice state.
+  private func scheduleActivityRetention(
+    for zoneID: CKRecordZone.ID,
+    scope: CKDatabase.Scope
+  ) async {
+    guard let retentionZone = activityRetentionZone(for: zoneID, scope: scope) else { return }
+    let generation = activityRetentionGeneration.capture()
+
+    let coordinator: VaultActivityRetentionCoordinator
+    if let existing = activityRetentionCoordinator {
+      coordinator = existing
+    } else {
+      let newCoordinator = VaultActivityRetentionCoordinator {
+        [weak self] retentionZone, scheduledGeneration in
+        guard let self else { return }
+        await self.performActivityRetention(
+          for: retentionZone,
+          generation: scheduledGeneration
+        )
+      }
+      activityRetentionCoordinator = newCoordinator
+      coordinator = newCoordinator
+    }
+    await coordinator.schedule(retentionZone, generation: generation)
+  }
+
+  /// Queries one exact server zone and turns only the oldest excess Activities
+  /// into durable tombstones. Any query/page/result failure exits before the
+  /// SwiftData transaction, so a later acknowledgement can retry safely.
+  private func performActivityRetention(
+    for retentionZone: VaultActivityRetentionZone,
+    generation: UInt64
+  ) async {
+    let zoneID = retentionZone.cloudKitZoneID
+    guard
+      Task.isCancelled == false,
+      activityRetentionGeneration.isCurrent(generation),
+      descriptor(forActivityRetentionZone: retentionZone) != nil
+    else {
+      return
+    }
+
+    do {
+      let serverCandidates = try await VaultActivityRetentionCloudKitQuery(
+        database: cloudDatabase(for: retentionZone.cloudKitDatabaseScope)
+      ).activityCandidates(in: zoneID)
+      guard
+        Task.isCancelled == false,
+        activityRetentionGeneration.isCurrent(generation)
+      else {
+        return
+      }
+      let deletionCandidates = VaultActivityRetentionPolicy.deletionCandidates(
+        from: serverCandidates
+      )
+      guard deletionCandidates.isEmpty == false else { return }
+
+      // Catalog membership and ownership can change while the network query is
+      // suspended. Recheck before opening the store or seeding the engine.
+      guard let currentDescriptor = descriptor(forActivityRetentionZone: retentionZone) else {
+        return
+      }
+      let database = try syncDatabase(for: currentDescriptor)
+      guard
+        let outcome = try await database.enqueueActivityRetentionDeletes(
+          deletionCandidates,
+          ifCurrent: activityRetentionGeneration,
+          generation: generation
+        ),
+        activityRetentionGeneration.isCurrent(generation),
+        Task.isCancelled == false
+      else {
+        return
+      }
+      guard outcome.hasDeleteWork else { return }
+      await seedPendingChanges(for: currentDescriptor, unstagingAll: false)
+    } catch is CancellationError {
+      return
+    } catch {
+      log.error(
+        "Activity retention failed for \(zoneID.zoneName, privacy: .public): \(error)"
+      )
+    }
+  }
+
+  /// Resolves a retention scheduler key back to current catalog state without
+  /// ever broadening a query beyond its original scope and exact zone ID.
+  private func descriptor(
+    forActivityRetentionZone retentionZone: VaultActivityRetentionZone
+  ) -> VaultDescriptor? {
+    Self.exactDescriptor(
+      for: retentionZone.cloudKitZoneID,
+      scope: retentionZone.cloudKitDatabaseScope,
+      in: descriptors
+    )
+  }
+
+  private func activityRetentionZone(
+    for zoneID: CKRecordZone.ID,
+    scope: CKDatabase.Scope
+  ) -> VaultActivityRetentionZone? {
+    guard Self.exactDescriptor(for: zoneID, scope: scope, in: descriptors) != nil else {
+      return nil
+    }
+    return VaultActivityRetentionZone(scope: scope, zoneID: zoneID)
   }
 
   // MARK: - Incoming
@@ -410,9 +791,8 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     }
 
     for deletion in changes.deletions {
-      guard let vaultID = VaultID(zoneName: deletion.zoneID.zoneName) else { continue }
       await deleteLocalVaultAfterRemoteZoneRemoval(
-        vaultID: vaultID,
+        zoneID: deletion.zoneID,
         scope: scope,
         reason: String(describing: deletion.reason)
       )
@@ -422,12 +802,21 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
   /// Applies a remote zone deletion locally: owner deleted the vault, a share
   /// was revoked, or the user removed the accepted shared zone elsewhere.
   private func deleteLocalVaultAfterRemoteZoneRemoval(
-    vaultID: VaultID,
+    zoneID: CKRecordZone.ID,
     scope: CKDatabase.Scope,
     reason: String
   ) async {
-    if let descriptor = descriptors[vaultID],
-       let engine = engines[scope] {
+    guard
+      let descriptor = Self.exactDescriptor(for: zoneID, scope: scope, in: descriptors)
+    else {
+      log.notice(
+        "ignored stale zone deletion for unroutable zone \(zoneID.zoneName, privacy: .public)"
+      )
+      return
+    }
+    let vaultID = descriptor.vaultID
+
+    if let engine = engines[scope] {
       removeEnginePendingChanges(for: descriptor, engine: engine)
     }
 
@@ -437,7 +826,8 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     do {
       try layout.removeVaultDirectory(for: vaultID)
     } catch {
-      log.error("remove local vault directory failed \(vaultID.uuidString, privacy: .public): \(error)")
+      log.error(
+        "remove local vault directory failed \(vaultID.uuidString, privacy: .public): \(error)")
     }
 
     do {
@@ -493,7 +883,11 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     for zoneID in zoneIDs {
       guard let vaultID = VaultID(zoneName: zoneID.zoneName) else { continue }
       await materializeVaultIfNeeded(vaultID: vaultID, zoneID: zoneID, scope: scope)
-      guard let descriptor = descriptors[vaultID] else { continue }
+      guard
+        let descriptor = Self.exactDescriptor(for: zoneID, scope: scope, in: descriptors)
+      else {
+        continue
+      }
 
       let modifications = modificationsByZone[zoneID] ?? []
       let deletions = deletionsByZone[zoneID] ?? []
@@ -649,11 +1043,37 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     return database
   }
 
-  private func syncDatabase(forZone zoneID: CKRecordZone.ID) throws -> VaultSyncDatabase? {
+  /// Resolves a callback only when its full CloudKit identity matches current
+  /// catalog state. Zone UUID alone is insufficient across account changes or
+  /// when a stale shared-owner callback arrives after rejoining the same vault.
+  static func exactDescriptor(
+    for zoneID: CKRecordZone.ID,
+    scope: CKDatabase.Scope,
+    in descriptors: [VaultID: VaultDescriptor]
+  ) -> VaultDescriptor? {
     guard
+      scope == .private || scope == .shared,
       let vaultID = VaultID(zoneName: zoneID.zoneName),
-      let descriptor = descriptors[vaultID]
+      let descriptor = descriptors[vaultID],
+      descriptor.zoneID == zoneID
     else {
+      return nil
+    }
+
+    switch descriptor.ownership {
+    case .owned:
+      guard scope == .private else { return nil }
+    case .participant:
+      guard scope == .shared else { return nil }
+    }
+    return descriptor
+  }
+
+  private func syncDatabase(
+    forZone zoneID: CKRecordZone.ID,
+    scope: CKDatabase.Scope
+  ) throws -> VaultSyncDatabase? {
+    guard let descriptor = Self.exactDescriptor(for: zoneID, scope: scope, in: descriptors) else {
       return nil
     }
     return try syncDatabase(for: descriptor)
@@ -987,17 +1407,67 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     }
   }
 
+  // MARK: - Visible Pulse subscription reconciliation
+
+  /// Coalesces lifecycle requests while preserving a request that arrives during
+  /// an in-flight CloudKit call. The work remains separate from Vault record
+  /// synchronization, so a subscription error never delays content recovery.
+  private func scheduleVisiblePulseSubscriptionReconciliation() {
+    needsVisiblePulseSubscriptionReconciliation = true
+    guard visiblePulseSubscriptionReconciliationTask == nil else { return }
+
+    visiblePulseSubscriptionReconciliationTask = Task {
+      await self.runVisiblePulseSubscriptionReconciliation()
+    }
+  }
+
+  private func runVisiblePulseSubscriptionReconciliation() async {
+    defer { visiblePulseSubscriptionReconciliationTask = nil }
+
+    while needsVisiblePulseSubscriptionReconciliation {
+      needsVisiblePulseSubscriptionReconciliation = false
+      await reconcileVisiblePulseSubscriptions()
+    }
+  }
+
+  private func reconcileVisiblePulseSubscriptions() async {
+    for scope: CKDatabase.Scope in [.private, .shared] {
+      let store = CloudKitDatabaseSubscriptionStore(database: cloudDatabase(for: scope))
+      let reconciler = VaultNotificationPulseSubscriptionReconciler(store: store)
+      let scopeName = scope == .private ? "private" : "shared"
+
+      do {
+        let outcome = try await reconciler.reconcile(databaseScope: scope)
+        log.debug(
+          "visible Pulse subscription reconciliation for \(scopeName, privacy: .public): \(outcome.rawValue, privacy: .public)"
+        )
+      } catch is CancellationError {
+        log.debug("visible Pulse subscription reconciliation cancelled")
+        return
+      } catch {
+        // Do not turn a server-subscription failure into a Vault sync failure.
+        // Startup, account change, and app activation will request another pass.
+        log.error(
+          "visible Pulse subscription reconciliation failed for \(scopeName, privacy: .public): \(error)"
+        )
+      }
+    }
+  }
+
   // MARK: - Engine construction & state persistence
 
   private func makeEngine(scope: CKDatabase.Scope) -> CKSyncEngine {
-    let database = scope == .shared ? container.sharedCloudDatabase : container.privateCloudDatabase
-    return CKSyncEngine(
-      .init(
-        database: database,
-        stateSerialization: loadEngineState(scope: scope),
-        delegate: self
-      )
+    guard let subscriptionID = VaultSyncEngineSubscription.identifier(for: scope) else {
+      preconditionFailure("Vault sync only supports private and shared CloudKit databases.")
+    }
+
+    var configuration = CKSyncEngine.Configuration(
+      database: cloudDatabase(for: scope),
+      stateSerialization: loadEngineState(scope: scope),
+      delegate: self
     )
+    configuration.subscriptionID = subscriptionID
+    return CKSyncEngine(configuration)
   }
 
   private func engineStateFileURL(scope: CKDatabase.Scope) -> URL {
@@ -1007,15 +1477,51 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
 
   private func loadEngineState(scope: CKDatabase.Scope) -> CKSyncEngine.State.Serialization? {
     guard let data = try? Data(contentsOf: engineStateFileURL(scope: scope)) else { return nil }
-    return try? JSONDecoder().decode(CKSyncEngine.State.Serialization.self, from: data)
+    switch VaultSyncEngineStateEnvelope.restore(
+      from: data,
+      as: CKSyncEngine.State.Serialization.self
+    ) {
+    case .restored(let serialization):
+      return serialization
+
+    case .requiresFullRefetch:
+      // Persist the current empty header before constructing the engine. This
+      // prevents an unchanged legacy/mismatched file from causing an
+      // invalidation loop if the process exits during the first refetch.
+      saveEmptyEngineStateEnvelope(
+        scope: scope
+      )
+      return nil
+    }
   }
 
   private func saveEngineState(
     _ serialization: CKSyncEngine.State.Serialization,
     scope: CKDatabase.Scope
   ) {
-    guard let data = try? JSONEncoder().encode(serialization) else { return }
+    guard
+      let data = try? VaultSyncEngineStateEnvelope.current(serialization: serialization)
+        .encoded()
+    else {
+      return
+    }
     try? data.write(to: engineStateFileURL(scope: scope), options: .atomic)
+  }
+
+  /// Persists a current, intentionally empty envelope after a token mismatch.
+  private func saveEmptyEngineStateEnvelope(scope: CKDatabase.Scope) {
+    guard let data = try? VaultSyncEngineStateEnvelope.emptyCurrent.encoded() else { return }
+    try? data.write(to: engineStateFileURL(scope: scope), options: .atomic)
+  }
+
+  /// Rejects state writes emitted by a `CKSyncEngine` instance that has already
+  /// been replaced for the same CloudKit database scope.
+  static func isCurrentEngine<Engine: AnyObject>(
+    _ eventEngine: Engine,
+    currentEngine: Engine?
+  ) -> Bool {
+    guard let currentEngine else { return false }
+    return eventEngine === currentEngine
   }
 
   /// A pre-release local store reset discards rows and media, so the next
@@ -1062,9 +1568,9 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
   }
 }
 
-private extension CKError {
+extension CKError {
 
-  var isMissingZone: Bool {
+  fileprivate var isMissingZone: Bool {
     switch code {
     case .unknownItem, .zoneNotFound, .userDeletedZone:
       return true
@@ -1075,18 +1581,20 @@ private extension CKError {
     }
   }
 
-  func isUnknownItem(for recordID: CKRecord.ID) -> Bool {
+  fileprivate func isUnknownItem(for recordID: CKRecord.ID) -> Bool {
     if code == .unknownItem {
       return true
     }
 
     guard code == .partialFailure else { return false }
     if let partialErrors = userInfo[CKPartialErrorsByItemIDKey] as? [CKRecord.ID: any Error],
-       let itemError = partialErrors[recordID] as? CKError {
+      let itemError = partialErrors[recordID] as? CKError
+    {
       return itemError.code == .unknownItem
     }
     if let partialErrors = userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: any Error],
-       let itemError = partialErrors[AnyHashable(recordID)] as? CKError {
+      let itemError = partialErrors[AnyHashable(recordID)] as? CKError
+    {
       return itemError.code == .unknownItem
     }
     return false

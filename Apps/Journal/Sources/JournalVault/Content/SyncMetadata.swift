@@ -14,11 +14,18 @@ import SwiftData
 @Model
 public final class SyncMetadata {
 
-  /// CloudKit record name (== the model row's UUID string).
+  /// CloudKit record name for the local row this metadata describes.
+  ///
+  /// Most content records use their model UUID string. The mutable
+  /// `VaultNotificationPulse` uses a fixed singleton name instead.
   @Attribute(.unique)
   public var recordName: String
 
   /// CloudKit record type (`VaultRecordType` raw value).
+  ///
+  /// The sync boundary validates this alongside decoded system fields before
+  /// reusing a shell, so stale metadata can never make one local row upload as
+  /// another record type or identity.
   public var recordType: String
 
   /// `CKRecord` system fields encoded via `encodeSystemFields(with:)`.

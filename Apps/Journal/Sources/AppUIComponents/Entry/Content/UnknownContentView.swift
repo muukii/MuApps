@@ -10,15 +10,6 @@ struct UnknownContentView: View {
     init(_ preset: EntryContentStyle) {
       self.preset = preset
     }
-
-    var minimumHeight: CGFloat? {
-      switch preset {
-      case .composer:
-        return nil
-      case .cell:
-        return 120
-      }
-    }
   }
 
   let style: Style

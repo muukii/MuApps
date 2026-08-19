@@ -72,6 +72,9 @@ let journalBundleConfigurations: [Configuration] = [
     settings: [
       "APS_ENVIRONMENT": "development",
       "CLOUDKIT_ENVIRONMENT": "Development",
+      // The public-profile schema and UX are still under review. Do not add
+      // this condition to DebugProduction or Release until their gates pass.
+      "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "$(inherited) TINYCURVE_PROFILE_IMAGE",
     ],
     xcconfig: "xcconfig/Version.xcconfig"
   ),
@@ -93,6 +96,19 @@ let journalBundleConfigurations: [Configuration] = [
     ],
     xcconfig: "xcconfig/Version.xcconfig"
   ),
+]
+
+/// Keeps `@testable import Tinycurve` and profile-specific tests on the same
+/// compilation side of the development-only profile-image boundary.
+let journalTinycurveTestConfigurations: [Configuration] = [
+  .debug(
+    name: "Debug",
+    settings: [
+      "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "$(inherited) TINYCURVE_PROFILE_IMAGE",
+    ]
+  ),
+  .debug(name: journalDebugProductionConfigurationName),
+  .release(name: "Release"),
 ]
 
 let journalVersionInfoPlistKeys: [String: Plist.Value] = [
@@ -189,11 +205,18 @@ let project = Project(
       // `com.apple.security.application-groups` is shared with `JournalWidget`
       // and the vault store layout. The app writes vault stores here; the widget
       // reads configured vault stores from the same App Group.
+      // These Shared with You / Messages Collaboration entitlement keys are the
+      // source contract for Tinycurve's saved-CKShare activity entry. The App
+      // ID capabilities must be enabled and the provisioning profile regenerated
+      // before a signed device build can exercise this feature; Project.swift
+      // alone cannot grant the capability.
       entitlements: .dictionary([
         "com.apple.developer.icloud-container-identifiers": ["iCloud.app.muukii.journal"],
         "com.apple.developer.icloud-container-environment":
           journalCloudKitEnvironmentBuildSetting,
         "com.apple.developer.icloud-services": ["CloudKit"],
+        "com.apple.developer.shared-with-you.collaboration": true,
+        "com.apple.developer.shared-with-you": true,
         "com.apple.security.application-groups": ["group.app.muukii.journal"],
         "aps-environment": "$(APS_ENVIRONMENT)",
         "com.apple.developer.journal.allow": ["suggestions"],
@@ -206,6 +229,7 @@ let project = Project(
         .sdk(name: "Photos", type: .framework),
         .sdk(name: "PhotosUI", type: .framework),
         .sdk(name: "SharedWithYou", type: .framework),
+        .sdk(name: "UserNotifications", type: .framework),
         .external(name: "ScrollEdgeEffect"),
         // The package's gesture bridge is UIKit-only. Native macOS uses the
         // local AppKit/SwiftUI compatibility modifier in the Tinycurve target.
@@ -231,6 +255,7 @@ let project = Project(
         .target(name: "MuHaptics"),
         .target(name: "CaptureText"),
         .target(name: "CapturePhoto"),
+        .target(name: "ImageCropper"),
         .target(name: "MediaProcessing"),
         .target(name: "CaptureDoodle"),
         .target(name: "CaptureBauhaus"),
@@ -314,7 +339,7 @@ let project = Project(
       ],
       settings: .settings(
         base: [:],
-        configurations: journalConfigurations
+        configurations: journalTinycurveTestConfigurations
       )
     ),
 
@@ -583,6 +608,33 @@ let project = Project(
         configurations: journalConfigurations
       )
     ),
+    // App-owned profile-image crop façade. The current editor is pure SwiftUI;
+    // keeping its public input/output neutral allows its internal engine to be
+    // replaced without introducing that engine's types into the app target.
+    journalFramework(
+      name: "ImageCropper",
+      resources: ["Resources/ImageCropper/**"],
+      dependencies: [
+        .sdk(name: "ImageIO", type: .framework),
+        .sdk(name: "UniformTypeIdentifiers", type: .framework),
+      ]
+    ),
+    .target(
+      name: "ImageCropperTests",
+      destinations: journalDestinations,
+      product: .unitTests,
+      bundleId: "app.muukii.journal.ImageCropperTests",
+      deploymentTargets: journalDeploymentTargets,
+      infoPlist: .default,
+      buildableFolders: ["Tests/ImageCropperTests"],
+      dependencies: [
+        .target(name: "ImageCropper"),
+      ],
+      settings: .settings(
+        base: [:],
+        configurations: journalConfigurations
+      )
+    ),
     // Save-time raster derivatives for large media such as photos and videos.
     journalFramework(
       name: "MediaProcessing",
@@ -706,6 +758,16 @@ let project = Project(
       testAction: .targets([
         .testableTarget(
           target: "CaptureAudioTests",
+          parallelization: .swiftTestingOnly
+        ),
+      ])
+    ),
+    .scheme(
+      name: "ImageCropperTests",
+      buildAction: .buildAction(targets: ["ImageCropperTests"]),
+      testAction: .targets([
+        .testableTarget(
+          target: "ImageCropperTests",
           parallelization: .swiftTestingOnly
         ),
       ])

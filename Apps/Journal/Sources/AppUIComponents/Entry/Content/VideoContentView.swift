@@ -54,15 +54,6 @@ struct VideoContentView: View {
         return 16 / 9
       }
     }
-
-    var minimumHeight: CGFloat? {
-      switch preset {
-      case .composer:
-        return nil
-      case .cell:
-        return 180
-      }
-    }
   }
 
   let video: VideoContentSource

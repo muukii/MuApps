@@ -319,6 +319,7 @@ private struct VaultSavedListContentView: View {
           pins: locationPins,
           transitionNamespace: navigationTransitionNamespace
         )
+        .padding(.horizontal, savedListPadding)
       }
 
       LazyVStack(alignment: .leading, spacing: 2) {
@@ -363,7 +364,6 @@ private struct VaultSavedListContentView: View {
         }
       }
     }
-    .padding(.horizontal, savedListPadding)
   }
 
   private var entries: [VaultSavedEntry] {

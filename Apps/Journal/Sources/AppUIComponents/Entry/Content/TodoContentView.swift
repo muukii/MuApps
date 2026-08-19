@@ -70,8 +70,6 @@ struct TodoContentView: View {
     var lineSpacing: CGFloat { 0 }
 
     var minimumScaleFactor: CGFloat { 1 }
-
-    var minimumHeight: CGFloat? { nil }
   }
 
   let source: TodoContentSource
@@ -98,7 +96,6 @@ struct TodoContentView: View {
     .padding(.horizontal, 8)
     .padding(.vertical, 6)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.appSecondaryContainer)
   }
 
   private var displayText: String {

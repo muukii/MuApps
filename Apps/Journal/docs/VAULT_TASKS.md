@@ -136,14 +136,14 @@ flowchart TD
   - 既存 zone-wide share を `CKRecordNameZoneWideShare` で fetch し、なければ
     `CKShare(recordZoneID:)` を作って保存する。
   - saved share の `shareURL` / record name / participant count を `VaultSummary` に保存する。
-  - UIKit bridge として `UICloudSharingController(share:container:)` を採用する。
+  - 保存済み share を `NSItemProvider.registerCKShare(...)` に登録し、iOS activity と
+    native macOS sharing picker の collaboration entry を採用する。
   - sharing UI は初期範囲として private invite / read-write permission に絞る。
 - API notes:
   - `sosumi` / Apple docs: `CKShare(recordZoneID:)` は iOS 15+ の zone-wide share
     initializer。custom record zone は既定で `zoneWideSharing` capability を持つ。
-  - `UICloudSharingController(share:container:)` は previously saved `CKShare` を受け取る。
-    deprecated の `init(preparationHandler:)` ではなく、sync layer で share を保存してから
-    controller に渡す。
+  - system collaboration entry は previously saved `CKShare` を受け取る。sync layer で
+    share を保存してから item provider に登録し、UI layer が新たな CloudKit save をしない。
   - zone-wide share を accept した participant 側では、CloudKit が shared database に
     new zone を追加する。fetch database changes で zone ID を得てから record zone changes を
     fetch する、という流れは現在の `CloudKitVaultSyncEngine` の shared database import 方針と合う。
@@ -280,8 +280,8 @@ flowchart TD
     を表示する。
     `SWCollaborationView` は share 状態の visual affordance と管理入口として扱い、
     cell 表示時には CloudKit transport を走らせない。
-  - share button は既存の `cloudSharingPresentation` / `UICloudSharingController`
-    導線を使い、Notes のように collaboration state 表示とは別の invite affordance として残す。
+  - share button は `VaultCollaborationSharePresentation` の saved-CKShare activity 導線を
+    使い、Notes のように collaboration state 表示とは別の invite affordance として残す。
   - 必要なら後続で shared vault settings にも `SWCollaborationView` を置く。
 - Done:
   - Messages に vault preview が出る。

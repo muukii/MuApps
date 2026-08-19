@@ -62,6 +62,19 @@ enum VaultRecordMapper {
     static let file = "file"
   }
 
+  enum VaultActivityKey {
+    static let kindRawValue = "kindRawValue"
+    static let subjectEdgeID = "subjectEdgeID"
+    static let rootEdgeID = "rootEdgeID"
+    static let createdAt = "createdAt"
+  }
+
+  enum VaultNotificationPulseKey {
+    static let latestActivityRecordName = "latestActivityRecordName"
+    static let kindRawValue = "kindRawValue"
+    static let updatedAt = "updatedAt"
+  }
+
   // MARK: - Outgoing
 
   static func applyFields(of info: VaultInfo, to record: CKRecord) {
@@ -128,6 +141,21 @@ enum VaultRecordMapper {
     if let assetFileURL {
       resourceRecord.file = CKAsset(fileURL: assetFileURL)
     }
+  }
+
+  static func applyFields(of activity: VaultActivity, to record: CKRecord) {
+    let activityRecord = VaultActivityRecord(record: record)
+    activityRecord.kindRawValue = activity.kindRawValue
+    activityRecord.subjectEdgeIDRawValue = activity.subjectEdgeID?.uuidString
+    activityRecord.rootEdgeIDRawValue = activity.rootEdgeID?.uuidString
+    activityRecord.createdAt = activity.createdAt
+  }
+
+  static func applyFields(of pulse: VaultNotificationPulse, to record: CKRecord) {
+    let pulseRecord = VaultNotificationPulseRecord(record: record)
+    pulseRecord.latestActivityRecordName = pulse.latestActivityRecordName
+    pulseRecord.kindRawValue = pulse.kindRawValue
+    pulseRecord.updatedAt = pulse.updatedAt
   }
 
   // MARK: - Incoming
@@ -243,6 +271,43 @@ enum VaultRecordMapper {
     if record[AttachmentResourceKey.createdAt] != nil {
       resource.createdAt = resourceRecord.createdAt
     }
+  }
+
+  /// Builds an immutable local Activity snapshot from a structurally valid
+  /// remote record. Existing Activity rows are never field-updated because an
+  /// Activity represents an append-only logical action, not mutable sync state.
+  static func activity(id: UUID, from record: CKRecord) -> VaultActivity? {
+    guard canMaterializeActivity(from: record) else { return nil }
+    let activityRecord = VaultActivityRecord(record: record)
+    return VaultActivity(
+      id: id,
+      kindRawValue: activityRecord.kindRawValue,
+      subjectEdgeID: activityRecord.subjectEdgeIDRawValue.flatMap(UUID.init(uuidString:)),
+      rootEdgeID: activityRecord.rootEdgeIDRawValue.flatMap(UUID.init(uuidString:)),
+      createdAt: activityRecord.createdAt
+    )
+  }
+
+  static func update(_ pulse: VaultNotificationPulse, from record: CKRecord) {
+    let pulseRecord = VaultNotificationPulseRecord(record: record)
+    pulse.latestActivityRecordName = pulseRecord.latestActivityRecordName
+    pulse.kindRawValue = pulseRecord.kindRawValue
+    pulse.updatedAt = pulseRecord.updatedAt
+  }
+
+  /// Validates the required payload before a macro-generated nonoptional
+  /// accessor reads it. This avoids treating a malformed remote record as a
+  /// process-fatal invariant violation.
+  static func canMaterializeActivity(from record: CKRecord) -> Bool {
+    record[VaultActivityKey.kindRawValue] is String
+      && record[VaultActivityKey.createdAt] is Date
+  }
+
+  /// Validates the fixed Pulse payload before decoding nonoptional fields.
+  static func canMaterializeNotificationPulse(from record: CKRecord) -> Bool {
+    record[VaultNotificationPulseKey.latestActivityRecordName] is String
+      && record[VaultNotificationPulseKey.kindRawValue] is String
+      && record[VaultNotificationPulseKey.updatedAt] is Date
   }
 
   // MARK: - System fields

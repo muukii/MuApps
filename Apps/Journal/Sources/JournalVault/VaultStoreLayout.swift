@@ -13,6 +13,7 @@ import Foundation
 ///       <vault-id>/
 ///         store.sqlite         VaultContentStore(vaultID)
 ///         media/               attachment bytes, one file per attachment id
+///         .authored-write.lock  advisory lock for app/extension authored writes
 ///     SyncState/               CKSyncEngine state serializations. Engine state
 ///                              is per CloudKit *database* (private / shared),
 ///                              not per vault, so it lives at the environment root.
@@ -100,6 +101,17 @@ public struct VaultStoreLayout: Hashable, Sendable {
     vaultDirectoryURL(for: vaultID).appending(path: "media", directoryHint: .isDirectory)
   }
 
+  /// Stable per-vault advisory-lock file shared by every App Group process.
+  ///
+  /// It contains no user data. `VaultAuthoredWriteCoordinator` uses it to
+  /// serialize authored writes with sync import/acknowledgement, retention, and
+  /// Shared with You local delivery; the Pulse singleton is one such critical
+  /// fetch-then-insert transaction.
+  func authoredWriteLockFileURL(for vaultID: VaultID) -> URL {
+    vaultDirectoryURL(for: vaultID)
+      .appending(path: ".authored-write.lock", directoryHint: .notDirectory)
+  }
+
   func preReleaseCloudKitRefetchMarkerURL(for vaultID: VaultID) -> URL {
     vaultDirectoryURL(for: vaultID)
       .appending(path: "needs-cloudkit-refetch", directoryHint: .notDirectory)
@@ -116,8 +128,14 @@ public struct VaultStoreLayout: Hashable, Sendable {
 
   /// Creates the root, `Vaults/`, and `SyncState/` directories. Idempotent.
   public func ensureRootDirectories() throws {
-    try FileManager.default.createDirectory(at: vaultsDirectoryURL, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: syncStateDirectoryURL, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(
+      at: vaultsDirectoryURL,
+      withIntermediateDirectories: true
+    )
+    try FileManager.default.createDirectory(
+      at: syncStateDirectoryURL,
+      withIntermediateDirectories: true
+    )
   }
 
   /// Creates one vault's directory and its `media/` subdirectory. Idempotent.

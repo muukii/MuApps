@@ -201,11 +201,14 @@ VaultCatalogStore
 
 VaultContentStore(vaultID)
   VaultInfo
+  VaultActivity
+  VaultNotificationPulse
   CardEdge
   Card
   Attachment
   SyncMetadata
   PendingMutation
+  PendingSharedWithYouNotice  # local only
 ```
 
 ```mermaid
@@ -404,6 +407,283 @@ sequenceDiagram
   ParticipantSync->>ParticipantStore: Import records and assets
 ```
 
+## Vault Activity / participant notification
+
+この節を、Vault 内の activity history と participant-visible notification の
+正規 contract とする。2026-08-18 時点で source code には `VaultActivity`、
+`VaultNotificationPulse`、local-only `PendingSharedWithYouNotice`、CloudKit record
+mapping、private/shared visible Pulse subscription、system notification presentation、
+retention、および Shared with You delivery worker が実装されている。まだ release
+ready を意味しない。CloudKit Development / Production の record type と `createdAt`
+index の確認・deploy、Apple capability を含む App ID / provisioning profile、署名済み
+実機二アカウント検証は repository 外の必須 gate である。
+
+`VaultActivity` は CloudKit の raw record change log ではなく、user が意味を理解できる
+logical action を表す immutable な domain event。1 回の user action が複数の `Card`、
+`CardEdge`、`Attachment`、`AttachmentResource` record を変更しても、生成する activity は
+最大 1 件とする。sync retry、conflict retry、import、retention cleanup のような
+infrastructure action は activity を生成しない。
+
+初期実装で確定する kind は `contentAdded` のみ。`createThread(cards:)` による新規投稿と
+`appendCard(_:to:)` による Reply は、いずれも「Vault に content を追加した」という
+1 回の logical action として扱う。root / Reply の違いを kind に重複して持たせず、
+`subjectEdgeID` と `rootEdgeID` の topology から判定する。
+
+- root 投稿: `subjectEdgeID == rootEdgeID`。Shared with You では `.edit` へ投影する。
+- Reply: `subjectEdgeID != rootEdgeID`。Shared with You では `.comment` へ投影する。
+- Home の multi-item drop は item ごとに partial success を返す既存 contract を維持し、
+  成功した各 item を独立した logical action / Activity として扱う。
+
+既存 content の edit、delete、vault metadata、membership などを activity にするかは
+別の product decision とし、ここから推測して追加しない。
+
+```mermaid
+flowchart LR
+  Action["Logical user action"]
+  Content["Card / CardEdge / Attachment records"]
+  Activity["VaultActivity<br/>durable history"]
+  Pulse["VaultNotificationPulse<br/>one mutable record"]
+  Silent["Silent sync subscription"]
+  Visible["Visible pulse subscription"]
+  History["Future activity history UI"]
+  Participant["Participant notification"]
+
+  Action --> Content
+  Action --> Activity
+  Action --> Pulse
+  Content --> Silent
+  Activity --> Silent
+  Pulse --> Silent
+  Pulse --> Visible
+  Activity --> History
+  Visible --> Participant
+```
+
+### Zone and persistence boundary
+
+`VaultActivity` と `VaultNotificationPulse` は、対象 content と同じ Vault custom record
+zone に置く。zone-wide `CKShare` の一部になるため、owner は private database、
+participant は shared database から同じ records を参照する。
+
+`VaultActivity` は履歴として `VaultContentStore` に import する domain row。
+`VaultNotificationPulse` は notification transport 専用であり、履歴 UI の data source
+にはしない。Activity は personal / shared を問わず全 Vault で作る。Pulse は書き込み直前に
+`VaultDescriptor` から snapshot した delivery policy が「他の participant がいる」と判定した
+場合だけ作る。その条件は participant vault、または owner vault で
+`participantCount > 1` のいずれかとし、share UI の準備だけで `isShared == true` になった
+owner-only vault は対象にしない。
+
+content、Activity、条件を満たす場合の Pulse、および対応する `PendingMutation` は同じ
+local transaction で commit する。Activity / Pulse の upload は content と同じ durable
+outbox、retry、idempotency boundary で扱う。`VaultContentStore` 自身は catalog や share
+state を読まず、app / extension の書き込み境界が明示的な delivery policy を渡す。
+
+#### Delivery policy の freshness 限界
+
+delivery policy は logical action と同じ local transaction に snapshot し、後から catalog を
+refresh して既存 Activity を `historyOnly` から notification 対象へ昇格させない。share 作成や
+participant 追加の後に過去の Activity を自動通知しないための local side-effect boundary である。
+
+ただしこれは participant-at-action を server で証明する仕組みではない。`createdAt` は offline
+作成も含む client 側の logical time である一方、`CKShare.modificationDate` と participant の
+`dateAddedToShare` は CloudKit が share を save した server time である。両者を比較しても、特定の
+Pulse save 時点の受信者 roster を確定できない。database subscription は recipient ごとの filter を
+持たないため、share / participant の変更と offline outbox upload が交差した場合に、厳密に
+「参加前の action は通知しない」を保証することはできない。
+
+この初期 contract は snapshot cache による best effort とし、`isShared` だけへの後退はしない。
+厳密な no-retroactivity が product requirement になった場合は、CloudKit commit 時刻を action 時刻に
+再定義して server conditional write を設計するか、per-recipient delivery を持つ transport / backend を
+別途導入する必要がある。
+
+### `VaultActivity`
+
+1 activity は作成後に内容を更新しない。retention cleanup だけが削除できる。
+CloudKit record name には activity の UUID string を使う。
+
+| Field | Type | Contract |
+|-------|------|----------|
+| `id` | `UUID` | Vault 内で一意。CloudKit record name と同じ値。 |
+| `kindRawValue` | `String` | 初期値は `contentAdded`。未知の将来値は削除せず round-trip する。 |
+| `subjectEdgeID` | `UUID?` | action が直接追加した placement。対象が既に消えていても activity 自体は残せる。 |
+| `rootEdgeID` | `UUID?` | history / deep link が開く owning root。root 投稿では `subjectEdgeID` と同じ。 |
+| `createdAt` | `Date` | offline 作成も含む logical action の発生時刻。 |
+
+actor は custom display-name field として複製しない。CloudKit 上では record の
+`creatorUserRecordID` を transport identity とし、local pending activity は current user
+として扱う。participant name の解決や、解決できない場合の表示 copy は presentation
+policy として別に決める。
+
+Activity record に full Card body、thumbnail、`CKAsset` は複製しない。history surface は
+subject record を解決し、解決できない場合は kind と時刻だけの fallback を表示できる
+shape にする。Activity は security audit log、全変更の完全な archive、unread delivery
+保証のいずれでもない。
+
+### `VaultNotificationPulse`
+
+visible push を `VaultActivity` 自体に直接 subscribe しない。`CKDatabaseSubscription` は
+record creation、update、deletion のすべてに反応するため、Activity cleanup が
+participant-visible notification を発生させてしまう。
+
+代わりに、各 Vault zone に次の stable record を 1 件だけ置く。
+
+| Field | Type | Contract |
+|-------|------|----------|
+| record name | `String` | `notification-pulse`。zone ごとに 1 件だけ。 |
+| `latestActivityRecordName` | `String` | notification の契機になった `VaultActivity` record name。 |
+| `kindRawValue` | `String` | notification routing 用。初期値は `contentAdded`。 |
+| `updatedAt` | `Date` | save ごとに変わる pulse timestamp。 |
+
+logical action が Activity を追加するたびに同じ Pulse record を上書きする。Pulse の
+CloudKit conflict は server record を取り直して retry する。Activity が durable history
+なので、同時更新で Pulse の最新値が上書きされても history は失われない。push 自体も
+CloudKit / APNs により coalesce され得るため、Pulse は event delivery log ではなく
+「Vault に新しい activity がある」という attention signal とする。
+
+outbox は content、Activity、Pulse の順に record を提示する。ただし `CKSyncEngine` と
+CloudKit は別 records の remote commit 順を保証しないため、Pulse が content より先に
+観測される可能性は許容する。通知 tap は後述のとおり generic app open とし、起動後の
+通常 sync が authoritative state を取得する。Pulse の `updatedAt` も concurrent writer の
+local-wins retry により単調増加を保証できないため、未読 cursor や最新 Activity の authority
+には使わない。
+
+### Subscription ownership
+
+subscription は sync layer が CloudKit account ごと、database scope ごとに idempotent に
+管理する。silent sync と visible notification は次の stable ID で分離する。
+
+```text
+tinycurve.vault-sync.private.v1
+tinycurve.vault-sync.shared.v1
+tinycurve.vault-pulse.private.v1
+tinycurve.vault-pulse.shared.v1
+```
+
+- `CKSyncEngine.Configuration.subscriptionID` に private / shared の sync ID を明示し、全 Vault
+  record の同期 wake-up を担う silent subscription を Pulse 用 subscription から分離する。
+  visible subscription より先にこの設定を入れ、`CKSyncEngine` が既存 database subscription
+  を自動探索して Pulse 用 subscription を sync 用に採用しないようにする。
+- 表示用には `recordType == VaultNotificationPulse` の `CKDatabaseSubscription` を
+  private / shared database に別途作る。Activity cleanup はこの subscription の対象外。
+- visible notification info は stable な localization key
+  `VAULT_ACTIVITY_NOTIFICATION_TITLE` / `VAULT_ACTIVITY_NOTIFICATION_BODY`、default sound、
+  badge なし、`shouldSendContentAvailable == false` とする。初期 copy は title `Tinycurve`、
+  body `There's an update in a shared Vault.` / `共有Vaultに更新があります。` とする。
+- subscription は notification permission と独立して常設する。permission denial を理由に
+  user-scoped subscription を削除せず、silent sync、Activity history、同じ account の別端末を
+  無効にしない。
+- notification は coalesce / omission され得るため、受信数と Activity 件数の一致を
+  前提にしない。app を開いたら通常の change fetch で authoritative state を読む。
+- Pulse や push payload に Card body / media を入れない。`CKDatabaseNotification` から
+  record / zone ID を取得できる保証がないため、初期 notification tap は Tinycurve を通常起動
+  するだけとし、特定 Vault / Card への推測 deep link は行わない。
+- direct CloudKit visible notification は受信前に app code を挟めず zone predicate もない。
+  初期設定は app-wide の system permission のみとし、Vault ごとの mute は提供しない。
+  exact deep link または per-Vault mute が必須になった場合は provider push 等へ再設計する。
+
+### System notification presentation and permission
+
+silent push を fetch したあとに `UNNotificationRequest` を作る local reconstruction は行わない。
+CloudKit の visible Pulse notification をそのまま system notification として表示する。
+`TinycurveAppDelegate` は launch 完了前に `UNUserNotificationCenterDelegate` を設定し、Pulse 用
+subscription ID の notification を foreground で受けた場合も `.banner`、`.list`、`.sound`
+を返す。現在開いている Vault や scene state による app 独自の抑止は入れない。
+
+system authorization は `[.alert, .sound]` を request し、badge は要求しない。初回 onboarding
+では request せず、次の contextual boundary で app 内 primer を提示する。
+
+- owner: system sharing UI が share を実際に save し、UI が dismiss した後。
+- participant: share acceptance と initial shared-zone import が成功した後。
+- existing user: `authorizationStatus == .notDetermined` で、participant vault または
+  `participantCount > 1` の owner vault を初めて開いた後。
+
+primer の「あとで」は system prompt を出さず、同じ install で自動再提示しない。
+`.denied` では再 request せず Settings へ案内する。app が active に戻るたびに system settings
+を再読込する。iOS は documented notification Settings URL を開く。macOS は private URL scheme
+に依存せず System Settings を開き、`Notifications > Tinycurve` という手順を表示する。
+native macOS Settings scene にも authorization state を明示的に注入する。
+
+remote notification registration は authorization と独立して app launch で行い、alert を
+denied / not determined にしても CloudKit silent sync transport を止めない。device token を独自
+server へ送らない。registration failure は log して次の active 復帰で再試行し、unregister は行わない。
+Shared with You notice はこの notification permission とは別の system integration である。
+
+### Retention and cleanup
+
+retention scope は Vault zone ごと。Activity は通常 append-only だが、無制限には残さない。
+
+```text
+retained target: 1,000 activities
+cleanup high-water mark: 1,200 activities
+cleanup result: delete oldest activities until 1,000 remain
+```
+
+新しい Activity の CloudKit upload を確認した実行 device が best-effort cleanup を schedule
+する。`VaultActivity.createdAt` を Development / Production schema で queryable かつ
+sortable にし、対象 zone の CloudKit query を authority として件数と oldest records を
+決める。1,200 件以上なら newest 1,000 件を残し、古い records の delete を既存
+`PendingMutation` outbox へ durable に積む。1 回の
+CloudKit modify batch は最大 200 deletes とし、必要なら複数 batch で 1,000 件まで戻す。
+
+cleanup failure は content save、Activity save、Pulse update の成功を取り消さない。次に
+Activity を作る device が再試行できるため、server cron や特定 owner device は必要としない。
+
+cleanup は次の contract に従う。
+
+- oldest-first で bounded batch delete し、1 action ごとに 1 record を消し続けない。
+- cleanup 自体は Activity を作らず、Pulse も更新しない。
+- 複数 participant が同時に同じ古い record を消してもよい。既に削除済みの record は
+  idempotent success として扱う。
+- 不完全な local cache の件数だけを authority にして削除対象を選ばない。対象 zone の
+  CloudKit query と `createdAt` sort で retained set を確定する。
+- remote Activity deletion は通常の silent sync path で local history に反映する。
+
+上限は storage bound であって unread guarantee ではない。長期間 offline の participant
+が復帰する前に古い Activity が retention 対象になる可能性は許容する。将来 unread や
+compliance archive が必要になった場合は、per-participant read cursor または別 archive
+contract を設計し、この上限を暗黙に流用しない。
+
+### Shared with You boundary
+
+`VaultActivity` を Messages thread へ Shared with You notice を post する canonical logical
+event として使う。ただし CloudKit Activity、visible push、`SWHighlightChangeEvent` は別々の責務。
+origin device が作った Activity の CloudKit save 成功を sync layer が確認した後だけ、app
+integration layer が share URL から `SWCollaborationHighlight` を解決して notice を post する。
+
+initial mapping は `contentAdded` の topology から決める。
+
+| Activity shape | `SWHighlightChangeEvent` trigger |
+|----------------|----------------------------------|
+| `subjectEdgeID == rootEdgeID` | `.edit` |
+| `subjectEdgeID != rootEdgeID` | `.comment` |
+
+remote Activity import、sync/conflict retry、retention cleanup は notice を post しない。short-lived
+extension からの投稿でも origin-only boundary を失わないよう、local action transaction には
+`PendingSharedWithYouNotice(activityID:)` を local-only row として残す。Activity upload の ack
+後にだけ waiting から ready へ変更し、その durable transition を registry の ready-event stream
+で vault ID として broadcast する。main app は event に加え launch / scene active ごとに全 Vault
+を drain し、Share extension / App Intent 起点の ready row も回収する。
+
+`SharedWithYouNoticeDeliveryCoordinator` は
+`SWHighlightCenter.isSystemCollaborationSupportAvailable`、catalog の `shareURL`、
+`getCollaborationHighlight(for:)` を順に確認する。system unsupported、share URL 不在、highlight
+不在は terminal `skipped` とする。lookup の transient error だけ `attemptCount` /
+`lastAttemptAt` を durable に更新して最大 3 回まで次の lifecycle boundary で retry し、同一
+drain 内では繰り返さない。highlight 解決後は `attempted` を先に保存してから
+`postNotice(for:)` するため、crash 時には重複より一件欠落を選ぶ at-most-once side effect となる。
+terminal (`attempted` / `skipped`) row は bounded purge し、Activity retention が Activity を
+delete する時も対応する local-only notice を同一 transaction で delete する。ready snapshot と
+state update は vault transaction lock を共有し、snapshot 後に retention / remote delete が勝った
+場合は `markAttempted == false` として post しない。失敗しても content、Activity、Pulse の成功を
+戻さない。`SWHighlightCenter.postNotice` 自体には delivery acknowledgment がないため、Messages
+notice は guaranteed delivery log ではない。
+
+残る product decision:
+
+- actor identity を participant-facing display name へどう解決するか。
+- `contentAdded` 以外にどの logical action を Activity として残すか。
+- Activity history UI をいつ、どの surface に置くか。
+
 ## Shared with You / Messages 連携
 
 Shared with You は、vault を Messages の会話や FaceTime の collaboration surface と結び付けるために使う。
@@ -418,7 +698,7 @@ flowchart TB
   CKShare["CKShare for vault zone"]
   CollaborationView["SWCollaborationView"]
   Observer["CKSystemSharingUIObserver"]
-  Highlight["SWHighlightCenter / SWHighlightEvent"]
+  Highlight["SWHighlightCenter / SWHighlightChangeEvent"]
   Messages["Messages / FaceTime"]
   CatalogStore["VaultCatalogStore"]
 
@@ -441,8 +721,29 @@ flowchart TB
   participant 表示、`activeParticipantCount`、Manage Share UI への入口を提供する。
 - `CKSystemSharingUIObserver` で、system sharing UI 経由の share save / stop sharing を observe し、
   `VaultCatalogStore` の share state を更新する。
-- `SWHighlightCenter` と `SWHighlightEvent` 系を使い、必要に応じて Messages thread に
+- `SWHighlightCenter` と `SWHighlightChangeEvent` を使い、必要に応じて Messages thread に
   content update、mention、rename/delete、membership update の notice を post する。
+
+2026-08-18 時点の初回共有 UI は、runtime が保存済みにした zone-wide `CKShare` を
+`NSItemProvider.registerCKShare(...)` で登録してから表示する。iOS は
+`UIActivityItemsConfiguration` と `LPLinkMetadata` を持つ `UIActivityViewController`、native
+macOS は `NSPreviewRepresentingActivityItem` を持つ `NSSharingServicePicker` を使う。既存 share
+の participant 表示と管理は `SWCollaborationView` を維持する。app-lifetime の
+`CKSystemSharingUIObserver` が system sharing UI 経由の save / stop を
+`JournalVaultRuntime` の refresh / stop seam へ渡し、個々の view delegate は即時の UI feedback
+だけを担う。
+
+初回 owner invite からの notification primer は、system observer の成功 save、platform sharing
+activity の成功、sheet dismissal の3条件を順不同で待つ。cancel / error は session を terminal に
+して遅延 callback を無視し、3条件後も catalog を refresh して owner かつ
+`participantCount > 1` を確認できたときだけ提示する。
+
+Messages Collaboration と Shared with You の source entitlement contract は
+`com.apple.developer.shared-with-you.collaboration = true` と
+`com.apple.developer.shared-with-you = true` である。ただし capability の実効性は Apple
+Developer の App ID、project entitlements、provisioning profile の3箇所で決まる。App ID で
+capability を有効にし、profile を再生成した signed device build の effective entitlements を
+検査するまで、Messages collaboration を Production-ready とは扱わない。
 
 `CKSystemSharingUIObserver` は remote record changes の observer ではない。
 他の participant が card を編集した、attachment が増えた、という変更は
@@ -464,8 +765,10 @@ VaultSummary
   lastSharedWithYouNoticeAt?
 ```
 
-最初に対応する範囲は、share sheet preview、`SWCollaborationView`、share save / stop sharing の反映まで。
-Messages thread への update notice は、content edit の粒度と notification policy が固まってから入れる。
+最初の update notice は `VaultActivity.contentAdded` だけを対象にし、root 投稿を `.edit`、
+Reply を `.comment` として post する。share sheet preview、`SWCollaborationView`、share save /
+stop sharing の既存境界は維持する。将来の edit、delete、rename、membership notice は、対応する
+Activity kind と product policy を決めてから追加する。
 
 ## Card Tree
 
@@ -688,7 +991,7 @@ symbol を使う。
 - doodle JSON のような小さな authored data は SwiftData row に直接持つか、attachment asset として扱うか。
 - text edit の最初の conflict policy をどうするか。field-wise last write wins、explicit version、append-only replacement のどれに寄せるか。
 - `VaultCatalogStore` のうち、どこまでを user 自身の device 間で sync し、どこからを local-only にするか。
-- Messages thread に post する Shared with You notice は、どの user action から始めるか。
+- Vault Activity の未決定範囲は「Vault Activity / participant notification」節に集約する。
 
 ## 最初の Spike
 
@@ -774,8 +1077,10 @@ CloudKit zone 作成と owned vault の invite issuance は UI action として�
 pending outbox を一度 `CKSyncEngine` へ流したうえで
 `CKRecordNameZoneWideShare` を fetch する。既存 share がなければ
 `CKShare(recordZoneID:)` を作成して保存し、saved `CKShare` と `CKContainer` を
-`UICloudSharingController(share:container:)` に渡す。初期 UI は private invite と
-read-write permission に絞り、public link はまだ出さない。
+`NSItemProvider.registerCKShare(...)` に渡す。初期 owner invite は iOS の
+`UIActivityItemsConfiguration` / `LPLinkMetadata` activity と native macOS の
+`NSSharingServicePicker` preview で提示する。初期 UI は private invite と read-write
+permission に絞り、public link はまだ出さない。
 
 Invite acceptance は SwiftUI app に UIKit scene delegate を差し込み、
 running-scene callback と cold-launch `UIScene.ConnectionOptions.cloudKitShareMetadata`
@@ -785,11 +1090,15 @@ shared database の `CKSyncEngine` に accepted zone 優先の fetch をかけ�
 fetched zone は既存の shared-zone materialization/import path で local catalog と
 vault store に反映される。実 iCloud の二アカウント手動検証はまだ残っている。
 
-Shared With You、collaboration preview / notice は別 milestone。
+Shared with You collaboration preview、app-lifetime sharing observer、root `.edit` / Reply
+`.comment` update notice の source implementation は接続済みである。CloudKit schema/index deployment、
+effective entitlement を含む signed-device build、Messages で作られた highlight を使う二アカウント
+実機検証は別の external release gate として残る。
 
-## Collaboration Spike
+## Collaboration device verification
 
-CloudKit zone と `CKShare` が作れるようになった後、Shared with You 連携を次の順番で検証する。
+source implementation を release 可能と確認するには、実機で Shared with You 連携を次の順番で
+検証する。
 
 1. vault の `CKShare` から collaboration item provider を作る。
 2. share sheet に vault preview title / image を出す。
@@ -797,7 +1106,8 @@ CloudKit zone と `CKShare` が作れるようになった後、Shared with You 
 4. shared vault の settings または toolbar に `SWCollaborationView` を表示する。
 5. `CKSystemSharingUIObserver` で share save / stop sharing を拾い、`VaultCatalogStore` を更新する。
 6. owner / participant の permission と `participantCount` の見え方を確認する。
-7. content edit notice を 1 種類だけ `SWHighlightChangeEvent` として post するか判断する。
+7. root post の `.edit` と Reply の `.comment` notice が、origin device の Activity save ack 後だけ
+   post されることを確認する。remote import、retry、retention は post してはならない。
 
 ## 実装状況
 
@@ -813,7 +1123,8 @@ bridge. Invite acceptance is implemented through the scene metadata router,
 is still pending. Vault deletion is implemented from `VaultSelectionView`:
 owned vaults delete their private custom zone before local cleanup, participant
 vaults target the accepted shared zone before removing local catalog/content
-files. Shared With You surfacing is not implemented in this slice.
+files. Shared with You surfacing is connected in source; signed two-account
+device verification remains a release gate.
 
 起動時には sync engine を start し、毎回 CloudKit vault recovery / reconciliation を
 kick する。remote/private/shared vault が見つからず local catalog も空の場合は
@@ -867,6 +1178,20 @@ environment に入れ、active `CardEdge` (`deletedAt == nil`) の `@Query` か�
   `AttachmentResource` の `CKAsset` upload / download(vault の `media/` に保存、
   file 到着時は `AttachmentResource.localFileRevision` を更新して SwiftData
   observation で UI preview を再読み込み)。
+- `CKSyncEngine` state file は raw serialization ではなく versioned envelope として保存する。
+  envelope は `formatVersion`、`schemaCompatibilityGeneration`、sorted
+  `knownRecordTypes`、nested serialization を持つ。legacy raw file、decode failure、format /
+  generation / type manifest の不一致は token を再利用せず、current empty envelope を先に保存して
+  1 回の full refetch を開始する。empty marker は process が次の state update より前に終了しても
+  同じ incompatible file を無限に invalidation しないためのもの。新 record type の materialization、
+  remote collision policy、既存 record shape の compatibility を変える場合は
+  `syncStateCompatibilityGeneration` を bump する。これは vault content / durable outbox を reset
+  しない。旧 build が envelope を読めず raw state を書き戻した場合も、次の新 build が legacy として
+  再 fetch する。
+  account user ID hash はこの envelope には入れない。account change は既存
+  `CKSyncEngine.Event.accountChange` handling で retention generation を invalidate し、進行中 cleanup
+  を cancel して subscription reconciliation を再要求する。account をまたぐ local vault data の保持
+  policy はこの token compatibility contract とは別の product decision とする。
 - `JournalVaultRuntime` — `TinycurveApp` 起動時に
   App Group layout、catalog store、store registry、`CloudKitVaultSyncEngine` を作る。
   preset vault は自動作成しない。`previewRuntime()` と debug 用 factory は
@@ -888,12 +1213,27 @@ environment に入れ、active `CardEdge` (`deletedAt == nil`) の `@Query` か�
 - zone-level deletion(owner の削除 / share revoke / participant 側の removal)は
   catalog row と vault-local content directory を削除し、次回 picker refresh で消える。
 
+source 実装済み（external release gate は別）:
+
+- `VaultActivity` / `VaultNotificationPulse`、private/shared participant-visible Pulse subscription、
+  foreground system UI、1,200 -> 1,000 件の opportunistic Activity retention cleanup。
+- origin-only、ack-gated Shared with You update notice delivery と local-only notice retention。
+
 未実装(次フェーズ):
 
 - entry Trash UI、restore、retention、physical purge。
-- Shared with You 連携。
+- Activity history を閲覧する product UI。
 - `VaultSummary` の latest card denormalize。
 - vault-backed saved-entry export share UI。
+
+external release gate:
+
+- Activity `createdAt` index と Activity / Pulse record type を CloudKit Development で確認し、
+  Production へ deploy する。
+- Shared with You / Messages Collaboration capability を App ID で有効化し、profile を再生成して
+  signed device の effective entitlement を確認する。
+- owner / participant 二アカウント実機で visible push、foreground banner/list/sound、share URL / highlight、
+  ack-gated `.edit` / `.comment` notice を確認する。
 
 ## 参考
 
@@ -901,3 +1241,5 @@ environment に入れ、active `CardEdge` (`deletedAt == nil`) の `@Query` か�
 - [Adding shared content collaboration to your app](https://developer.apple.com/documentation/sharedwithyou/adding-shared-content-collaboration-to-your-app)
 - [SWCollaborationView](https://developer.apple.com/documentation/sharedwithyou/swcollaborationview)
 - [CKSystemSharingUIObserver](https://developer.apple.com/documentation/cloudkit/cksystemsharinguiobserver)
+- [CKDatabaseSubscription](https://developer.apple.com/documentation/cloudkit/ckdatabasesubscription)
+- [CKQuerySubscription](https://developer.apple.com/documentation/cloudkit/ckquerysubscription)

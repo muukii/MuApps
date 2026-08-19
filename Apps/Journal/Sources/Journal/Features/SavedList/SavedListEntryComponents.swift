@@ -73,7 +73,8 @@ struct VaultSavedEntryRow: View {
   var body: some View {
     VaultSavedRootGroup(
       entry: entry.entryModel,
-      interaction: .interactive(isEnabled: isMutationDisabled == false) { action in
+      interaction: .interactive(isEnabled: isMutationDisabled == false) {
+        action in
         switch action {
         case .toggleTodoCompletion:
           onToggleTodoCompletion(entry)
@@ -111,7 +112,8 @@ struct VaultSavedEntryRow: View {
     .accessibilityAction(
       named: Text(
         "Reply",
-        comment: "Accessibility action that selects this entry as a Reply parent."
+        comment:
+          "Accessibility action that selects this entry as a Reply parent."
       )
     ) {
       onReply(entry)
@@ -136,32 +138,52 @@ struct VaultSavedEntryTreeCell: View {
   let onToggleTodoCompletion: @MainActor (VaultSavedEntry) -> Void
 
   var body: some View {
-    SwipeCell {
-      VaultSavedEntryRow(
-        entry: entry,
-        isMutationDisabled: isMutationDisabled,
-        onReply: onReply,
-        onShare: onShare,
-        onEdit: onEdit,
-        onRequestDelete: onRequestDelete,
-        onToggleTodoCompletion: onToggleTodoCompletion
-      )
-    } onTrigger: {
-      onReply(entry)
-    }
-    .padding(
-      .leading,
-      depth > 0 ? VaultSavedEntryTreeMetrics.descendantMarkerGutter : 0
-    )
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .overlay(alignment: .topLeading) {
-      HStack(spacing: 1) {
-        ForEach(0..<depth, id: \.self) { _ in
-          Capsule()
-            .frame(width: 6, height: 4)
-        }
+    HStack {
+
+      if depth > 0 {
+
+        Text(depth.description)
+          .font(.system(size: 12))
+          .fontWeight(.semibold)
+          .fontDesign(.rounded)
+          .padding(5)
+          .background(
+            RoundedRectangle(cornerRadius: 6)
+              .foregroundStyle(.quinary)
+          )
+          .foregroundStyle(.tint)
+          .frame(width: 26, alignment: .center)
+          .padding(.leading, -10)
+        
+      }
+
+      SwipeCell {
+        VStack {
+//          if depth > 0 {
+//            DepthIndicator(depth: depth)
+//              .frame(
+//                maxWidth: .infinity,
+//                alignment: .init(horizontal: .leading, vertical: .center)
+//              )
+//          }
+          VaultSavedEntryRow(
+            entry: entry,
+            isMutationDisabled: isMutationDisabled,
+            onReply: onReply,
+            onShare: onShare,
+            onEdit: onEdit,
+            onRequestDelete: onRequestDelete,
+            onToggleTodoCompletion: onToggleTodoCompletion
+          )
+        }       
+        .background(.appSecondaryContainer)
+        .clipShape(.rect(cornerRadius: 24))
+      } onTrigger: {
+        onReply(entry)
       }
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, 16)
   }
 }
 

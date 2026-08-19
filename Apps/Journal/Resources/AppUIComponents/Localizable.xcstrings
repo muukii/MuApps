@@ -53,6 +53,12 @@
         }
       }
     },
+    "Pause Recording" : {
+      "comment" : "Button that stops the recording playing on this card."
+    },
+    "Play Recording" : {
+      "comment" : "Button that plays the recording attached to this card."
+    },
     "Reopen Todo" : {
       "comment" : "Button that changes a completed Todo back to incomplete.",
       "localizations" : {

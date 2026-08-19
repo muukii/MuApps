@@ -56,47 +56,34 @@ public struct EntryContentView: View {
           text: text,
           style: style.text
         )
-        .frame(minHeight: style.text.minimumHeight)
       case .todo(let todo):
         TodoContentView(
           source: todo,
           style: style.todo,
           interaction: todoInteraction
         )
-        .frame(minHeight: style.todo.minimumHeight)
       case .link(let urlString):
         LinkContentView(urlString: urlString, style: style.link)
-          .frame(minHeight: style.link.minimumHeight)
       case .file(let file):
         FileContentView(file: file, style: style.file)
-          .frame(minHeight: style.file.minimumHeight)
       case .photo(let photo):
         PhotoContentView(photo: photo, style: style.photo)
-          .frame(minHeight: style.photo.minimumHeight)
       case .video(let video):
         VideoContentView(video: video, style: style.video)
-          .frame(minHeight: style.video.minimumHeight)
       case .livePhoto(let livePhoto):
         LivePhotoContentView(livePhoto: livePhoto, style: style.livePhoto)
-          .frame(minHeight: style.livePhoto.minimumHeight)
       case .audio(let audio):
         AudioContentView(audio: audio, style: style.audio)
-      //          .frame(minHeight: style.audio.minimumHeight)
       case .suggestion(let suggestion):
         SuggestionContentView(suggestion: suggestion, style: style.suggestion)
-          .frame(minHeight: style.suggestion.minimumHeight)
       case .doodle(let doodle):
         DoodleContentView(doodle: doodle, style: style.doodle)
-          .frame(minHeight: style.doodle.minimumHeight)
       case .bauhaus(let bauhaus):
         BauhausContentView(bauhaus: bauhaus, style: style.bauhaus)
-          .frame(minHeight: style.bauhaus.minimumHeight)
       case .unknown:
         UnknownContentView(style: style.unknown)
-          .frame(minHeight: style.unknown.minimumHeight)
       }
     }
-    .clipShape(.rect(cornerRadius: 24))
   }
 
   private var todoInteraction: TodoContentView.Interaction {

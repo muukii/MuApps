@@ -14,11 +14,18 @@ import SwiftData
 @Model
 public final class PendingMutation {
 
-  /// CloudKit record name (== the model row's UUID string).
+  /// CloudKit record name for the local row this mutation describes.
+  ///
+  /// Most content records use their model UUID string. VaultNotificationPulse
+  /// intentionally uses its stable `notification-pulse` singleton name instead.
   @Attribute(.unique)
   public var recordName: String
 
   /// CloudKit record type (`VaultRecordType` raw value).
+  ///
+  /// The persisted string keeps this SwiftData outbox forward-compatible with
+  /// later record types. The sync boundary converts only recognized values to
+  /// `VaultRecordType` before handing work to `CKSyncEngine`.
   public var recordType: String
 
   public var kind: Kind

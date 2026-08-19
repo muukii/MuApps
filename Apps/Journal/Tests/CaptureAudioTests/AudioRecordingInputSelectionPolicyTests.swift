@@ -74,6 +74,47 @@ struct AudioRecordingInputSelectionPolicyTests {
     #expect(resolved == builtIn)
   }
 
+  #if os(iOS)
+    @Test
+    func routeConfirmationAcceptsRequestedInputAsSoonAsItBecomesActive() {
+      let policy = AudioRecordingInputRouteConfirmationPolicy(maximumAttempts: 3)
+
+      let decision = policy.decision(
+        requestedInputID: "airpods",
+        activeInputIDs: ["built-in", "airpods"],
+        attemptIndex: 0
+      )
+
+      #expect(decision == .confirmed)
+    }
+
+    @Test
+    func routeConfirmationRetriesBeforeItsFinalAttempt() {
+      let policy = AudioRecordingInputRouteConfirmationPolicy(maximumAttempts: 3)
+
+      let decision = policy.decision(
+        requestedInputID: "airpods",
+        activeInputIDs: ["built-in"],
+        attemptIndex: 1
+      )
+
+      #expect(decision == .retry)
+    }
+
+    @Test
+    func routeConfirmationTimesOutInsteadOfAcceptingAnUnrequestedFallback() {
+      let policy = AudioRecordingInputRouteConfirmationPolicy(maximumAttempts: 3)
+
+      let decision = policy.decision(
+        requestedInputID: "airpods",
+        activeInputIDs: ["built-in"],
+        attemptIndex: 2
+      )
+
+      #expect(decision == .timedOut)
+    }
+  #endif
+
   private func input(
     id: AudioRecordingInput.ID,
     kind: AudioRecordingInput.Kind

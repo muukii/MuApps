@@ -73,15 +73,6 @@ struct SuggestionContentView: View {
     }
 
     var contentPadding: CGFloat { 16 }
-
-    var minimumHeight: CGFloat? {
-      switch preset {
-      case .composer:
-        return nil
-      case .cell:
-        return 120
-      }
-    }
   }
 
   let suggestion: SuggestionContentSource

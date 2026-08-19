@@ -35,8 +35,12 @@ public final class VaultSummary {
 
   public var permission: VaultPermissionSummary
 
-  /// Last time a Shared with You notice was posted to the vault's Messages
-  /// thread. Unused until the notice policy is decided (see design doc).
+  /// Last time Tinycurve invoked a Shared with You notice post for this vault.
+  ///
+  /// This is diagnostic summary state only. The corresponding
+  /// ``PendingSharedWithYouNotice/activityID`` row is the event-level
+  /// at-most-once boundary; this aggregate timestamp must never decide whether
+  /// a particular Activity is eligible to post.
   public var lastSharedWithYouNoticeAt: Date?
 
   public init(

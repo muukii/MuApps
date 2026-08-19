@@ -20,6 +20,20 @@ enum VideoPlaybackAudioSessionPolicy {
     guard isConfigured == false else { return }
     isConfigured = true
 
+    applyMutedInlineCategory()
+  }
+
+  /// Restores the mixing category after an audible surface borrowed the session.
+  ///
+  /// Audible playback — a voice recording played from a card — has to take the
+  /// session over while it lasts. Handing it back here keeps that borrow scoped
+  /// to one recording instead of silently changing how every later video
+  /// preview shares the session with the user's music.
+  static func restoreMutedInlinePlayback() {
+    applyMutedInlineCategory()
+  }
+
+  private static func applyMutedInlineCategory() {
     #if os(iOS)
       do {
         try AVAudioSession.sharedInstance().setCategory(

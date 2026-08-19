@@ -311,6 +311,22 @@ extension VaultCatalogStore {
     try context.save()
   }
 
+  /// Records a successful call to the system Shared with You posting API.
+  ///
+  /// The timestamp is a lightweight diagnostic for catalog-facing tooling. It
+  /// intentionally does not participate in event idempotency: a vault can have
+  /// many Activity notices, each governed by its own local-only intent row.
+  @MainActor
+  public func noteSharedWithYouNoticePosted(
+    vaultID: VaultID,
+    at date: Date
+  ) throws {
+    let context = container.mainContext
+    guard let summary = try fetchSummary(vaultID: vaultID, in: context) else { return }
+    summary.lastSharedWithYouNoticeAt = date
+    try context.save()
+  }
+
   // MARK: - Fetch helpers
 
   @MainActor

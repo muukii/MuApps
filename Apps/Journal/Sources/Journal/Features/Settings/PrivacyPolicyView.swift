@@ -2,9 +2,10 @@ import SwiftUI
 
 /// A readable, in-app copy of Tinycurve's privacy policy.
 ///
-/// Keep this screen aligned with `Apps/Journal/docs/PRIVACY_POLICY.md`. The
-/// Markdown file is the public-policy draft; this view gives users the same
-/// substance from Settings without requiring network access.
+/// Keep the Release-visible sections aligned with
+/// `Apps/Journal/docs/PRIVACY_POLICY.md`. Development-only profile disclosures
+/// are gated with the unfinished feature and must move into the public policy
+/// before that feature is enabled in a shipping configuration.
 struct PrivacyPolicyView: View {
 
   var body: some View {
@@ -13,7 +14,11 @@ struct PrivacyPolicyView: View {
         PrivacyPolicyHeaderView()
 
         ForEach(PrivacyPolicyContent.sections) { section in
-          PrivacyPolicySectionView(section: section)
+          if !section.requiresProfileImageFeature
+            || JournalFeatureFlags.isProfileImageEnabled
+          {
+            PrivacyPolicySectionView(section: section)
+          }
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -31,7 +36,7 @@ struct PrivacyPolicyView: View {
 /// Static policy copy shared by the section views on this screen.
 private enum PrivacyPolicyContent {
 
-  static let lastUpdated: LocalizedStringResource = "Last updated: July 13, 2026"
+  static let lastUpdated: LocalizedStringResource = "Last updated: August 18, 2026"
 
   static let introduction: LocalizedStringResource =
     "Tinycurve is a personal journaling app. It is designed so the developer does not run a server for your journal content and does not sell, track, or advertise with your data."
@@ -45,6 +50,12 @@ private enum PrivacyPolicyContent {
           id: "content",
           body:
             "When you create entries, Tinycurve can store the text you type, photos you capture or choose from Photos, audio recordings, doodles, Bauhaus artwork, timestamps, relationships between entries, attachment metadata, and optional location coordinates."
+        ),
+        PrivacyPolicyParagraph(
+          id: "profile-photo",
+          body:
+            "You may also choose an optional profile photo. Tinycurve crops the selected photo on your device before you explicitly save it.",
+          requiresProfileImageFeature: true
         ),
         PrivacyPolicyParagraph(
           id: "suggestions",
@@ -70,6 +81,18 @@ private enum PrivacyPolicyContent {
       ]
     ),
     PrivacyPolicySection(
+      id: "public-profile-photo",
+      title: "Public profile photo",
+      paragraphs: [
+        PrivacyPolicyParagraph(
+          id: "cloudkit-public-profile",
+          body:
+            "If you save a profile photo, Tinycurve uploads the cropped image to the public CloudKit database on your Tinycurve user record. It is separate from your private journal content and may be retrieved by other Tinycurve users to identify you in collaborative features. You can remove the profile photo from Settings, which clears it from your Tinycurve user record."
+        )
+      ],
+      requiresProfileImageFeature: true
+    ),
+    PrivacyPolicySection(
       id: "permissions",
       title: "Device permissions",
       paragraphs: [
@@ -81,7 +104,7 @@ private enum PrivacyPolicyContent {
         PrivacyPolicyParagraph(
           id: "photos",
           body:
-            "Photos access is used through Apple's system picker. Tinycurve receives only the photo you choose for an entry."
+            "Photos access is used through Apple's system picker. Tinycurve receives only the photo you choose in the picker."
         ),
         PrivacyPolicyParagraph(
           id: "microphone",
@@ -134,7 +157,13 @@ private enum PrivacyPolicyContent {
           id: "user-control",
           body:
             "Journal content remains until you delete it in the app, delete the app's data, or remove it through iCloud behavior controlled by Apple. iCloud sync deletion timing is governed by Apple's CloudKit and iCloud systems."
-        )
+        ),
+        PrivacyPolicyParagraph(
+          id: "profile-photo-retention",
+          body:
+            "Your optional public profile photo remains until you remove it in Settings or it is removed through iCloud behavior controlled by Apple.",
+          requiresProfileImageFeature: true
+        ),
       ]
     ),
     PrivacyPolicySection(
@@ -162,6 +191,8 @@ private struct PrivacyPolicySection: Identifiable {
   let id: String
   let title: LocalizedStringResource
   let paragraphs: [PrivacyPolicyParagraph]
+  /// Hides an unfinished disclosure together with its disabled Release feature.
+  var requiresProfileImageFeature = false
 }
 
 /// One paragraph inside a policy section.
@@ -169,6 +200,8 @@ private struct PrivacyPolicyParagraph: Identifiable {
 
   let id: String
   let body: LocalizedStringResource
+  /// Hides profile-only copy when the profile-image build flag is disabled.
+  var requiresProfileImageFeature = false
 }
 
 // MARK: - Fileprivate Views
@@ -201,10 +234,14 @@ private struct PrivacyPolicySectionView: View {
         .foregroundStyle(.primary)
 
       ForEach(section.paragraphs) { paragraph in
-        Text(paragraph.body)
-          .font(.body)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
+        if !paragraph.requiresProfileImageFeature
+          || JournalFeatureFlags.isProfileImageEnabled
+        {
+          Text(paragraph.body)
+            .font(.body)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
       }
     }
   }

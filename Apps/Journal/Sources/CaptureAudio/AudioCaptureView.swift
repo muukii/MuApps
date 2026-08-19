@@ -13,10 +13,13 @@ public struct AudioCaptureView: View {
   @State private var recorder = AmbientAudioRecorder()
   @State private var permissionDenied = false
   @State private var errorMessage: String?
+  @State private var inputRefreshTask: Task<Void, Never>?
+  @State private var isChangingRecordingState = false
 
   private let onFinish: @MainActor @Sendable (AudioRecording) -> Void
 
-  public init(onFinish: @escaping @MainActor @Sendable (AudioRecording) -> Void) {
+  public init(onFinish: @escaping @MainActor @Sendable (AudioRecording) -> Void)
+  {
     self.onFinish = onFinish
   }
 
@@ -24,12 +27,9 @@ public struct AudioCaptureView: View {
     VStack(spacing: 40) {
       Spacer()
 
-      Text(Self.formatted(recorder.duration))
-        .font(.system(size: 56, weight: .light, design: .rounded))
-        .monospacedDigit()
-        .contentTransition(.numericText())
+      AudioRecordingDurationLabel(recorder: recorder)
 
-      WaveformMeter(samples: recorder.samples, isActive: recorder.state == .recording)
+      AudioRecordingWaveformMeter(recorder: recorder)
         .frame(height: 64)
         .padding(.horizontal, 32)
 
@@ -37,8 +37,11 @@ public struct AudioCaptureView: View {
         AudioInputSelector(
           inputs: recorder.availableInputs,
           selection: recorder.inputSelection,
-          resolvedInputName: recorder.resolvedInput?.name ?? String(localized: "Automatic"),
-          isEnabled: recorder.state != .recording && recorder.availableInputs.isEmpty == false,
+          resolvedInputName: recorder.resolvedInput?.name
+            ?? String(localized: "Automatic"),
+          isEnabled: recorder.state != .recording
+            && isChangingRecordingState == false
+            && recorder.availableInputs.isEmpty == false,
           onSelect: { recorder.selectInput($0) }
         )
         .padding(.horizontal, 32)
@@ -62,27 +65,37 @@ public struct AudioCaptureView: View {
       Text("Enable microphone access in Settings to record ambient sound.")
     }
     #if os(iOS)
-      .onAppear {
-        refreshAudioInputs(reportingErrors: false)
+      .task {
+        await refreshAudioInputs(reportingErrors: false)
       }
       .onReceive(
         NotificationCenter.default.publisher(
           for: AVAudioSession.availableInputsChangeNotification
         )
       ) { _ in
-        refreshAudioInputs(reportingErrors: recorder.state == .recording)
+        scheduleAudioInputRefresh(reportingErrors: recorder.state == .recording)
       }
       .onReceive(
-        NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)
+        NotificationCenter.default.publisher(
+          for: AVAudioSession.routeChangeNotification
+        )
       ) { _ in
-        refreshAudioInputs(reportingErrors: recorder.state == .recording)
+        scheduleAudioInputRefresh(reportingErrors: recorder.state == .recording)
+      }
+      .onDisappear {
+        inputRefreshTask?.cancel()
       }
     #endif
   }
 
   private var recordButton: some View {
     Button {
-      toggleRecording()
+      guard isChangingRecordingState == false else { return }
+      isChangingRecordingState = true
+      Task {
+        defer { isChangingRecordingState = false }
+        await toggleRecording()
+      }
     } label: {
       ZStack {
         Circle()
@@ -97,18 +110,21 @@ public struct AudioCaptureView: View {
       }
     }
     .buttonStyle(.plain)
+    .disabled(isChangingRecordingState)
     .animation(.smooth, value: recorder.state)
-    .accessibilityLabel(recorder.state == .recording ? "Stop recording" : "Start recording")
+    .accessibilityLabel(
+      recorder.state == .recording ? "Stop recording" : "Start recording"
+    )
   }
 
-  private func toggleRecording() {
+  private func toggleRecording() async {
     switch recorder.state {
     case .recording:
-      if let recording = recorder.stop() {
+      if let recording = await recorder.stop() {
         onFinish(recording)
       }
     case .idle, .finished:
-      Task { await beginRecording() }
+      await beginRecording()
     }
   }
 
@@ -119,16 +135,27 @@ public struct AudioCaptureView: View {
     }
     do {
       errorMessage = nil
-      try recorder.start()
+      try await recorder.start()
     } catch {
       errorMessage = "Couldn't start recording: \(error.localizedDescription)"
     }
   }
 
   #if os(iOS)
-    private func refreshAudioInputs(reportingErrors: Bool) {
+    private func scheduleAudioInputRefresh(reportingErrors: Bool) {
+      inputRefreshTask?.cancel()
+      inputRefreshTask = Task {
+        try? await Task.sleep(for: .milliseconds(50))
+        guard Task.isCancelled == false else { return }
+        await refreshAudioInputs(reportingErrors: reportingErrors)
+      }
+    }
+
+    private func refreshAudioInputs(reportingErrors: Bool) async {
       do {
-        try recorder.refreshAudioInputs()
+        try await recorder.refreshAudioInputs()
+      } catch is CancellationError {
+        return
       } catch {
         if reportingErrors {
           errorMessage = error.localizedDescription
@@ -138,6 +165,18 @@ public struct AudioCaptureView: View {
       }
     }
   #endif
+}
+
+/// Isolates the high-frequency duration observation from the capture surface.
+private struct AudioRecordingDurationLabel: View {
+  let recorder: AmbientAudioRecorder
+
+  var body: some View {
+    Text(Self.formatted(recorder.duration))
+      .font(.system(size: 56, weight: .light, design: .rounded))
+      .monospacedDigit()
+      .contentTransition(.numericText())
+  }
 
   private static func formatted(_ duration: TimeInterval) -> String {
     let total = Int(duration)
@@ -208,53 +247,75 @@ public struct AudioCaptureView: View {
 
 // MARK: - Waveform Meter
 
-/// A live, scrolling waveform in the style of the iMessage voice message UI:
-/// each bar is a real amplitude sample, mirrored around a center line, with the
-/// newest sample entering at the right. The bars occupy fixed positional slots,
-/// so as the underlying samples shift left each slot springs to its neighbour's
-/// value — reading as flowing horizontal motion.
+/// Isolates the recorder's high-frequency meter observation from unrelated controls.
+private struct AudioRecordingWaveformMeter: View {
+  let recorder: AmbientAudioRecorder
+
+  var body: some View {
+    let liveMeter = recorder.liveMeter
+    WaveformMeter(
+      samples: liveMeter.renderingSamples,
+      visibleBarCount: liveMeter.samples.count,
+      newestSampleDate: liveMeter.newestSampleDate,
+      sampleInterval: AmbientAudioRecorder.sampleInterval,
+      isActive: recorder.state == .recording
+    )
+  }
+}
+
+/// A time-based scrolling waveform whose bars are drawn in one Canvas pass.
+///
+/// Recorder measurements remain at 20 Hz. The animation timeline interpolates
+/// their horizontal position at the display cadence, so each measured bar moves
+/// exactly one slot before the next value enters from the trailing edge.
 private struct WaveformMeter: View {
   let samples: [Float]
+  let visibleBarCount: Int
+  let newestSampleDate: Date?
+  let sampleInterval: TimeInterval
   let isActive: Bool
 
   private let barSpacing: CGFloat = 3
   private let minBarHeight: CGFloat = 4
 
   var body: some View {
-    GeometryReader { proxy in
-      let count = max(samples.count, 1)
-      let barWidth = max(
-        (proxy.size.width - barSpacing * CGFloat(count - 1)) / CGFloat(count),
-        1
-      )
-      HStack(spacing: barSpacing) {
-        // Fixed positional slots, not identity-bearing data: index-as-id is the
-        // intended model — slot N always renders the Nth sample in the window.
-        ForEach(samples.indices, id: \.self) { index in
-          Capsule()
-            .fill(.tint)
-            .frame(width: barWidth, height: height(for: samples[index], in: proxy.size.height))
-            .frame(maxHeight: .infinity, alignment: .center)
+    TimelineView(.animation(paused: isActive == false)) { timeline in
+      Canvas { context, size in
+        let phase = LiveWaveformCanvasLayout.scrollPhase(
+          at: timeline.date,
+          newestSampleDate: newestSampleDate,
+          sampleInterval: sampleInterval
+        )
+        let layout = LiveWaveformCanvasLayout(
+          size: size,
+          visibleBarCount: visibleBarCount,
+          phase: phase,
+          barSpacing: barSpacing,
+          minimumBarHeight: minBarHeight
+        )
+        var bars = Path()
+        for (index, sample) in samples.enumerated() {
+          let rect = layout.barRect(for: sample, at: index)
+          let cornerRadius = min(rect.width, rect.height) / 2
+          bars.addRoundedRect(
+            in: rect,
+            cornerSize: CGSize(width: cornerRadius, height: cornerRadius)
+          )
         }
-      }
-      .frame(width: proxy.size.width, height: proxy.size.height)
-      .opacity(isActive ? 1 : 0.3)
-      .animation(.spring(response: 0.18, dampingFraction: 0.72), value: samples)
-      .animation(.smooth, value: isActive)
-    }
-  }
 
-  private func height(for sample: Float, in maxHeight: CGFloat) -> CGFloat {
-    let amplitude = CGFloat(min(max(sample, 0), 1))
-    return minBarHeight + (maxHeight - minBarHeight) * amplitude
+        context.clip(to: Path(CGRect(origin: .zero, size: size)))
+        context.fill(bars, with: .style(.tint))
+      }
+    }
+    .opacity(isActive ? 1 : 0.3)
+    .animation(.smooth, value: isActive)
   }
 }
 
 #Preview {
-  NavigationStack {
-    AudioCaptureView { recording in
-      print("finished:", recording.fileURL, recording.duration)
-    }
-    .navigationTitle("Ambient Sound")
+  AudioCaptureView { recording in
+    print("finished:", recording.fileURL, recording.duration)
   }
+  .frame(height: 400)
+  .frame(maxHeight: .infinity)
 }

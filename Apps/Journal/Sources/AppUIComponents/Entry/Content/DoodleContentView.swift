@@ -59,14 +59,6 @@ struct DoodleContentView: View {
     }
 
     var placeholderAspectRatio: CGFloat { 1 }
-    var minimumHeight: CGFloat? {
-      switch preset {
-      case .composer:
-        return nil
-      case .cell:
-        return 180
-      }
-    }
   }
 
   let doodle: DoodleContentSource

@@ -63,6 +63,17 @@ struct VaultCloudKitSchemaTests {
         VaultRecordMapper.AttachmentResourceKey.createdAt,
         VaultRecordMapper.AttachmentResourceKey.file,
       ],
+      .activity: [
+        VaultRecordMapper.VaultActivityKey.kindRawValue,
+        VaultRecordMapper.VaultActivityKey.subjectEdgeID,
+        VaultRecordMapper.VaultActivityKey.rootEdgeID,
+        VaultRecordMapper.VaultActivityKey.createdAt,
+      ],
+      .notificationPulse: [
+        VaultRecordMapper.VaultNotificationPulseKey.latestActivityRecordName,
+        VaultRecordMapper.VaultNotificationPulseKey.kindRawValue,
+        VaultRecordMapper.VaultNotificationPulseKey.updatedAt,
+      ],
     ]
 
     for recordType in VaultRecordType.allCases {
@@ -83,6 +94,16 @@ struct VaultCloudKitSchemaTests {
             fieldName: VaultRecordMapper.CardEdgeKey.parentEdgeID
           )
       }
+    )
+  }
+
+  @Test
+  func activityCreatedAt_isDeclaredSortableForRetention() {
+    let descriptor = VaultCloudKitSchema.descriptor(for: .activity)
+
+    #expect(
+      descriptor.field(named: VaultRecordMapper.VaultActivityKey.createdAt)?.indexExpectation
+        == .sortable
     )
   }
 
@@ -124,5 +145,46 @@ struct VaultCloudKitSchemaTests {
     #expect(imported.updatedAt == updatedAt)
     #expect(imported.location?.latitude == 35.0)
     #expect(imported.location?.longitude == 139.7)
+  }
+
+  @Test
+  func activityAndPulse_macroGeneratedWrappersBridgeThroughCKRecord() {
+    let zoneID = VaultID().zoneID()
+    let activityRecordID = CKRecord.ID(recordName: UUID().uuidString, zoneID: zoneID)
+    let subjectEdgeID = UUID()
+    let rootEdgeID = UUID()
+    let createdAt = Date(timeIntervalSince1970: 1_725_000_000)
+    let activity = VaultActivityRecord(recordID: activityRecordID)
+    activity.kindRawValue = "futureActivityKind"
+    activity.subjectEdgeIDRawValue = subjectEdgeID.uuidString
+    activity.rootEdgeIDRawValue = rootEdgeID.uuidString
+    activity.createdAt = createdAt
+
+    #expect(VaultActivityRecord.recordType == VaultRecordType.activity.rawValue)
+    #expect(
+      activity.record[VaultRecordMapper.VaultActivityKey.kindRawValue] as? String
+        == "futureActivityKind"
+    )
+    #expect(activity.record[VaultRecordMapper.VaultActivityKey.createdAt] as? Date == createdAt)
+
+    let pulseRecordID = CKRecord.ID(
+      recordName: VaultNotificationPulse.fixedRecordName,
+      zoneID: zoneID
+    )
+    let pulse = VaultNotificationPulseRecord(recordID: pulseRecordID)
+    pulse.latestActivityRecordName = activityRecordID.recordName
+    pulse.kindRawValue = "futureActivityKind"
+    pulse.updatedAt = createdAt
+
+    #expect(
+      VaultNotificationPulseRecord.recordType == VaultRecordType.notificationPulse.rawValue
+    )
+    #expect(
+      pulse.record[VaultRecordMapper.VaultNotificationPulseKey.latestActivityRecordName] as? String
+        == activityRecordID.recordName
+    )
+    #expect(
+      pulse.record[VaultRecordMapper.VaultNotificationPulseKey.updatedAt] as? Date == createdAt
+    )
   }
 }

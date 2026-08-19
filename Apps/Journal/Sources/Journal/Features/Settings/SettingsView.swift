@@ -120,6 +120,12 @@ struct SettingsView: View {
 
   var body: some View {
     Form {
+      #if TINYCURVE_PROFILE_IMAGE
+        if JournalFeatureFlags.isProfileImageEnabled {
+          ProfileSettingsSection()
+        }
+      #endif
+
       #if DEBUG
         Section {
           NavigationLink {
@@ -151,6 +157,7 @@ struct SettingsView: View {
 
       AppearanceSection(selectionID: $appearancePreferenceID)
       LocationSection(isEnabled: $shouldAttachLocationToNewCards)
+      SystemNotificationSettingsSection()
       CloudStorageEstimateSection(runtime: vaultRuntime)
       WidgetInstructionsSection()
 
@@ -230,6 +237,43 @@ private struct AppearanceSection: View {
   }
 }
 
+#if TINYCURVE_PROFILE_IMAGE
+  /// A Settings entry point for the app-global public profile image.
+  private struct ProfileSettingsSection: View {
+
+    @Environment(JournalUserProfile.self) private var profile
+
+    var body: some View {
+      Section {
+        NavigationLink {
+          ProfileImageSettingsView()
+        } label: {
+          HStack(spacing: 12) {
+            Label("Profile", systemImage: "person.crop.circle")
+
+            Spacer(minLength: 0)
+
+            if profile.loadState == .loading {
+              ProgressView()
+                .controlSize(.small)
+            } else if profile.imageData != nil {
+              ProfileImageAvatar(imageData: profile.imageData, diameter: 28)
+            }
+          }
+        }
+      } header: {
+        Text("Profile")
+      } footer: {
+        Text("Set the photo that can identify you in collaborative Tinycurve features.")
+      }
+      .settingsListRowBackground()
+      .task {
+        await profile.loadIfNeeded()
+      }
+    }
+  }
+#endif
+
 /// A form section that links to the OS-level widget installation guide.
 private struct WidgetInstructionsSection: View {
 
@@ -267,6 +311,109 @@ private struct LocationSection: View {
       )
     }
     .settingsListRowBackground()
+  }
+}
+
+/// Settings surface for the app-scoped system notification authorization.
+///
+/// This section never creates a local notification. It only exposes the live
+/// UserNotifications state and offers the operating system's permission or
+/// settings route when that is the appropriate next action.
+private struct SystemNotificationSettingsSection: View {
+
+  @Environment(SystemNotificationAuthorization.self) private var authorization
+
+  var body: some View {
+    Section {
+      switch authorization.status {
+      case .unresolved:
+        LabeledContent("Status") {
+          HStack(spacing: 8) {
+            ProgressView()
+              .controlSize(.small)
+            Text("Checking")
+              .foregroundStyle(.secondary)
+          }
+        }
+
+      case .notDetermined:
+        Button {
+          Task { await authorization.requestAuthorization() }
+        } label: {
+          Label("Enable Notifications", systemImage: "bell.badge")
+        }
+
+      case .denied:
+        LabeledContent("Status", value: "Off")
+        Button(action: authorization.openSystemNotificationSettings) {
+          Label(settingsActionTitle, systemImage: "gearshape")
+        }
+
+      case .enabled(let delivery):
+        LabeledContent("Status") {
+          Text(delivery.settingsStatusTitle)
+        }
+
+        if delivery.isAlertEnabled == false {
+          LabeledContent("Alerts", value: "Off")
+        }
+
+        if delivery.isSoundEnabled == false {
+          LabeledContent("Sound", value: "Off")
+        }
+
+        Button(action: authorization.openSystemNotificationSettings) {
+          Label(settingsActionTitle, systemImage: "gearshape")
+        }
+      }
+    } header: {
+      Text("Notifications")
+    } footer: {
+      switch authorization.status {
+      case .unresolved:
+        EmptyView()
+      case .notDetermined:
+        Text("Enable alerts and sounds for updates in shared Vaults.")
+      case .denied:
+        Text(settingsGuidance)
+      case .enabled:
+        Text("Tinycurve uses notifications only for updates in shared Vaults.")
+      }
+    }
+    .settingsListRowBackground()
+    .task {
+      await authorization.refresh()
+    }
+  }
+
+  private var settingsActionTitle: LocalizedStringResource {
+    #if os(iOS)
+      "Open Notification Settings"
+    #else
+      "Open System Settings"
+    #endif
+  }
+
+  private var settingsGuidance: LocalizedStringResource {
+    #if os(iOS)
+      "Turn on Allow Notifications in Settings to receive shared Vault updates."
+    #else
+      "Open System Settings, then choose Notifications > Tinycurve to turn on shared Vault notifications."
+    #endif
+  }
+}
+
+private extension SystemNotificationAuthorization.Status.Delivery {
+
+  /// Short status text for the Settings row without exposing authorization
+  /// mechanics as a product concept.
+  var settingsStatusTitle: LocalizedStringResource {
+    switch self {
+    case .immediate:
+      "On"
+    case .quiet:
+      "Quiet"
+    }
   }
 }
 
@@ -780,7 +927,7 @@ extension View {
   ///
   /// SwiftUI's grouped `Form` row background does not inherit the app palette
   /// automatically, so each Settings row/section opts into the theme explicitly.
-  fileprivate func settingsListRowBackground() -> some View {
+  func settingsListRowBackground() -> some View {
     listRowBackground(Rectangle().fill(.appSecondaryContainer))
   }
 }
@@ -942,10 +1089,16 @@ extension View {
 
 // MARK: - Previews
 
-#Preview {
-  let vaultRuntime = JournalVaultRuntime.previewRuntime()
-  NavigationStack {
-    SettingsView()
+#if DEBUG
+  #Preview {
+    let vaultRuntime = JournalVaultRuntime.previewRuntime()
+    NavigationStack {
+      SettingsView()
+    }
+    .environment(vaultRuntime)
+    .environment(SystemNotificationAuthorization())
+    #if TINYCURVE_PROFILE_IMAGE
+      .environment(JournalUserProfile(client: .preview()))
+    #endif
   }
-  .environment(vaultRuntime)
-}
+#endif

@@ -93,6 +93,7 @@ Tinycurve (app, app.muukii.journal)
 ├── CaptureText        — text note capture
 ├── CapturePhoto       — camera capture (AVFoundation)
 ├── MediaProcessing    — save-time media derivatives (Image I/O thumbnails)
+├── ImageCropper       — development-only profile-image pan/zoom and square JPEG export
 ├── CaptureDoodle      — SwiftUI vector ink canvas (depends on CoreHaptics)
 ├── CaptureBauhaus     — 5 x 5 Bauhaus-style grid composer
 ├── CaptureAudio       — ambient sound recording (depends on AVFoundation)
@@ -106,6 +107,17 @@ Those wrappers are CloudKit transport objects only: they stay inside the sync
 boundary and are translated to/from SwiftData-backed domain rows before data
 reaches app UI. The legacy `JournalModel` module has been removed; product
 migration code is not kept in the app while Journal is still pre-release.
+
+When the development-only `TINYCURVE_PROFILE_IMAGE` compilation condition is
+enabled, the current user's optional profile image is app-global identity data,
+not Vault content. `JournalUserProfile` reads and writes the custom
+`profileImage` CKAsset field on CloudKit's public system `Users` record and is
+injected independently from `JournalVault`. `ImageCropper` accepts encoded image
+`Data` and returns a neutral square JPEG, keeping its pan/zoom geometry and any
+future Brightroom implementation private to that module. The condition is set
+only by the normal `Debug` configuration; `DebugProduction`, `Release`,
+TestFlight, and App Store builds do not construct the profile model or expose its
+UI while the feature remains under review.
 
 ### Localization
 
@@ -419,6 +431,8 @@ directory before the CloudKit temporary file disappears.
 Photo, Video, Live Photo, Audio, Suggestion, Doodle, Bauhaus, and Unknown leaf
 views each own a concrete `Style`. The `.composer` preset serves the compact
 authoring preview, while `.cell` is the ordinary Home-tree presentation.
+The router adds no minimum-height layout; each leaf derives its own intrinsic,
+preview-height, or authored aspect-ratio geometry.
 Share/export does not add a content preset: a 360 x 640pt `ShareFrame` wraps the
 ordinary read-only content, centers it inside a 32pt safe inset, and
 rasterizes the complete hierarchy uniformly to the default 1080 x 1920px
@@ -431,6 +445,13 @@ Audio content receives only validated quantized levels from the feature
 projection. It summarizes the full recording with peak-per-time-bucket bars for
 the current placement; missing, malformed, or unsupported waveform payloads use
 the existing decorative fallback waveform without making the audio unavailable.
+Audio content also owns a play/pause control beside its waveform. Every
+placement plays through one shared player, so starting a recording stops
+whichever recording was already playing, and a recording keeps playing while its
+card scrolls out of view. While a recording plays, the app takes the audio
+session as spoken content — audible with the ring switch silenced, ducking other
+audio instead of stopping it — and hands the session back to the muted inline
+video mixing policy when playback ends.
 The CloudKit storage estimate counts the encoded payload as inline record data
 and exposes it under **Audio Waveforms** in the app-wide and per-vault breakdowns.
 Doodle and Bauhaus content decode their saved JSON attachment and render
@@ -622,7 +643,7 @@ and generated mp4 use the same per-frame values.
 
 `AudioCaptureView` over `AmbientAudioRecorder` — records the whole ambient
 soundscape to an AAC (`.m4a`) file in the temp directory via `AVAudioRecorder`,
-exposing live duration and a normalized input level for a scrolling waveform.
+exposing live duration and normalized input levels for a scrolling waveform.
 
 - `AudioRecording`: `Sendable, Equatable, Codable` — `fileURL: URL` (temp dir;
   host must move it to keep it), `duration: TimeInterval`, and optional
@@ -638,6 +659,12 @@ exposing live duration and a normalized input level for a scrolling waveform.
   window resets after stop while the completed waveform stays on the returned
   value. Level mapping is linear-in-dB above a −50dB silence floor so the meter
   tracks perceived loudness.
+- The recording surface keeps 48 bars visible and draws them in one synchronous
+  `Canvas` pass. `TimelineView(.animation)` derives horizontal travel from the
+  newest sample time, moving every measured bar left by one slot over the next
+  50ms instead of repeatedly retargeting per-bar springs. The timeline pauses
+  outside active recording; metering and persisted waveform data remain at the
+  same nominal 20Hz cadence.
 - On iOS, the recording category enables Bluetooth HFP input. The recorder's
   default **Automatic** choice prefers a connected wireless microphone such as
   AirPods, otherwise preserving a valid current route before falling back to
@@ -778,6 +805,23 @@ the gallery's **Lab** section).
   scene metadata into `JournalVaultRuntime.acceptShare(metadata:)`; success
   completes onboarding if needed and activates the first available vault only
   when no vault is already active.
+  `SystemNotificationAuthorization` is a separate app-scoped controller; it
+  does not use the scene-local `JournalNotificationCenter` overlay. The app
+  delegate installs `UNUserNotificationCenterDelegate` before launch completion
+  on iOS and native macOS, registers APNs on launch and active recovery even
+  when alert permission is denied, and never sends the device token to an app
+  server. A CloudKit visible Pulse notification is allowed to use the system
+  UI in foreground (`banner`, `list`, and `sound`) without rebuilding it as a
+  local notification or suppressing it for the current Vault. A contextual
+  primer requests only alert and sound after a confirmed collaboration boundary:
+  owner share save plus dismissal, participant acceptance plus initial import,
+  or the first open of an already collaborative Vault. Permission state remains
+  app-scoped, while only one active scene at a time claims the primer
+  presentation so multiple macOS windows cannot show duplicate alerts. The root
+  also starts `SharedWithYouNoticeDeliveryCoordinator` and drains every local
+  Vault on launch and when a scene becomes active, recovering ready notices
+  authored by extensions or App Intents that never reached this process's
+  in-memory event stream.
   The same root consumes buffered `UISceneAppIntent` capture requests after
   launch-time vault recovery, rejects missing/stale/read-only destinations
   without fallback, and rescans extension-written outboxes whenever the scene
@@ -808,11 +852,12 @@ the gallery's **Lab** section).
   share has been fetched, owned vault rows show an explicit share button whose
   icon carries the catalog sharing state: an unshared vault uses
   `person.fill.badge.plus`, while a catalog-known shared vault uses
-  `person.2.fill`. It opens the direct
-  `UICloudSharingController` flow, which acts as the invite sheet before
-  sharing and can manage an existing share while its live record is being
-  fetched. Once the runtime has fetched the zone-wide share, the row replaces
-  that button with a compact (36pt) system `SWCollaborationView` control. The
+  `person.2.fill`. It opens a platform collaboration activity that registers
+  the runtime's saved zone-wide `CKShare` on an `NSItemProvider`: iOS uses
+  `UIActivityItemsConfiguration` with `LPLinkMetadata`, and native macOS uses
+  an `NSSharingServicePicker` preview item. Once the runtime has fetched the
+  zone-wide share, the row replaces that button with a compact (36pt) system
+  `SWCollaborationView` control. The
   collaboration control registers the saved zone-wide `CKShare` on its
   `NSItemProvider` (an existing-share registration, not a lazy preparation
   handler), so the system treats the vault as already collaborated and its
@@ -825,10 +870,21 @@ the gallery's **Lab** section).
   the zone-wide `CKShare` (shared flag, participant count, this user's
   permission) into the catalog, so a reinstall or the user's second device shows
   correct status without opening the share sheet. The explicit share button
-  and the row context menu both present the direct
-  `UICloudSharingController` invite sheet; participant vault rows do not offer
-  invite issuance but do show the collaboration control for their accepted
-  share. New vault creation keeps icon selection to one compact row
+  and the row context menu both present that collaboration activity; participant
+  vault rows do not offer invite issuance but do show the collaboration control
+  for their accepted share. The app-lifetime `CKSystemSharingUIObserver` routes
+  system save / stop callbacks through the runtime, while view delegates retain
+  immediate UI feedback. The app posts a Shared with You update only for the
+  origin device's eligible local `VaultActivity` after that Activity's CloudKit
+  save acknowledgement: a root maps to `.edit`, a Reply maps to `.comment`.
+  It resolves the catalog's saved share URL through the system collaboration
+  highlight API and records `attempted` before posting, preferring a possible
+  one-notice loss after a crash over a duplicate Messages notice. Remote imports
+  never create or repost that local intent. The source entitlement contract is
+  `com.apple.developer.shared-with-you.collaboration = true` and
+  `com.apple.developer.shared-with-you = true`; App ID configuration, regenerated
+  provisioning profile, and a signed-device effective-entitlement check remain
+  required external release gates. New vault creation keeps icon selection to one compact row
   in the form and drills into one **Icon** browser. Curated SF Symbols and the
   Unicode fully-qualified Emoji catalog share a single lazy-scrolling grid with
   no family tabs or section split. The always-visible search field filters both
@@ -1162,6 +1218,9 @@ the gallery's **Lab** section).
   revision, SwiftData observation re-runs the affected content load. Audio cells
   summarize their recording's persisted measured levels into the available bars;
   recordings created before waveform persistence retain the decorative fallback.
+  Their play control starts and pauses that recording in place and returns to its
+  idle state as soon as the sound stops, whether the recording reached its end,
+  another card took playback over, or the system interrupted it.
   Todo entries
   show an explicit completion control on every visible Home tree node. Completing
   or reopening a Todo changes `completedAt` and `updatedAt` atomically with the
@@ -1206,14 +1265,36 @@ the gallery's **Lab** section).
   rows and files. Deleting a Reply target makes that detached target unavailable;
   the view remains on Home and its draft is neither discarded nor posted as a
   root.
-- **`SettingsView`** — an **Accent Color** picker, an **Appearance** picker, a **Location**
+- **`SettingsView`** — an optional development-only **Profile** destination, an
+  **Accent Color** picker, an **Appearance** picker, a **Location**
   toggle for automatic location attachment, a **Storage** section with **Cloud
   Storage** estimates, a **Widgets** section with an **Add Widgets** guide,
   optional Debug-only **Vault Runtime** and Lab links, and About actions.
+  Its **Notifications** row reflects the app-scoped system authorization state:
+  **Enable** is available while not determined, **On** means alert-enabled,
+  **Quiet** means provisional authorization, and an alert-disabled state directs
+  the user to settings instead of issuing another request. iOS opens Apple's
+  documented notification Settings URL; native macOS opens System Settings and
+  explains `Notifications > Tinycurve` without relying on a private URL scheme.
+  The same controller is explicitly injected into the native macOS Settings
+  scene. Choosing **Not Now** from a contextual primer suppresses automatic
+  re-presentation for the rest of that install.
   Settings is a grouped `Form`, but every cell background opts into the
   neutral `MuColor` secondary container because SwiftUI form rows do not inherit
   the app surface automatically. Selecting an accent writes
   `JournalDefaults.accentColorID` (animated) and triggers selection haptic feedback.
+  When `TINYCURVE_PROFILE_IMAGE` is enabled, **Profile** loads the current user's
+  optional public profile image from the CloudKit system `Users` record. On
+  iPhone, iPad, and native macOS, the user can
+  choose one image with the system Photos picker, drag and zoom inside a circular
+  crop preview, and explicitly **Save** a 512 x 512 square JPEG. Save updates only
+  the `profileImage` field with changed-keys semantics; **Remove Photo** clears
+  that field without deleting the system user record. Selection and crop cancel
+  never upload data. The first editor deliberately does not expose rotation or
+  normalize EXIF orientation metadata. Loading, saving, refresh, general failure,
+  and unavailable-iCloud states remain visible in the Profile screen. The image
+  is Tinycurve-wide public identity that may later identify authors in
+  collaborative features; it is not stored per Vault and is not journal content.
   The Appearance segmented picker writes
   `JournalDefaults.appearancePreferenceID`; **System** follows the device
   setting, while **Light** and **Dark** request a fixed scene color scheme for
@@ -1241,8 +1322,9 @@ the gallery's **Lab** section).
   system-managed Settings window, toolbar actions target that same window, and
   the window's standard close control replaces an in-content dismiss button.
   The independent scene receives the same `JournalVaultRuntime`, theme, and
-  appearance preference as the main window. Its size remains stable while
-  navigating between Settings pages rather than resizing around each detail.
+  appearance preference as the main window, plus `JournalUserProfile` only when
+  its development flag is enabled. Its size remains stable while navigating
+  between Settings pages rather than resizing around each detail.
   Capture demos are intentionally hidden from Settings. In Debug builds, **Lab**
   links to Haptics and Haptic Doodle so those tools can be tried from the current
   app root; Release builds omit the Lab section. An **About** section has
@@ -1309,6 +1391,9 @@ optimization remain enabled while the signed CloudKit entitlement is
 `Production`. The iOS Simulator only accesses CloudKit Development and cannot
 validate this path. `Tinycurve Production` uses the shipping bundle ID and full
 sync engine, so it can create, update, share, and delete real production data.
+`TINYCURVE_PROFILE_IMAGE` is deliberately absent from this configuration despite
+its debug semantics, so the unfinished public-profile UI and CloudKit client are
+not compiled into the app root or Settings scene for Production checks.
 
 Todo completion adds the optional `Card.completedAt` date field. Existing or
 older records that omit it import as incomplete. Before release, verify that the

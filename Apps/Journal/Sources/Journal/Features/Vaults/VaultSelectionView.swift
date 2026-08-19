@@ -6,13 +6,6 @@ import MuColor
 import Observation
 import SwiftUI
 
-#if canImport(UIKit)
-  import UIKit
-#elseif canImport(AppKit)
-  import AppKit
-  import SharedWithYou
-#endif
-
 /// Sheet content for choosing and managing the vault that backs the composer.
 ///
 /// `CreationView` writes through `JournalVaultRuntime.selectedVault`, so this
@@ -26,12 +19,13 @@ struct VaultSelectionView: View {
   private let onActiveVaultChanged: @MainActor @Sendable () -> Void
 
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
+  @Environment(VaultSystemSharingCoordinator.self) private var systemSharingCoordinator
 
   @State private var selectingVaultID: VaultID?
   @State private var preparingShareVaultID: VaultID?
   @State private var renamingVaultID: VaultID?
   @State private var deletingVaultID: VaultID?
-  @State private var cloudSharingPresentation: VaultCloudSharingPresentation?
+  @State private var cloudSharingPresentation: VaultCollaborationSharePresentation?
   @State private var shareError: VaultShareErrorMessage?
   @State private var deletionConfirmation: VaultDeletionConfirmation?
   @State private var deletionError: VaultDeletionErrorMessage?
@@ -39,6 +33,10 @@ struct VaultSelectionView: View {
   @State private var iconEditorPresentation: VaultIconEditorPresentation?
   @State private var iconError: VaultIconErrorMessage?
   @State private var isVaultCreationPresented = false
+  /// The initial owner-invite session visible in this SwiftUI sheet. The
+  /// app-lifetime coordinator owns the durable callback state so an observer
+  /// callback can arrive after this view has changed.
+  @State private var ownerSharePresentationID: UUID?
 
   init(
     onVaultSelected: @escaping @MainActor @Sendable () -> Void,
@@ -121,17 +119,23 @@ struct VaultSelectionView: View {
         onCancel: { iconEditorPresentation = nil }
       )
     }
-    .sheet(item: $cloudSharingPresentation) { presentation in
-      VaultCloudSharingController(
+    .sheet(
+      item: $cloudSharingPresentation,
+      onDismiss: noteOwnerSharePresentationDismissal
+    ) { presentation in
+      VaultCollaborationShareSheet(
         presentation: presentation,
-        onDidSave: {
-          _ = try? await vaultRuntime.prepareShare(for: presentation.vaultID)
-        },
-        onDidStopSharing: {
-          await vaultRuntime.noteSharingStopped(for: presentation.vaultID)
+        onActivityCompletion: { completed in
+          systemSharingCoordinator.noteActivityCompletion(
+            for: presentation.id,
+            completed: completed
+          )
+          cloudSharingPresentation = nil
         },
         onError: { error in
+          systemSharingCoordinator.cancelOwnerSharePresentation(for: presentation.id)
           shareError = VaultShareErrorMessage(message: error.localizedDescription)
+          cloudSharingPresentation = nil
         }
       )
     }
@@ -243,7 +247,12 @@ struct VaultSelectionView: View {
 
       do {
         let preparation = try await vaultRuntime.prepareShare(for: descriptor.vaultID)
-        cloudSharingPresentation = VaultCloudSharingPresentation(
+        let presentationID = systemSharingCoordinator.beginOwnerSharePresentation(
+          for: descriptor.vaultID
+        )
+        ownerSharePresentationID = presentationID
+        cloudSharingPresentation = VaultCollaborationSharePresentation(
+          id: presentationID,
           vaultID: descriptor.vaultID,
           title: descriptor.title,
           preparation: preparation
@@ -260,6 +269,15 @@ struct VaultSelectionView: View {
 
   private func noteCollaborationSharingStopped(_ vaultID: VaultID) async {
     await vaultRuntime.noteSharingStopped(for: vaultID)
+  }
+
+  /// Passes the SwiftUI sheet boundary to the app-lifetime system-sharing
+  /// coordinator. Dismissal alone is insufficient for a primer; the
+  /// coordinator also requires a successful activity and observer save.
+  private func noteOwnerSharePresentationDismissal() {
+    guard let presentationID = ownerSharePresentationID else { return }
+    ownerSharePresentationID = nil
+    systemSharingCoordinator.notePresentationDismissed(for: presentationID)
   }
 
   private func presentShareError(_ error: any Error) {
@@ -693,8 +711,8 @@ private struct VaultSelectionRowPreview: View {
 ///
 /// The icon carries the sharing state: an unshared Vault uses
 /// `person.fill.badge.plus`, while a catalog-known share that is still being
-/// fetched uses `person.2.fill`. Both states open the direct
-/// `UICloudSharingController` flow.
+/// fetched uses `person.2.fill`. Both states open Tinycurve's documented
+/// collaboration activity flow with the saved zone-wide `CKShare`.
 /// Once the live share arrives, the row replaces this button with
 /// `VaultCollaborationControl` rather than displaying two management actions.
 private struct VaultShareButton: View {
@@ -719,13 +737,6 @@ private struct VaultShareButton: View {
     .buttonStyle(.borderless)
     .accessibilityLabel(isShared ? Text("Manage Sharing") : Text("Invite People"))
   }
-}
-
-private struct VaultCloudSharingPresentation: Identifiable {
-  let id = UUID()
-  let vaultID: VaultID
-  let title: String
-  let preparation: VaultSharePreparation
 }
 
 private struct VaultShareErrorMessage: Identifiable {
@@ -793,158 +804,6 @@ private struct VaultDeletionConfirmation: Identifiable {
     }
   }
 }
-
-#if canImport(UIKit)
-  private struct VaultCloudSharingController: UIViewControllerRepresentable {
-
-    let presentation: VaultCloudSharingPresentation
-    let onDidSave: @MainActor @Sendable () async -> Void
-    let onDidStopSharing: @MainActor @Sendable () async -> Void
-    let onError: @MainActor @Sendable (any Error) -> Void
-
-    func makeUIViewController(context: Context) -> UICloudSharingController {
-      let controller = UICloudSharingController(
-        share: presentation.preparation.share,
-        container: presentation.preparation.container
-      )
-      controller.availablePermissions = [.allowPrivate, .allowReadWrite]
-      controller.delegate = context.coordinator
-      return controller
-    }
-
-    func updateUIViewController(_ controller: UICloudSharingController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator {
-      Coordinator(
-        title: presentation.title,
-        onDidSave: onDidSave,
-        onDidStopSharing: onDidStopSharing,
-        onError: onError
-      )
-    }
-
-    final class Coordinator: NSObject, UICloudSharingControllerDelegate {
-
-      private let title: String
-      private let onDidSave: @MainActor @Sendable () async -> Void
-      private let onDidStopSharing: @MainActor @Sendable () async -> Void
-      private let onError: @MainActor @Sendable (any Error) -> Void
-
-      init(
-        title: String,
-        onDidSave: @escaping @MainActor @Sendable () async -> Void,
-        onDidStopSharing: @escaping @MainActor @Sendable () async -> Void,
-        onError: @escaping @MainActor @Sendable (any Error) -> Void
-      ) {
-        self.title = title
-        self.onDidSave = onDidSave
-        self.onDidStopSharing = onDidStopSharing
-        self.onError = onError
-      }
-
-      func itemTitle(for cloudSharingController: UICloudSharingController) -> String? {
-        title
-      }
-
-      func cloudSharingControllerDidSaveShare(_ cloudSharingController: UICloudSharingController) {
-        Task { @MainActor in
-          await onDidSave()
-        }
-      }
-
-      func cloudSharingControllerDidStopSharing(_ cloudSharingController: UICloudSharingController)
-      {
-        Task { @MainActor in
-          await onDidStopSharing()
-        }
-      }
-
-      func cloudSharingController(
-        _ cloudSharingController: UICloudSharingController,
-        failedToSaveShareWithError error: any Error
-      ) {
-        Task { @MainActor in
-          onError(error)
-        }
-      }
-    }
-  }
-#elseif canImport(AppKit)
-  /// Native Mac host for the system CloudKit collaboration popover.
-  private struct VaultCloudSharingController: NSViewRepresentable {
-    let presentation: VaultCloudSharingPresentation
-    let onDidSave: @MainActor @Sendable () async -> Void
-    let onDidStopSharing: @MainActor @Sendable () async -> Void
-    let onError: @MainActor @Sendable (any Error) -> Void
-
-    func makeNSView(context: Context) -> SWCollaborationView {
-      let provider = NSItemProvider()
-      provider.registerCKShare(
-        presentation.preparation.share,
-        container: presentation.preparation.container
-      )
-      let view = SWCollaborationView(itemProvider: provider)
-      view.headerTitle = presentation.title
-      view.cloudSharingServiceDelegate = context.coordinator
-      return view
-    }
-
-    func updateNSView(_ view: SWCollaborationView, context: Context) {
-      view.headerTitle = presentation.title
-      view.cloudSharingServiceDelegate = context.coordinator
-    }
-
-    func makeCoordinator() -> Coordinator {
-      Coordinator(
-        onDidSave: onDidSave,
-        onDidStopSharing: onDidStopSharing,
-        onError: onError
-      )
-    }
-
-    final class Coordinator: NSObject, NSCloudSharingServiceDelegate {
-      private let onDidSave: @MainActor @Sendable () async -> Void
-      private let onDidStopSharing: @MainActor @Sendable () async -> Void
-      private let onError: @MainActor @Sendable (any Error) -> Void
-
-      init(
-        onDidSave: @escaping @MainActor @Sendable () async -> Void,
-        onDidStopSharing: @escaping @MainActor @Sendable () async -> Void,
-        onError: @escaping @MainActor @Sendable (any Error) -> Void
-      ) {
-        self.onDidSave = onDidSave
-        self.onDidStopSharing = onDidStopSharing
-        self.onError = onError
-      }
-
-      func sharingService(_ sharingService: NSSharingService, didSave share: CKShare) {
-        let onDidSave = onDidSave
-        Task { @MainActor [onDidSave] in
-          await onDidSave()
-        }
-      }
-
-      func sharingService(_ sharingService: NSSharingService, didStopSharing share: CKShare) {
-        let onDidStopSharing = onDidStopSharing
-        Task { @MainActor [onDidStopSharing] in
-          await onDidStopSharing()
-        }
-      }
-
-      func sharingService(
-        _ sharingService: NSSharingService,
-        didCompleteForItems items: [Any],
-        error: (any Error)?
-      ) {
-        guard let error else { return }
-        let onError = onError
-        Task { @MainActor [onError, error] in
-          onError(error)
-        }
-      }
-    }
-  }
-#endif
 
 /// Sheet that edits the user-facing title of an existing vault.
 private struct VaultRenameSheet: View {

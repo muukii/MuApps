@@ -24,6 +24,15 @@ public struct VaultCloudStorageEstimate: Equatable, Sendable {
   /// Number of `AttachmentResource` records in this vault.
   public var attachmentResourceCount: Int
 
+  /// Number of immutable `VaultActivity` history records in this vault.
+  public var activityCount: Int
+
+  /// Number of mutable `VaultNotificationPulse` records in this vault.
+  ///
+  /// A valid vault has zero or one. Personal vaults may remain at zero because
+  /// Pulse is created only while another participant exists.
+  public var notificationPulseCount: Int
+
   /// UTF-8 bytes stored in card body fields, including text and link cards.
   public var cardBodyBytes: Int
 
@@ -45,6 +54,8 @@ public struct VaultCloudStorageEstimate: Equatable, Sendable {
     cardEdgeCount: Int = 0,
     attachmentCount: Int = 0,
     attachmentResourceCount: Int = 0,
+    activityCount: Int = 0,
+    notificationPulseCount: Int = 0,
     cardBodyBytes: Int = 0,
     mediaBytes: Int = 0,
     thumbnailBytes: Int = 0,
@@ -56,6 +67,8 @@ public struct VaultCloudStorageEstimate: Equatable, Sendable {
     self.cardEdgeCount = cardEdgeCount
     self.attachmentCount = attachmentCount
     self.attachmentResourceCount = attachmentResourceCount
+    self.activityCount = activityCount
+    self.notificationPulseCount = notificationPulseCount
     self.cardBodyBytes = cardBodyBytes
     self.mediaBytes = mediaBytes
     self.thumbnailBytes = thumbnailBytes
@@ -65,7 +78,13 @@ public struct VaultCloudStorageEstimate: Equatable, Sendable {
 
   /// Record rows Journal expects to mirror into the vault's CloudKit zone.
   public var recordCount: Int {
-    vaultInfoCount + cardCount + cardEdgeCount + attachmentCount + attachmentResourceCount
+    vaultInfoCount
+      + cardCount
+      + cardEdgeCount
+      + attachmentCount
+      + attachmentResourceCount
+      + activityCount
+      + notificationPulseCount
   }
 
   /// Inline bytes stored directly on CloudKit records.
@@ -108,6 +127,8 @@ extension VaultContentStore {
   public func cloudStorageEstimate() throws -> VaultCloudStorageEstimate {
     let context = container.mainContext
     let vaultInfoCount = try context.fetchCount(FetchDescriptor<VaultInfo>())
+    let activityCount = try context.fetchCount(FetchDescriptor<VaultActivity>())
+    let notificationPulseCount = try context.fetchCount(FetchDescriptor<VaultNotificationPulse>())
     let allEdges = try context.fetch(FetchDescriptor<CardEdge>())
     let activeEdges = allEdges.filter { $0.deletedAt == nil }
     let activeCardIDs = Set(activeEdges.map(\.cardID))
@@ -170,6 +191,8 @@ extension VaultContentStore {
       cardEdgeCount: activeEdges.count,
       attachmentCount: attachments.count,
       attachmentResourceCount: resources.count,
+      activityCount: activityCount,
+      notificationPulseCount: notificationPulseCount,
       cardBodyBytes: cardBodyBytes,
       mediaBytes: mediaBreakdowns.reduce(0) { $0 + $1.byteSize },
       thumbnailBytes: thumbnailBytes,

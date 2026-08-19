@@ -274,6 +274,63 @@ struct VaultRecordMapperTests {
   }
 
   @Test
+  func activityFields_roundTripPreservesUnknownKindAndTopology() throws {
+    let subjectEdgeID = UUID()
+    let rootEdgeID = UUID()
+    let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let activity = VaultActivity(
+      kindRawValue: "futureActivityKind",
+      subjectEdgeID: subjectEdgeID,
+      rootEdgeID: rootEdgeID,
+      createdAt: createdAt
+    )
+    let record = makeRecord(type: .activity, recordName: activity.recordName)
+    VaultRecordMapper.applyFields(of: activity, to: record)
+
+    let imported = try #require(VaultRecordMapper.activity(id: activity.id, from: record))
+
+    #expect(imported.id == activity.id)
+    #expect(imported.kindRawValue == "futureActivityKind")
+    #expect(imported.kind == .unknown("futureActivityKind"))
+    #expect(imported.subjectEdgeID == subjectEdgeID)
+    #expect(imported.rootEdgeID == rootEdgeID)
+    #expect(imported.createdAt == createdAt)
+  }
+
+  @Test
+  func activityImport_rejectsMissingRequiredFields() {
+    let record = makeRecord(type: .activity, recordName: UUID().uuidString)
+    record[VaultRecordMapper.VaultActivityKey.kindRawValue] = "contentAdded"
+
+    #expect(VaultRecordMapper.activity(id: UUID(), from: record) == nil)
+  }
+
+  @Test
+  func notificationPulseFields_roundTripPreservesUnknownKind() {
+    let updatedAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let source = VaultNotificationPulse(
+      latestActivityRecordName: UUID().uuidString,
+      kind: .unknown("futureActivityKind"),
+      updatedAt: updatedAt
+    )
+    let record = makeRecord(type: .notificationPulse, recordName: source.recordName)
+    VaultRecordMapper.applyFields(of: source, to: record)
+
+    let imported = VaultNotificationPulse(
+      latestActivityRecordName: "old-activity",
+      kind: .contentAdded,
+      updatedAt: .distantPast
+    )
+    VaultRecordMapper.update(imported, from: record)
+
+    #expect(imported.recordName == VaultNotificationPulse.fixedRecordName)
+    #expect(imported.latestActivityRecordName == source.latestActivityRecordName)
+    #expect(imported.kindRawValue == "futureActivityKind")
+    #expect(imported.kind == .unknown("futureActivityKind"))
+    #expect(imported.updatedAt == updatedAt)
+  }
+
+  @Test
   func vaultInfoFields_roundTrip() {
     let icon = VaultIcon.emoji("\u{1F5FE}")
     let info = VaultInfo(vaultID: UUID(), title: "Trip", icon: icon)

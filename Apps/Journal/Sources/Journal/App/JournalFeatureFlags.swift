@@ -5,6 +5,19 @@
 /// that was created while a feature was enabled.
 enum JournalFeatureFlags {
 
+  /// Shows the in-development public profile-image flow.
+  ///
+  /// The named condition is intentionally enabled only by the normal Debug
+  /// configuration. DebugProduction and Release stay off so unfinished UI
+  /// cannot read or mutate the public Users record in CloudKit Production.
+  static var isProfileImageEnabled: Bool {
+    #if TINYCURVE_PROFILE_IMAGE
+      true
+    #else
+      false
+    #endif
+  }
+
   /// Shows Apple Journaling Suggestions capture entry points.
   ///
   /// Suggestion capture is available in iPhone and iPad builds so in-app menus
@@ -12,9 +25,9 @@ enum JournalFeatureFlags {
   /// exposes it because the framework is only available to iOS-family builds.
   static var isJournalingSuggestionsCaptureEnabled: Bool {
     #if os(iOS)
-    true
+      true
     #else
-    false
+      false
     #endif
   }
 }

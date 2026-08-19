@@ -189,11 +189,11 @@ struct CreationReplyTargetStrip: View {
       .frame(maxWidth: .infinity, alignment: .leading)
 
       Button(action: onCancelReply) {
-        Label(
-          "Cancel Reply",
-          systemImage: "xmark"
-        )
-        .font(.caption.weight(.semibold))
+        Image(systemName: "xmark")
+          .resizable()
+          .aspectRatio(contentMode: .fit)
+          .frame(width: 14, height: 14)
+          .frame(width: 36, height: 36)
       }
       .buttonStyle(.plain)
     }

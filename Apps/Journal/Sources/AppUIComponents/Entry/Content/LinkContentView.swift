@@ -39,10 +39,6 @@ struct LinkContentView: View {
         }()
       )
     }
-
-    var minimumHeight: CGFloat? {
-      previewHeight
-    }
   }
 
   let urlString: String
@@ -55,7 +51,6 @@ struct LinkContentView: View {
       )
       .frame(height: style.previewHeight)
       .padding(16)
-      .background(.appSecondaryContainer)
     } else {
       TextContentView(
         text: urlString,

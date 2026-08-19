@@ -86,7 +86,6 @@ enum AudioRecordingInputSelectionPolicy {
   extension AudioRecordingInput {
 
     /// Copies a live AVFoundation port into the value model used by CaptureAudio.
-    @MainActor
     init(port: AVAudioSessionPortDescription) {
       self.init(
         id: port.uid,

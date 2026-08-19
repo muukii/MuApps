@@ -43,6 +43,21 @@ final class JournalVaultRuntime {
     case failed(String)
   }
 
+  /// Result of refreshing the catalog's collaboration-share facts from
+  /// CloudKit.
+  ///
+  /// A caller that needs participant eligibility for a user-facing decision
+  /// must proceed only on ``refreshed``. The cached catalog remains useful for
+  /// rendering an existing collaboration control after a transient failure,
+  /// but it is not authoritative enough to earn a notification primer.
+  enum CollaborationShareRefreshResult: Equatable {
+    /// Every known shared vault was fetched and the catalog reloaded.
+    case refreshed
+
+    /// At least one fetch or the final catalog reload failed.
+    case failed
+  }
+
   /// Current lifecycle state.
   private(set) var state: State = .starting
 
@@ -82,6 +97,8 @@ final class JournalVaultRuntime {
   @ObservationIgnored private let instanceRegistry: VaultInstanceRegistry
   @ObservationIgnored private let syncEngine: any VaultSyncEngine
   @ObservationIgnored private var didStart = false
+  @ObservationIgnored
+  private var sharedWithYouNoticeStores: [VaultID: VaultSharedWithYouNoticeStore] = [:]
 
   init(
     catalogStore: VaultCatalogStore,
@@ -292,8 +309,10 @@ final class JournalVaultRuntime {
   /// The sync boundary corrects the catalog summary while fetching, so this is
   /// also what heals stale sharing state (participants added or the share
   /// stopped on another device) behind the collaboration UI.
-  func refreshCollaborationShares() async {
+  @discardableResult
+  func refreshCollaborationShares() async -> CollaborationShareRefreshResult {
     let sharedVaultIDs = vaults.filter(\.isShared).map(\.vaultID)
+    var didFetchEverySharedVault = true
 
     for vaultID in sharedVaultIDs {
       do {
@@ -304,7 +323,10 @@ final class JournalVaultRuntime {
         }
       } catch {
         // Keep any previously cached share; a transient fetch failure should
-        // not tear down a working collaboration button.
+        // not tear down a working collaboration button. Callers that need
+        // authoritative collaboration facts receive `.failed` below and must
+        // not inspect this cache to make a product decision.
+        didFetchEverySharedVault = false
         lastMessage = error.localizedDescription
       }
     }
@@ -314,7 +336,24 @@ final class JournalVaultRuntime {
       refreshSelectedVaultDescriptor()
     } catch {
       lastMessage = error.localizedDescription
+      return .failed
     }
+
+    return didFetchEverySharedVault ? .refreshed : .failed
+  }
+
+  /// Reconciles catalog-facing state after the operating system saves a
+  /// CloudKit share from Tinycurve's collaboration UI.
+  ///
+  /// `CKSystemSharingUIObserver` reports the record-zone identity, which can
+  /// be absent for a non-vault record in the same container. Caching the share
+  /// when the zone maps to a vault keeps the inline management control current;
+  /// the following refresh remains authoritative for participant roster facts.
+  func noteSystemSharingShareSaved(_ share: CKShare, for vaultID: VaultID?) async {
+    if let vaultID {
+      collaborationShares[vaultID] = share
+    }
+    _ = await refreshCollaborationShares()
   }
 
   /// Accepts a CloudKit vault invite and refreshes local runtime state.
@@ -486,6 +525,7 @@ final class JournalVaultRuntime {
 
       instanceRegistry.discardInstance(for: descriptor.vaultID)
       registry.discardStore(for: descriptor.vaultID)
+      sharedWithYouNoticeStores.removeValue(forKey: descriptor.vaultID)
       collaborationShares.removeValue(forKey: descriptor.vaultID)
       try catalogStore.layout.removeVaultDirectory(for: descriptor.vaultID)
       try catalogStore.deleteVault(vaultID: descriptor.vaultID)
@@ -533,6 +573,58 @@ final class JournalVaultRuntime {
       )
     }
     return JournalCloudStorageEstimate(generatedAt: Date(), vaults: vaultEstimates)
+  }
+
+  // MARK: - Shared with You notice delivery
+
+  /// Returns the current local catalog identities for app-process delivery
+  /// recovery.
+  ///
+  /// The coordinator calls this at app start and each active-scene transition
+  /// so rows created by an extension process are recovered even though that
+  /// process could not publish into this runtime's in-memory event stream.
+  var sharedWithYouNoticeVaultIDs: [VaultID] {
+    vaults.map(\.vaultID)
+  }
+
+  /// Returns the current catalog descriptor used to locate a saved `CKShare`
+  /// URL for one notice delivery attempt.
+  func sharedWithYouNoticeDescriptor(for vaultID: VaultID) -> VaultDescriptor? {
+    vaults.first(where: { $0.vaultID == vaultID })
+  }
+
+  /// Returns the process-stable delivery state-machine owner for a vault.
+  func sharedWithYouNoticeStore(for vaultID: VaultID) throws -> VaultSharedWithYouNoticeStore {
+    if let existing = sharedWithYouNoticeStores[vaultID] {
+      return existing
+    }
+
+    let store = VaultSharedWithYouNoticeStore(store: try registry.store(for: vaultID))
+    sharedWithYouNoticeStores[vaultID] = store
+    return store
+  }
+
+  /// Returns acknowledgement events emitted only when a local Activity notice
+  /// moves from waiting to ready.
+  func readySharedWithYouNoticeVaults() -> AsyncStream<VaultID> {
+    registry.readySharedWithYouNotices()
+  }
+
+  /// Records a diagnostic timestamp after the system receives a post-notice
+  /// call. Event-level duplicate prevention stays in the vault-local state.
+  func noteSharedWithYouNoticePosted(
+    for vaultID: VaultID,
+    at date: Date
+  ) {
+    do {
+      try catalogStore.noteSharedWithYouNoticePosted(vaultID: vaultID, at: date)
+      try reloadCatalog()
+      refreshSelectedVaultDescriptor()
+    } catch {
+      // A successful system side effect must never be rolled back or retried
+      // because this optional catalog diagnostic failed to persist.
+      lastMessage = error.localizedDescription
+    }
   }
 
   #if DEBUG
@@ -718,9 +810,16 @@ final class VaultInstance {
   }
 
   /// Saves a newly authored thread into this vault.
+  ///
+  /// The instance owns the current catalog descriptor, making this the app-side
+  /// boundary that snapshots participant eligibility before `VaultContentStore`
+  /// starts its local transaction.
   @discardableResult
   func createThread(cards drafts: [VaultContentStore.CardDraft]) throws -> [CardEdge] {
-    let edges = try contentStore.createThread(cards: drafts)
+    let edges = try contentStore.createThread(
+      cards: drafts,
+      deliveryPolicy: descriptor.activityDeliveryPolicy
+    )
     refreshPendingMutationCount()
     return edges
   }
@@ -729,12 +828,17 @@ final class VaultInstance {
   ///
   /// Home's explicit Reply target supplies the parent placement identity at
   /// every tree depth; navigation state never selects this relationship.
+  /// The delivery policy comes from the same descriptor snapshot as root posts.
   @discardableResult
   func appendCard(
     _ draft: VaultContentStore.CardDraft,
     to parentEdgeID: UUID
   ) throws -> CardEdge {
-    let edge = try contentStore.appendCard(draft, to: parentEdgeID)
+    let edge = try contentStore.appendCard(
+      draft,
+      to: parentEdgeID,
+      deliveryPolicy: descriptor.activityDeliveryPolicy
+    )
     refreshPendingMutationCount()
     return edge
   }

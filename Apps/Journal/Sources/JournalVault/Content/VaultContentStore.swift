@@ -7,6 +7,12 @@ import SwiftData
 /// Every write here therefore does two things in one transaction: mutate the
 /// content rows *and* enqueue matching `PendingMutation` outbox rows, so a
 /// local change can never exist without its pending upload (and vice versa).
+/// New authored posts additionally create their durable `VaultActivity`, local
+/// Shared with You intent, and eligible notification Pulse in that transaction.
+/// Every authored mutation enters the vault-scoped write coordinator before it
+/// reads either domain or outbox state. This lets it safely coexist with the
+/// sync actor's import, staging, and acknowledgement transactions even when
+/// the app, Share extension, and App Intent hold separate SwiftData contexts.
 ///
 /// The write API is `@MainActor` and works on `container.mainContext` — the
 /// same context SwiftUI observes. The sync engine reads and writes the store
@@ -32,6 +38,9 @@ public struct VaultContentStore: Sendable {
     AttachmentResource.self,
     SyncMetadata.self,
     PendingMutation.self,
+    VaultActivity.self,
+    VaultNotificationPulse.self,
+    PendingSharedWithYouNotice.self,
   ])
 
   public let vaultID: VaultID
@@ -41,6 +50,16 @@ public struct VaultContentStore: Sendable {
   /// Directory holding attachment bytes, inside the vault directory so media
   /// and rows share the same vault boundary.
   public let mediaDirectoryURL: URL
+
+  /// Cross-process guard for complete vault-store transactions in this vault.
+  ///
+  /// Every process gets its own coordinator value, but all values lock the same
+  /// App Group file. Authored writes use it to atomically create Activity,
+  /// Pulse, and outbox rows; sync import, acknowledgement, retention, and
+  /// Shared with You local delivery use the same identity so independently
+  /// opened app, extension, and App Intent containers cannot overwrite a
+  /// fresh transaction with stale context state.
+  let authoredWriteCoordinator: VaultAuthoredWriteCoordinator
 
   /// Invoked after any save that enqueued outbox rows. `VaultStoreRegistry`
   /// routes this into the sync engine's local-mutation stream.
@@ -78,6 +97,9 @@ public struct VaultContentStore: Sendable {
       vaultID: vaultID,
       container: container,
       mediaDirectoryURL: layout.mediaDirectoryURL(for: vaultID),
+      authoredWriteCoordinator: VaultAuthoredWriteCoordinator(
+        lockFileURL: layout.authoredWriteLockFileURL(for: vaultID)
+      ),
       onLocalMutation: onLocalMutation
     )
   }
@@ -95,6 +117,7 @@ extension VaultContentStore {
   public enum Error: Swift.Error {
     case cardNotFound(UUID)
     case cardEdgeNotFound(UUID)
+    case invalidCardEdgeTopology(UUID)
     case cardIsNotTodo(UUID)
     case missingMediaPayload(Card.Kind)
   }
@@ -279,12 +302,23 @@ extension VaultContentStore {
   /// arrives from CloudKit, and a local placeholder would race the server's.
   @MainActor
   public func seedVaultInfo(title: String, icon: VaultIcon = .default) throws {
-    let context = container.mainContext
-    guard try context.fetchCount(FetchDescriptor<VaultInfo>()) == 0 else { return }
-    context.insert(VaultInfo(vaultID: vaultID.rawValue, title: title, icon: icon))
-    try noteSave(.vaultInfo, recordName: vaultID.uuidString, in: context)
-    try context.save()
-    onLocalMutation()
+    let didSeed = try withFreshAuthoredWrite { context in
+      guard try context.fetchCount(FetchDescriptor<VaultInfo>()) == 0 else { return false }
+
+      do {
+        context.insert(VaultInfo(vaultID: vaultID.rawValue, title: title, icon: icon))
+        try noteSave(.vaultInfo, recordName: vaultID.uuidString, in: context)
+        try context.save()
+        return true
+      } catch {
+        context.rollback()
+        throw error
+      }
+    }
+
+    if didSeed {
+      onLocalMutation()
+    }
   }
 
   /// Updates the vault's shared display title and queues the `VaultInfo` save.
@@ -295,28 +329,38 @@ extension VaultContentStore {
   @MainActor
   @discardableResult
   public func renameVault(title: String) throws -> Bool {
-    let context = container.mainContext
-    let now = Date()
+    let didRename = try withFreshAuthoredWrite { context in
+      let now = Date()
 
-    if let info = try fetchVaultInfo(in: context) {
-      guard info.title != title else { return false }
-      info.title = title
-      info.updatedAt = now
-    } else {
-      context.insert(
-        VaultInfo(
-          vaultID: vaultID.rawValue,
-          title: title,
-          createdAt: now,
-          updatedAt: now
+      if let info = try fetchVaultInfo(in: context) {
+        guard info.title != title else { return false }
+        info.title = title
+        info.updatedAt = now
+      } else {
+        context.insert(
+          VaultInfo(
+            vaultID: vaultID.rawValue,
+            title: title,
+            createdAt: now,
+            updatedAt: now
+          )
         )
-      )
+      }
+
+      do {
+        try noteSave(.vaultInfo, recordName: vaultID.uuidString, in: context)
+        try context.save()
+        return true
+      } catch {
+        context.rollback()
+        throw error
+      }
     }
 
-    try noteSave(.vaultInfo, recordName: vaultID.uuidString, in: context)
-    try context.save()
-    onLocalMutation()
-    return true
+    if didRename {
+      onLocalMutation()
+    }
+    return didRename
   }
 
   /// Updates the vault's shared display icon and queues the `VaultInfo` save.
@@ -326,40 +370,57 @@ extension VaultContentStore {
   @MainActor
   @discardableResult
   public func updateVaultIcon(_ icon: VaultIcon, title: String) throws -> Bool {
-    let context = container.mainContext
-    let now = Date()
+    let didUpdate = try withFreshAuthoredWrite { context in
+      let now = Date()
 
-    if let info = try fetchVaultInfo(in: context) {
-      guard info.icon != icon else { return false }
-      info.iconKindRawValue = icon.kind.rawValue
-      info.iconValue = icon.value
-      info.updatedAt = now
-    } else {
-      context.insert(
-        VaultInfo(
-          vaultID: vaultID.rawValue,
-          title: title,
-          icon: icon,
-          createdAt: now,
-          updatedAt: now
+      if let info = try fetchVaultInfo(in: context) {
+        guard info.icon != icon else { return false }
+        info.iconKindRawValue = icon.kind.rawValue
+        info.iconValue = icon.value
+        info.updatedAt = now
+      } else {
+        context.insert(
+          VaultInfo(
+            vaultID: vaultID.rawValue,
+            title: title,
+            icon: icon,
+            createdAt: now,
+            updatedAt: now
+          )
         )
-      )
+      }
+
+      do {
+        try noteSave(.vaultInfo, recordName: vaultID.uuidString, in: context)
+        try context.save()
+        return true
+      } catch {
+        context.rollback()
+        throw error
+      }
     }
 
-    try noteSave(.vaultInfo, recordName: vaultID.uuidString, in: context)
-    try context.save()
-    onLocalMutation()
-    return true
+    if didUpdate {
+      onLocalMutation()
+    }
+    return didUpdate
   }
 
   /// Saves a post. Every save creates a root `CardEdge`; additional drafts
   /// become child edges of that root in authored order — the design rule that
   /// single cards and threads share one shape.
   ///
+  /// The caller must supply a catalog-derived delivery policy. This store never
+  /// reads `VaultCatalogStore`, so it cannot safely infer whether another
+  /// participant currently exists while holding this content transaction.
+  ///
   /// - Returns: The created edges in authored order; the first is the root.
   @MainActor
   @discardableResult
-  public func createThread(cards drafts: [CardDraft]) throws -> [CardEdge] {
+  public func createThread(
+    cards drafts: [CardDraft],
+    deliveryPolicy: VaultActivityDeliveryPolicy
+  ) throws -> [CardEdge] {
     guard drafts.isEmpty == false else { return [] }
 
     // Validate the full authored post before mutating the context or staging
@@ -368,50 +429,66 @@ extension VaultContentStore {
       try validateAttachmentPayloadIfNeeded(draft)
     }
 
-    let context = container.mainContext
+    let committed = try withFreshAuthoredWrite {
+      context -> (edges: [CardEdge], sourceFileURLsToDeleteAfterCommit: [URL]) in
 
-    // A multi-card post is one save, but its authored order still matters to
-    // date-sorted readers, so cards get tiny timestamp offsets.
-    let threadCreatedAt = Date()
-    var edges: [CardEdge] = []
-    var rootEdge: CardEdge?
-    var destinationFileURLs: [URL] = []
-    var sourceFileURLsToDeleteAfterCommit: [URL] = []
+      // A multi-card post is one save, but its authored order still matters to
+      // date-sorted readers, so cards get tiny timestamp offsets.
+      let threadCreatedAt = Date()
+      var edges: [CardEdge] = []
+      var rootEdge: CardEdge?
+      var destinationFileURLs: [URL] = []
+      var sourceFileURLsToDeleteAfterCommit: [URL] = []
 
-    do {
-      for (offset, draft) in drafts.enumerated() {
-        let createdAt = threadCreatedAt.addingTimeInterval(TimeInterval(offset) / 1000)
-        let stagedCardEdge = try stageCardEdge(
-          from: draft,
-          parent: rootEdge,
-          sortIndex: rootEdge == nil ? 0 : offset - 1,
-          createdAt: createdAt,
+      do {
+        for (offset, draft) in drafts.enumerated() {
+          let createdAt = threadCreatedAt.addingTimeInterval(TimeInterval(offset) / 1000)
+          let stagedCardEdge = try stageCardEdge(
+            from: draft,
+            parent: rootEdge,
+            sortIndex: rootEdge == nil ? 0 : offset - 1,
+            createdAt: createdAt,
+            in: context
+          )
+          if rootEdge == nil {
+            rootEdge = stagedCardEdge.edge
+          }
+          destinationFileURLs.append(contentsOf: stagedCardEdge.destinationFileURLs)
+          sourceFileURLsToDeleteAfterCommit.append(
+            contentsOf: stagedCardEdge.sourceFileURLsToDeleteAfterCommit
+          )
+          edges.append(stagedCardEdge.edge)
+        }
+
+        guard let rootEdge else {
+          preconditionFailure("A non-empty thread must create its root CardEdge.")
+        }
+        try stageAuthoredActivity(
+          subjectEdgeID: rootEdge.id,
+          rootEdgeID: rootEdge.id,
+          createdAt: threadCreatedAt,
+          deliveryPolicy: deliveryPolicy,
           in: context
         )
-        if rootEdge == nil {
-          rootEdge = stagedCardEdge.edge
+        try context.save()
+        return (edges, sourceFileURLsToDeleteAfterCommit)
+      } catch {
+        context.rollback()
+        for fileURL in destinationFileURLs {
+          try? FileManager.default.removeItem(at: fileURL)
         }
-        destinationFileURLs.append(contentsOf: stagedCardEdge.destinationFileURLs)
-        sourceFileURLsToDeleteAfterCommit.append(
-          contentsOf: stagedCardEdge.sourceFileURLsToDeleteAfterCommit
-        )
-        edges.append(stagedCardEdge.edge)
+        throw error
       }
-
-      try context.save()
-    } catch {
-      context.rollback()
-      for fileURL in destinationFileURLs {
-        try? FileManager.default.removeItem(at: fileURL)
-      }
-      throw error
     }
 
-    for fileURL in Set(sourceFileURLsToDeleteAfterCommit) {
+    // Source files are no longer needed only after the SQLite transaction has
+    // committed. Keep the OS lock narrowly scoped to shared vault state; a
+    // slow source-file cleanup must not delay another process's authored save.
+    for fileURL in Set(committed.sourceFileURLsToDeleteAfterCommit) {
       try? FileManager.default.removeItem(at: fileURL)
     }
     onLocalMutation()
-    return edges
+    return committed.edges
   }
 
   /// Appends one authored card directly below an existing placement.
@@ -419,56 +496,73 @@ extension VaultContentStore {
   /// The parent lookup, sibling order, content rows, attachment files, and
   /// CloudKit outbox rows commit as one transaction. This keeps every detail
   /// level fractal without ever exposing a temporary root placement to sync.
+  /// The delivery policy is intentionally explicit for the same cross-store
+  /// ownership reason as ``createThread(cards:deliveryPolicy:)``.
   @MainActor
   @discardableResult
-  public func appendCard(_ draft: CardDraft, to parentEdgeID: UUID) throws -> CardEdge {
+  public func appendCard(
+    _ draft: CardDraft,
+    to parentEdgeID: UUID,
+    deliveryPolicy: VaultActivityDeliveryPolicy
+  ) throws -> CardEdge {
     try validateAttachmentPayloadIfNeeded(draft)
 
-    let context = container.mainContext
-    let allEdges = try context.fetch(FetchDescriptor<CardEdge>())
-    guard
-      let parentEdge = allEdges.first(where: { $0.id == parentEdgeID }),
-      parentEdge.deletedAt == nil
-    else {
-      throw Error.cardEdgeNotFound(parentEdgeID)
+    let committed = try withFreshAuthoredWrite {
+      context -> (edge: CardEdge, sourceFileURLsToDeleteAfterCommit: [URL]) in
+      let allEdges = try context.fetch(FetchDescriptor<CardEdge>())
+      guard
+        let parentEdge = allEdges.first(where: { $0.id == parentEdgeID }),
+        parentEdge.deletedAt == nil
+      else {
+        throw Error.cardEdgeNotFound(parentEdgeID)
+      }
+
+      // Parent resolution and the next sibling index read shared local state,
+      // so they must use the same cross-process critical section as the save.
+      let nextSortIndex =
+        allEdges
+        .lazy
+        .filter { $0.parentEdgeID == parentEdgeID }
+        .map(\.sortIndex)
+        .max()
+        .map { $0 + 1 }
+        ?? 0
+      let rootEdgeID = try resolvedRootEdgeID(startingAt: parentEdge, allEdges: allEdges)
+      let createdAt = Date()
+      var destinationFileURLs: [URL] = []
+
+      do {
+        let stagedCardEdge = try stageCardEdge(
+          from: draft,
+          parent: parentEdge,
+          sortIndex: nextSortIndex,
+          createdAt: createdAt,
+          in: context
+        )
+        destinationFileURLs = stagedCardEdge.destinationFileURLs
+        try stageAuthoredActivity(
+          subjectEdgeID: stagedCardEdge.edge.id,
+          rootEdgeID: rootEdgeID,
+          createdAt: createdAt,
+          deliveryPolicy: deliveryPolicy,
+          in: context
+        )
+        try context.save()
+        return (stagedCardEdge.edge, stagedCardEdge.sourceFileURLsToDeleteAfterCommit)
+      } catch {
+        context.rollback()
+        for fileURL in destinationFileURLs {
+          try? FileManager.default.removeItem(at: fileURL)
+        }
+        throw error
+      }
     }
 
-    let nextSortIndex =
-      allEdges
-      .lazy
-      .filter { $0.parentEdgeID == parentEdgeID }
-      .map(\.sortIndex)
-      .max()
-      .map { $0 + 1 }
-      ?? 0
-    var destinationFileURLs: [URL] = []
-    var sourceFileURLsToDeleteAfterCommit: [URL] = []
-
-    do {
-      let stagedCardEdge = try stageCardEdge(
-        from: draft,
-        parent: parentEdge,
-        sortIndex: nextSortIndex,
-        createdAt: Date(),
-        in: context
-      )
-      destinationFileURLs = stagedCardEdge.destinationFileURLs
-      sourceFileURLsToDeleteAfterCommit =
-        stagedCardEdge.sourceFileURLsToDeleteAfterCommit
-      try context.save()
-
-      for fileURL in Set(sourceFileURLsToDeleteAfterCommit) {
-        try? FileManager.default.removeItem(at: fileURL)
-      }
-      onLocalMutation()
-      return stagedCardEdge.edge
-    } catch {
-      context.rollback()
-      for fileURL in destinationFileURLs {
-        try? FileManager.default.removeItem(at: fileURL)
-      }
-      throw error
+    for fileURL in Set(committed.sourceFileURLsToDeleteAfterCommit) {
+      try? FileManager.default.removeItem(at: fileURL)
     }
+    onLocalMutation()
+    return committed.edge
   }
 
   /// Returns the newest top-level card, ignoring every continuation depth.
@@ -512,48 +606,51 @@ extension VaultContentStore {
   public func updateCard(cardID: UUID, with draft: CardDraft) throws {
     try validateAttachmentPayloadIfNeeded(draft)
 
-    let context = container.mainContext
-    guard let card = try fetchCard(id: cardID, in: context) else {
-      throw Error.cardNotFound(cardID)
-    }
+    let committed = try withFreshAuthoredWrite {
+      context -> (deletedMediaFileURLs: [URL], sourceFileURLsToDeleteAfterCommit: [URL]) in
+      guard let card = try fetchCard(id: cardID, in: context) else {
+        throw Error.cardNotFound(cardID)
+      }
 
-    var deletedMediaFileURLs: [URL] = []
-    var destinationFileURLs: [URL] = []
-    var sourceFileURLsToDeleteAfterCommit: [URL] = []
+      var deletedMediaFileURLs: [URL] = []
+      var destinationFileURLs: [URL] = []
+      var sourceFileURLsToDeleteAfterCommit: [URL] = []
 
-    do {
-      deletedMediaFileURLs = try deleteAttachments(for: card.id, in: context)
+      do {
+        deletedMediaFileURLs = try deleteAttachments(for: card.id, in: context)
 
-      card.kind = draft.kind
-      card.body = Self.body(for: draft)
-      card.completedAt = Self.completedAt(for: draft)
-      card.location = draft.location
-      card.updatedAt = Date()
-      try noteSave(.card, recordName: card.id.uuidString, in: context)
+        card.kind = draft.kind
+        card.body = Self.body(for: draft)
+        card.completedAt = Self.completedAt(for: draft)
+        card.location = draft.location
+        card.updatedAt = Date()
+        try noteSave(.card, recordName: card.id.uuidString, in: context)
 
-      if let stagedAttachment = try stageAttachment(from: draft, card: card, in: context) {
-        destinationFileURLs = stagedAttachment.destinationFileURLs
-        sourceFileURLsToDeleteAfterCommit = stagedAttachment.sourceFileURLsToDeleteAfterCommit
-        try noteSave(
-          .attachment, recordName: stagedAttachment.attachment.id.uuidString, in: context)
-        for resource in stagedAttachment.resources {
-          try noteSave(.attachmentResource, recordName: resource.id.uuidString, in: context)
+        if let stagedAttachment = try stageAttachment(from: draft, card: card, in: context) {
+          destinationFileURLs = stagedAttachment.destinationFileURLs
+          sourceFileURLsToDeleteAfterCommit = stagedAttachment.sourceFileURLsToDeleteAfterCommit
+          try noteSave(
+            .attachment, recordName: stagedAttachment.attachment.id.uuidString, in: context)
+          for resource in stagedAttachment.resources {
+            try noteSave(.attachmentResource, recordName: resource.id.uuidString, in: context)
+          }
         }
-      }
 
-      try context.save()
-    } catch {
-      context.rollback()
-      for fileURL in destinationFileURLs {
-        try? FileManager.default.removeItem(at: fileURL)
+        try context.save()
+        return (deletedMediaFileURLs, sourceFileURLsToDeleteAfterCommit)
+      } catch {
+        context.rollback()
+        for fileURL in destinationFileURLs {
+          try? FileManager.default.removeItem(at: fileURL)
+        }
+        throw error
       }
-      throw error
     }
 
-    for url in deletedMediaFileURLs {
+    for url in committed.deletedMediaFileURLs {
       try? FileManager.default.removeItem(at: url)
     }
-    for fileURL in Set(sourceFileURLsToDeleteAfterCommit) {
+    for fileURL in Set(committed.sourceFileURLsToDeleteAfterCommit) {
       try? FileManager.default.removeItem(at: fileURL)
     }
     onLocalMutation()
@@ -562,14 +659,22 @@ extension VaultContentStore {
   /// Replaces a text card's body.
   @MainActor
   public func updateCardBody(cardID: UUID, body: String) throws {
-    let context = container.mainContext
-    guard let card = try fetchCard(id: cardID, in: context) else {
-      throw Error.cardNotFound(cardID)
+    try withFreshAuthoredWrite { context in
+      guard let card = try fetchCard(id: cardID, in: context) else {
+        throw Error.cardNotFound(cardID)
+      }
+
+      do {
+        card.body = body
+        card.updatedAt = Date()
+        try noteSave(.card, recordName: card.id.uuidString, in: context)
+        try context.save()
+      } catch {
+        context.rollback()
+        throw error
+      }
     }
-    card.body = body
-    card.updatedAt = Date()
-    try noteSave(.card, recordName: card.id.uuidString, in: context)
-    try context.save()
+
     onLocalMutation()
   }
 
@@ -583,30 +688,34 @@ extension VaultContentStore {
   @MainActor
   @discardableResult
   public func setTodoCompletion(cardID: UUID, isCompleted: Bool) throws -> Bool {
-    let context = container.mainContext
-    guard let card = try fetchCard(id: cardID, in: context) else {
-      throw Error.cardNotFound(cardID)
-    }
-    guard card.kind == .todo else {
-      throw Error.cardIsNotTodo(cardID)
-    }
-    guard card.isCompleted != isCompleted else {
-      return false
+    let didChange = try withFreshAuthoredWrite { context in
+      guard let card = try fetchCard(id: cardID, in: context) else {
+        throw Error.cardNotFound(cardID)
+      }
+      guard card.kind == .todo else {
+        throw Error.cardIsNotTodo(cardID)
+      }
+      guard card.isCompleted != isCompleted else {
+        return false
+      }
+
+      do {
+        let now = Date()
+        card.completedAt = isCompleted ? now : nil
+        card.updatedAt = now
+        try noteSave(.card, recordName: card.id.uuidString, in: context)
+        try context.save()
+        return true
+      } catch {
+        context.rollback()
+        throw error
+      }
     }
 
-    do {
-      let now = Date()
-      card.completedAt = isCompleted ? now : nil
-      card.updatedAt = now
-      try noteSave(.card, recordName: card.id.uuidString, in: context)
-      try context.save()
-    } catch {
-      context.rollback()
-      throw error
+    if didChange {
+      onLocalMutation()
     }
-
-    onLocalMutation()
-    return true
+    return didChange
   }
 
   /// Logically deletes an edge and its entire subtree.
@@ -617,61 +726,86 @@ extension VaultContentStore {
   /// deletion begins immediately without detaching live SwiftData models.
   @MainActor
   public func deleteCardEdge(edgeID: UUID) throws {
-    let context = container.mainContext
-    let allEdges = try context.fetch(FetchDescriptor<CardEdge>())
-    guard
-      let root = allEdges.first(where: { $0.id == edgeID }),
-      root.deletedAt == nil
-    else {
-      return
+    let didDelete = try withFreshAuthoredWrite { context in
+      let allEdges = try context.fetch(FetchDescriptor<CardEdge>())
+      guard
+        let root = allEdges.first(where: { $0.id == edgeID }),
+        root.deletedAt == nil
+      else {
+        return false
+      }
+
+      var childrenByParent: [UUID: [CardEdge]] = [:]
+      for edge in allEdges {
+        if let parent = edge.parentEdgeID {
+          childrenByParent[parent, default: []].append(edge)
+        }
+      }
+
+      var subtree: [CardEdge] = []
+      var stack = [root]
+      while let edge = stack.popLast() {
+        subtree.append(edge)
+        stack.append(contentsOf: childrenByParent[edge.id] ?? [])
+      }
+
+      let cardIDs = Set(subtree.map(\.cardID))
+      let cards = try context.fetch(FetchDescriptor<Card>()).filter { cardIDs.contains($0.id) }
+      let attachments = try context.fetch(FetchDescriptor<Attachment>()).filter {
+        cardIDs.contains($0.cardID)
+      }
+      let attachmentIDs = Set(attachments.map(\.id))
+      let resources = try context.fetch(FetchDescriptor<AttachmentResource>())
+        .filter { attachmentIDs.contains($0.attachmentID) }
+
+      let deletedAt = Date()
+      do {
+        // Entry-level records lead the outbox so receiving devices can establish
+        // logical deletion before processing attachment/resource tombstones.
+        for edge in subtree {
+          edge.deletedAt = deletedAt
+          try noteDelete(.cardEdge, recordName: edge.id.uuidString, in: context)
+        }
+        for card in cards {
+          try noteDelete(.card, recordName: card.id.uuidString, in: context)
+        }
+        for attachment in attachments {
+          try noteDelete(.attachment, recordName: attachment.id.uuidString, in: context)
+        }
+        for resource in resources {
+          try noteDelete(.attachmentResource, recordName: resource.id.uuidString, in: context)
+        }
+        try context.save()
+        return true
+      } catch {
+        context.rollback()
+        throw error
+      }
     }
 
-    var childrenByParent: [UUID: [CardEdge]] = [:]
-    for edge in allEdges {
-      if let parent = edge.parentEdgeID {
-        childrenByParent[parent, default: []].append(edge)
-      }
+    if didDelete {
+      onLocalMutation()
     }
+  }
 
-    var subtree: [CardEdge] = []
-    var stack = [root]
-    while let edge = stack.popLast() {
-      subtree.append(edge)
-      stack.append(contentsOf: childrenByParent[edge.id] ?? [])
-    }
-
-    let cardIDs = Set(subtree.map(\.cardID))
-    let cards = try context.fetch(FetchDescriptor<Card>()).filter { cardIDs.contains($0.id) }
-    let attachments = try context.fetch(FetchDescriptor<Attachment>()).filter {
-      cardIDs.contains($0.cardID)
-    }
-    let attachmentIDs = Set(attachments.map(\.id))
-    let resources = try context.fetch(FetchDescriptor<AttachmentResource>())
-      .filter { attachmentIDs.contains($0.attachmentID) }
-
-    let deletedAt = Date()
-    do {
-      // Entry-level records lead the outbox so receiving devices can establish
-      // logical deletion before processing attachment/resource tombstones.
-      for edge in subtree {
-        edge.deletedAt = deletedAt
-        try noteDelete(.cardEdge, recordName: edge.id.uuidString, in: context)
-      }
-      for card in cards {
-        try noteDelete(.card, recordName: card.id.uuidString, in: context)
-      }
-      for attachment in attachments {
-        try noteDelete(.attachment, recordName: attachment.id.uuidString, in: context)
-      }
-      for resource in resources {
-        try noteDelete(.attachmentResource, recordName: resource.id.uuidString, in: context)
-      }
-      try context.save()
-    } catch {
+  /// Runs one local authored transaction against fresh durable vault state.
+  ///
+  /// `ModelContext` caches rows independently in the app, Share extension,
+  /// and App Intent. Acquiring the same lock as ``VaultSyncDatabase`` and then
+  /// rolling this context back prevents a stale UI context from overwriting a
+  /// sync acknowledgement's outbox transition (or vice versa). The closure is
+  /// synchronous by design: CloudKit, callbacks, and slow post-commit file
+  /// deletion must stay outside this critical section.
+  @MainActor
+  private func withFreshAuthoredWrite<Result>(
+    _ operation: (ModelContext) throws -> Result
+  ) throws -> Result {
+    try authoredWriteCoordinator.withExclusiveAccess {
+      let context = container.mainContext
       context.rollback()
-      throw error
+      context.processPendingChanges()
+      return try operation(context)
     }
-    onLocalMutation()
   }
 
   private struct StagedAttachment {
@@ -689,6 +823,72 @@ extension VaultContentStore {
     var edge: CardEdge
     var destinationFileURLs: [URL]
     var sourceFileURLsToDeleteAfterCommit: [URL]
+  }
+
+  /// Stages the non-content consequences of one locally authored logical
+  /// action. It deliberately has no import or retry caller: imported records,
+  /// edits, Todo changes, deletes, and sync retries are not new Activity.
+  @MainActor
+  private func stageAuthoredActivity(
+    subjectEdgeID: UUID,
+    rootEdgeID: UUID,
+    createdAt: Date,
+    deliveryPolicy: VaultActivityDeliveryPolicy,
+    in context: ModelContext
+  ) throws {
+    let activity = VaultActivity(
+      subjectEdgeID: subjectEdgeID,
+      rootEdgeID: rootEdgeID,
+      createdAt: createdAt
+    )
+    context.insert(activity)
+    try noteSave(.activity, recordName: activity.recordName, in: context)
+
+    switch deliveryPolicy {
+    case .historyOnly:
+      break
+    case .notifyParticipants:
+      // This row is intentionally local-only. Its presence proves the current
+      // device authored a participant-visible action, so a later Shared with
+      // You worker will not repost notices merely because it imported another
+      // participant's Activity. History-only Activity intentionally has no
+      // intent and can never become a retroactive notice after later sharing.
+      context.insert(
+        PendingSharedWithYouNotice(
+          activityID: activity.id,
+          createdAt: createdAt
+        )
+      )
+      try stageNotificationPulse(for: activity, updatedAt: createdAt, in: context)
+    }
+  }
+
+  /// Updates the vault's one mutable participant-notification trigger and
+  /// re-arms its durable outbox row. `noteSave` clears `stagedAt`, preserving
+  /// the existing `enqueuedAt` / `stagedAt` guarantee when a second post lands
+  /// while the prior Pulse upload is in flight.
+  @MainActor
+  private func stageNotificationPulse(
+    for activity: VaultActivity,
+    updatedAt: Date,
+    in context: ModelContext
+  ) throws {
+    let pulse: VaultNotificationPulse
+    if let existing = try fetchNotificationPulse(in: context) {
+      pulse = existing
+      pulse.latestActivityRecordName = activity.recordName
+      pulse.kindRawValue = activity.kindRawValue
+      pulse.updatedAt = updatedAt
+    } else {
+      pulse = VaultNotificationPulse(
+        latestActivityRecordName: activity.recordName,
+        kind: activity.kind,
+        updatedAt: updatedAt
+      )
+      context.insert(pulse)
+    }
+
+    try noteSave(.notificationPulse, recordName: pulse.recordName, in: context)
   }
 
   /// Inserts one card placement and stages its optional attachment without
@@ -1039,6 +1239,49 @@ extension VaultContentStore {
     descriptor.fetchLimit = 1
     return try context.fetch(descriptor).first
   }
+
+  /// Fetches the fixed-name singleton Pulse. The unique record-name key keeps
+  /// this defensive lookup stable across restarts and future background writes.
+  @MainActor
+  private func fetchNotificationPulse(
+    in context: ModelContext
+  ) throws -> VaultNotificationPulse? {
+    let descriptor = FetchDescriptor<VaultNotificationPulse>()
+    return try context.fetch(descriptor).first {
+      $0.recordName == VaultNotificationPulse.fixedRecordName
+    }
+  }
+
+  /// Walks parent IDs without trusting repaired SwiftData relationships.
+  ///
+  /// A remote import can temporarily leave a parent missing, or corrupt data
+  /// can contain a cycle. Both states are rejected before a new Reply is
+  /// persisted: inventing a root would make the new Activity point at a
+  /// topology that the app cannot safely navigate or synchronize.
+  @MainActor
+  private func resolvedRootEdgeID(
+    startingAt edge: CardEdge,
+    allEdges: [CardEdge]
+  ) throws -> UUID {
+    let edgesByID = Dictionary(uniqueKeysWithValues: allEdges.map { ($0.id, $0) })
+    var current = edge
+    var resolvedRootID = edge.id
+    var visited = Set<UUID>()
+
+    while true {
+      guard visited.insert(current.id).inserted else {
+        throw Error.invalidCardEdgeTopology(current.id)
+      }
+      resolvedRootID = current.id
+      guard let parentID = current.parentEdgeID else {
+        return resolvedRootID
+      }
+      guard let parent = edgesByID[parentID] else {
+        throw Error.invalidCardEdgeTopology(current.id)
+      }
+      current = parent
+    }
+  }
 }
 
 // MARK: - Outbox
@@ -1054,6 +1297,10 @@ extension VaultContentStore {
     in context: ModelContext
   ) throws {
     if let existing = try fetchPendingMutation(recordName: recordName, in: context) {
+      // The record name is the outbox uniqueness key. Keep its type current as
+      // well so an old/corrupt row can never route a valid model to the wrong
+      // CloudKit record type on its next retry.
+      existing.recordType = recordType.rawValue
       existing.kind = .save
       existing.enqueuedAt = Date()
       existing.stagedAt = nil
@@ -1084,6 +1331,7 @@ extension VaultContentStore {
     }
 
     if let pending {
+      pending.recordType = recordType.rawValue
       pending.kind = .delete
       pending.enqueuedAt = Date()
       pending.stagedAt = nil

@@ -63,7 +63,32 @@ final class CloudKitShareAcceptanceRouter {
 
 /// Platform app delegate that forwards CloudKit invitation metadata.
 #if canImport(UIKit)
+@MainActor
 final class TinycurveAppDelegate: UIResponder, UIApplicationDelegate {
+
+  func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+  ) -> Bool {
+    // UserNotifications asks its delegate about foreground presentation. This
+    // must be installed before launch finishes or an early visible CloudKit
+    // Pulse can be suppressed while the process is already active.
+    SystemNotificationAuthorization.shared.installDelegate()
+    // APNs registration is also required for CloudKit's silent sync transport,
+    // so it is deliberately independent of the user's alert authorization.
+    SystemNotificationAuthorization.shared.registerForRemoteNotifications()
+    return true
+  }
+
+  /// Leaves retry ownership with the app-scoped authorization controller. A
+  /// later active scene refreshes the system settings and re-registers with
+  /// APNs without changing the user's visible-alert choice.
+  func application(
+    _ application: UIApplication,
+    didFailToRegisterForRemoteNotificationsWithError error: any Error
+  ) {
+    SystemNotificationAuthorization.shared.noteRemoteRegistrationFailure(error)
+  }
 
   func application(
     _ application: UIApplication,
@@ -110,7 +135,28 @@ final class TinycurveSceneDelegate: UIResponder, UIWindowSceneDelegate, AppInten
   }
 }
 #elseif canImport(AppKit)
+@MainActor
 final class TinycurveAppDelegate: NSObject, NSApplicationDelegate {
+
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    // Native macOS uses the same UserNotifications delegate as iOS. Install it
+    // before launch completes so foreground visible Pulse pushes retain system
+    // banner, list, and sound presentation.
+    SystemNotificationAuthorization.shared.installDelegate()
+    // Keep silent CloudKit synchronization registered even if the user turns
+    // off system alert presentation.
+    SystemNotificationAuthorization.shared.registerForRemoteNotifications()
+  }
+
+  /// The next active-state settings refresh retries the APNs registration. No
+  /// device token is persisted or sent to a Tinycurve-operated server.
+  func application(
+    _ application: NSApplication,
+    didFailToRegisterForRemoteNotificationsWithError error: any Error
+  ) {
+    SystemNotificationAuthorization.shared.noteRemoteRegistrationFailure(error)
+  }
+
   func application(
     _ application: NSApplication,
     userDidAcceptCloudKitShareWith metadata: CKShare.Metadata

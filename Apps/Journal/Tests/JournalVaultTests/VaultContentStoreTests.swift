@@ -94,14 +94,160 @@ struct VaultContentStoreTests {
     #expect(cards.first?.body == "hello")
     #expect(cards.first?.id == root.cardID)
 
-    // The write and its pending uploads are one transaction: card + edge.
+    // The write and its pending uploads are one transaction: card + edge + Activity.
     let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
-    #expect(outbox.count == 2)
+    #expect(outbox.count == 3)
     #expect(outbox.allSatisfy { $0.kind == .save })
     #expect(
       Set(outbox.map(\.recordType))
-        == [VaultRecordType.card.rawValue, VaultRecordType.cardEdge.rawValue]
+        == [
+          VaultRecordType.card.rawValue,
+          VaultRecordType.cardEdge.rawValue,
+          VaultActivity.recordType,
+        ]
     )
+
+    let activity = try #require(try context.fetch(FetchDescriptor<VaultActivity>()).first)
+    #expect(activity.kind == .contentAdded)
+    #expect(activity.recordName == activity.id.uuidString)
+    #expect(activity.subjectEdgeID == root.id)
+    #expect(activity.rootEdgeID == root.id)
+
+    // The default test helper models a personal vault. History is retained,
+    // while Shared with You intent and the participant-only Pulse stay absent.
+    #expect(try context.fetchCount(FetchDescriptor<PendingSharedWithYouNotice>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<VaultNotificationPulse>()) == 0)
+  }
+
+  @Test
+  func createThread_notifyParticipants_stagesActivityNoticeAndPulseTogether() throws {
+    let store = try makeStore()
+
+    let root = try #require(
+      try store.createThread(
+        cards: [.init(kind: .text, text: "hello participants")],
+        deliveryPolicy: .notifyParticipants
+      ).first
+    )
+
+    let context = store.container.mainContext
+    let activity = try #require(try context.fetch(FetchDescriptor<VaultActivity>()).first)
+    let notice = try #require(
+      try context.fetch(FetchDescriptor<PendingSharedWithYouNotice>()).first
+    )
+    let pulse = try #require(
+      try context.fetch(FetchDescriptor<VaultNotificationPulse>()).first
+    )
+    let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
+
+    #expect(activity.subjectEdgeID == root.id)
+    #expect(notice.activityID == activity.id)
+    #expect(notice.state == .waitingForActivityUpload)
+    #expect(pulse.recordName == VaultNotificationPulse.fixedRecordName)
+    #expect(pulse.latestActivityRecordName == activity.recordName)
+    #expect(pulse.kindRawValue == activity.kindRawValue)
+    #expect(
+      Set(outbox.map(\.recordType))
+        == [
+          VaultRecordType.card.rawValue,
+          VaultRecordType.cardEdge.rawValue,
+          VaultRecordType.activity.rawValue,
+          VaultRecordType.notificationPulse.rawValue,
+        ]
+    )
+  }
+
+  @Test
+  func createThread_notifyParticipants_rearmsSingletonPulse() throws {
+    let store = try makeStore()
+    _ = try store.createThread(
+      cards: [.init(kind: .text, text: "first")],
+      deliveryPolicy: .notifyParticipants
+    )
+
+    let context = store.container.mainContext
+    let pendingPulse = try #require(
+      try context.fetch(FetchDescriptor<PendingMutation>()).first {
+        $0.recordName == VaultNotificationPulse.fixedRecordName
+      }
+    )
+    // Model an already handed-off upload. A second authored action must clear
+    // this marker rather than leave the singleton Pulse stranded in flight.
+    pendingPulse.stagedAt = Date()
+    try context.save()
+
+    _ = try store.createThread(
+      cards: [.init(kind: .text, text: "second")],
+      deliveryPolicy: .notifyParticipants
+    )
+
+    let activities = try context.fetch(FetchDescriptor<VaultActivity>())
+      .sorted { $0.createdAt < $1.createdAt }
+    let pulse = try #require(
+      try context.fetch(FetchDescriptor<VaultNotificationPulse>()).first
+    )
+    let rearmedPendingPulse = try #require(
+      try context.fetch(FetchDescriptor<PendingMutation>()).first {
+        $0.recordName == VaultNotificationPulse.fixedRecordName
+      }
+    )
+
+    #expect(activities.count == 2)
+    #expect(try context.fetchCount(FetchDescriptor<VaultNotificationPulse>()) == 1)
+    #expect(pulse.latestActivityRecordName == activities.last?.recordName)
+    #expect(rearmedPendingPulse.recordType == VaultRecordType.notificationPulse.rawValue)
+    #expect(rearmedPendingPulse.kind == .save)
+    #expect(rearmedPendingPulse.stagedAt == nil)
+  }
+
+  @Test
+  func createThread_notifyParticipants_twoOpenContainersReuseThePulse() throws {
+    let vaultID = VaultID()
+    let layout = makeTemporaryLayout()
+    let firstStore = try VaultContentStore.open(vaultID: vaultID, layout: layout)
+    let secondStore = try VaultContentStore.open(
+      vaultID: vaultID,
+      layout: layout,
+      recoveryPolicy: .failWithoutReset
+    )
+
+    // Keep a second ModelContainer alive before the first author writes. This
+    // models app and extension processes that opened the same vault earlier.
+    #expect(
+      try secondStore.container.mainContext.fetchCount(
+        FetchDescriptor<VaultNotificationPulse>()
+      ) == 0
+    )
+    _ = try firstStore.createThread(
+      cards: [.init(kind: .text, text: "from app")],
+      deliveryPolicy: .notifyParticipants
+    )
+    _ = try secondStore.createThread(
+      cards: [.init(kind: .text, text: "from extension")],
+      deliveryPolicy: .notifyParticipants
+    )
+
+    let verificationStore = try VaultContentStore.open(
+      vaultID: vaultID,
+      layout: layout,
+      recoveryPolicy: .failWithoutReset
+    )
+    let verificationContext = verificationStore.container.mainContext
+    #expect(try verificationContext.fetchCount(FetchDescriptor<VaultActivity>()) == 2)
+    #expect(try verificationContext.fetchCount(FetchDescriptor<VaultNotificationPulse>()) == 1)
+    #expect(
+      try verificationContext.fetch(FetchDescriptor<PendingMutation>())
+        .filter { $0.recordName == VaultNotificationPulse.fixedRecordName }
+        .count == 1
+    )
+  }
+
+  @Test
+  func pendingSharedWithYouNotice_skippedIsTerminalState() {
+    let notice = PendingSharedWithYouNotice(activityID: UUID(), state: .skipped)
+
+    #expect(notice.state == .skipped)
+    #expect(notice.stateRawValue == "skipped")
   }
 
   @Test
@@ -146,6 +292,12 @@ struct VaultContentStoreTests {
     // Authored order also holds for date-sorted readers.
     #expect(edges[0].createdAt < edges[1].createdAt)
     #expect(edges[1].createdAt < edges[2].createdAt)
+
+    let context = store.container.mainContext
+    let activities = try context.fetch(FetchDescriptor<VaultActivity>())
+    #expect(activities.count == 1)
+    #expect(activities.first?.subjectEdgeID == root.id)
+    #expect(activities.first?.rootEdgeID == root.id)
   }
 
   // MARK: - appendCard
@@ -182,9 +334,16 @@ struct VaultContentStoreTests {
     #expect(cards.count == 4)
     #expect(cards.first(where: { $0.id == grandchild.cardID })?.body == "grandchild")
 
-    // Every appended text card contributes one card save and one edge save.
+    // Every authored action contributes card + edge + immutable Activity saves.
     let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
-    #expect(outbox.count == 8)
+    #expect(outbox.count == 12)
+
+    let grandchildActivity = try #require(
+      try context.fetch(FetchDescriptor<VaultActivity>()).first {
+        $0.subjectEdgeID == grandchild.id
+      }
+    )
+    #expect(grandchildActivity.rootEdgeID == root.id)
   }
 
   @Test
@@ -202,6 +361,9 @@ struct VaultContentStoreTests {
     let context = store.container.mainContext
     #expect(try context.fetchCount(FetchDescriptor<Card>()) == 0)
     #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<VaultActivity>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<VaultNotificationPulse>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<PendingSharedWithYouNotice>()) == 0)
     #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 0)
   }
 
@@ -229,7 +391,7 @@ struct VaultContentStoreTests {
     #expect(attachment.cardID == child.cardID)
     #expect(resource.attachmentID == attachment.id)
     #expect(try Data(contentsOf: store.fileURL(for: resource)) == bytes)
-    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 6)
+    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 8)
   }
 
   @Test
@@ -329,7 +491,7 @@ struct VaultContentStoreTests {
     #expect(try Data(contentsOf: fileURL) == bytes)
 
     let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
-    #expect(outbox.count == 4)  // card + edge + attachment + resource
+    #expect(outbox.count == 5)  // card + edge + attachment + resource + Activity
     #expect(outbox.contains { $0.recordType == VaultRecordType.attachment.rawValue })
     #expect(outbox.contains { $0.recordType == VaultRecordType.attachmentResource.rawValue })
   }
@@ -392,7 +554,7 @@ struct VaultContentStoreTests {
     #expect(FileManager.default.fileExists(atPath: pairedVideoURL.path) == false)
 
     let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
-    #expect(outbox.count == 5)  // card + edge + attachment + 2 resources
+    #expect(outbox.count == 6)  // card + edge + attachment + 2 resources + Activity
     #expect(
       outbox.filter { $0.recordType == VaultRecordType.attachmentResource.rawValue }.count == 2)
   }
@@ -439,6 +601,9 @@ struct VaultContentStoreTests {
     #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 0)
     #expect(try context.fetchCount(FetchDescriptor<JournalVault.Attachment>()) == 0)
     #expect(try context.fetchCount(FetchDescriptor<JournalVault.AttachmentResource>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<VaultActivity>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<VaultNotificationPulse>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<PendingSharedWithYouNotice>()) == 0)
     #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 0)
 
     try pairedVideoBytes.write(to: pairedVideoURL)
@@ -450,7 +615,7 @@ struct VaultContentStoreTests {
     #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 1)
     #expect(try context.fetchCount(FetchDescriptor<JournalVault.Attachment>()) == 1)
     #expect(try context.fetchCount(FetchDescriptor<JournalVault.AttachmentResource>()) == 2)
-    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 5)
+    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 6)
   }
 
   @Test
@@ -542,7 +707,7 @@ struct VaultContentStoreTests {
     #expect(try Data(contentsOf: originalFileURL) == originalBytes)
     #expect(FileManager.default.fileExists(atPath: stillURL.path))
     #expect(FileManager.default.fileExists(atPath: pairedVideoURL.path))
-    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 4)
+    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 5)
   }
 
   @Test
@@ -561,10 +726,14 @@ struct VaultContentStoreTests {
     #expect(try context.fetchCount(FetchDescriptor<JournalVault.AttachmentResource>()) == 0)
 
     let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
-    #expect(outbox.count == 2)  // card + edge
+    #expect(outbox.count == 3)  // card + edge + Activity
     #expect(
       Set(outbox.map(\.recordType))
-        == [VaultRecordType.card.rawValue, VaultRecordType.cardEdge.rawValue]
+        == [
+          VaultRecordType.card.rawValue,
+          VaultRecordType.cardEdge.rawValue,
+          VaultActivity.recordType,
+        ]
     )
   }
 
@@ -614,7 +783,7 @@ struct VaultContentStoreTests {
     #expect(FileManager.default.fileExists(atPath: sourceURL.path) == false)
 
     let outbox = try context.fetch(FetchDescriptor<PendingMutation>())
-    #expect(outbox.count == 4)  // card + edge + attachment + resource
+    #expect(outbox.count == 5)  // card + edge + attachment + resource + Activity
   }
 
   @Test
@@ -631,7 +800,7 @@ struct VaultContentStoreTests {
       switch error {
       case .missingMediaPayload(let kind):
         #expect(kind == .file)
-      case .cardNotFound, .cardEdgeNotFound, .cardIsNotTodo:
+      case .cardNotFound, .cardEdgeNotFound, .invalidCardEdgeTopology, .cardIsNotTodo:
         Issue.record("Expected missingMediaPayload, received \(error)")
       }
     }
@@ -641,6 +810,9 @@ struct VaultContentStoreTests {
     #expect(try context.fetchCount(FetchDescriptor<CardEdge>()) == 0)
     #expect(try context.fetchCount(FetchDescriptor<JournalVault.Attachment>()) == 0)
     #expect(try context.fetchCount(FetchDescriptor<JournalVault.AttachmentResource>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<VaultActivity>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<VaultNotificationPulse>()) == 0)
+    #expect(try context.fetchCount(FetchDescriptor<PendingSharedWithYouNotice>()) == 0)
     #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 0)
   }
 
@@ -664,7 +836,9 @@ struct VaultContentStoreTests {
     #expect(estimate.cardEdgeCount == 3)
     #expect(estimate.attachmentCount == 1)
     #expect(estimate.attachmentResourceCount == 1)
-    #expect(estimate.recordCount == 9)
+    #expect(estimate.activityCount == 1)
+    #expect(estimate.notificationPulseCount == 0)
+    #expect(estimate.recordCount == 10)
     #expect(
       estimate.cardBodyBytes
         == "hello".utf8.count + "https://example.com/article".utf8.count
@@ -908,8 +1082,9 @@ struct VaultContentStoreTests {
     #expect(edges.count == 2)
     #expect(edges.allSatisfy { $0.deletedAt != nil })
     #expect(Set(edges.compactMap(\.deletedAt)).count == 1)
-    // Nothing ever reached CloudKit, so no remote tombstones are needed.
-    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 0)
+    // Content never reached CloudKit, so no remote tombstones are needed.
+    // The durable Activity is intentionally retained and still awaits upload.
+    #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 1)
   }
 
   @Test

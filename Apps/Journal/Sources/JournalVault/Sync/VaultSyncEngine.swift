@@ -10,11 +10,12 @@ public enum VaultCloudKitContainer {
   public static let identifier = "iCloud.app.muukii.journal"
 }
 
-/// Saved CloudKit share payload ready for `UICloudSharingController`.
+/// Saved CloudKit share payload ready for the system collaboration share UI.
 ///
 /// The sync engine returns this only after the zone-wide `CKShare` has been
-/// saved in CloudKit. UIKit owns the presentation details; app views receive
-/// this prepared value and never create or save CloudKit shares themselves.
+/// saved in CloudKit. Platform share-sheet adapters own presentation details;
+/// app views receive this prepared value and never create or save CloudKit
+/// shares themselves.
 public struct VaultSharePreparation: @unchecked Sendable {
   public let share: CKShare
   public let container: CKContainer

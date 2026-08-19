@@ -26,6 +26,48 @@ public struct AudioRecording: Sendable, Equatable, Codable {
   }
 }
 
+/// One atomic live-meter update consumed by the recording waveform renderer.
+///
+/// `samples` is the 48-slot visible window after the newest measurement was
+/// appended. `leadingSample` retains the value that just left that window so a
+/// time-based renderer can move it offscreen while the newest value enters from
+/// the right without discontinuity at a polling boundary.
+struct LiveAudioMeterSnapshot: Sendable, Equatable {
+  /// The fixed-width rolling window after the latest meter update.
+  var samples: [Float]
+  /// The sample removed from the leading edge by the latest update.
+  var leadingSample: Float
+  /// The wall-clock instant associated with the newest sample.
+  var newestSampleDate: Date?
+
+  /// The outgoing value, visible window, and incoming value needed for one
+  /// continuous one-slot transition.
+  var renderingSamples: [Float] {
+    [leadingSample] + samples
+  }
+
+  /// Creates a silent fixed-width window before recording measurements arrive.
+  static func resting(sampleCount: Int) -> Self {
+    precondition(sampleCount > 0)
+    return Self(
+      samples: Array(repeating: 0, count: sampleCount),
+      leadingSample: 0,
+      newestSampleDate: nil
+    )
+  }
+
+  func appending(_ sample: Float, at date: Date) -> Self {
+    var nextSamples = samples
+    let nextLeadingSample = nextSamples.removeFirst()
+    nextSamples.append(sample)
+    return Self(
+      samples: nextSamples,
+      leadingSample: nextLeadingSample,
+      newestSampleDate: date
+    )
+  }
+}
+
 // MARK: - Recorder
 
 /// Records the whole ambient soundscape to an AAC (.m4a) file via
@@ -44,10 +86,13 @@ public final class AmbientAudioRecorder {
   public private(set) var state: State = .idle
   public private(set) var duration: TimeInterval = 0
   /// A rolling window of recent normalized amplitudes (0...1), oldest first,
-  /// newest last. Each entry is a real measurement sampled at `pollInterval`;
+  /// newest last. Each entry is a real measurement sampled at `sampleInterval`;
   /// rendering it as bars produces a live, scrolling waveform. Fixed length —
   /// padded with zeros before any audio arrives so the meter has a resting shape.
-  public private(set) var samples: [Float] = Array(repeating: 0, count: sampleCount)
+  public var samples: [Float] { liveMeter.samples }
+
+  /// Atomic live-meter state used by the CaptureAudio rendering layer.
+  private(set) var liveMeter = LiveAudioMeterSnapshot.resting(sampleCount: sampleCount)
 
   #if os(iOS)
     /// Microphones currently reported by the configured iOS audio session.
@@ -60,18 +105,19 @@ public final class AmbientAudioRecorder {
     private(set) var resolvedInput: AudioRecordingInput?
   #endif
 
-  /// Number of amplitude samples kept in `samples`. At `pollInterval` cadence
+  /// Number of amplitude samples kept in `samples`. At `sampleInterval` cadence
   /// this is the width of the waveform's time window (~2.4s).
   public static let sampleCount = 48
 
+  /// Nominal cadence shared by live scrolling and persisted waveform metadata.
+  static let sampleInterval: TimeInterval = 0.05
+
   private var recorder: AVAudioRecorder?
+  private let recordingController = AudioRecordingSessionController()
   private var fileURL: URL?
   private var pollTask: Task<Void, Never>?
   /// Complete quantized history for the active recording.
   private var recordedLevels = Data()
-
-  private static let pollInterval: Duration = .milliseconds(50)
-  private static let waveformSampleInterval: TimeInterval = 0.05
 
   public init() {}
 
@@ -95,13 +141,13 @@ public final class AmbientAudioRecorder {
     /// Calling this method doesn't activate recording or interrupt another app's
     /// audio. If a route changes during a recording, the current selection is
     /// reapplied to the active session.
-    func refreshAudioInputs() throws {
-      let session = AVAudioSession.sharedInstance()
-      try Self.configureAudioSession(session)
-      try reloadAudioInputs(
-        from: session,
+    func refreshAudioInputs() async throws {
+      let snapshot = try await recordingController.refresh(
+        selection: inputSelection,
         applyingPreferredInput: state == .recording
       )
+      try Task.checkCancellation()
+      applyAudioSessionSnapshot(snapshot)
     }
 
     /// Stores a transient input choice. The live port is resolved again when
@@ -119,53 +165,33 @@ public final class AmbientAudioRecorder {
       resolvedInput = AudioRecordingInputSelectionPolicy.resolvedInput(
         for: inputSelection,
         availableInputs: availableInputs,
-        currentInputID: AVAudioSession.sharedInstance().currentRoute.inputs.first?.uid
+        currentInputID: resolvedInput?.id
       )
     }
   #endif
 
-  public func start() throws {
+  public func start() async throws {
     guard state != .recording else { return }
-
-    #if os(iOS)
-      let session = AVAudioSession.sharedInstance()
-      do {
-        try Self.configureAudioSession(session)
-        try session.setActive(true)
-        try reloadAudioInputs(from: session, applyingPreferredInput: true)
-      } catch {
-        Self.deactivateAudioSession(session)
-        throw error
-      }
-    #endif
 
     let url = FileManager.default.temporaryDirectory
       .appendingPathComponent("ambient-\(UUID().uuidString)")
       .appendingPathExtension("m4a")
 
-    let settings: [String: Any] = [
-      AVFormatIDKey: kAudioFormatMPEG4AAC,
-      AVSampleRateKey: 44_100,
-      AVNumberOfChannelsKey: 1,
-      AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-    ]
+    let startResult: AudioRecordingStartResult
+    #if os(iOS)
+      startResult = try await recordingController.startRecording(
+        fileURL: url,
+        selection: inputSelection
+      )
+      applyAudioSessionSnapshot(startResult.sessionSnapshot)
+    #else
+      startResult = try await recordingController.startRecording(fileURL: url)
+    #endif
 
-    let recorder: AVAudioRecorder
-    do {
-      recorder = try AVAudioRecorder(url: url, settings: settings)
-    } catch {
-      #if os(iOS)
-        Self.deactivateAudioSession(session)
-      #endif
-      throw error
-    }
-    recorder.isMeteringEnabled = true
-    recorder.record()
-
-    self.recorder = recorder
+    self.recorder = startResult.recorder
     self.fileURL = url
     self.duration = 0
-    self.samples = Array(repeating: 0, count: Self.sampleCount)
+    self.liveMeter = .resting(sampleCount: Self.sampleCount)
     self.recordedLevels.removeAll(keepingCapacity: true)
     self.state = .recording
     startPolling()
@@ -174,27 +200,23 @@ public final class AmbientAudioRecorder {
   /// Stops recording and returns the resulting file. Returns `nil` if not
   /// currently recording.
   @discardableResult
-  public func stop() -> AudioRecording? {
+  public func stop() async -> AudioRecording? {
     guard let recorder, let fileURL else { return nil }
 
-    let finalDuration = recorder.currentTime
-    recorder.stop()
     stopPolling()
-    #if os(iOS)
-      Self.deactivateAudioSession(AVAudioSession.sharedInstance())
-    #endif
+    let finalDuration = await recordingController.stopRecording(recorder)
 
     let waveform =
       recordedLevels.isEmpty
       ? nil
       : AudioWaveform(
-        sampleInterval: Self.waveformSampleInterval,
+        sampleInterval: Self.sampleInterval,
         levels: recordedLevels
       )
 
     self.recorder = nil
     self.fileURL = nil
-    self.samples = Array(repeating: 0, count: Self.sampleCount)
+    self.liveMeter = .resting(sampleCount: Self.sampleCount)
     self.recordedLevels.removeAll(keepingCapacity: true)
     self.duration = finalDuration
     self.state = .finished
@@ -211,16 +233,13 @@ public final class AmbientAudioRecorder {
     pollTask = Task { [weak self] in
       while Task.isCancelled == false {
         guard let self, let recorder = self.recorder else { return }
-        recorder.updateMeters()
-        let power = recorder.averagePower(forChannel: 0)
-        let normalizedLevel = Self.normalizedLevel(fromDecibels: power)
-        var next = self.samples
-        next.removeFirst()
-        next.append(normalizedLevel)
-        self.samples = next
+        guard let reading = await self.recordingController.meter(recorder) else { return }
+        guard Task.isCancelled == false else { return }
+        let normalizedLevel = Self.normalizedLevel(fromDecibels: reading.averagePower)
+        self.liveMeter = self.liveMeter.appending(normalizedLevel, at: .now)
         self.recordedLevels.append(AudioWaveform.quantizedLevel(normalizedLevel))
-        self.duration = recorder.currentTime
-        try? await Task.sleep(for: Self.pollInterval)
+        self.duration = reading.duration
+        try? await Task.sleep(for: .seconds(Self.sampleInterval))
       }
     }
   }
@@ -231,56 +250,13 @@ public final class AmbientAudioRecorder {
   }
 
   #if os(iOS)
-    /// Configures an input-only category while making Bluetooth HFP microphones
-    /// available. No output route, including the built-in speaker, is selected.
-    private static func configureAudioSession(_ session: AVAudioSession) throws {
-      try session.setCategory(
-        .record,
-        mode: .default,
-        options: [.allowBluetoothHFP]
-      )
-    }
-
-    /// Rebuilds value inputs and optionally applies the resolved live port.
-    private func reloadAudioInputs(
-      from session: AVAudioSession,
-      applyingPreferredInput: Bool
-    ) throws {
-      let ports = session.availableInputs ?? []
-      let inputs = ports.map(AudioRecordingInput.init(port:))
-      availableInputs = inputs
-
-      if case .input(let id) = inputSelection,
-        inputs.contains(where: { $0.id == id }) == false
-      {
-        inputSelection = .automatic
-      }
-
-      let requestedInput = AudioRecordingInputSelectionPolicy.resolvedInput(
-        for: inputSelection,
-        availableInputs: inputs,
-        currentInputID: session.currentRoute.inputs.first?.uid
-      )
-
-      guard applyingPreferredInput else {
-        resolvedInput = requestedInput
-        return
-      }
-
-      let preferredPort = ports.first { $0.uid == requestedInput?.id }
-      if session.preferredInput?.uid != preferredPort?.uid {
-        try session.setPreferredInput(preferredPort)
-      }
-      resolvedInput =
-        session.currentRoute.inputs.first.map(AudioRecordingInput.init(port:))
-        ?? requestedInput
-    }
-
-    /// Releases Tinycurve's shared-session preference before notifying other apps
-    /// that recording no longer owns the audio session.
-    private static func deactivateAudioSession(_ session: AVAudioSession) {
-      try? session.setPreferredInput(nil)
-      try? session.setActive(false, options: .notifyOthersOnDeactivation)
+    /// Publishes a copied session snapshot after the serial controller finishes.
+    private func applyAudioSessionSnapshot(
+      _ snapshot: AudioRecordingSessionSnapshot
+    ) {
+      availableInputs = snapshot.availableInputs
+      inputSelection = snapshot.selection
+      resolvedInput = snapshot.resolvedInput
     }
   #endif
 

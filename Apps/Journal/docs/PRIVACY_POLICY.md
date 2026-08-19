@@ -1,6 +1,6 @@
 # Tinycurve Privacy Policy
 
-Last updated: July 13, 2026
+Last updated: August 18, 2026
 
 Tinycurve is a personal journaling app. It is designed so the developer does not
 run a server for your journal content and does not sell, track, or advertise
@@ -34,7 +34,7 @@ Camera access is used only when you open photo capture and take a photo for an
 entry.
 
 Photos access is used through Apple's system picker. Tinycurve receives only the
-photo you choose for an entry.
+photo you choose in the picker.
 
 Microphone access is used only when you record ambient audio content.
 

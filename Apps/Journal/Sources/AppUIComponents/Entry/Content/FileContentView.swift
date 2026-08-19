@@ -71,15 +71,6 @@ struct FileContentView: View {
     var minimumScaleFactor: CGFloat { 0.8 }
 
     var padding: CGFloat { 16 }
-
-    var minimumHeight: CGFloat? {
-      switch preset {
-      case .composer:
-        return nil
-      case .cell:
-        return 120
-      }
-    }
   }
 
   let file: FileContentSource

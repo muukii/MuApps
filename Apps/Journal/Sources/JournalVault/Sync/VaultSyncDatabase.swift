@@ -8,6 +8,12 @@ struct RecordDeletion: Hashable, Sendable {
   let recordType: String
 }
 
+/// Prevents a malformed retention query result from overwriting unrelated
+/// durable transport work that happens to share a record name.
+enum ActivityRetentionEnqueueError: Error, Equatable, Sendable {
+  case conflictingPendingMutation(recordName: String, recordType: String)
+}
+
 /// Background database access for one vault's sync work.
 ///
 /// All sync-side reads and writes of a vault store go through this actor so
@@ -26,10 +32,12 @@ actor VaultSyncDatabase: ModelActor {
 
   private let vaultID: VaultID
   private let mediaDirectoryURL: URL
+  private let authoredWriteCoordinator: VaultAuthoredWriteCoordinator
 
   init(store: VaultContentStore) {
     self.vaultID = store.vaultID
     self.mediaDirectoryURL = store.mediaDirectoryURL
+    self.authoredWriteCoordinator = store.authoredWriteCoordinator
     self.modelContainer = store.container
     let context = ModelContext(store.container)
     context.autosaveEnabled = false
@@ -40,14 +48,50 @@ actor VaultSyncDatabase: ModelActor {
 
   struct PendingChange: Hashable, Sendable {
     let recordName: String
-    let recordType: String
+    let recordType: VaultRecordType
     let kind: PendingMutation.Kind
+  }
+
+  /// Durable effects of one CloudKit saved-record acknowledgement.
+  ///
+  /// The sync engine consumes these independent facts only after this database
+  /// transaction commits: an Activity acknowledgement can schedule retention,
+  /// while a matching local-only Shared with You intent can wake the app's
+  /// delivery worker. Import, duplicate acknowledgement, and a re-armed
+  /// outbox row leave both values `false`.
+  struct SavedRecordOutcome: Hashable, Sendable {
+    let didAcknowledgeLocalActivity: Bool
+    let didMakeSharedWithYouNoticeReady: Bool
+
+    static let none = Self(
+      didAcknowledgeLocalActivity: false,
+      didMakeSharedWithYouNoticeReady: false
+    )
+  }
+
+  /// Result of atomically turning server-selected Activity history into local
+  /// cleanup plus durable CloudKit delete work.
+  struct ActivityRetentionEnqueueOutcome: Hashable, Sendable {
+    let deleteRecordNames: [String]
+    let newlyEnqueuedDeleteCount: Int
+    let removedLocalActivityCount: Int
+    let removedNoticeCount: Int
+
+    var hasDeleteWork: Bool { deleteRecordNames.isEmpty == false }
   }
 
   /// Snapshot of the outbox, used to (re)seed `CKSyncEngine`'s pending-change
   /// set. `unstagingAll` clears stale in-flight markers after a relaunch so
   /// rows staged by a previous process become collectable again.
   func pendingChanges(unstagingAll: Bool = false) throws -> [PendingChange] {
+    try withFreshCrossProcessState {
+      try pendingChangesInCurrentContext(unstagingAll: unstagingAll)
+    }
+  }
+
+  private func pendingChangesInCurrentContext(
+    unstagingAll: Bool
+  ) throws -> [PendingChange] {
     let rows = try modelContext.fetch(FetchDescriptor<PendingMutation>())
     if unstagingAll {
       for row in rows {
@@ -55,8 +99,28 @@ actor VaultSyncDatabase: ModelActor {
       }
       try modelContext.save()
     }
-    return rows.sorted(by: Self.pendingChangePrecedes).map {
-      PendingChange(recordName: $0.recordName, recordType: $0.recordType, kind: $0.kind)
+    return rows.sorted(by: Self.pendingChangePrecedes).compactMap { row in
+      // A persisted raw value from an unknown future build stays in the
+      // durable outbox rather than being deleted. This build cannot safely
+      // manufacture its record, so it must not feed the engine a change that
+      // would be dropped by `makeRecord`.
+      guard let recordType = VaultRecordType(rawValue: row.recordType) else { return nil }
+      return PendingChange(recordName: row.recordName, recordType: recordType, kind: row.kind)
+    }
+  }
+
+  /// Whether a persisted future record-type tombstone must stay out of a stale
+  /// `CKSyncEngine` state after an app downgrade. The raw outbox row remains
+  /// durable for the future build that understands its record type.
+  func hasUnknownDeletePendingMutation(recordName: String) throws -> Bool {
+    try withFreshCrossProcessState {
+      guard
+        let pending = try fetchPendingMutation(recordName),
+        pending.kind == .delete
+      else {
+        return false
+      }
+      return VaultRecordType(rawValue: pending.recordType) == nil
     }
   }
 
@@ -87,7 +151,9 @@ actor VaultSyncDatabase: ModelActor {
       case .card: return 1
       case .attachment: return 2
       case .attachmentResource: return 3
-      case .vaultInfo, .none: return 4
+      case .vaultInfo, .activity: return 4
+      case .notificationPulse: return 5
+      case .none: return 6
       }
     case .save:
       switch recordType {
@@ -96,13 +162,114 @@ actor VaultSyncDatabase: ModelActor {
       case .cardEdge: return 12
       case .attachment: return 13
       case .attachmentResource: return 14
-      case .none: return 15
+      // Activity is durable history, while Pulse is only a coalescible
+      // attention signal. Present the latter after every content and Activity
+      // save, though CloudKit still does not guarantee remote commit order.
+      case .activity: return 15
+      case .notificationPulse: return 16
+      case .none: return 17
       }
     }
   }
 
   func hasPendingMutations() throws -> Bool {
-    try modelContext.fetchCount(FetchDescriptor<PendingMutation>()) > 0
+    try pendingChanges().isEmpty == false
+  }
+
+  /// Deletes local Activity history and its matching local-only notice while
+  /// durably enqueuing the corresponding remote tombstones in one transaction.
+  ///
+  /// Candidates come from the complete, server-authoritative retention query
+  /// in oldest-first order. Repeating the call is safe: an already pending
+  /// Activity delete remains staged as-is, while any lingering local row or
+  /// notice is still removed before the transaction commits.
+  func enqueueActivityRetentionDeletes(
+    _ candidates: [VaultActivityRetentionCandidate],
+    ifCurrent accountGeneration: VaultActivityRetentionGeneration,
+    generation: UInt64
+  ) throws -> ActivityRetentionEnqueueOutcome? {
+    try withFreshCrossProcessState {
+      try accountGeneration.withCurrentGeneration(generation) {
+        try enqueueActivityRetentionDeletesInCurrentAccount(candidates)
+      }
+    }
+  }
+
+  /// Performs the local transaction after the caller's account generation was
+  /// synchronously validated. Keeping this body non-async ensures the
+  /// generation lock spans the final check through `modelContext.save()`.
+  private func enqueueActivityRetentionDeletesInCurrentAccount(
+    _ candidates: [VaultActivityRetentionCandidate]
+  ) throws -> ActivityRetentionEnqueueOutcome {
+    var uniqueCandidates: [VaultActivityRetentionCandidate] = []
+    var seenRecordNames = Set<String>()
+    for candidate in candidates where seenRecordNames.insert(candidate.recordName).inserted {
+      uniqueCandidates.append(candidate)
+    }
+
+    // A single UUID name is the transport identity across record types. Do not
+    // let a malformed server Activity replace unrelated durable content work.
+    // Preflight every row before mutating the model context so a conflict has
+    // no partial local cleanup side effect.
+    for candidate in uniqueCandidates {
+      if let pending = try fetchPendingMutation(candidate.recordName),
+        pending.recordType != VaultRecordType.activity.rawValue
+      {
+        throw ActivityRetentionEnqueueError.conflictingPendingMutation(
+          recordName: candidate.recordName,
+          recordType: pending.recordType
+        )
+      }
+    }
+
+    var newlyEnqueuedDeleteCount = 0
+    var removedLocalActivityCount = 0
+    var removedNoticeCount = 0
+
+    do {
+      for candidate in uniqueCandidates {
+        if let pending = try fetchPendingMutation(candidate.recordName) {
+          if pending.kind != .delete {
+            pending.kind = .delete
+            // The server's createdAt preserves oldest-first retention order
+            // when CKSyncEngine asks the outbox for its next batch.
+            pending.enqueuedAt = candidate.createdAt
+            pending.stagedAt = nil
+            newlyEnqueuedDeleteCount += 1
+          }
+        } else {
+          modelContext.insert(
+            PendingMutation(
+              recordName: candidate.recordName,
+              recordType: VaultRecordType.activity.rawValue,
+              kind: .delete,
+              enqueuedAt: candidate.createdAt
+            )
+          )
+          newlyEnqueuedDeleteCount += 1
+        }
+
+        guard let activityID = UUID(uuidString: candidate.recordName) else { continue }
+        if let activity = try fetchActivity(activityID) {
+          modelContext.delete(activity)
+          removedLocalActivityCount += 1
+        }
+        if try removePendingSharedWithYouNotice(activityID: activityID) {
+          removedNoticeCount += 1
+        }
+      }
+      try modelContext.save()
+    } catch {
+      modelContext.rollback()
+      throw error
+    }
+
+    return ActivityRetentionEnqueueOutcome(
+      deleteRecordNames: uniqueCandidates.map(\.recordName),
+      newlyEnqueuedDeleteCount: newlyEnqueuedDeleteCount,
+      removedLocalActivityCount: removedLocalActivityCount,
+      removedNoticeCount: removedNoticeCount
+    )
   }
 
   // MARK: - Outgoing
@@ -113,13 +280,25 @@ actor VaultSyncDatabase: ModelActor {
   /// turned into a delete, or the model row vanished — and cleans up so the
   /// caller can drop the engine's pending change.
   func makeRecord(recordName: String, zoneID: CKRecordZone.ID) throws -> CKRecord? {
+    try withFreshCrossProcessState {
+      try makeRecordInCurrentContext(recordName: recordName, zoneID: zoneID)
+    }
+  }
+
+  private func makeRecordInCurrentContext(
+    recordName: String,
+    zoneID: CKRecordZone.ID
+  ) throws -> CKRecord? {
     guard
       let pending = try fetchPendingMutation(recordName),
-      pending.kind == .save,
-      let recordType = VaultRecordType(rawValue: pending.recordType)
+      pending.kind == .save
     else {
       return nil
     }
+    // `pendingChanges()` never schedules an unrecognized type, but an older
+    // CKSyncEngine state can still ask for one after an app downgrade. Keep
+    // that durable row intact rather than deleting data this build cannot map.
+    guard let recordType = VaultRecordType(rawValue: pending.recordType) else { return nil }
 
     let record = try baseRecord(recordName: recordName, recordType: recordType, zoneID: zoneID)
 
@@ -164,6 +343,23 @@ actor VaultSyncDatabase: ModelActor {
       )
       let assetFileURL = FileManager.default.fileExists(atPath: fileURL.path) ? fileURL : nil
       VaultRecordMapper.applyFields(of: resource, assetFileURL: assetFileURL, to: record)
+
+    case .activity:
+      guard let id = UUID(uuidString: recordName), let activity = try fetchActivity(id) else {
+        try discardPendingRow(pending)
+        return nil
+      }
+      VaultRecordMapper.applyFields(of: activity, to: record)
+
+    case .notificationPulse:
+      guard
+        recordName == VaultNotificationPulse.fixedRecordName,
+        let pulse = try fetchNotificationPulse()
+      else {
+        try discardPendingRow(pending)
+        return nil
+      }
+      VaultRecordMapper.applyFields(of: pulse, to: record)
     }
 
     pending.stagedAt = Date()
@@ -179,10 +375,21 @@ actor VaultSyncDatabase: ModelActor {
     recordType: VaultRecordType,
     zoneID: CKRecordZone.ID
   ) throws -> CKRecord {
-    if let metadata = try fetchSyncMetadata(recordName),
-      let shell = VaultRecordMapper.record(fromSystemFields: metadata.systemFieldsData)
-    {
-      return shell
+    if let metadata = try fetchSyncMetadata(recordName) {
+      if metadata.recordType == recordType.rawValue,
+        let shell = VaultRecordMapper.record(fromSystemFields: metadata.systemFieldsData),
+        shell.recordType == recordType.rawValue,
+        shell.recordID.recordName == recordName,
+        shell.recordID.zoneID == zoneID
+      {
+        return shell
+      }
+
+      // System fields describe server identity and change tags. Never reuse a
+      // stale or malformed shell for a different record type, name, or zone.
+      // The live row can still be uploaded as a fresh record; a later server
+      // acknowledgement will replace this invalid bookkeeping safely.
+      modelContext.delete(metadata)
     }
     return CKRecord(
       recordType: recordType.rawValue,
@@ -200,16 +407,57 @@ actor VaultSyncDatabase: ModelActor {
   /// A save reached the server: adopt its system fields and clear the outbox
   /// row — unless the row was re-enqueued while the upload was in flight, in
   /// which case it stays and the newer state goes out with the next batch.
-  func handleSavedRecord(_ record: CKRecord) throws {
+  ///
+  /// Returns the committed outcomes for a locally staged Activity save and its
+  /// matching Shared with You intent. The sync engine uses the first outcome to
+  /// schedule retention and the second to broadcast a ready-notice event.
+  /// Remote imports, duplicate acknowledgements, and re-armed rows never
+  /// report either outcome.
+  @discardableResult
+  func handleSavedRecord(_ record: CKRecord) throws -> SavedRecordOutcome {
+    try withFreshCrossProcessState {
+      try handleSavedRecordInCurrentContext(record)
+    }
+  }
+
+  private func handleSavedRecordInCurrentContext(
+    _ record: CKRecord
+  ) throws -> SavedRecordOutcome {
+    guard let recordType = VaultRecordType(rawValue: record.recordType) else { return .none }
+    guard
+      try recordIdentityIsCompatible(
+        recordName: record.recordID.recordName,
+        recordType: recordType
+      )
+    else {
+      return .none
+    }
     upsertSyncMetadata(for: record)
+    var didAcknowledgeLocalActivity = false
     if let pending = try fetchPendingMutation(record.recordID.recordName),
+      pending.recordType == recordType.rawValue,
       pending.kind == .save,
       let stagedAt = pending.stagedAt,
       pending.enqueuedAt <= stagedAt
     {
       modelContext.delete(pending)
+      didAcknowledgeLocalActivity = recordType == .activity
+    }
+
+    let didMakeSharedWithYouNoticeReady: Bool
+    switch recordType {
+    case .activity where didAcknowledgeLocalActivity:
+      didMakeSharedWithYouNoticeReady = try markSharedWithYouNoticeReadyIfMatchingActivity(record)
+    case .vaultInfo, .card, .cardEdge, .attachment, .attachmentResource, .notificationPulse:
+      didMakeSharedWithYouNoticeReady = false
+    case .activity:
+      didMakeSharedWithYouNoticeReady = false
     }
     try modelContext.save()
+    return SavedRecordOutcome(
+      didAcknowledgeLocalActivity: didAcknowledgeLocalActivity,
+      didMakeSharedWithYouNoticeReady: didMakeSharedWithYouNoticeReady
+    )
   }
 
   /// The server rejected our save because it holds a newer record.
@@ -220,6 +468,21 @@ actor VaultSyncDatabase: ModelActor {
   /// Field-wise merging is an open design question
   /// (`VAULT_SYNC_DESIGN.md` 未決定事項).
   func handleServerRecordChanged(serverRecord: CKRecord) throws {
+    try withFreshCrossProcessState {
+      try handleServerRecordChangedInCurrentContext(serverRecord: serverRecord)
+    }
+  }
+
+  private func handleServerRecordChangedInCurrentContext(serverRecord: CKRecord) throws {
+    guard let recordType = VaultRecordType(rawValue: serverRecord.recordType) else { return }
+    guard
+      try recordIdentityIsCompatible(
+        recordName: serverRecord.recordID.recordName,
+        recordType: recordType
+      )
+    else {
+      return
+    }
     upsertSyncMetadata(for: serverRecord)
     if let pending = try fetchPendingMutation(serverRecord.recordID.recordName) {
       pending.stagedAt = nil
@@ -230,19 +493,39 @@ actor VaultSyncDatabase: ModelActor {
   /// A staged send failed transiently; clear the in-flight marker so the row
   /// re-stages when `CKSyncEngine` retries.
   func unstage(recordName: String) throws {
-    guard let pending = try fetchPendingMutation(recordName) else { return }
-    pending.stagedAt = nil
-    try modelContext.save()
+    try withFreshCrossProcessState {
+      guard let pending = try fetchPendingMutation(recordName) else { return }
+      pending.stagedAt = nil
+      try modelContext.save()
+    }
   }
 
   /// A delete reached the server (or the record never existed there): the
   /// tombstone and the record's metadata are done.
   func handleCompletedDelete(recordName: String) throws {
-    if let pending = try fetchPendingMutation(recordName), pending.kind == .delete {
+    try withFreshCrossProcessState {
+      try handleCompletedDeleteInCurrentContext(recordName: recordName)
+    }
+  }
+
+  private func handleCompletedDeleteInCurrentContext(recordName: String) throws {
+    let pending = try fetchPendingMutation(recordName)
+    let metadata = try fetchSyncMetadata(recordName)
+    let recordType =
+      pending.flatMap { VaultRecordType(rawValue: $0.recordType) }
+      ?? metadata.flatMap { VaultRecordType(rawValue: $0.recordType) }
+
+    if let pending, pending.kind == .delete {
       modelContext.delete(pending)
     }
-    if let metadata = try fetchSyncMetadata(recordName) {
+    if let metadata {
       modelContext.delete(metadata)
+    }
+
+    if recordType == .activity,
+      let activityID = UUID(uuidString: recordName)
+    {
+      try removePendingSharedWithYouNotice(activityID: activityID)
     }
     try modelContext.save()
   }
@@ -273,6 +556,21 @@ actor VaultSyncDatabase: ModelActor {
     modifications: [CKRecord],
     deletions: [RecordDeletion]
   ) throws -> ImportOutcome {
+    try withFreshCrossProcessState {
+      try importChangesInCurrentContext(
+        modifications: modifications,
+        deletions: deletions
+      )
+    }
+  }
+
+  /// Applies one fetched batch while holding the same vault lock as authored
+  /// app/extension writes, so conflict checks and fixed-Pulse materialization
+  /// observe a single fresh durable state.
+  private func importChangesInCurrentContext(
+    modifications: [CKRecord],
+    deletions: [RecordDeletion]
+  ) throws -> ImportOutcome {
     var outcome = ImportOutcome()
     var touchedEdgeTopology = false
     var touchedRelationships = false
@@ -280,6 +578,42 @@ actor VaultSyncDatabase: ModelActor {
 
     for record in modifications {
       let recordName = record.recordID.recordName
+      guard let recordType = VaultRecordType(rawValue: record.recordType) else { continue }
+
+      // Activity and Pulse have stronger record-name and payload contracts than
+      // ordinary UUID-backed content. Reject malformed remote shapes before
+      // storing transport metadata, so they cannot later become a valid shell
+      // for an unrelated local row.
+      switch recordType {
+      case .activity:
+        guard
+          UUID(uuidString: recordName) != nil,
+          VaultRecordMapper.canMaterializeActivity(from: record)
+        else {
+          continue
+        }
+      case .notificationPulse:
+        guard
+          recordName == VaultNotificationPulse.fixedRecordName,
+          VaultRecordMapper.canMaterializeNotificationPulse(from: record)
+        else {
+          continue
+        }
+      case .vaultInfo, .card, .cardEdge, .attachment, .attachmentResource:
+        break
+      }
+
+      // CloudKit record name is the transport identity across every record
+      // type. Reject a mismatched remote shape before touching SyncMetadata or
+      // materializing a second local type under the same identity.
+      guard
+        try recordIdentityIsCompatible(
+          recordName: recordName,
+          recordType: recordType
+        )
+      else {
+        continue
+      }
       upsertSyncMetadata(for: record)
 
       if let pending = try fetchPendingMutation(recordName) {
@@ -291,8 +625,6 @@ actor VaultSyncDatabase: ModelActor {
         }
         continue
       }
-
-      guard let recordType = VaultRecordType(rawValue: record.recordType) else { continue }
 
       switch recordType {
       case .vaultInfo:
@@ -368,17 +700,50 @@ actor VaultSyncDatabase: ModelActor {
             // The row stays; the file can be repaired by a later fetch.
           }
         }
+
+      case .activity:
+        guard
+          let id = UUID(uuidString: recordName),
+          let activity = VaultRecordMapper.activity(id: id, from: record)
+        else {
+          continue
+        }
+        // Activity is immutable domain history. An existing snapshot already
+        // represents the logical action and must not be rewritten by later
+        // fetches; only its SyncMetadata was refreshed above.
+        if try fetchActivity(id) == nil {
+          modelContext.insert(activity)
+        }
+
+      case .notificationPulse:
+        let pulse: VaultNotificationPulse
+        if let existing = try fetchNotificationPulse() {
+          pulse = existing
+        } else {
+          pulse = VaultNotificationPulse(
+            latestActivityRecordName: "",
+            kind: .contentAdded,
+            updatedAt: .distantPast
+          )
+          modelContext.insert(pulse)
+        }
+        VaultRecordMapper.update(pulse, from: record)
       }
 
       outcome.importedRecordCount += 1
     }
 
     for deletion in deletions.sorted(by: Self.remoteDeletionPrecedes) {
-      if deletion.recordType == VaultRecordType.cardEdge.rawValue {
-        touchedEdgeTopology = true
-      }
-      if deletion.recordType != VaultRecordType.vaultInfo.rawValue {
-        touchedRelationships = true
+      if let recordType = VaultRecordType(rawValue: deletion.recordType) {
+        switch recordType {
+        case .cardEdge:
+          touchedEdgeTopology = true
+          touchedRelationships = true
+        case .card, .attachment, .attachmentResource:
+          touchedRelationships = true
+        case .vaultInfo, .activity, .notificationPulse:
+          break
+        }
       }
       try applyRemoteDeletion(
         deletion,
@@ -406,22 +771,56 @@ actor VaultSyncDatabase: ModelActor {
   ) throws {
     let recordName = deletion.recordName
 
-    if let recordType = VaultRecordType(rawValue: deletion.recordType),
-      let id = UUID(uuidString: recordName)
-    {
-      switch recordType {
-      case .vaultInfo:
-        if let info = try fetchVaultInfo() {
-          modelContext.delete(info)
-        }
-      case .card:
-        try deleteImportedCard(cardID: id, deletedAt: logicalDeletionDate)
-      case .cardEdge:
-        try deleteImportedEdgeSubtree(edgeID: id, deletedAt: logicalDeletionDate)
-      case .attachment:
-        try deleteImportedAttachment(attachmentID: id)
-      case .attachmentResource:
-        try deleteImportedAttachmentResource(resourceID: id)
+    // A deletion with an unknown type must not erase transport state solely by
+    // record name. A future app version may use that name for a row this build
+    // cannot identify safely.
+    guard let recordType = VaultRecordType(rawValue: deletion.recordType) else { return }
+    guard
+      try recordIdentityIsCompatible(
+        recordName: recordName,
+        recordType: recordType
+      )
+    else {
+      return
+    }
+
+    switch recordType {
+    case .vaultInfo:
+      guard UUID(uuidString: recordName) != nil else { return }
+      if let info = try fetchVaultInfo() {
+        modelContext.delete(info)
+      }
+
+    case .card:
+      guard let id = UUID(uuidString: recordName) else { return }
+      try deleteImportedCard(cardID: id, deletedAt: logicalDeletionDate)
+
+    case .cardEdge:
+      guard let id = UUID(uuidString: recordName) else { return }
+      try deleteImportedEdgeSubtree(edgeID: id, deletedAt: logicalDeletionDate)
+
+    case .attachment:
+      guard let id = UUID(uuidString: recordName) else { return }
+      try deleteImportedAttachment(attachmentID: id)
+
+    case .attachmentResource:
+      guard let id = UUID(uuidString: recordName) else { return }
+      try deleteImportedAttachmentResource(resourceID: id)
+
+    case .activity:
+      guard let id = UUID(uuidString: recordName) else { return }
+      if let activity = try fetchActivity(id) {
+        modelContext.delete(activity)
+      }
+      // A remote deletion wins over a local authored Activity as well. Remove
+      // any undelivered local-only intent so a later worker cannot post a
+      // notice for history that no longer exists in the vault.
+      try removePendingSharedWithYouNotice(activityID: id)
+
+    case .notificationPulse:
+      guard recordName == VaultNotificationPulse.fixedRecordName else { return }
+      if let pulse = try fetchNotificationPulse() {
+        modelContext.delete(pulse)
       }
     }
 
@@ -447,7 +846,9 @@ actor VaultSyncDatabase: ModelActor {
     case .card: return 1
     case .attachment: return 2
     case .attachmentResource: return 3
-    case .vaultInfo, .none: return 4
+    case .vaultInfo, .activity: return 4
+    case .notificationPulse: return 5
+    case .none: return 6
     }
   }
 
@@ -705,6 +1106,7 @@ actor VaultSyncDatabase: ModelActor {
   private func upsertSyncMetadata(for record: CKRecord) {
     let data = VaultRecordMapper.encodeSystemFields(of: record)
     if let existing = try? fetchSyncMetadata(record.recordID.recordName) {
+      existing.recordType = record.recordType
       existing.systemFieldsData = data
       existing.lastSyncedAt = Date()
     } else {
@@ -715,6 +1117,104 @@ actor VaultSyncDatabase: ModelActor {
           systemFieldsData: data
         )
       )
+    }
+  }
+
+  /// Verifies that one CloudKit record name denotes exactly one local type.
+  ///
+  /// Metadata and outbox rows participate alongside materialized domain rows:
+  /// accepting a different type in any of those stores would overwrite the
+  /// archived CloudKit identity and could later upload or delete the wrong
+  /// model under that record name.
+  private func recordIdentityIsCompatible(
+    recordName: String,
+    recordType: VaultRecordType
+  ) throws -> Bool {
+    if recordType == .vaultInfo, recordName != vaultID.uuidString {
+      return false
+    }
+    if recordType == .notificationPulse,
+      recordName != VaultNotificationPulse.fixedRecordName
+    {
+      return false
+    }
+    if let metadata = try fetchSyncMetadata(recordName),
+      metadata.recordType != recordType.rawValue
+    {
+      return false
+    }
+    if let pending = try fetchPendingMutation(recordName),
+      pending.recordType != recordType.rawValue
+    {
+      return false
+    }
+
+    var materializedTypes = Set<VaultRecordType>()
+    if recordName == VaultNotificationPulse.fixedRecordName,
+      try fetchNotificationPulse() != nil
+    {
+      materializedTypes.insert(.notificationPulse)
+    }
+    guard let identifier = UUID(uuidString: recordName) else {
+      return materializedTypes.allSatisfy { $0 == recordType }
+    }
+
+    if let info = try fetchVaultInfo(), info.vaultID == identifier {
+      materializedTypes.insert(.vaultInfo)
+    }
+    if try fetchCard(identifier) != nil {
+      materializedTypes.insert(.card)
+    }
+    if try fetchCardEdge(identifier) != nil {
+      materializedTypes.insert(.cardEdge)
+    }
+    if try fetchAttachment(identifier) != nil {
+      materializedTypes.insert(.attachment)
+    }
+    if try fetchAttachmentResource(identifier) != nil {
+      materializedTypes.insert(.attachmentResource)
+    }
+    if try fetchActivity(identifier) != nil {
+      materializedTypes.insert(.activity)
+    }
+    return materializedTypes.allSatisfy { $0 == recordType }
+  }
+
+  /// Advances only the origin device's matching notice after its immutable
+  /// Activity has actually been acknowledged by CloudKit. Import never calls
+  /// this method, and terminal/future states remain untouched.
+  private func markSharedWithYouNoticeReadyIfMatchingActivity(_ record: CKRecord) throws -> Bool {
+    guard
+      let activityID = UUID(uuidString: record.recordID.recordName),
+      let activity = try fetchActivity(activityID),
+      activity.id == activityID,
+      let notice = try fetchPendingSharedWithYouNotice(activityID: activityID)
+    else {
+      return false
+    }
+
+    switch notice.state {
+    case .waitingForActivityUpload:
+      notice.stateRawValue = PendingSharedWithYouNotice.State.ready.rawValue
+      return true
+    case .ready, .attempted, .skipped, .unknown:
+      return false
+    }
+  }
+
+  /// Synchronizes sync-side outbox work with app/extension authored writes.
+  ///
+  /// `VaultSyncDatabase` keeps a long-lived ModelContext, while another
+  /// Tinycurve process can commit through its own container. Rollback drops
+  /// registered snapshots before the locked fetch so ACK decisions observe the
+  /// latest durable re-arm instead of deleting a row from stale context state.
+  private func withFreshCrossProcessState<Result>(
+    _ operation: () throws -> Result
+  ) throws -> Result {
+    try authoredWriteCoordinator.withExclusiveAccess {
+      modelContext.rollback()
+      modelContext.processPendingChanges()
+      return try operation()
     }
   }
 
@@ -764,6 +1264,44 @@ actor VaultSyncDatabase: ModelActor {
     var descriptor = FetchDescriptor<AttachmentResource>(predicate: #Predicate { $0.id == id })
     descriptor.fetchLimit = 1
     return try modelContext.fetch(descriptor).first
+  }
+
+  private func fetchActivity(_ id: UUID) throws -> VaultActivity? {
+    var descriptor = FetchDescriptor<VaultActivity>(predicate: #Predicate { $0.id == id })
+    descriptor.fetchLimit = 1
+    return try modelContext.fetch(descriptor).first
+  }
+
+  /// Fetches only the singleton whose fixed local and CloudKit identity is
+  /// valid. A malformed duplicate is never treated as the transport Pulse.
+  private func fetchNotificationPulse() throws -> VaultNotificationPulse? {
+    try modelContext.fetch(FetchDescriptor<VaultNotificationPulse>()).first {
+      $0.recordName == VaultNotificationPulse.fixedRecordName
+    }
+  }
+
+  private func fetchPendingSharedWithYouNotice(
+    activityID: UUID
+  ) throws -> PendingSharedWithYouNotice? {
+    var descriptor = FetchDescriptor<PendingSharedWithYouNotice>(
+      predicate: #Predicate { $0.activityID == activityID }
+    )
+    descriptor.fetchLimit = 1
+    return try modelContext.fetch(descriptor).first
+  }
+
+  /// Removes the local-only delivery intent associated with a history record.
+  ///
+  /// Returning whether a row existed lets retention confirm it changed the
+  /// notice and Activity in the same SwiftData transaction without ever
+  /// creating a replacement notice.
+  @discardableResult
+  private func removePendingSharedWithYouNotice(activityID: UUID) throws -> Bool {
+    if let notice = try fetchPendingSharedWithYouNotice(activityID: activityID) {
+      modelContext.delete(notice)
+      return true
+    }
+    return false
   }
 
   private func fetchAttachmentResources(attachmentID: UUID) throws -> [AttachmentResource] {

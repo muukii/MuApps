@@ -1,0 +1,23 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Image crop area" : {
+      "comment" : "Accessibility label for the draggable and zoomable profile image crop area.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Image crop area"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画像のクロップ範囲"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
