@@ -24,6 +24,23 @@ struct AudioRecordingInput: Identifiable, Equatable, Hashable, Sendable {
 
   /// Connection class used for automatic preference and safe fallback.
   let kind: Kind
+
+  /// Channel modes this microphone can record, `.mono` always first. Stereo
+  /// entries exist only when a data source advertises the `.stereo` polar
+  /// pattern, which the Simulator and non-built-in microphones never do.
+  let supportedChannelModes: [AudioRecordingChannelMode]
+
+  init(
+    id: String,
+    name: String,
+    kind: Kind,
+    supportedChannelModes: [AudioRecordingChannelMode] = [.mono]
+  ) {
+    self.id = id
+    self.name = name
+    self.kind = kind
+    self.supportedChannelModes = supportedChannelModes
+  }
 }
 
 /// The user's transient microphone choice for one recorder presentation.
@@ -90,8 +107,27 @@ enum AudioRecordingInputSelectionPolicy {
       self.init(
         id: port.uid,
         name: port.portName,
-        kind: Self.kind(for: port.portType)
+        kind: Self.kind(for: port.portType),
+        supportedChannelModes: Self.supportedChannelModes(for: port)
       )
+    }
+
+    private static func supportedChannelModes(
+      for port: AVAudioSessionPortDescription
+    ) -> [AudioRecordingChannelMode] {
+      var modes: [AudioRecordingChannelMode] = [.mono]
+      for dataSource in port.dataSources ?? [] {
+        guard dataSource.supportedPolarPatterns?.contains(.stereo) == true else {
+          continue
+        }
+        if dataSource.orientation == .front, modes.contains(.stereoFront) == false {
+          modes.append(.stereoFront)
+        }
+        if dataSource.orientation == .back, modes.contains(.stereoBack) == false {
+          modes.append(.stereoBack)
+        }
+      }
+      return modes
     }
 
     private static func kind(for portType: AVAudioSession.Port) -> Kind {

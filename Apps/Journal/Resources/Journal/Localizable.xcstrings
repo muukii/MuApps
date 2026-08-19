@@ -1016,6 +1016,23 @@
         }
       }
     },
+    "Channels" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Channels"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャンネル"
+          }
+        }
+      }
+    },
     "Checking" : {
       "localizations" : {
         "ja" : {
@@ -2886,6 +2903,23 @@
         }
       }
     },
+    "Mono" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mono"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モノラル"
+          }
+        }
+      }
+    },
     "Nature" : {
       "localizations" : {
         "en" : {
@@ -4246,6 +4280,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "共有Vaultの更新を受け取る"
+          }
+        }
+      }
+    },
+    "Stereo · Back" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stereo · Back"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ステレオ・背面"
+          }
+        }
+      }
+    },
+    "Stereo · Front" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stereo · Front"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ステレオ・前面"
           }
         }
       }

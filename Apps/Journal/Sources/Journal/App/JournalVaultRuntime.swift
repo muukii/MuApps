@@ -575,6 +575,19 @@ final class JournalVaultRuntime {
     return JournalCloudStorageEstimate(generatedAt: Date(), vaults: vaultEstimates)
   }
 
+  /// Counts one vault's local rows and outbox depth for the debug sync probe.
+  func localSyncCounts(for vaultID: VaultID) throws -> VaultLocalSyncCounts {
+    try registry.store(for: vaultID).localSyncCounts()
+  }
+
+  /// Counts the records CloudKit currently stores for one vault.
+  ///
+  /// This reads CloudKit directly instead of reporting engine progress, because
+  /// `CKSyncEngine` exposes no backlog or import-progress state.
+  func cloudRecordCounts(for vaultID: VaultID) async throws -> VaultRecordCountSnapshot {
+    try await syncEngine.cloudRecordCounts(for: vaultID)
+  }
+
   // MARK: - Shared with You notice delivery
 
   /// Returns the current local catalog identities for app-process delivery

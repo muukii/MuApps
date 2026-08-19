@@ -102,7 +102,7 @@ struct AudioRecordingInputSelectionPolicyTests {
     }
 
     @Test
-    func routeConfirmationTimesOutInsteadOfAcceptingAnUnrequestedFallback() {
+    func routeConfirmationTimesOutAfterItsFinalAttempt() {
       let policy = AudioRecordingInputRouteConfirmationPolicy(maximumAttempts: 3)
 
       let decision = policy.decision(

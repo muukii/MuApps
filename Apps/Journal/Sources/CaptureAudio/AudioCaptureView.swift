@@ -18,8 +18,7 @@ public struct AudioCaptureView: View {
 
   private let onFinish: @MainActor @Sendable (AudioRecording) -> Void
 
-  public init(onFinish: @escaping @MainActor @Sendable (AudioRecording) -> Void)
-  {
+  public init(onFinish: @escaping @MainActor @Sendable (AudioRecording) -> Void) {
     self.onFinish = onFinish
   }
 
@@ -45,6 +44,17 @@ public struct AudioCaptureView: View {
           onSelect: { recorder.selectInput($0) }
         )
         .padding(.horizontal, 32)
+
+        if recorder.availableChannelModes.count > 1 {
+          AudioChannelModePicker(
+            modes: recorder.availableChannelModes,
+            selection: recorder.channelMode,
+            isEnabled: recorder.state != .recording
+              && isChangingRecordingState == false,
+            onSelect: { recorder.selectChannelMode($0) }
+          )
+          .padding(.horizontal, 32)
+        }
       #endif
 
       Spacer()
@@ -81,6 +91,13 @@ public struct AudioCaptureView: View {
         )
       ) { _ in
         scheduleAudioInputRefresh(reportingErrors: recorder.state == .recording)
+      }
+      .onReceive(
+        NotificationCenter.default.publisher(
+          for: AVAudioSession.interruptionNotification
+        )
+      ) { notification in
+        finishRecordingOnInterruption(notification)
       }
       .onDisappear {
         inputRefreshTask?.cancel()
@@ -142,6 +159,27 @@ public struct AudioCaptureView: View {
   }
 
   #if os(iOS)
+    /// Ends the take when the system interrupts recording (phone call, Siri).
+    /// The partial recording is delivered instead of leaving the surface stuck
+    /// in a recording state whose audio I/O already stopped.
+    private func finishRecordingOnInterruption(_ notification: Notification) {
+      guard
+        let rawType =
+          notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+        AVAudioSession.InterruptionType(rawValue: rawType) == .began,
+        recorder.state == .recording,
+        isChangingRecordingState == false
+      else { return }
+
+      isChangingRecordingState = true
+      Task {
+        defer { isChangingRecordingState = false }
+        if let recording = await recorder.stop() {
+          onFinish(recording)
+        }
+      }
+    }
+
     private func scheduleAudioInputRefresh(reportingErrors: Bool) {
       inputRefreshTask?.cancel()
       inputRefreshTask = Task {
@@ -245,6 +283,37 @@ private struct AudioRecordingDurationLabel: View {
   }
 #endif
 
+#if os(iOS)
+  /// Stateless channel-layout selector shown only when the resolved microphone
+  /// can record stereo. The recorder owns the effective mode; this view renders
+  /// narrow values and sends the user's next transient choice upward.
+  private struct AudioChannelModePicker: View {
+    let modes: [AudioRecordingChannelMode]
+    let selection: AudioRecordingChannelMode
+    let isEnabled: Bool
+    let onSelect: @MainActor @Sendable (AudioRecordingChannelMode) -> Void
+
+    var body: some View {
+      Picker(
+        "Channels",
+        selection: Binding(
+          get: { selection },
+          set: { onSelect($0) }
+        )
+      ) {
+        ForEach(modes, id: \.self) { mode in
+          Text(mode.displayName)
+            .tag(mode)
+        }
+      }
+      .pickerStyle(.segmented)
+      .disabled(isEnabled == false)
+      .accessibilityLabel("Channels")
+      .accessibilityValue(Text(selection.displayName))
+    }
+  }
+#endif
+
 // MARK: - Waveform Meter
 
 /// Isolates the recorder's high-frequency meter observation from unrelated controls.
@@ -309,6 +378,21 @@ private struct WaveformMeter: View {
     }
     .opacity(isActive ? 1 : 0.3)
     .animation(.smooth, value: isActive)
+  }
+}
+
+// MARK: - Formatting Helpers
+
+extension AudioRecordingChannelMode {
+  fileprivate var displayName: String {
+    switch self {
+    case .mono:
+      return String(localized: "Mono")
+    case .stereoFront:
+      return String(localized: "Stereo · Front")
+    case .stereoBack:
+      return String(localized: "Stereo · Back")
+    }
   }
 }
 

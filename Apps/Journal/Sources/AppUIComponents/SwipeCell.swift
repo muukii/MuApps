@@ -7,26 +7,30 @@ import SwiftUI
 /// A content cell that exposes a snap-to-trigger swipe action on iPhone and iPad.
 ///
 /// Native macOS renders `Content` unchanged and installs no swipe interaction.
-public struct SwipeCell<Content: View>: View {
+public struct SwipeCell<Content: View, Info: View>: View {
 
   private let content: Content
+  private let info: Info
 
   #if os(iOS)
+    @State private var infoWidth: CGFloat = 0
     @State private var offset: CGSize = .zero
   #endif
   private let onTrigger: () -> Void
 
   #if os(iOS)
     private var isTriggering: Bool {
-      offset.width < -44
+      offset.width > 44
     }
   #endif
 
   public init(
     @ViewBuilder content: () -> Content,
+    @ViewBuilder info: () -> Info,
     onTrigger: @escaping () -> Void
   ) {
     self.content = content()
+    self.info = info()
     self.onTrigger = onTrigger
   }
 
@@ -39,8 +43,8 @@ public struct SwipeCell<Content: View>: View {
             offset: $offset,
             axis: [.horizontal],
             horizontalBoundary: .init(
-              min: -50,
-              max: 0,
+              min: -infoWidth,
+              max: 50,
               bandLength: 50
             ),
             handler: .init(
@@ -59,15 +63,18 @@ public struct SwipeCell<Content: View>: View {
           )
         )
         .background(
-          alignment: .trailing,
+          alignment: .leading,
           content: {
             Circle()
               .foregroundStyle(.quinary)
               .overlay {
                 Image(systemName: "arrowshape.turn.up.backward.fill")
+                  .resizable()
+                  .aspectRatio(contentMode: .fit)
                   .foregroundStyle(.primary)
+                  .frame(width: 14)
               }
-              .frame(width: 44, height: 44)
+              .frame(width: 36, height: 36)
               .padding(10)
               .animation(
                 .smooth,
@@ -78,9 +85,20 @@ public struct SwipeCell<Content: View>: View {
                     )
                     .opacity(isTriggering ? 1 : 0)
                     .blur(radius: isTriggering ? 0 : 10)
-                })
+                }
+              )
           }
         )
+        .background(alignment: .trailing) {
+          info
+            .onGeometryChange(
+              for: CGFloat.self,
+              of: \.size.width,
+              action: { newValue in
+                infoWidth = newValue
+              }
+            )
+        }
         .sensoryFeedback(
           trigger: isTriggering,
           { oldValue, newValue in
@@ -89,7 +107,8 @@ public struct SwipeCell<Content: View>: View {
             } else {
               return nil
             }
-          })
+          }
+        )
     #else
       content
     #endif
@@ -102,6 +121,8 @@ public struct SwipeCell<Content: View>: View {
   SwipeCell {
     RoundedRectangle(cornerRadius: 10)
       .frame(height: 100)
+  } info: {
+    Text("Hello")
   } onTrigger: {
     print("trigger")
   }

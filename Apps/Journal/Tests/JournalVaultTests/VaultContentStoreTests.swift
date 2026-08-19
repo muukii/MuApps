@@ -18,6 +18,31 @@ struct VaultContentStoreTests {
     )
   }
 
+  // MARK: - Sync diagnostics
+
+  @Test
+  func localSyncCounts_reportRowsPerRecordTypeAndOutboxDepth() throws {
+    let store = try makeStore()
+    try store.seedVaultInfo(title: "Trip")
+    _ = try store.createThread(cards: [
+      .init(kind: .text, text: "first"),
+      .init(kind: .text, text: "second"),
+    ])
+
+    let counts = try store.localSyncCounts()
+    let context = store.container.mainContext
+
+    #expect(counts.records.count(of: .vaultInfo) == 1)
+    #expect(counts.records.count(of: .card) == 2)
+    #expect(counts.records.count(of: .cardEdge) == 2)
+    #expect(counts.records.count(of: .attachment) == 0)
+    #expect(counts.records.otherRecordCount == 0)
+    #expect(counts.records.total == 5 + counts.records.count(of: .activity))
+    #expect(
+      counts.pendingMutationCount == (try context.fetchCount(FetchDescriptor<PendingMutation>()))
+    )
+  }
+
   // MARK: - VaultInfo
 
   @Test

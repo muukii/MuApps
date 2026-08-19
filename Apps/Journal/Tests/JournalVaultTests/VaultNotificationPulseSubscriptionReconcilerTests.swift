@@ -127,6 +127,45 @@ struct VaultNotificationPulseSubscriptionReconcilerTests {
     #expect(await secondAccountPrivateStore.saveCount() == 1)
     #expect(await secondAccountSharedStore.saveCount() == 1)
   }
+
+  @Test(arguments: [CKDatabase.Scope.private, .shared])
+  func reconciler_reportsMissingRecordTypeAsSchemaUnavailable(
+    databaseScope: CKDatabase.Scope
+  ) async throws {
+    let store = TestSubscriptionStore(saveError: CKError(.unknownItem))
+    let reconciler = VaultNotificationPulseSubscriptionReconciler(store: store)
+
+    #expect(try await reconciler.reconcile(databaseScope: databaseScope) == .schemaUnavailable)
+  }
+
+  @Test
+  func reconciler_reportsMissingRecordTypeInsidePartialFailureAsSchemaUnavailable() async throws {
+    let partialFailure = CKError(
+      .partialFailure,
+      userInfo: [
+        CKPartialErrorsByItemIDKey: [
+          VaultNotificationPulseSubscription.privateDatabaseIdentifier:
+            CKError(.unknownItem) as NSError
+        ]
+      ]
+    )
+    let store = TestSubscriptionStore(saveError: partialFailure)
+    let reconciler = VaultNotificationPulseSubscriptionReconciler(store: store)
+
+    #expect(try await reconciler.reconcile(databaseScope: .private) == .schemaUnavailable)
+  }
+
+  /// A transport failure must stay an error so the caller retries it, unlike the
+  /// missing record type, which only a Pulse upload can resolve.
+  @Test
+  func reconciler_rethrowsUnrelatedSaveFailure() async throws {
+    let store = TestSubscriptionStore(saveError: CKError(.networkUnavailable))
+    let reconciler = VaultNotificationPulseSubscriptionReconciler(store: store)
+
+    await #expect(throws: CKError.self) {
+      try await reconciler.reconcile(databaseScope: .private)
+    }
+  }
 }
 
 /// In-memory account/database adapter that records only the exact subscription
@@ -136,16 +175,24 @@ private actor TestSubscriptionStore: VaultNotificationPulseSubscriptionStore {
 
   private var subscriptions: [CKSubscription.ID: CKSubscription]
   private var savedSubscriptionIDs: [CKSubscription.ID] = []
+  private let saveError: (any Error)?
 
-  init(subscriptions: [CKSubscription.ID: CKSubscription] = [:]) {
+  init(
+    subscriptions: [CKSubscription.ID: CKSubscription] = [:],
+    saveError: (any Error)? = nil
+  ) {
     self.subscriptions = subscriptions
+    self.saveError = saveError
   }
 
   func subscription(withID subscriptionID: CKSubscription.ID) -> CKSubscription? {
     subscriptions[subscriptionID]
   }
 
-  func save(subscription: CKSubscription) {
+  func save(subscription: CKSubscription) throws {
+    if let saveError {
+      throw saveError
+    }
     subscriptions[subscription.subscriptionID] = subscription
     savedSubscriptionIDs.append(subscription.subscriptionID)
   }

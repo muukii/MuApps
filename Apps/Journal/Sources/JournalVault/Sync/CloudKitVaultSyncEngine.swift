@@ -37,6 +37,8 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
   private var foregroundSyncTasks: [VaultID: Task<Void, Never>] = [:]
   private var visiblePulseSubscriptionReconciliationTask: Task<Void, Never>?
   private var needsVisiblePulseSubscriptionReconciliation = false
+  private var scopesWithCompletedEngineFetch: Set<CKDatabase.Scope> = []
+  private var scopesAwaitingPulseRecordTypeSchema: Set<CKDatabase.Scope> = []
   private var activityRetentionCoordinator: VaultActivityRetentionCoordinator?
   private let activityRetentionGeneration = VaultActivityRetentionGeneration()
 
@@ -72,10 +74,10 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     engines[.private] = makeEngine(scope: .private)
     engines[.shared] = makeEngine(scope: .shared)
 
-    // Build both sync engines with their explicit silent IDs before scheduling
-    // a visible subscription. This prevents CKSyncEngine's automatic discovery
-    // from adopting a Pulse alert subscription as its sync wake-up transport.
-    scheduleVisiblePulseSubscriptionReconciliation()
+    // The visible Pulse subscription is deliberately not requested here. Each
+    // engine establishes its own silent subscription during its first fetch,
+    // and `reconcileVisiblePulseSubscriptions()` documents why Tinycurve must
+    // stay out of that window.
 
     // Reseed the engines' pending sets from each vault's durable outbox. This
     // recovers work enqueued right before a crash and survives engine state
@@ -307,6 +309,10 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
       // for a same-UUID zone in the new private account.
       activityRetentionGeneration.invalidate()
       await activityRetentionCoordinator?.cancelAll()
+      // Subscriptions are account-scoped, so the new account starts from an
+      // unknown server state and its engines have not fetched yet.
+      scopesWithCompletedEngineFetch.removeAll()
+      scopesAwaitingPulseRecordTypeSchema.removeAll()
       scheduleVisiblePulseSubscriptionReconciliation()
 
     case .fetchedDatabaseChanges(let changes):
@@ -321,8 +327,15 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     case .sentDatabaseChanges:
       break
 
+    case .didFetchChanges:
+      // This engine has finished establishing its subscription and fetching, so
+      // this database's subscriptions can be modified without colliding with it.
+      if scopesWithCompletedEngineFetch.insert(scope).inserted {
+        scheduleVisiblePulseSubscriptionReconciliation()
+      }
+
     case .willFetchChanges, .willFetchRecordZoneChanges, .didFetchRecordZoneChanges,
-      .didFetchChanges, .willSendChanges, .didSendChanges:
+      .willSendChanges, .didSendChanges:
       break
 
     @unknown default:
@@ -583,6 +596,16 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     let databaseScope = engine.database.databaseScope
 
     for record in sent.savedRecords {
+      // A saved Pulse record proves this CloudKit environment now has the Pulse
+      // record type. Record types are environment-wide rather than per
+      // database, so one upload unblocks both scopes.
+      if record.recordType == VaultRecordType.notificationPulse.rawValue,
+        scopesAwaitingPulseRecordTypeSchema.isEmpty == false
+      {
+        scopesAwaitingPulseRecordTypeSchema.removeAll()
+        scheduleVisiblePulseSubscriptionReconciliation()
+      }
+
       do {
         guard
           let database = try syncDatabase(
@@ -1407,6 +1430,54 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     }
   }
 
+  // MARK: - Diagnostics
+
+  public func cloudRecordCounts(for vaultID: VaultID) async throws -> VaultRecordCountSnapshot {
+    await ensureDescriptorsLoaded()
+    await refreshDescriptorsIfUnknown(vaultID)
+
+    guard let descriptor = descriptors[vaultID] else {
+      throw VaultRecordCountError.vaultNotFound(vaultID)
+    }
+
+    let database = cloudDatabase(for: databaseScope(for: descriptor))
+    let zoneID = descriptor.zoneID
+    var countsByRecordType: [VaultRecordType: Int] = [:]
+    var otherRecordCount = 0
+    var changeToken: CKServerChangeToken?
+
+    while true {
+      try Task.checkCancellation()
+
+      // Start from no token and keep the returned one only to page through this
+      // probe: `CKSyncEngine` owns the durable tokens for this zone. Asking for
+      // no user fields keeps a media-heavy vault from downloading every asset
+      // just to be counted.
+      let changes = try await database.recordZoneChanges(
+        inZoneWith: zoneID,
+        since: changeToken,
+        desiredKeys: []
+      )
+
+      for modificationResult in changes.modificationResultsByID.values {
+        guard let record = try? modificationResult.get().record else { continue }
+        if let recordType = VaultRecordType(rawValue: record.recordType) {
+          countsByRecordType[recordType, default: 0] += 1
+        } else {
+          otherRecordCount += 1
+        }
+      }
+
+      guard changes.moreComing else { break }
+      changeToken = changes.changeToken
+    }
+
+    return VaultRecordCountSnapshot(
+      countsByRecordType: countsByRecordType,
+      otherRecordCount: otherRecordCount
+    )
+  }
+
   // MARK: - Visible Pulse subscription reconciliation
 
   /// Coalesces lifecycle requests while preserving a request that arrives during
@@ -1432,15 +1503,36 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
 
   private func reconcileVisiblePulseSubscriptions() async {
     for scope: CKDatabase.Scope in [.private, .shared] {
+      // CloudKit coalesces concurrent subscription modifications on one
+      // database into a single server operation. A Pulse save issued while the
+      // engine is still establishing its own silent subscription can therefore
+      // fail that subscription too and abort the engine's fetch, so wait for
+      // the engine to report a completed fetch first.
+      guard scopesWithCompletedEngineFetch.contains(scope) else { continue }
+
+      // The Pulse record type exists only after a Pulse record has been
+      // uploaded in this CloudKit environment. Reissuing the rejected save on
+      // every activation re-enters the window above and never succeeds; the
+      // scope reopens when a Pulse record is saved or the account changes.
+      guard scopesAwaitingPulseRecordTypeSchema.contains(scope) == false else { continue }
+
       let store = CloudKitDatabaseSubscriptionStore(database: cloudDatabase(for: scope))
       let reconciler = VaultNotificationPulseSubscriptionReconciler(store: store)
       let scopeName = scope == .private ? "private" : "shared"
 
       do {
         let outcome = try await reconciler.reconcile(databaseScope: scope)
-        log.debug(
-          "visible Pulse subscription reconciliation for \(scopeName, privacy: .public): \(outcome.rawValue, privacy: .public)"
-        )
+        switch outcome {
+        case .schemaUnavailable:
+          scopesAwaitingPulseRecordTypeSchema.insert(scope)
+          log.notice(
+            "visible Pulse subscription deferred for \(scopeName, privacy: .public): CloudKit has no \(VaultRecordType.notificationPulse.rawValue, privacy: .public) record type in this environment yet"
+          )
+        case .created, .updated, .unchanged, .unsupportedScope:
+          log.debug(
+            "visible Pulse subscription reconciliation for \(scopeName, privacy: .public): \(outcome.rawValue, privacy: .public)"
+          )
+        }
       } catch is CancellationError {
         log.debug("visible Pulse subscription reconciliation cancelled")
         return
@@ -1554,6 +1646,7 @@ public actor CloudKitVaultSyncEngine: VaultSyncEngine, CKSyncEngineDelegate {
     syncDatabases.removeAll()
     engines[.private] = makeEngine(scope: .private)
     engines[.shared] = makeEngine(scope: .shared)
+    scopesWithCompletedEngineFetch.removeAll()
     await refreshDescriptors()
 
     for descriptor in descriptors.values {

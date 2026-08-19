@@ -445,6 +445,10 @@ private struct VaultSelectionList: View {
   let onEditVaultIcon: @MainActor @Sendable (VaultDescriptor) -> Void
   let onDeleteVault: @MainActor @Sendable (VaultDescriptor) -> Void
 
+  #if DEBUG
+    @State private var recordCountPresentation: VaultRecordCountPresentation?
+  #endif
+
   var body: some View {
     List {
       if let initialAvailabilityResolution,
@@ -506,6 +510,14 @@ private struct VaultSelectionList: View {
               }
             }
 
+            #if DEBUG
+              Button {
+                recordCountPresentation = VaultRecordCountPresentation(descriptor: vault)
+              } label: {
+                Label("Record Counts", systemImage: "ladybug")
+              }
+            #endif
+
             Button(role: .destructive) {
               onDeleteVault(vault)
             } label: {
@@ -525,8 +537,24 @@ private struct VaultSelectionList: View {
     .appInsetGroupedListStyle()
     .scrollContentBackground(.hidden)
     .background(.background)
+    #if DEBUG
+      .sheet(item: $recordCountPresentation) { presentation in
+        VaultRecordCountSheet(
+          descriptor: presentation.descriptor,
+          onClose: { recordCountPresentation = nil }
+        )
+      }
+    #endif
   }
 }
+
+#if DEBUG
+  private struct VaultRecordCountPresentation: Identifiable {
+    let descriptor: VaultDescriptor
+
+    var id: VaultID { descriptor.vaultID }
+  }
+#endif
 
 private struct VaultSelectionRow: View {
 

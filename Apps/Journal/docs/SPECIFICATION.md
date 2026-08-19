@@ -665,14 +665,36 @@ exposing live duration and normalized input levels for a scrolling waveform.
   50ms instead of repeatedly retargeting per-bar springs. The timeline pauses
   outside active recording; metering and persisted waveform data remain at the
   same nominal 20Hz cadence.
-- On iOS, the recording category enables Bluetooth HFP input. The recorder's
+- On iOS, the recording category enables Bluetooth HFP input plus high-quality
+  Bluetooth recording, so supporting AirPods-class microphones record above
+  telephone quality while older hardware silently keeps HFP. The recorder's
   default **Automatic** choice prefers a connected wireless microphone such as
   AirPods, otherwise preserving a valid current route before falling back to
   the built-in microphone. The recording surface shows the resolved microphone
   and lets the user choose any currently available input before recording.
   Input choice is transient to that recording surface; a disconnected explicit
-  input falls back to Automatic. Native macOS input selection and output-route
-  selection are outside this contract.
+  input falls back to Automatic. Routing is **best-effort**: the recorder waits
+  up to ~1.5s for a requested input to become active, then records on whatever
+  route the system settled on and shows that input — a slow or declined
+  Bluetooth handover changes the displayed microphone instead of failing the
+  take. Native macOS input selection and output-route selection are outside
+  this contract.
+- **Channel modes (iOS):** recordings are mono by default. When the resolved
+  microphone exposes stereo-capable data sources (the built-in microphone array
+  on a physical device), a segmented control appears under the microphone
+  selector offering **Mono / Stereo · Front / Stereo · Back**. Stereo takes set
+  the data source's polar pattern to stereo, match the input orientation to the
+  interface orientation at start (fixed for the take), and produce a 2-channel
+  AAC file; the live meter shows the louder channel. The choice is transient to
+  the surface and falls back to Mono when the selected input cannot record
+  stereo — or when the active session does not actually grant two input
+  channels after the stereo request (`inputNumberOfChannels` is the authority
+  per WWDC20 session 10226; another app controlling routing can deny the
+  preference). The Simulator (no data sources) records mono only.
+- **Interruption:** if the system interrupts an active recording (phone call,
+  Siri), the surface stops the take and delivers the partial recording through
+  `onFinish` — audio captured before the interruption is kept instead of the
+  surface staying stuck in a dead recording state.
 
 ### CaptureSuggestions → `CapturedSuggestion`
 
@@ -904,6 +926,17 @@ the gallery's **Lab** section).
   `VaultInfo` title, mirrors it into the local catalog summary, refreshes widget
   timelines, and hides the action for read-only shared vaults. Vault rows can be
   deleted from the row context menu after a destructive confirmation.
+  Debug builds add **Record Counts** to the row context menu. It opens a sheet
+  that reads the vault's local SwiftData rows for every CloudKit record type
+  immediately, then counts the records CloudKit currently stores in that vault's
+  zone, and shows both as `local / iCloud` per record type plus totals, records
+  CloudKit holds that this device has not imported yet, and the durable outbox
+  depth. `CKSyncEngine` publishes no import progress, so a vault that still
+  looks empty after a reinstall cannot otherwise be told apart from a finished
+  import. The CloudKit read is a diagnostics probe: it enumerates the zone with
+  its own change token and requests no record fields, so it neither advances
+  sync tokens nor downloads media. A refresh action re-runs both sides, and a
+  CloudKit failure is shown in the sheet without affecting sync.
   Owned vault deletion removes the CloudKit custom zone before deleting local
   catalog/content files, so the vault disappears for everyone with access.
   Participant vault deletion targets the accepted shared zone and then removes
@@ -1230,14 +1263,19 @@ the gallery's **Lab** section).
   visible tree node's context menu exposes Reply, Share, Edit, and Delete. Reply
   selects the explicit composer target described above; it does not navigate or
   mutate storage by itself. On iPhone and iPad, each individual tree node also
-  exposes Reply through a physical-left `SwipeCell` gesture. The row gesture
+  exposes Reply through a physical-right `SwipeCell` gesture. The row gesture
   begins only when horizontal movement is dominant, so vertical or equal-axis
   movement remains owned by Home's vertical scroll. The row continues to
-  rubber-band within its existing `-50...0pt` horizontal range. Crossing `-44pt`
-  reveals the same 44-point trailing circular Reply affordance and produces
+  rubber-band to the right within `0...50pt`. Crossing `+44pt`
+  reveals the same 44-point leading circular Reply affordance and produces
   impact feedback. A normally ended gesture past that threshold selects the same
   explicit Reply target exactly once; ending below the threshold, cancellation,
-  or failure restores the row without selecting Reply. Native macOS renders the
+  or failure restores the row without selecting Reply. Dragging the same row to
+  the left instead slides it aside to disclose that entry's capture time, shown
+  behind the trailing edge as the time of day above its abbreviated month and
+  day. The left range stops exactly at the width of that disclosure, and the
+  gesture carries no trigger in that direction: releasing the row always
+  restores it without mutating anything. Native macOS renders the
   cell content unchanged, without installing that swipe interaction; context-menu
   and accessibility Reply remain available. Saved entries can be shared from
   that menu. The share

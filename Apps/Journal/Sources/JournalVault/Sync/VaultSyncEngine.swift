@@ -182,6 +182,21 @@ public enum VaultDeletionError: Error, LocalizedError, Sendable {
   }
 }
 
+/// Failures for the CloudKit record-count diagnostics probe.
+public enum VaultRecordCountError: Error, LocalizedError, Sendable {
+  case unsupportedBySyncEngine
+  case vaultNotFound(VaultID)
+
+  public var errorDescription: String? {
+    switch self {
+    case .unsupportedBySyncEngine:
+      "This sync engine cannot read CloudKit record counts."
+    case .vaultNotFound:
+      "The selected vault could not be found."
+    }
+  }
+}
+
 /// The explicit sync boundary that owns CloudKit for vault stores.
 ///
 /// Screens never read CloudKit; they observe SwiftData. Implementations import
@@ -226,6 +241,15 @@ public protocol VaultSyncEngine: Sendable {
   /// Accepts a zone-wide CloudKit vault share and imports its shared database
   /// changes into the local vault stores.
   func acceptShare(metadata: CKShare.Metadata) async throws -> VaultShareAcceptance
+
+  /// Counts the records CloudKit currently stores in one vault's zone.
+  ///
+  /// A diagnostics probe rather than a sync operation: implementations must
+  /// enumerate the zone with their own change token and discard it, leaving
+  /// `CKSyncEngine` tokens and the local stores untouched. `CKSyncEngine`
+  /// publishes no import progress or backlog depth, so counting both sides is
+  /// how a debug surface separates "still importing" from "nothing to import".
+  func cloudRecordCounts(for vaultID: VaultID) async throws -> VaultRecordCountSnapshot
 
   /// Deletes the CloudKit boundary for a vault.
   ///
@@ -287,6 +311,10 @@ public actor LoggingVaultSyncEngine: VaultSyncEngine {
 
   public func acceptShare(metadata: CKShare.Metadata) async throws -> VaultShareAcceptance {
     throw VaultShareAcceptanceError.unsupportedBySyncEngine
+  }
+
+  public func cloudRecordCounts(for vaultID: VaultID) async throws -> VaultRecordCountSnapshot {
+    throw VaultRecordCountError.unsupportedBySyncEngine
   }
 
   public func deleteVault(_ descriptor: VaultDescriptor) async throws {

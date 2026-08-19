@@ -129,6 +129,11 @@ enum VaultNotificationPulseSubscriptionReconciliationOutcome: String, Equatable,
   case updated
   case unchanged
   case unsupportedScope
+
+  /// This CloudKit environment's schema has no Pulse record type yet, so the
+  /// record-type-filtered subscription cannot exist. Not a transport failure:
+  /// the same save succeeds once a Pulse record has been uploaded.
+  case schemaUnavailable
 }
 
 /// Idempotently owns only Tinycurve's visible Pulse subscription in one database.
@@ -156,16 +161,36 @@ struct VaultNotificationPulseSubscriptionReconciler<Store: VaultNotificationPuls
 
     guard let existingSubscription = try await store.subscription(withID: configuration.identifier)
     else {
-      try await store.save(subscription: configuration.makeSubscription())
-      return .created
+      return try await save(configuration, reporting: .created)
     }
 
     guard configuration.isEquivalent(to: existingSubscription) == false else {
       return .unchanged
     }
 
-    try await store.save(subscription: configuration.makeSubscription())
-    return .updated
+    return try await save(configuration, reporting: .updated)
+  }
+
+  /// Saves the subscription, reporting a missing record type as a state instead
+  /// of an error.
+  ///
+  /// CloudKit only creates a record type when a *record* of that type is saved;
+  /// saving a record-type-filtered subscription never creates schema. Until the
+  /// first `VaultNotificationPulse` record reaches this environment every save
+  /// is rejected, and CloudKit coalesces concurrent subscription modifications
+  /// on one database into a single server operation — so a doomed Pulse save
+  /// can fail the `CKSyncEngine` subscription riding in the same operation and
+  /// abort its fetch. Callers need this outcome to stop reissuing that save.
+  private func save(
+    _ configuration: VaultNotificationPulseSubscriptionConfiguration,
+    reporting savedOutcome: VaultNotificationPulseSubscriptionReconciliationOutcome
+  ) async throws -> VaultNotificationPulseSubscriptionReconciliationOutcome {
+    do {
+      try await store.save(subscription: configuration.makeSubscription())
+      return savedOutcome
+    } catch let error as CKError where error.isMissingRecordType {
+      return .schemaUnavailable
+    }
   }
 }
 
@@ -191,6 +216,25 @@ struct CloudKitDatabaseSubscriptionStore: VaultNotificationPulseSubscriptionStor
       throw CloudKitDatabaseSubscriptionStoreError.missingSaveResult(subscription.subscriptionID)
     }
     _ = try saveResult.get()
+  }
+}
+
+extension CKError {
+
+  /// Whether CloudKit rejected the request because this environment's schema
+  /// has no such record type. The server reports it as `unknownItem` (2003),
+  /// either directly or inside a partial failure.
+  fileprivate var isMissingRecordType: Bool {
+    switch code {
+    case .unknownItem:
+      true
+    case .partialFailure:
+      partialErrorsByItemID?.values.contains {
+        ($0 as? CKError)?.isMissingRecordType == true
+      } ?? false
+    default:
+      false
+    }
   }
 }
 

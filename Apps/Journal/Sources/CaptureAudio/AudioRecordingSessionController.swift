@@ -13,22 +13,22 @@ struct AudioRecordingStartResult: Sendable {
 
   #if os(iOS)
     let sessionSnapshot: AudioRecordingSessionSnapshot
+
+    /// The channel layout the recorder was actually configured with. Falls back
+    /// to `.mono` when the requested stereo configuration was refused.
+    let channelMode: AudioRecordingChannelMode
   #endif
 }
 
-/// Failures that prevent CaptureAudio from starting on its requested input.
+/// Failures that prevent CaptureAudio from starting a recording.
 enum AudioRecordingSessionError: LocalizedError, Sendable {
   case noRecordingInputAvailable
-  case requestedInputDidNotBecomeActive(name: String)
   case recorderDidNotStart
 
   var errorDescription: String? {
     switch self {
     case .noRecordingInputAvailable:
       return "No recording input is currently available."
-    case .requestedInputDidNotBecomeActive(let name):
-      return "The selected microphone “\(name)” didn't become active. "
-        + "Check its connection and try again."
     case .recorderDidNotStart:
       return "The audio recorder couldn't start."
     }
@@ -64,8 +64,8 @@ enum AudioRecordingSessionError: LocalizedError, Sendable {
   /// Decides whether an asynchronous audio-route request is ready to record.
   ///
   /// `setPreferredInput(_:)` only requests a route change. This policy gives the
-  /// controller a bounded confirmation window before it either starts the
-  /// recorder on the requested input or reports an actionable failure.
+  /// controller a bounded confirmation window; on timeout the take proceeds on
+  /// whatever route the system settled on rather than failing.
   struct AudioRecordingInputRouteConfirmationPolicy: Sendable {
     enum Decision: Sendable, Equatable {
       case confirmed
@@ -111,13 +111,17 @@ final class AudioRecordingSessionController: Sendable {
   )
 
   #if os(iOS)
-    /// Allows Bluetooth profile transitions up to roughly 1.5 seconds without
-    /// ever starting the recorder on an unconfirmed fallback microphone.
+    /// Allows Bluetooth profile transitions up to roughly 1.5 seconds before
+    /// recording proceeds on the route the system actually settled on.
     private static let routeConfirmationPolicy = AudioRecordingInputRouteConfirmationPolicy(
       maximumAttempts: 30
     )
     private static let routeConfirmationInterval: Duration = .milliseconds(50)
     private static let recorderRouteStabilizationDelay: Duration = .milliseconds(100)
+
+    /// Bounds the wait for the session to report two input channels after a
+    /// stereo data-source request (up to ~500ms).
+    private static let stereoInputConfirmationAttempts = 10
 
     /// Prepares or refreshes input state without activating the audio session.
     func refresh(
@@ -132,7 +136,7 @@ final class AudioRecordingSessionController: Sendable {
           selection: selection
         )
         if applyingPreferredInput {
-          try Self.applyPreferredInput(
+          Self.applyPreferredInput(
             request,
             to: session,
             forceRequest: false
@@ -147,9 +151,16 @@ final class AudioRecordingSessionController: Sendable {
     }
 
     /// Configures the selected input, activates the session, and starts recording.
+    ///
+    /// Routing is best-effort: after a bounded wait for the requested input the
+    /// recorder starts on the active route, and the snapshot reports the input
+    /// that is actually recording. A take never fails because a Bluetooth
+    /// microphone was slow to hand over or declined the route.
     func startRecording(
       fileURL: URL,
-      selection: AudioRecordingInputSelection
+      selection: AudioRecordingInputSelection,
+      channelMode: AudioRecordingChannelMode,
+      inputOrientation: AVAudioSession.StereoOrientation
     ) async throws -> AudioRecordingStartResult {
       let routeRequest = try await perform {
         let session = AVAudioSession.sharedInstance()
@@ -167,7 +178,7 @@ final class AudioRecordingSessionController: Sendable {
           guard request.requestedInput != nil else {
             throw AudioRecordingSessionError.noRecordingInputAvailable
           }
-          try Self.applyPreferredInput(
+          Self.applyPreferredInput(
             request,
             to: session,
             forceRequest: true
@@ -181,20 +192,51 @@ final class AudioRecordingSessionController: Sendable {
         }
       }
 
+      await waitForRequestedInputRoute(routeRequest)
+
       var startedRecorder: AVAudioRecorder?
       do {
-        _ = try await confirmRequestedInputRoute(routeRequest)
+        var resolvedChannelMode = try await perform {
+          Self.configureChannelMode(
+            channelMode,
+            on: AVAudioSession.sharedInstance(),
+            request: routeRequest,
+            inputOrientation: inputOrientation
+          )
+        }
+        if resolvedChannelMode.channelCount == 2 {
+          // WWDC20 session 10226: the active session, not the capability list,
+          // is the authority on whether stereo was actually granted — an app
+          // controlling routing can deny the preference. The data-source
+          // request also needs a moment to reconfigure the route, so poll
+          // briefly before recording a mono take instead.
+          let hasStereoInput = await waitForStereoInputChannels()
+          if hasStereoInput == false {
+            resolvedChannelMode = .mono
+          }
+        }
+        let channelCount = resolvedChannelMode.channelCount
         let recorder = try await perform {
-          try Self.makeRecorder(fileURL: fileURL)
+          try Self.makeRecorder(
+            fileURL: fileURL,
+            channelCount: channelCount
+          )
         }
         startedRecorder = recorder
         // Starting audio I/O can perform one more system route reconfiguration.
-        // Give that transition a moment to become observable before confirming.
+        // Give that transition a moment to become observable before reporting
+        // the input that is actually recording.
         try await Task.sleep(for: Self.recorderRouteStabilizationDelay)
-        let snapshot = try await verifyRequestedInputRemainsActive(routeRequest)
+        let snapshot = try await perform {
+          let session = AVAudioSession.sharedInstance()
+          return routeRequest.snapshot(
+            resolvedInput: Self.currentInput(from: routeRequest, session: session)
+          )
+        }
         return AudioRecordingStartResult(
           recorder: recorder,
-          sessionSnapshot: snapshot
+          sessionSnapshot: snapshot,
+          channelMode: resolvedChannelMode
         )
       } catch {
         let recorderToStop = startedRecorder
@@ -210,7 +252,7 @@ final class AudioRecordingSessionController: Sendable {
     func startRecording(fileURL: URL) async throws -> AudioRecordingStartResult {
       try await perform {
         AudioRecordingStartResult(
-          recorder: try Self.makeRecorder(fileURL: fileURL)
+          recorder: try Self.makeRecorder(fileURL: fileURL, channelCount: 1)
         )
       }
     }
@@ -221,8 +263,15 @@ final class AudioRecordingSessionController: Sendable {
     try? await perform {
       guard recorder.isRecording else { return nil }
       recorder.updateMeters()
+      // The waveform renders one stream, so the louder channel drives the
+      // meter; a stereo take with one quiet channel still shows motion.
+      let channelCount = max(1, Int(recorder.format.channelCount))
+      let averagePower =
+        (0..<channelCount)
+        .map { recorder.averagePower(forChannel: $0) }
+        .max() ?? -160
       return AudioRecordingMeterReading(
-        averagePower: recorder.averagePower(forChannel: 0),
+        averagePower: averagePower,
         duration: recorder.currentTime
       )
     }
@@ -256,11 +305,14 @@ final class AudioRecordingSessionController: Sendable {
     }
   }
 
-  private static func makeRecorder(fileURL: URL) throws -> AVAudioRecorder {
+  private static func makeRecorder(
+    fileURL: URL,
+    channelCount: Int
+  ) throws -> AVAudioRecorder {
     let settings: [String: Any] = [
       AVFormatIDKey: kAudioFormatMPEG4AAC,
       AVSampleRateKey: 44_100,
-      AVNumberOfChannelsKey: 1,
+      AVNumberOfChannelsKey: channelCount,
       AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
     ]
     let recorder = try AVAudioRecorder(url: fileURL, settings: settings)
@@ -272,54 +324,99 @@ final class AudioRecordingSessionController: Sendable {
   }
 
   #if os(iOS)
-    private func confirmRequestedInputRoute(
+    /// Waits for `setPreferredInput(_:)` to take effect. A timeout is not a
+    /// failure: the caller records on the active route and the UI shows the
+    /// resolved input instead of the requested one.
+    private func waitForRequestedInputRoute(
       _ request: AudioRecordingInputRouteRequest
-    ) async throws -> AudioRecordingSessionSnapshot {
-      guard let requestedInput = request.requestedInput else {
-        throw AudioRecordingSessionError.noRecordingInputAvailable
-      }
+    ) async {
+      guard let requestedInput = request.requestedInput else { return }
 
       for attemptIndex in 0..<Self.routeConfirmationPolicy.maximumAttempts {
-        let activeInputIDs = try await perform {
-          AVAudioSession.sharedInstance().currentRoute.inputs.map(\.uid)
-        }
+        let activeInputIDs =
+          (try? await perform {
+            AVAudioSession.sharedInstance().currentRoute.inputs.map(\.uid)
+          }) ?? []
         switch Self.routeConfirmationPolicy.decision(
           requestedInputID: requestedInput.id,
           activeInputIDs: activeInputIDs,
           attemptIndex: attemptIndex
         ) {
-        case .confirmed:
-          return request.snapshot(resolvedInput: requestedInput)
+        case .confirmed, .timedOut:
+          return
         case .retry:
-          try await Task.sleep(for: Self.routeConfirmationInterval)
-        case .timedOut:
-          throw AudioRecordingSessionError.requestedInputDidNotBecomeActive(
-            name: requestedInput.name
-          )
+          do {
+            try await Task.sleep(for: Self.routeConfirmationInterval)
+          } catch {
+            return
+          }
         }
       }
-
-      preconditionFailure("The route confirmation policy must finish within its attempt limit.")
     }
 
-    /// Rejects a recorder start that reconfigured audio I/O onto another input.
-    private func verifyRequestedInputRemainsActive(
-      _ request: AudioRecordingInputRouteRequest
-    ) async throws -> AudioRecordingSessionSnapshot {
-      guard let requestedInput = request.requestedInput else {
-        throw AudioRecordingSessionError.noRecordingInputAvailable
-      }
-      let isRequestedInputActive = try await perform {
-        AVAudioSession.sharedInstance().currentRoute.inputs.contains {
-          $0.uid == requestedInput.id
+    /// Waits for the active session to expose two input channels after the
+    /// stereo data source was requested. `false` means the system kept a mono
+    /// input and the recorder must be created with one channel.
+    private func waitForStereoInputChannels() async -> Bool {
+      for _ in 0..<Self.stereoInputConfirmationAttempts {
+        let channelCount =
+          (try? await perform {
+            AVAudioSession.sharedInstance().inputNumberOfChannels
+          }) ?? 1
+        if channelCount >= 2 {
+          return true
+        }
+        do {
+          try await Task.sleep(for: Self.routeConfirmationInterval)
+        } catch {
+          return false
         }
       }
-      guard isRequestedInputActive else {
-        throw AudioRecordingSessionError.requestedInputDidNotBecomeActive(
-          name: requestedInput.name
-        )
+      return false
+    }
+
+    /// Applies the built-in microphone data source, polar pattern, and input
+    /// orientation for a stereo take, falling back to mono when the hardware or
+    /// session refuses. Input orientation cannot change once recording starts,
+    /// so this must run before the recorder is created.
+    private static func configureChannelMode(
+      _ requestedMode: AudioRecordingChannelMode,
+      on session: AVAudioSession,
+      request: AudioRecordingInputRouteRequest,
+      inputOrientation: AVAudioSession.StereoOrientation
+    ) -> AudioRecordingChannelMode {
+      let ports = session.availableInputs ?? []
+      guard let port = ports.first(where: { $0.uid == request.requestedInput?.id })
+      else {
+        return .mono
       }
-      return request.snapshot(resolvedInput: requestedInput)
+
+      guard let dataSourceOrientation = requestedMode.dataSourceOrientation else {
+        // Mono uses the default data source; clear a stereo one left behind by
+        // a previous take so the bottom voice microphone records again.
+        if port.preferredDataSource != nil {
+          try? port.setPreferredDataSource(nil)
+        }
+        return .mono
+      }
+
+      guard
+        let dataSource = (port.dataSources ?? []).first(where: {
+          $0.orientation == dataSourceOrientation
+        }),
+        dataSource.supportedPolarPatterns?.contains(.stereo) == true
+      else {
+        return .mono
+      }
+
+      do {
+        try dataSource.setPreferredPolarPattern(.stereo)
+        try port.setPreferredDataSource(dataSource)
+        try session.setPreferredInputOrientation(inputOrientation)
+        return requestedMode
+      } catch {
+        return .mono
+      }
     }
 
     /// Avoids emitting another route/input notification when the recording
@@ -327,7 +424,13 @@ final class AudioRecordingSessionController: Sendable {
     private static func configureForRecordingIfNeeded(
       _ session: AVAudioSession
     ) throws {
-      let options: AVAudioSession.CategoryOptions = [.allowBluetoothHFP]
+      // High-quality Bluetooth recording upgrades supporting AirPods-class
+      // devices past the telephone-grade HFP microphone; unsupported hardware
+      // silently keeps using HFP.
+      let options: AVAudioSession.CategoryOptions = [
+        .allowBluetoothHFP,
+        .bluetoothHighQualityRecording,
+      ]
       guard
         session.category != .record
           || session.mode != .default
@@ -373,25 +476,23 @@ final class AudioRecordingSessionController: Sendable {
     }
 
     /// Requests the resolved port when either the preference or actual route is
-    /// stale. Recording start forces one fresh request after activation.
+    /// stale. Recording start forces one fresh request after activation. The
+    /// request is best-effort; the active route stays authoritative.
     private static func applyPreferredInput(
       _ request: AudioRecordingInputRouteRequest,
       to session: AVAudioSession,
       forceRequest: Bool
-    ) throws {
+    ) {
       let ports = session.availableInputs ?? []
-      let preferredPort = ports.first { $0.uid == request.requestedInput?.id }
 
-      guard let requestedInput = request.requestedInput else {
+      guard
+        let requestedInput = request.requestedInput,
+        let preferredPort = ports.first(where: { $0.uid == requestedInput.id })
+      else {
         if session.preferredInput != nil {
-          try session.setPreferredInput(nil)
+          try? session.setPreferredInput(nil)
         }
         return
-      }
-      guard let preferredPort else {
-        throw AudioRecordingSessionError.requestedInputDidNotBecomeActive(
-          name: requestedInput.name
-        )
       }
 
       let isRequestedInputActive = session.currentRoute.inputs.contains {
@@ -401,7 +502,7 @@ final class AudioRecordingSessionController: Sendable {
         || session.preferredInput?.uid != requestedInput.id
         || isRequestedInputActive == false
       {
-        try session.setPreferredInput(preferredPort)
+        try? session.setPreferredInput(preferredPort)
       }
     }
 
@@ -415,7 +516,12 @@ final class AudioRecordingSessionController: Sendable {
     }
 
     private static func deactivate(_ session: AVAudioSession) {
-      if session.preferredInput != nil {
+      if let preferredInput = session.preferredInput {
+        // Also clear a stereo data source so the next session starts from the
+        // system default microphone configuration.
+        if preferredInput.preferredDataSource != nil {
+          try? preferredInput.setPreferredDataSource(nil)
+        }
         try? session.setPreferredInput(nil)
       }
       try? session.setActive(false, options: .notifyOthersOnDeactivation)

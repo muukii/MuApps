@@ -407,6 +407,23 @@ sequenceDiagram
   ParticipantSync->>ParticipantStore: Import records and assets
 ```
 
+### Sync diagnostics probe
+
+`CKSyncEngine` は import progress も backlog depth も公開しないため、local wipe 後の
+vault は「まだ import 中」なのか「取り込むものがない」のか区別できない。sync boundary は
+この判別のためだけに record 数を数える probe を持つ。
+
+- `VaultSyncEngine.cloudRecordCounts(for:)` は対象 vault の zone を `CKSyncEngine` とは別の
+  change token で列挙し、その token を捨てる。durable token と local store は一切触らない。
+- 列挙は `desiredKeys: []` で行う。record type と件数しか必要としないため、media の多い
+  vault でも asset を download しない。
+- record type schema に依存する query は使わない。index 未 deploy の environment でも
+  同じ結果が得られることを優先する。
+- local 側は `VaultContentStore.localSyncCounts()` が record type ごとの row 数と outbox
+  深さを返す。`cloudStorageEstimate()` と異なり payload ではなく row を数え、logically
+  deleted row も含める。対応する CloudKit record がまだ存在し得るためである。
+- probe は診断専用であり、sync の進行判断や retry 制御には使わない。
+
 ## Vault Activity / participant notification
 
 この節を、Vault 内の activity history と participant-visible notification の
@@ -565,6 +582,18 @@ tinycurve.vault-pulse.shared.v1
   を自動探索して Pulse 用 subscription を sync 用に採用しないようにする。
 - 表示用には `recordType == VaultNotificationPulse` の `CKDatabaseSubscription` を
   private / shared database に別途作る。Activity cleanup はこの subscription の対象外。
+- visible subscription の save は record sync を止めてはならない。CloudKit は同一 database への
+  subscription 変更を 1 つの server operation に coalesce するため、`CKSyncEngine` が silent
+  subscription を確立している最中に Pulse subscription を save すると、その失敗が engine 側の
+  subscription ごと fetch を落とす。よって Pulse subscription の reconciliation は、その scope の
+  engine が `didFetchChanges` を報告した後にだけ実行する。engine 再生成と account change では
+  この待機状態に戻す。
+- CloudKit が record type を作るのは record を save したときだけで、subscription の save は schema を
+  作らない。`VaultNotificationPulse` record がまだ 1 件も upload されていない environment では
+  save は必ず `unknownItem`（server 2003 `record type not found`）で失敗する。これは transport
+  failure ではなく `schemaUnavailable` state として扱い、その scope の再試行を止める。Pulse record の
+  save 成功（record type は database ではなく environment 単位なので両 scope を解除）または
+  account change で再開する。
 - visible notification info は stable な localization key
   `VAULT_ACTIVITY_NOTIFICATION_TITLE` / `VAULT_ACTIVITY_NOTIFICATION_BODY`、default sound、
   badge なし、`shouldSendContentAvailable == false` とする。初期 copy は title `Tinycurve`、

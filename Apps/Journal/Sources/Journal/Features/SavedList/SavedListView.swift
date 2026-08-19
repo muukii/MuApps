@@ -29,8 +29,12 @@ struct SavedListView: View {
     selectedContentKind: Binding<JournalVault.Card.Kind?> = .constant(nil),
     replyTarget: SavedListReplyTarget? = nil,
     scrollRequest: Binding<SavedListScrollRequest?> = .constant(nil),
-    onSelectReplyTarget: @escaping @MainActor (SavedListReplyTarget) -> Void = { _ in },
-    onReplyTargetAvailabilityChange: @escaping @MainActor (Bool) -> Void = { _ in }
+    onSelectReplyTarget: @escaping @MainActor (SavedListReplyTarget) -> Void = {
+      _ in
+    },
+    onReplyTargetAvailabilityChange: @escaping @MainActor (Bool) -> Void = {
+      _ in
+    }
   ) {
     _selectedContentKind = selectedContentKind
     self.replyTarget = replyTarget
@@ -261,7 +265,10 @@ private struct VaultSavedListContentView: View {
         Text(deleteErrorMessage)
       }
     }
-    .alert("Could Not Update Todo", isPresented: todoCompletionErrorPresentation) {
+    .alert(
+      "Could Not Update Todo",
+      isPresented: todoCompletionErrorPresentation
+    ) {
       Button("OK", role: .cancel) {}
     } message: {
       if let todoCompletionErrorMessage {
@@ -322,7 +329,11 @@ private struct VaultSavedListContentView: View {
         .padding(.horizontal, savedListPadding)
       }
 
-      LazyVStack(alignment: .leading, spacing: 2) {
+      LazyVStack(
+        alignment: .leading,
+        spacing: 2,
+        pinnedViews: .sectionHeaders
+      ) {
         ForEach(sections) { section in
           Section {
             ForEach(section.entries) { entry in
@@ -358,8 +369,16 @@ private struct VaultSavedListContentView: View {
               }
             }
           } header: {
-            VaultSavedDayHeader(day: section.day)
-              .padding(.vertical, daySectionTopSpacing)
+            StickyContainer { isSticked in
+              VaultSavedDayHeader(
+                isSticked: isSticked,
+                day: section.day
+              )
+              .padding(
+                .vertical,
+                daySectionTopSpacing
+              )
+            }
           }
         }
       }
@@ -550,7 +569,9 @@ private struct VaultSavedListContentView: View {
         guard didChange else { return }
 
         await vaultRuntime.refresh()
-        WidgetCenter.shared.reloadTimelines(ofKind: JournalWidgetKind.latestNote)
+        WidgetCenter.shared.reloadTimelines(
+          ofKind: JournalWidgetKind.latestNote
+        )
       } catch {
         todoCompletionErrorMessage = error.localizedDescription
       }
@@ -594,6 +615,26 @@ private struct SavedListRenderedEdgeIDsPreferenceKey: PreferenceKey {
     nextValue: () -> Set<UUID>
   ) {
     value.formUnion(nextValue())
+  }
+}
+
+private struct StickyContainer<Content: View>: View {
+
+  let content: (Bool) -> Content
+  @State private var isSticked: Bool = false
+
+  init(@ViewBuilder content: @escaping (Bool) -> Content) {
+    self.content = content
+  }
+
+  var body: some View {
+    content(isSticked)
+      .onGeometryChange(for: Bool.self) {
+        // 20pt is just approximate value
+        return $0.frame(in: .scrollView).minY <= 20
+      } action: { newValue in
+        isSticked = newValue
+      }
   }
 }
 
@@ -715,6 +756,7 @@ private struct SavedListReplyTargetAvailabilityObservation: Equatable {
 private struct VaultSavedListContentFilterMenu: View {
 
   @Binding var selection: JournalVault.Card.Kind?
+  @Environment(\.appPalette) var palette
 
   var body: some View {
     Menu {
@@ -732,16 +774,22 @@ private struct VaultSavedListContentFilterMenu: View {
         }
       }
       .pickerStyle(.inline)
+      .tint(palette.onPrimaryContainer)
     } label: {
       Label("Filter Entries", systemImage: filterSymbolName)
         .labelStyle(.iconOnly)
     }
+    .tint(isSelectionEnabled ? palette.tint : palette.onPrimaryContainer)
     .accessibilityLabel("Filter Entries")
     .accessibilityValue(accessibilityValue)
   }
 
   private var filterableKinds: [JournalVault.Card.Kind] {
     JournalVault.Card.Kind.allCases.filter(\.isAvailableInSavedListFilter)
+  }
+  
+  private var isSelectionEnabled: Bool {
+    selection != nil
   }
 
   private var filterSymbolName: String {

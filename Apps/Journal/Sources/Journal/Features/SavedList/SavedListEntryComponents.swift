@@ -154,18 +154,18 @@ struct VaultSavedEntryTreeCell: View {
           .foregroundStyle(.tint)
           .frame(width: 26, alignment: .center)
           .padding(.leading, -10)
-        
+
       }
 
       SwipeCell {
         VStack {
-//          if depth > 0 {
-//            DepthIndicator(depth: depth)
-//              .frame(
-//                maxWidth: .infinity,
-//                alignment: .init(horizontal: .leading, vertical: .center)
-//              )
-//          }
+          //          if depth > 0 {
+          //            DepthIndicator(depth: depth)
+          //              .frame(
+          //                maxWidth: .infinity,
+          //                alignment: .init(horizontal: .leading, vertical: .center)
+          //              )
+          //          }
           VaultSavedEntryRow(
             entry: entry,
             isMutationDisabled: isMutationDisabled,
@@ -175,15 +175,42 @@ struct VaultSavedEntryTreeCell: View {
             onRequestDelete: onRequestDelete,
             onToggleTodoCompletion: onToggleTodoCompletion
           )
-        }       
+        }
         .background(.appSecondaryContainer)
         .clipShape(.rect(cornerRadius: 24))
+      } info: {
+        VaultSavedEntryCreatedAtInfo(createdAt: entry.createdAt)
       } onTrigger: {
         onReply(entry)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.horizontal, 16)
+  }
+}
+
+/// Capture time disclosed behind a saved-entry card while it is swiped aside.
+///
+/// The day header already carries the calendar day for a root placement, but a
+/// reply can be authored on a later day than the tree it hangs under, so the
+/// date stays beside the time instead of being inferred from the section.
+private struct VaultSavedEntryCreatedAtInfo: View {
+
+  let createdAt: Date
+
+  var body: some View {
+    VStack(alignment: .trailing, spacing: 2) {
+      Text(createdAt, format: .dateTime.hour().minute())
+        .font(.system(size: 13))
+        .fontWeight(.semibold)
+
+      Text(createdAt, format: .dateTime.month(.abbreviated).day())
+        .font(.system(size: 11))
+    }
+    .fontDesign(.rounded)
+    .monospacedDigit()
+    .foregroundStyle(.secondary)
+    .padding(.horizontal, 12)
   }
 }
 
@@ -211,6 +238,7 @@ struct VaultSavedRootGroup: View {
 
 struct VaultSavedDayHeader: View {
 
+  let isSticked: Bool
   let day: Date
 
   var body: some View {
@@ -219,5 +247,11 @@ struct VaultSavedDayHeader: View {
       .foregroundStyle(.appOnPrimaryContainer.opacity(0.72))
       .accessibilityAddTraits(.isHeader)
       .frame(maxWidth: .infinity, alignment: .center)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+      .animation(.smooth) {
+        $0.glassEffect(isSticked ? .regular : .identity)
+      } 
+      .padding(.horizontal, 16)
   }
 }

@@ -1,6 +1,10 @@
 import AVFoundation
 import Observation
 
+#if os(iOS)
+  import UIKit
+#endif
+
 // MARK: - Value
 
 /// A finished ambient-sound recording. The file lives in the temporary
@@ -103,6 +107,14 @@ public final class AmbientAudioRecorder {
 
     /// Input that Automatic or the explicit choice currently resolves to.
     private(set) var resolvedInput: AudioRecordingInput?
+
+    /// Transient channel-layout choice for this recorder presentation.
+    private(set) var channelMode: AudioRecordingChannelMode = .mono
+
+    /// Channel modes the currently resolved microphone can record.
+    var availableChannelModes: [AudioRecordingChannelMode] {
+      resolvedInput?.supportedChannelModes ?? [.mono]
+    }
   #endif
 
   /// Number of amplitude samples kept in `samples`. At `sampleInterval` cadence
@@ -167,6 +179,19 @@ public final class AmbientAudioRecorder {
         availableInputs: availableInputs,
         currentInputID: resolvedInput?.id
       )
+      channelMode = AudioRecordingChannelModePolicy.effectiveMode(
+        for: channelMode,
+        supportedModes: availableChannelModes
+      )
+    }
+
+    /// Stores a transient channel-mode choice, clamped to what the resolved
+    /// microphone supports.
+    func selectChannelMode(_ mode: AudioRecordingChannelMode) {
+      channelMode = AudioRecordingChannelModePolicy.effectiveMode(
+        for: mode,
+        supportedModes: availableChannelModes
+      )
     }
   #endif
 
@@ -181,9 +206,15 @@ public final class AmbientAudioRecorder {
     #if os(iOS)
       startResult = try await recordingController.startRecording(
         fileURL: url,
-        selection: inputSelection
+        selection: inputSelection,
+        channelMode: AudioRecordingChannelModePolicy.effectiveMode(
+          for: channelMode,
+          supportedModes: availableChannelModes
+        ),
+        inputOrientation: Self.currentStereoInputOrientation()
       )
       applyAudioSessionSnapshot(startResult.sessionSnapshot)
+      channelMode = startResult.channelMode
     #else
       startResult = try await recordingController.startRecording(fileURL: url)
     #endif
@@ -257,6 +288,38 @@ public final class AmbientAudioRecorder {
       availableInputs = snapshot.availableInputs
       inputSelection = snapshot.selection
       resolvedInput = snapshot.resolvedInput
+      channelMode = AudioRecordingChannelModePolicy.effectiveMode(
+        for: channelMode,
+        supportedModes: availableChannelModes
+      )
+    }
+
+    /// Stereo bakes left/right into the file, so the input orientation must
+    /// match how the user is holding the interface when the take starts; the
+    /// system forbids changing it mid-recording.
+    private static func currentStereoInputOrientation() -> AVAudioSession.StereoOrientation {
+      let scenes = UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+      let scene =
+        scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+
+      guard let interfaceOrientation = scene?.effectiveGeometry.interfaceOrientation
+      else {
+        return .portrait
+      }
+
+      switch interfaceOrientation {
+      case .portrait, .unknown:
+        return .portrait
+      case .portraitUpsideDown:
+        return .portraitUpsideDown
+      case .landscapeLeft:
+        return .landscapeLeft
+      case .landscapeRight:
+        return .landscapeRight
+      @unknown default:
+        return .portrait
+      }
     }
   #endif
 
