@@ -43,7 +43,7 @@ enum CreationComposerPlacement {
 /// The caller continues to own draft mutation, capture style, and saving.
 struct CreationContainer<Content: View, MenuContent: View>: View {
 
-  private let draft: ThreadDraftCard
+  private let draft: CardEditDraft
   private let isPresented: Bool
   private let placement: CreationComposerPlacement
   private let replyTarget: SavedListReplyTarget?
@@ -61,7 +61,7 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
   private let menuContent: MenuContent
 
   init(
-    draft: ThreadDraftCard,
+    draft: CardEditDraft,
     isPresented: Bool = true,
     placement: CreationComposerPlacement = .root,
     replyTarget: SavedListReplyTarget? = nil,

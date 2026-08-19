@@ -21,7 +21,7 @@ struct JournalShareLoadWarning: Identifiable, Sendable {
 
 /// Converts `NSItemProvider` values into persistence-ready share payloads.
 ///
-/// Providers are loaded in their original order so `createThread(cards:)`
+/// Providers are loaded in their original order so `createPost(cards:)`
 /// preserves the order in which the host app presented the shared items.
 @MainActor
 struct JournalShareContentLoader {

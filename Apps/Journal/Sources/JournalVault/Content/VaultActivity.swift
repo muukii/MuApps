@@ -26,7 +26,7 @@ public final class VaultActivity {
   /// represented locally. A future imported or legacy activity may omit it.
   public private(set) var subjectEdgeID: UUID?
 
-  /// Root placement that owns ``subjectEdgeID``'s thread, if known.
+  /// Root placement that owns ``subjectEdgeID``'s post, if known.
   ///
   /// Root posts set this to the same value as ``subjectEdgeID``. Keeping it as
   /// a stable ID instead of a SwiftData relationship lets history outlive

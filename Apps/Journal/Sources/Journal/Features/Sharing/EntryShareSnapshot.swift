@@ -24,6 +24,8 @@ struct EntryShareAttachmentSource: Sendable, Equatable {
   let thumbnail: Data?
   let contentType: String?
   let byteSize: Int?
+  /// Measured length of a time-based resource, in seconds.
+  let duration: TimeInterval?
 }
 
 /// A detached, share-ready copy of one saved vault entry.
@@ -107,7 +109,12 @@ struct EntryShareSnapshot: Identifiable, Sendable, Equatable {
     case .video:
       return .photo(PhotoContentSource(imageData: attachment?.thumbnail))
     case .audio:
-      return .audio(AudioContentSource(fileURL: fileURL(for: attachment)))
+      return .audio(
+        AudioContentSource(
+          fileURL: fileURL(for: attachment),
+          duration: attachment?.duration
+        )
+      )
     case .doodle:
       let drawingData = fileData(for: attachment)
       let drawing = drawingData.flatMap {

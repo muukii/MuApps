@@ -88,7 +88,7 @@ struct CreationComposerStateTests {
     #expect(
       state.completePost(
         for: state.activeDestination,
-        ifMatching: ThreadDraftCard(text: "Different object")
+        ifMatching: CardEditDraft(text: "Different object")
       ) == false
     )
     #expect(state.replyTarget == replyTarget)

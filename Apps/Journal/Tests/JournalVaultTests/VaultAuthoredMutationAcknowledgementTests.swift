@@ -22,7 +22,7 @@ struct VaultAuthoredMutationAcknowledgementTests {
     let vaultID = VaultID()
     let syncStore = try VaultContentStore.open(vaultID: vaultID, layout: layout)
     let root = try #require(
-      try syncStore.createThread(
+      try syncStore.createPost(
         cards: [.init(kind: .text, text: "first version")],
         deliveryPolicy: .historyOnly
       ).first
@@ -72,7 +72,7 @@ struct VaultAuthoredMutationAcknowledgementTests {
     let vaultID = VaultID()
     let syncStore = try VaultContentStore.open(vaultID: vaultID, layout: layout)
     let root = try #require(
-      try syncStore.createThread(
+      try syncStore.createPost(
         cards: [.init(kind: .text, text: "delete me")],
         deliveryPolicy: .historyOnly
       ).first

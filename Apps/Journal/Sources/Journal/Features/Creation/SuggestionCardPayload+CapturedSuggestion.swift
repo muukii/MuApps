@@ -42,7 +42,7 @@ extension SuggestionCardPayload {
   ///
   /// The single-card composer uses this aggregate shape so one system picker
   /// selection stays one post. `cardPayloads(capturedSuggestion:)` remains
-  /// available to importers that intentionally author a multi-card thread.
+  /// available to importers that intentionally author a multi-card post.
   init(capturedSuggestion: CapturedSuggestion) {
     let convertedElements = capturedSuggestion.elements.map { SuggestionCardElement(capturedElement: $0) }
     let mediaResources = zip(capturedSuggestion.elements, convertedElements).flatMap { capturedElement, element in

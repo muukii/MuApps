@@ -28,7 +28,7 @@ public struct VaultSharedWithYouNoticeCandidate: Equatable, Hashable, Sendable {
   /// Placement created by the authored action, when the Activity retained it.
   public let subjectEdgeID: UUID?
 
-  /// Root placement that owns ``subjectEdgeID``'s thread, when known.
+  /// Root placement that owns ``subjectEdgeID``'s post, when known.
   public let rootEdgeID: UUID?
 
   public init(

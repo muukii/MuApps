@@ -85,11 +85,11 @@ struct VaultAuthoredWriteCoordinatorTests {
     // manufacture two simultaneous extension main actors. Keep the stale
     // two-container data regression beside the coordinator proof: the second
     // author sees and reuses the fixed singleton after the first commits.
-    _ = try firstStore.createThread(
+    _ = try firstStore.createPost(
       cards: [.init(kind: .text, text: "from app")],
       deliveryPolicy: .notifyParticipants
     )
-    _ = try secondStore.createThread(
+    _ = try secondStore.createPost(
       cards: [.init(kind: .text, text: "from extension")],
       deliveryPolicy: .notifyParticipants
     )

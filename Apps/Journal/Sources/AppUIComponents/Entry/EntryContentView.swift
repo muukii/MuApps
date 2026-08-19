@@ -210,7 +210,8 @@ public enum EntryContent: Equatable, Sendable {
         AudioContentSource(
           fileURL: attachment?.kind == .audio ? attachment?.fileURL : nil,
           waveformLevels: attachment?.kind == .audio
-            ? attachment?.waveformLevels : nil
+            ? attachment?.waveformLevels : nil,
+          duration: attachment?.kind == .audio ? attachment?.duration : nil
         )
       )
     case .suggestion:
@@ -273,6 +274,8 @@ public struct EntryContentAttachment: Hashable, Sendable {
   public let byteSize: Int?
   /// Validated, quantized audio levels ordered from recording start to end.
   public let waveformLevels: Data?
+  /// Measured length of a time-based resource, in seconds.
+  public let duration: TimeInterval?
   public let suggestionMediaFileURLsByResourceID: [UUID: URL]
 
   public init(
@@ -285,6 +288,7 @@ public struct EntryContentAttachment: Hashable, Sendable {
     contentType: String? = nil,
     byteSize: Int? = nil,
     waveformLevels: Data? = nil,
+    duration: TimeInterval? = nil,
     suggestionMediaFileURLsByResourceID: [UUID: URL] = [:]
   ) {
     self.kind = kind
@@ -296,6 +300,7 @@ public struct EntryContentAttachment: Hashable, Sendable {
     self.contentType = contentType
     self.byteSize = byteSize
     self.waveformLevels = waveformLevels
+    self.duration = duration
     self.suggestionMediaFileURLsByResourceID =
       suggestionMediaFileURLsByResourceID
   }

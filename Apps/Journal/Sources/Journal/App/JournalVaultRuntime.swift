@@ -654,7 +654,7 @@ final class JournalVaultRuntime {
 
       do {
         let timestamp = Date().formatted(date: .abbreviated, time: .standard)
-        try vault.createThread(cards: [
+        try vault.createPost(cards: [
           VaultContentStore.CardDraft(
             kind: .text,
             text: "Vault runtime debug entry\n\(timestamp)"
@@ -822,14 +822,14 @@ final class VaultInstance {
     refreshPendingMutationCount()
   }
 
-  /// Saves a newly authored thread into this vault.
+  /// Saves a newly authored post into this vault.
   ///
   /// The instance owns the current catalog descriptor, making this the app-side
   /// boundary that snapshots participant eligibility before `VaultContentStore`
   /// starts its local transaction.
   @discardableResult
-  func createThread(cards drafts: [VaultContentStore.CardDraft]) throws -> [CardEdge] {
-    let edges = try contentStore.createThread(
+  func createPost(cards drafts: [VaultContentStore.CardDraft]) throws -> [CardEdge] {
+    let edges = try contentStore.createPost(
       cards: drafts,
       deliveryPolicy: descriptor.activityDeliveryPolicy
     )

@@ -856,12 +856,3 @@ enum CardEditDraftSnapshotError: Error {
   case invalidLinkURL
   case unsupportedKind
 }
-
-/// Creation-facing name kept while the shared edit draft is adopted across the app.
-typealias ThreadDraftCard = CardEditDraft
-
-/// Creation-facing snapshot name kept for call sites that still speak in drafts.
-typealias ThreadDraftCardSnapshot = CardEditDraftSnapshot
-
-/// Creation-facing error name kept while save-time conversion is generalized.
-typealias ThreadDraftCardSnapshotError = CardEditDraftSnapshotError

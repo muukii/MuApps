@@ -408,7 +408,7 @@ extension VaultContentStore {
 
   /// Saves a post. Every save creates a root `CardEdge`; additional drafts
   /// become child edges of that root in authored order — the design rule that
-  /// single cards and threads share one shape.
+  /// single cards and posts share one shape.
   ///
   /// The caller must supply a catalog-derived delivery policy. This store never
   /// reads `VaultCatalogStore`, so it cannot safely infer whether another
@@ -417,14 +417,14 @@ extension VaultContentStore {
   /// - Returns: The created edges in authored order; the first is the root.
   @MainActor
   @discardableResult
-  public func createThread(
+  public func createPost(
     cards drafts: [CardDraft],
     deliveryPolicy: VaultActivityDeliveryPolicy
   ) throws -> [CardEdge] {
     guard drafts.isEmpty == false else { return [] }
 
     // Validate the full authored post before mutating the context or staging
-    // files. A missing child payload must not leave a partial thread behind.
+    // files. A missing child payload must not leave a partial post behind.
     for draft in drafts {
       try validateAttachmentPayloadIfNeeded(draft)
     }
@@ -434,7 +434,7 @@ extension VaultContentStore {
 
       // A multi-card post is one save, but its authored order still matters to
       // date-sorted readers, so cards get tiny timestamp offsets.
-      let threadCreatedAt = Date()
+      let postCreatedAt = Date()
       var edges: [CardEdge] = []
       var rootEdge: CardEdge?
       var destinationFileURLs: [URL] = []
@@ -442,7 +442,7 @@ extension VaultContentStore {
 
       do {
         for (offset, draft) in drafts.enumerated() {
-          let createdAt = threadCreatedAt.addingTimeInterval(TimeInterval(offset) / 1000)
+          let createdAt = postCreatedAt.addingTimeInterval(TimeInterval(offset) / 1000)
           let stagedCardEdge = try stageCardEdge(
             from: draft,
             parent: rootEdge,
@@ -461,12 +461,12 @@ extension VaultContentStore {
         }
 
         guard let rootEdge else {
-          preconditionFailure("A non-empty thread must create its root CardEdge.")
+          preconditionFailure("A non-empty post must create its root CardEdge.")
         }
         try stageAuthoredActivity(
           subjectEdgeID: rootEdge.id,
           rootEdgeID: rootEdge.id,
-          createdAt: threadCreatedAt,
+          createdAt: postCreatedAt,
           deliveryPolicy: deliveryPolicy,
           in: context
         )
@@ -497,7 +497,7 @@ extension VaultContentStore {
   /// CloudKit outbox rows commit as one transaction. This keeps every detail
   /// level fractal without ever exposing a temporary root placement to sync.
   /// The delivery policy is intentionally explicit for the same cross-store
-  /// ownership reason as ``createThread(cards:deliveryPolicy:)``.
+  /// ownership reason as ``createPost(cards:deliveryPolicy:)``.
   @MainActor
   @discardableResult
   public func appendCard(

@@ -51,7 +51,7 @@ private enum CreationComposerInputBarMetrics {
 /// Bottom composer bar that owns the visible state of one unpublished entry.
 struct CreationComposerInputBar<MenuContent: View>: View {
 
-  @Bindable private var draft: ThreadDraftCard
+  @Bindable private var draft: CardEditDraft
   private let placement: CreationComposerPlacement
   private let isPostDestinationAvailable: Bool
   private let focusRequestID: UUID?
@@ -63,7 +63,7 @@ struct CreationComposerInputBar<MenuContent: View>: View {
   private let menuContent: MenuContent
 
   init(
-    draft: ThreadDraftCard,
+    draft: CardEditDraft,
     placement: CreationComposerPlacement = .root,
     isPostDestinationAvailable: Bool = true,
     focusRequestID: UUID? = nil,
@@ -121,7 +121,7 @@ struct CreationComposerInputBar<MenuContent: View>: View {
 /// One-line composer used by text and compact non-media content types.
 private struct CreationComposerCompactInputBar<MenuContent: View>: View {
 
-  @Bindable var draft: ThreadDraftCard
+  @Bindable var draft: CardEditDraft
   let placement: CreationComposerPlacement
   let isPostDestinationAvailable: Bool
   let focusRequestID: UUID?
@@ -133,7 +133,7 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
   let menuContent: MenuContent
 
   init(
-    draft: ThreadDraftCard,
+    draft: CardEditDraft,
     placement: CreationComposerPlacement,
     isPostDestinationAvailable: Bool,
     focusRequestID: UUID?,
@@ -194,7 +194,7 @@ private struct CreationComposerExpandedPreviewInputBar: View {
 
   @Environment(\.verticalSizeClass) private var verticalSizeClass
 
-  let draft: ThreadDraftCard
+  let draft: CardEditDraft
   let placement: CreationComposerPlacement
   let isPostDestinationAvailable: Bool
   let isProcessing: Bool
@@ -212,16 +212,31 @@ private struct CreationComposerExpandedPreviewInputBar: View {
         EmptyView()
       }
 
-      Button(action: onOpenDraft) {
+      switch draft.composerPreviewInteraction {
+      case .opensDetailEditor:
+        Button(action: onOpenDraft) {
+          CreationComposerExpandedPreviewCanvas {
+            expandedContent
+          }
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .disabled(isProcessing)
+        .accessibilityLabel("Edit Entry")
+        .accessibilityValue(Text(draft.kind.displayTitle))
+      case .playsInPlace:
+        CreationComposerExpandedPreviewCanvas(isContentInteractive: true) {
+          expandedContent
+        }
+        .frame(maxWidth: .infinity)
+      case .inert:
         CreationComposerExpandedPreviewCanvas {
           expandedContent
         }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(draft.kind.displayTitle))
       }
-      .buttonStyle(.plain)
-      .frame(maxWidth: .infinity)
-      .disabled(isProcessing)
-      .accessibilityLabel("Edit Entry")
-      .accessibilityValue(Text(draft.kind.displayTitle))
 
       CreationComposerPostButton(
         canPost: draft.canSave && isPostDestinationAvailable,
@@ -251,14 +266,7 @@ private struct CreationComposerExpandedPreviewInputBar: View {
       )
       .frame(maxWidth: .infinity)
       .frame(height: linkPreviewHeight)
-    case .audio:
-      EntryContentView(
-        content: draft.entryContent,
-        style: .composer
-      )
-      .frame(maxWidth: .infinity)
-      .frame(height: audioPreviewHeight)
-    case .text, .todo, .file, .suggestion, .unknown:
+    case .audio, .text, .todo, .file, .suggestion, .unknown:
       EntryContentView(
         content: draft.entryContent,
         style: .composer
@@ -299,9 +307,17 @@ private struct CreationComposerExpandedPreviewInputBar: View {
 /// Shared clipping and accessibility treatment for an expanded preview.
 private struct CreationComposerExpandedPreviewCanvas<Content: View>: View {
 
+  /// Whether the rendered content owns controls operated in place, such as an
+  /// audio transport. A flat preview stays inert so the surrounding affordance
+  /// keeps the whole tap target and VoiceOver reads one element.
+  let isContentInteractive: Bool
   let content: Content
 
-  init(@ViewBuilder content: () -> Content) {
+  init(
+    isContentInteractive: Bool = false,
+    @ViewBuilder content: () -> Content
+  ) {
+    self.isContentInteractive = isContentInteractive
     self.content = content()
   }
 
@@ -309,8 +325,8 @@ private struct CreationComposerExpandedPreviewCanvas<Content: View>: View {
     content
       .background(.background.opacity(0.72))
       .clipShape(.rect(cornerRadius: 23, style: .continuous))
-      .allowsHitTesting(false)
-      .accessibilityHidden(true)
+      .allowsHitTesting(isContentInteractive)
+      .accessibilityHidden(isContentInteractive == false)
       .contentShape(Rectangle())
   }
 }
@@ -365,7 +381,7 @@ private struct CreationComposerLeadingAction<MenuContent: View>: View {
 /// Inline text editor or compact preview for the entry being composed.
 private struct CreationComposerDraftContent: View {
 
-  @Bindable var draft: ThreadDraftCard
+  @Bindable var draft: CardEditDraft
   @FocusState private var focusedField: Field?
   let placement: CreationComposerPlacement
   let focusRequestID: UUID?
@@ -415,22 +431,29 @@ private struct CreationComposerDraftContent: View {
       .task(id: focusRequestID) {
         await focusIfRequested(.todo)
       }
-    case .link, .file, .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus, .unknown:
+    case .link, .file, .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus,
+      .unknown:
+      preview
+    @unknown default:
+      preview
+    }
+  }
+
+  /// Compact previews never carry in-place controls: the 40pt thumbnail is too
+  /// small to operate, and every kind that owns a transport is drawn expanded.
+  @ViewBuilder
+  private var preview: some View {
+    switch draft.composerPreviewInteraction {
+    case .opensDetailEditor:
       Button(action: onOpenDraft) {
-        CreationComposerDraftPreview(draft: draft)
+        CreationComposerDraftPreview(draft: draft, showsDisclosure: true)
       }
       .buttonStyle(.plain)
       .disabled(isProcessing)
       .accessibilityLabel("Edit Entry")
       .accessibilityValue(Text(draft.kind.displayTitle))
-    @unknown default:
-      Button(action: onOpenDraft) {
-        CreationComposerDraftPreview(draft: draft)
-      }
-      .buttonStyle(.plain)
-      .disabled(isProcessing)
-      .accessibilityLabel("Edit Entry")
-      .accessibilityValue("Entry")
+    case .playsInPlace, .inert:
+      CreationComposerDraftPreview(draft: draft, showsDisclosure: false)
     }
   }
 
@@ -450,7 +473,8 @@ private struct CreationComposerDraftContent: View {
 /// Compact authored-content preview shown inside the input bar.
 private struct CreationComposerDraftPreview: View {
 
-  let draft: ThreadDraftCard
+  let draft: CardEditDraft
+  let showsDisclosure: Bool
 
   var body: some View {
     HStack(spacing: 10) {
@@ -463,17 +487,24 @@ private struct CreationComposerDraftPreview: View {
       .clipShape(.rect(cornerRadius: 10, style: .continuous))
       .allowsHitTesting(false)
 
-      CreationComposerDraftLabel(kind: draft.kind)
+      CreationComposerDraftLabel(
+        kind: draft.kind,
+        showsDisclosure: showsDisclosure
+      )
     }
     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     .contentShape(Rectangle())
   }
 }
 
-/// Modality label shared by compact and expanded draft edit affordances.
+/// Modality label for a compact draft preview.
 private struct CreationComposerDraftLabel: View {
 
   let kind: Card.Kind
+
+  /// Drawn only when tapping the preview actually opens a detail editor, so the
+  /// chevron never promises an editor that does not exist.
+  let showsDisclosure: Bool
 
   var body: some View {
     HStack(spacing: 10) {
@@ -484,9 +515,11 @@ private struct CreationComposerDraftLabel: View {
 
       Spacer(minLength: 0)
 
-      Image(systemName: "chevron.right")
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.tertiary)
+      if showsDisclosure {
+        Image(systemName: "chevron.right")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.tertiary)
+      }
     }
     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     .contentShape(Rectangle())
@@ -507,7 +540,8 @@ private struct CreationComposerPostButton: View {
     Button(action: onPost) {
       ZStack {
         Circle()
-          .fill(postButtonBackground)
+          .fill(.tint)
+          .opacity(isProcessing ? 0.3 : 1)
 
         if isProcessing {
           ProgressView()
@@ -526,14 +560,7 @@ private struct CreationComposerPostButton: View {
     .accessibilityLabel(placement.postAccessibilityLabel)
     .keyboardShortcut(.return, modifiers: .command)
   }
-
-  private var postButtonBackground: Color {
-    if canPost, isProcessing == false {
-      return .accentColor
-    }
-
-    return .secondary.opacity(0.26)
-  }
+ 
 }
 
 #Preview("Creation Composer Content States") {
@@ -691,11 +718,11 @@ private struct CreationComposerInputBarPreviewRow: View {
 
   private let title: String
   private let isProcessing: Bool
-  @State private var draft: ThreadDraftCard
+  @State private var draft: CardEditDraft
 
   init(
     title: String,
-    draft: ThreadDraftCard,
+    draft: CardEditDraft,
     isProcessing: Bool = false
   ) {
     self.title = title
@@ -736,34 +763,34 @@ private struct CreationComposerInputBarPreviewRow: View {
 @MainActor
 private enum CreationComposerInputBarPreviewFixtures {
 
-  static var emptyText: ThreadDraftCard {
-    ThreadDraftCard()
+  static var emptyText: CardEditDraft {
+    CardEditDraft()
   }
 
-  static var shortText: ThreadDraftCard {
-    ThreadDraftCard(text: "A small thought before it slips away.")
+  static var shortText: CardEditDraft {
+    CardEditDraft(text: "A small thought before it slips away.")
   }
 
-  static var multilineText: ThreadDraftCard {
-    ThreadDraftCard(
+  static var multilineText: CardEditDraft {
+    CardEditDraft(
       text: "First line\nSecond line\nThird line\nFourth line\nFifth line"
     )
   }
 
-  static var incompleteLink: ThreadDraftCard {
-    let draft = ThreadDraftCard()
+  static var incompleteLink: CardEditDraft {
+    let draft = CardEditDraft()
     draft.setLinkURLString("not a link yet")
     return draft
   }
 
-  static var link: ThreadDraftCard {
-    let draft = ThreadDraftCard()
+  static var link: CardEditDraft {
+    let draft = CardEditDraft()
     draft.setLinkURLString("https://tinycurve.app")
     return draft
   }
 
-  static var photo: ThreadDraftCard {
-    let draft = ThreadDraftCard()
+  static var photo: CardEditDraft {
+    let draft = CardEditDraft()
     draft.setPhoto(
       CapturedPhoto(
         imageData: previewImageData,
@@ -773,8 +800,8 @@ private enum CreationComposerInputBarPreviewFixtures {
     return draft
   }
 
-  static var video: ThreadDraftCard {
-    let draft = ThreadDraftCard()
+  static var video: CardEditDraft {
+    let draft = CardEditDraft()
     draft.setVideo(
       CapturedVideo(
         fileURL: missingVideoURL,
@@ -786,8 +813,8 @@ private enum CreationComposerInputBarPreviewFixtures {
     return draft
   }
 
-  static var livePhoto: ThreadDraftCard {
-    let draft = ThreadDraftCard()
+  static var livePhoto: CardEditDraft {
+    let draft = CardEditDraft()
     draft.setLivePhoto(
       CapturedLivePhoto(
         stillImageData: previewImageData,
@@ -800,8 +827,8 @@ private enum CreationComposerInputBarPreviewFixtures {
     return draft
   }
 
-  static var audio: ThreadDraftCard {
-    let draft = ThreadDraftCard()
+  static var audio: CardEditDraft {
+    let draft = CardEditDraft()
     draft.setAudio(
       AudioRecording(
         fileURL: missingAudioURL,
@@ -811,8 +838,8 @@ private enum CreationComposerInputBarPreviewFixtures {
     return draft
   }
 
-  static var suggestion: ThreadDraftCard {
-    let draft = ThreadDraftCard()
+  static var suggestion: CardEditDraft {
+    let draft = CardEditDraft()
     draft.setSuggestion(
       SuggestionCardPayload(
         title: "A quiet morning",
@@ -828,8 +855,8 @@ private enum CreationComposerInputBarPreviewFixtures {
     return draft
   }
 
-  static var doodle: ThreadDraftCard {
-    let draft = ThreadDraftCard()
+  static var doodle: CardEditDraft {
+    let draft = CardEditDraft()
     draft.setDoodle(
       DoodleDrawing(
         strokes: [
@@ -849,8 +876,8 @@ private enum CreationComposerInputBarPreviewFixtures {
     return draft
   }
 
-  static var bauhaus: ThreadDraftCard {
-    let draft = ThreadDraftCard()
+  static var bauhaus: CardEditDraft {
+    let draft = CardEditDraft()
     draft.setBauhaus(
       BauhausGridDocument(
         artwork: BauhausGridArtwork(
@@ -865,12 +892,12 @@ private enum CreationComposerInputBarPreviewFixtures {
     return draft
   }
 
-  static var unknown: ThreadDraftCard {
-    ThreadDraftCard(kind: .unknown)
+  static var unknown: CardEditDraft {
+    CardEditDraft(kind: .unknown)
   }
 
-  static var processing: ThreadDraftCard {
-    ThreadDraftCard(text: "Posting this entry…")
+  static var processing: CardEditDraft {
+    CardEditDraft(text: "Posting this entry…")
   }
 
   private static let previewImageSize = CGSize(width: 4, height: 4)
@@ -890,7 +917,37 @@ private enum CreationComposerInputBarPreviewFixtures {
   )
 }
 
+/// How a composer preview answers a touch.
+private enum CreationComposerPreviewInteraction {
+  /// Reopens the draft's detail editor.
+  case opensDetailEditor
+  /// Hands the touch to controls the rendered content already owns.
+  case playsInPlace
+  /// A flat rendering with nothing to operate.
+  case inert
+}
+
 extension CardEditDraft {
+
+  /// How this draft's composer preview answers a touch.
+  ///
+  /// Only canvas-authored artwork earns an editor: a doodle or a Bauhaus grid
+  /// holds work worth revising stroke by stroke, while every other capture is
+  /// one-shot and a mistake is corrected by discarding the draft and capturing
+  /// again. Audio needs no editor but is still not flat — its preview draws a
+  /// transport, so the recording can be heard before posting.
+  fileprivate var composerPreviewInteraction: CreationComposerPreviewInteraction {
+    switch kind {
+    case .doodle, .bauhaus:
+      return .opensDetailEditor
+    case .audio:
+      return .playsInPlace
+    case .text, .todo, .link, .file, .photo, .video, .livePhoto, .suggestion, .unknown:
+      return .inert
+    @unknown default:
+      return .inert
+    }
+  }
 
   /// Whether the current authored content needs more than the one-line composer.
   fileprivate var usesExpandedComposerPreview: Bool {

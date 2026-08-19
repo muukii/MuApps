@@ -101,7 +101,7 @@ struct CreationView: View {
   /// An async media import can finish after another Reply is selected. Both
   /// drafts subscribe to the same one-shot fix without either becoming the
   /// other's location destination.
-  @State private var locationRequestTargets: [ObjectIdentifier: ThreadDraftCard] = [:]
+  @State private var locationRequestTargets: [ObjectIdentifier: CardEditDraft] = [:]
 
   /// Guards the compose surface while a save is in flight, so a card can't be
   /// created twice by a fast double-tap.
@@ -217,7 +217,7 @@ struct CreationView: View {
       onDismiss: restoreEmptyComposerPlaceholderIfNeeded
     ) { presentation in
       NavigationStack {
-        ThreadDraftEntryDetailEditor(
+        PostDraftEntryDetailEditor(
           draft: presentation.target,
           isSaving: isSaving
         )
@@ -228,7 +228,7 @@ struct CreationView: View {
     }
     .sheet(item: $linkEditorPresentation, onDismiss: restoreEmptyLinkPlaceholderIfNeeded) {
       presentation in
-      ThreadDraftLinkEditorSheet(
+      PostDraftLinkEditorSheet(
         card: presentation.target
       )
       .presentationDetents([.medium, .large])
@@ -236,7 +236,7 @@ struct CreationView: View {
       .presentationBackground(.background)
     }
     .sheet(item: $quickDoodleCanvasPresentation) { presentation in
-      ThreadDraftDoodleCanvasSheet(
+      PostDraftDoodleCanvasSheet(
         card: presentation.target,
         onChange: { drawing in
           updateDoodle(drawing, presentation: presentation)
@@ -250,7 +250,7 @@ struct CreationView: View {
       .presentationBackground(.background)
     }
     .sheet(item: $quickBauhausGridPresentation) { presentation in
-      ThreadDraftBauhausGridSheet(
+      PostDraftBauhausGridSheet(
         card: presentation.target,
         onChange: { document in
           updateBauhaus(document, presentation: presentation)
@@ -264,7 +264,7 @@ struct CreationView: View {
       .presentationBackground(.background)
     }
     .sheet(item: $photoCapturePresentation) { presentation in
-      ThreadDraftPhotoCaptureSheet(
+      PostDraftPhotoCaptureSheet(
         card: presentation.target,
         onCapture: { photo in
           finishPhotoCapture(photo, target: presentation.target)
@@ -275,7 +275,7 @@ struct CreationView: View {
       .presentationBackground(.background)
     }
     .sheet(item: $voiceRecorderPresentation) { presentation in
-      ThreadDraftVoiceRecorderSheet(
+      PostDraftVoiceRecorderSheet(
         card: presentation.target,
         onFinish: { recording in
           finishVoiceRecording(recording, target: presentation.target)
@@ -398,7 +398,7 @@ struct CreationView: View {
   ///
   /// Home owns the root draft; each selected parent owns a separate Reply draft.
   /// Map navigation has no effect on this ownership boundary.
-  private var composerDraft: ThreadDraftCard {
+  private var composerDraft: CardEditDraft {
     composerState.activeDraft
   }
 
@@ -621,7 +621,7 @@ struct CreationView: View {
 
   private func finishPhotoCapture(
     _ photo: CapturedPhoto,
-    target: ThreadDraftCard
+    target: CardEditDraft
   ) {
     target.setPhoto(photo)
     attachLocationIfNeeded(to: target)
@@ -661,7 +661,7 @@ struct CreationView: View {
 
   private func finishLibraryMediaImport(
     _ media: PhotoLibraryImportedMedia,
-    target: ThreadDraftCard
+    target: CardEditDraft
   ) {
     switch media {
     case .photo(let photo):
@@ -711,7 +711,7 @@ struct CreationView: View {
 
   private func finishVoiceRecording(
     _ recording: AudioRecording,
-    target: ThreadDraftCard
+    target: CardEditDraft
   ) {
     target.setAudio(recording)
     attachLocationIfNeeded(to: target)
@@ -748,7 +748,7 @@ struct CreationView: View {
   /// Reply selection can change while Core Location is suspended. Every draft
   /// that needs a coordinate subscribes by identity to the shared one-shot fix,
   /// so the result is never redirected through the currently active composer.
-  private func attachLocationIfNeeded(to target: ThreadDraftCard) {
+  private func attachLocationIfNeeded(to target: CardEditDraft) {
     guard shouldAttachLocationToNewCards,
       target.canSave,
       target.location == nil
@@ -818,7 +818,7 @@ struct CreationView: View {
         let createdEdge: CardEdge
         switch destination {
         case .root:
-          guard let rootEdge = try vault.createThread(cards: [vaultDraft]).first else {
+          guard let rootEdge = try vault.createPost(cards: [vaultDraft]).first else {
             throw CreationPostError.missingCreatedEdge
           }
           createdEdge = rootEdge
@@ -849,7 +849,7 @@ struct CreationView: View {
   /// Dismisses only editors that still belong to the draft that was posted.
   /// A user may select another Reply while persistence is running; a successful
   /// older post must not close an editor that now belongs to the newer target.
-  private func dismissPresentations(ownedBy draft: ThreadDraftCard) {
+  private func dismissPresentations(ownedBy draft: CardEditDraft) {
     if composerDraftEditorPresentation?.target === draft {
       composerDraftEditorPresentation = nil
     }
@@ -902,7 +902,7 @@ struct CreationView: View {
       let result = HomeDropPostingCoordinator.post(
         items: items,
         postCard: { draft in
-          guard let rootEdge = try vault.createThread(cards: [draft]).first else {
+          guard let rootEdge = try vault.createPost(cards: [draft]).first else {
             throw CreationPostError.missingCreatedEdge
           }
           return rootEdge.id
@@ -936,188 +936,6 @@ struct CreationView: View {
 
 }
 
-/// Persistence destination frozen when posting begins.
-///
-/// The value prevents a later Reply selection during an asynchronous save from
-/// retargeting authored content to a different tree placement.
-enum CreationPostDestination: Equatable {
-  case root
-  case reply(SavedListReplyTarget)
-}
-
-private enum CreationPostError: Error {
-  case missingCreatedEdge
-}
-
-/// Owns one unpublished draft for Home and one for every selected Reply parent.
-///
-/// Reply selection is explicit and independent from navigation. Drafts are
-/// keyed by vault and parent placement so changing context never silently moves
-/// authored content to another relationship. This type is internal so its
-/// ownership and in-flight completion rules can be verified without rendering
-/// the SwiftUI hierarchy.
-@MainActor
-@Observable
-final class CreationComposerState {
-
-  private var rootDraft = ThreadDraftCard()
-  private var replyDrafts: [ReplyDraftKey: ThreadDraftCard] = [:]
-
-  /// Explicit parent selected from an entry context menu.
-  private(set) var replyTarget: SavedListReplyTarget?
-
-  /// Whether the selected parent still exists in the active vault query.
-  ///
-  /// Unavailability never falls back to root; it only disables posting until
-  /// the user cancels Reply or the placement becomes available again.
-  private(set) var isReplyTargetAvailable = true
-
-  /// One-shot identity used to focus an inline Text or Todo field after Reply
-  /// is selected from a context menu.
-  private(set) var focusRequestID: UUID?
-
-  var activeDraft: ThreadDraftCard {
-    guard let replyTarget else {
-      return rootDraft
-    }
-    let key = ReplyDraftKey(replyTarget)
-    guard let draft = replyDrafts[key] else {
-      assertionFailure("A selected Reply target must own a draft.")
-      return rootDraft
-    }
-    return draft
-  }
-
-  var activeDestination: CreationPostDestination {
-    guard let replyTarget else { return .root }
-    return .reply(replyTarget)
-  }
-
-  var placement: CreationComposerPlacement {
-    replyTarget == nil ? .root : .reply
-  }
-
-  var hasAuthoredDrafts: Bool {
-    rootDraft.isEmptyTextDraft == false
-      || replyDrafts.values.contains { $0.isEmptyTextDraft == false }
-  }
-
-  /// Returns whether the current destination is safe to persist in the
-  /// selected vault. Root only needs an active vault; Reply additionally needs
-  /// its detached vault identity and live placement availability to match.
-  func isActiveDestinationAvailable(in selectedVaultID: VaultID?) -> Bool {
-    guard let selectedVaultID else { return false }
-    guard let replyTarget else { return true }
-    return replyTarget.vaultID == selectedVaultID && isReplyTargetAvailable
-  }
-
-  /// Selects a Reply placement and restores its independent unpublished draft.
-  func selectReplyTarget(_ target: SavedListReplyTarget) {
-    let key = ReplyDraftKey(target)
-    if replyDrafts[key] == nil {
-      replyDrafts[key] = ThreadDraftCard()
-    }
-    replyTarget = target
-    // Context-menu targets originate from a live visible row. SavedList will
-    // revalidate this optimistic value against its next query snapshot.
-    isReplyTargetAvailable = true
-    focusRequestID = UUID()
-  }
-
-  /// Consumes one pending focus request exactly once.
-  ///
-  /// A child consumes synchronously before yielding for context-menu dismissal.
-  /// Clearing the ID here prevents a recreated SwiftUI subtree from accepting
-  /// the same request during Map navigation or other structural changes.
-  @discardableResult
-  func consumeFocusRequest(_ requestID: UUID) -> Bool {
-    guard focusRequestID == requestID else { return false }
-    focusRequestID = nil
-    return true
-  }
-
-  /// Applies the SavedList query's latest availability for the selected parent.
-  func setReplyTargetAvailability(_ isAvailable: Bool) {
-    guard replyTarget != nil else {
-      isReplyTargetAvailable = true
-      return
-    }
-    isReplyTargetAvailable = isAvailable
-  }
-
-  /// Returns the composer to its root draft without discarding the Reply draft.
-  func cancelReply(requestFocus: Bool = true) {
-    replyTarget = nil
-    isReplyTargetAvailable = true
-    focusRequestID = requestFocus ? UUID() : nil
-  }
-
-  /// Completes exactly the draft and destination captured when posting began.
-  ///
-  /// The posted Reply draft is reset even if the user moved elsewhere while the
-  /// save ran. The visible target is cleared only when it still represents the
-  /// same parent, so a later selection is never clobbered by older work.
-  @discardableResult
-  func completePost(
-    for destination: CreationPostDestination,
-    ifMatching expectedDraft: ThreadDraftCard
-  ) -> Bool {
-    guard resetDraft(for: destination, ifMatching: expectedDraft) else {
-      return false
-    }
-
-    if case .reply(let postedTarget) = destination,
-      replyTarget.map(ReplyDraftKey.init) == ReplyDraftKey(postedTarget)
-    {
-      cancelReply()
-    }
-    return true
-  }
-
-  @discardableResult
-  private func resetDraft(
-    for destination: CreationPostDestination,
-    ifMatching expectedDraft: ThreadDraftCard
-  ) -> Bool {
-    switch destination {
-    case .root:
-      guard rootDraft === expectedDraft else { return false }
-      rootDraft = ThreadDraftCard()
-    case .reply(let target):
-      let key = ReplyDraftKey(target)
-      guard replyDrafts[key] === expectedDraft else { return false }
-      replyDrafts[key] = ThreadDraftCard()
-    }
-    return true
-  }
-
-  func discardActiveDraft() {
-    let draft = activeDraft
-    draft.savingSnapshot().removeTemporaryMediaFiles()
-    resetDraft(for: activeDestination, ifMatching: draft)
-  }
-
-  func discardAllDrafts() {
-    rootDraft.savingSnapshot().removeTemporaryMediaFiles()
-    for draft in replyDrafts.values {
-      draft.savingSnapshot().removeTemporaryMediaFiles()
-    }
-    rootDraft = ThreadDraftCard()
-    replyDrafts.removeAll(keepingCapacity: false)
-    cancelReply(requestFocus: false)
-  }
-
-  /// Stable draft ownership key for one Reply placement.
-  private struct ReplyDraftKey: Hashable {
-    let vaultID: VaultID
-    let parentEdgeID: UUID
-
-    init(_ target: SavedListReplyTarget) {
-      vaultID = target.vaultID
-      parentEdgeID = target.parentEdgeID
-    }
-  }
-}
 
 /// Presentation payload for a collaboration management error.
 private struct CollaborationErrorMessage: Identifiable {
@@ -1137,7 +955,7 @@ private struct ComposerDraftEditorPresentation: Identifiable {
   let id = UUID()
 
   /// The one unpublished card owned by the input bar.
-  let target: ThreadDraftCard
+  let target: CardEditDraft
 }
 
 /// Presentation payload for one link editor session.
@@ -1148,7 +966,7 @@ private struct LinkEditorPresentation: Identifiable {
   let id = UUID()
 
   /// Draft being edited by the link sheet.
-  let target: ThreadDraftCard
+  let target: CardEditDraft
 }
 
 /// Presentation payload for one photo capture session.
@@ -1159,7 +977,7 @@ private struct PhotoCapturePresentation: Identifiable {
   let id = UUID()
 
   /// The composer card that receives a successful capture.
-  let target: ThreadDraftCard
+  let target: CardEditDraft
 }
 
 /// Presentation payload for drawing into the current composer card.
@@ -1169,7 +987,7 @@ private struct DoodleCanvasPresentation: Identifiable {
   let id = UUID()
 
   /// The composer card receiving streamed drawing changes.
-  let target: ThreadDraftCard
+  let target: CardEditDraft
 }
 
 /// Presentation payload for composing Bauhaus art in the current card.
@@ -1179,7 +997,7 @@ private struct BauhausGridPresentation: Identifiable {
   let id = UUID()
 
   /// The composer card receiving streamed grid changes.
-  let target: ThreadDraftCard
+  let target: CardEditDraft
 }
 
 /// Presentation payload for one voice recorder session.
@@ -1190,7 +1008,7 @@ private struct VoiceRecorderPresentation: Identifiable {
   let id = UUID()
 
   /// The composer card that receives a completed recording.
-  let target: ThreadDraftCard
+  let target: CardEditDraft
 }
 
 /// Media value produced by one Photos library picker selection.

@@ -10,13 +10,13 @@ import SwiftUI
 ///
 /// Text edits bind directly to the draft, so the sheet has no commit or cancel
 /// boundary; dismissing it only closes the editor surface.
-struct ThreadDraftTextEditorSheet: View {
+struct PostDraftTextEditorSheet: View {
 
-  @Bindable var card: ThreadDraftCard
+  @Bindable var card: CardEditDraft
 
   var body: some View {
     NavigationStack {
-      ThreadDraftTextEditorContent(text: $card.text)
+      PostDraftTextEditorContent(text: $card.text)
         .navigationTitle("Text")
         .appInlineNavigationTitle()
     }
@@ -24,7 +24,7 @@ struct ThreadDraftTextEditorSheet: View {
 }
 
 /// Large-form text input shared by the text sheet and draft detail editor.
-struct ThreadDraftTextEditorContent: View {
+struct PostDraftTextEditorContent: View {
 
   /// Body text for the draft card.
   @Binding var text: String
@@ -59,13 +59,13 @@ struct ThreadDraftTextEditorContent: View {
 /// Link edits bind directly to the draft. The entered URL is normalized when the
 /// user submits or dismisses the editor so the saved card stores a canonical
 /// URL string.
-struct ThreadDraftLinkEditorSheet: View {
+struct PostDraftLinkEditorSheet: View {
 
-  @Bindable var card: ThreadDraftCard
+  @Bindable var card: CardEditDraft
 
   var body: some View {
     NavigationStack {
-      ThreadDraftLinkEditorContent(urlString: $card.text)
+      PostDraftLinkEditorContent(urlString: $card.text)
         .navigationTitle("Link")
         .appInlineNavigationTitle()
     }
@@ -73,7 +73,7 @@ struct ThreadDraftLinkEditorSheet: View {
 }
 
 /// URL input and live native preview for a link draft.
-struct ThreadDraftLinkEditorContent: View {
+struct PostDraftLinkEditorContent: View {
 
   /// Raw URL text for the draft card.
   @Binding var urlString: String

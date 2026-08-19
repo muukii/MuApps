@@ -54,7 +54,8 @@ extension CardEditDraft {
       return .audio(
         AudioContentSource(
           fileURL: audio?.fileURL,
-          waveformLevels: audio?.waveform?.levels
+          waveformLevels: audio?.waveform?.levels,
+          duration: audio?.duration
         )
       )
     case .suggestion:

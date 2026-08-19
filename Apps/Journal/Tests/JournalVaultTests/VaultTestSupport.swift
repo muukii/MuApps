@@ -19,8 +19,8 @@ func makeTemporaryLayout() -> VaultStoreLayout {
 @MainActor
 extension VaultContentStore {
 
-  func createThread(cards drafts: [CardDraft]) throws -> [CardEdge] {
-    try createThread(cards: drafts, deliveryPolicy: .historyOnly)
+  func createPost(cards drafts: [CardDraft]) throws -> [CardEdge] {
+    try createPost(cards: drafts, deliveryPolicy: .historyOnly)
   }
 
   func appendCard(_ draft: CardDraft, to parentEdgeID: UUID) throws -> CardEdge {

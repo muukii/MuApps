@@ -224,13 +224,19 @@ not claim CloudKit upload is already complete.
 
 `JournalShareExtension` presents a custom SwiftUI review sheet for text, web and
 Maps URLs, images, movies, and individual files. The user can choose any writable
-Vault, add an optional comment as the root Card, review skipped inputs, and post
-all accepted items in one `createThread(cards:)` transaction. Generic files are
-real `.file` Cards with their original display name, bytes, content type, and
-size preserved. The Vault from the most recent successful Share post is
-preselected when it remains writable. The preference changes only after the local
-post transaction succeeds; cancellation and failed posting leave it unchanged.
-The extension never silently substitutes another destination when the remembered
+Vault, add an optional comment, review skipped inputs, and post all accepted
+items in one `createPost(cards:)` transaction. The first shared item is always
+the root Card so the shared content owns the entry; the remaining items and the
+comment become its ordered children, which keeps the comment nested under the
+share instead of owning it. A segmented **Text / Todo** control chooses the
+comment's Card kind. Todo shows the same incomplete-circle marker as the app
+composer and posts a new, incomplete Todo; the other Card kinds are never
+authored here because they arrive as imported payloads. Generic files are real
+`.file` Cards with their original display name, bytes, content type, and size
+preserved. The Vault from the most recent successful Share post is preselected
+when it remains writable. The preference changes only after the local post
+transaction succeeds; cancellation and failed posting leave it unchanged. The
+extension never silently substitutes another destination when the remembered
 Vault is missing or read-only.
 
 All system entry points share `JournalPostingService`. App extensions receive
@@ -327,7 +333,7 @@ Journal/
         media/
 ```
 
-`VaultContentStore.createThread(cards:)` writes a root `CardEdge` plus child
+`VaultContentStore.createPost(cards:)` writes a root `CardEdge` plus child
 edges in one transaction. The same transaction writes `PendingMutation` rows, so
 local content never exists without a pending CloudKit upload.
 `VaultContentStore.appendCard(_:to:)` applies the same transaction boundary to
@@ -367,7 +373,7 @@ of order.
 ### `CardEdge` — a card placement in the vault tree
 
 `CardEdge` is the fractal structure for both roots and children. A root edge has
-no parent relationship; children point to another edge. A linear thread is a
+no parent relationship; children point to another edge. A linear post is a
 root edge plus ordered child edges, and future mind-map layouts can attach layout
 data without changing `Card`.
 
@@ -1039,7 +1045,7 @@ the gallery's **Lab** section).
   order SwiftUI supplied it. The drop path never replaces, clears, or reuses the
   unpublished composer draft. It freezes the selected writable Vault when the
   action begins, and every accepted value remains a root regardless of later
-  Reply selection. Each accepted item uses its own `createThread(cards:)`
+  Reply selection. Each accepted item uses its own `createPost(cards:)`
   transaction; one invalid item or failed write does not roll back sibling roots
   that already succeeded. Provider-owned files are copied while their transfer
   URLs are valid, classified as Photo, Video, Audio, or File, and removed from
@@ -1089,10 +1095,18 @@ the gallery's **Lab** section).
   surfaces occupy only the center column between the leading discard and
   trailing post buttons, and do not repeat the kind as visible text. An
   incomplete Link and the remaining non-text kinds keep the compact preview and
-  modality label. Tapping a preview opens the matching detail editor without
-  allowing the persisted content type to be switched;
-  imported video, Live Photo, and Suggestion details are preview-only, while
-  supported authored formats remain editable.
+  modality label. A composer preview answers a touch in one of three ways. Only
+  **Doodle and Bauhaus previews open an editor**: tapping reopens the matching
+  canvas detail editor, without allowing the persisted content type to be
+  switched, because that artwork is worth revising stroke by stroke. **Audio
+  previews play in place**: the expanded waveform's play/pause control is live in
+  the composer, so a recording can be heard — and stopped — before posting,
+  through the same single-recording-at-a-time player the saved tree uses. Every
+  other preview is non-interactive, and its compact form drops the disclosure
+  chevron so nothing promises an editor that will not open. Those captures are
+  one-shot, so a mistake is corrected with the leading discard button and a fresh
+  capture. Editing an already-saved entry is unaffected — the saved-entry sheet
+  still opens the per-kind editor for every editable kind.
 
   The Suggestions action presents Apple's Journaling Suggestions picker. One
   picker selection becomes one aggregate Suggestion entry containing the returned
@@ -1124,11 +1138,11 @@ the gallery's **Lab** section).
   individual pins as the user zooms in. The up-arrow freezes one save snapshot,
   including its posting destination, and converts it into one
   `VaultContentStore.CardDraft`. With no Reply target it calls
-  `createThread(cards:)` with that single value, persists one root `CardEdge`,
+  `createPost(cards:)` with that single value, persists one root `CardEdge`,
   refreshes the root-only Latest Note widget, and scrolls Home toward the new
   root. With Reply active it revalidates the detached target against the same
   Vault and calls `appendCard(_:to:)` with the selected parent edge; a missing
-  or inactive parent fails instead of falling back to `createThread(cards:)`.
+  or inactive parent fails instead of falling back to `createPost(cards:)`.
   Continuation posting does not refresh the root-only widget.
 
   A successful Reply issues one Home reveal request containing the owning root
@@ -1189,7 +1203,7 @@ the gallery's **Lab** section).
 
   Making Home the sole tree surface and selecting Reply targets are UI-state
   changes only. They add no SwiftData schema, migration, CloudKit record, or sync
-  field; root creation continues to use `createThread(cards:)`, and Reply
+  field; root creation continues to use `createPost(cards:)`, and Reply
   continues to use the existing `CardEdge.parentEdgeID` relationship through
   `appendCard(_:to:)`.
 
@@ -1200,7 +1214,7 @@ the gallery's **Lab** section).
   selection is transient UI state and changes only when the user chooses an
   option, so vault changes, Reply selection, and posting do not reset it. The
   filter applies only when selecting Home roots and location-map pins. Once a
-  root is selected, descendants remain unfiltered so the thread stays intact.
+  root is selected, descendants remain unfiltered so the post stays intact.
   If a non-empty vault has no roots of the selected type, Home shows a filtered
   empty state with **Show All Entries**. Posting a matching root keeps the filter
   and scrolls that root into view. Posting a root outside the current filter still

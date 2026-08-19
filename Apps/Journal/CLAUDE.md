@@ -43,6 +43,25 @@ behavior).
   shows the authored latest item. Home Screen widgets use save-time raster
   thumbnails for photos, render Doodle/Bauhaus authored JSON through SwiftUI
   renderers, and keep tight accessory families on labels/symbols.
+- `Sources/JournalShareExtension/` — **Share extension** (`.appExtension`):
+  `ShareViewController` only. It is the declared `NSExtensionPrincipalClass` and
+  must stay in the `.appex`.
+- `Sources/JournalShareUI/` — the Share extension's review sheet, model, payload,
+  and import loader, as a **dynamic** framework. **Keep this out of the `.appex`,
+  and keep it dynamic.** Xcode Previews does not support share-service extension
+  targets, so UI living in the extension cannot be previewed at all, and an
+  `.appex` cannot host a unit test target. The dynamic part is specifically about
+  this target's dependency graph, not a general rule — static frameworks preview
+  fine here (`MuHaptics`, `CaptureAudio`, `CaptureSuggestions` all do), because
+  they depend on nothing local. This one depends on three sibling frameworks, and
+  while it was static Previews JIT-linked `JournalShareUI` alone and loaded no
+  dependency product, leaving `JournalVault` / `JournalIntents` /
+  `MediaProcessing` symbols unbound. As a dynamic framework it is a real Mach-O
+  whose load commands name its dependencies, so dyld resolves the closure.
+  Rule of thumb for this project: **a framework with local framework dependencies
+  that needs Previews must be dynamic.** Built extension-API-only and embedded in
+  the app's `Frameworks/`; the `.appex` reaches it through
+  `@executable_path/../../Frameworks`.
 - `Sources/Capture*/` — capture frameworks (one isolated static framework each):
   `CaptureText`, `CapturePhoto`, `CaptureDoodle`, `CaptureBauhaus`,
   `CaptureAudio`, `CaptureSuggestions`.

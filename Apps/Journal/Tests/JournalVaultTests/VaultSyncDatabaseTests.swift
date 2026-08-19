@@ -10,7 +10,7 @@ struct VaultSyncDatabaseTests {
   @MainActor
   private func makeStoreWithCard() throws -> (store: VaultContentStore, cardID: UUID) {
     let store = try VaultContentStore.open(vaultID: VaultID(), layout: makeTemporaryLayout())
-    let edges = try store.createThread(cards: [.init(kind: .text, text: "hello")])
+    let edges = try store.createPost(cards: [.init(kind: .text, text: "hello")])
     return (store, edges[0].cardID)
   }
 
@@ -20,7 +20,7 @@ struct VaultSyncDatabaseTests {
     activityID: UUID
   ) {
     let store = try VaultContentStore.open(vaultID: VaultID(), layout: makeTemporaryLayout())
-    _ = try store.createThread(
+    _ = try store.createPost(
       cards: [.init(kind: .text, text: "hello participants")],
       deliveryPolicy: .notifyParticipants
     )
@@ -37,7 +37,7 @@ struct VaultSyncDatabaseTests {
     attachmentFileURL: URL
   ) {
     let store = try VaultContentStore.open(vaultID: VaultID(), layout: makeTemporaryLayout())
-    let edges = try store.createThread(cards: [
+    let edges = try store.createPost(cards: [
       .init(kind: .text, text: "root"),
       .init(kind: .photo, mediaData: Data([0x01, 0x02])),
     ])
@@ -195,7 +195,7 @@ struct VaultSyncDatabaseTests {
     let layout = makeTemporaryLayout()
     let vaultID = VaultID()
     let syncStore = try VaultContentStore.open(vaultID: vaultID, layout: layout)
-    _ = try syncStore.createThread(
+    _ = try syncStore.createPost(
       cards: [.init(kind: .text, text: "first")],
       deliveryPolicy: .notifyParticipants
     )
@@ -210,7 +210,7 @@ struct VaultSyncDatabaseTests {
     // Model a Share extension/App Intent process with an independently opened
     // container. Its authored transaction must win over the older Pulse ACK.
     let writerStore = try VaultContentStore.open(vaultID: vaultID, layout: layout)
-    _ = try writerStore.createThread(
+    _ = try writerStore.createPost(
       cards: [.init(kind: .text, text: "second")],
       deliveryPolicy: .notifyParticipants
     )
@@ -238,7 +238,7 @@ struct VaultSyncDatabaseTests {
       layout: layout,
       recoveryPolicy: .failWithoutReset
     )
-    _ = try writerStore.createThread(
+    _ = try writerStore.createPost(
       cards: [.init(kind: .text, text: "local extension write")],
       deliveryPolicy: .notifyParticipants
     )

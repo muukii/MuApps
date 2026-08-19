@@ -24,7 +24,7 @@ struct VaultContentStoreTests {
   func localSyncCounts_reportRowsPerRecordTypeAndOutboxDepth() throws {
     let store = try makeStore()
     try store.seedVaultInfo(title: "Trip")
-    _ = try store.createThread(cards: [
+    _ = try store.createPost(cards: [
       .init(kind: .text, text: "first"),
       .init(kind: .text, text: "second"),
     ])
@@ -100,13 +100,13 @@ struct VaultContentStoreTests {
     #expect(mutationCount.withLock { $0 } == 2)
   }
 
-  // MARK: - createThread
+  // MARK: - createPost
 
   @Test
-  func createThread_singleDraft_createsRootEdgeAndEnqueuesOutbox() throws {
+  func createPost_singleDraft_createsRootEdgeAndEnqueuesOutbox() throws {
     let store = try makeStore()
 
-    let edges = try store.createThread(cards: [.init(kind: .text, text: "hello")])
+    let edges = try store.createPost(cards: [.init(kind: .text, text: "hello")])
 
     let root = try #require(edges.first)
     #expect(edges.count == 1)
@@ -145,11 +145,11 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func createThread_notifyParticipants_stagesActivityNoticeAndPulseTogether() throws {
+  func createPost_notifyParticipants_stagesActivityNoticeAndPulseTogether() throws {
     let store = try makeStore()
 
     let root = try #require(
-      try store.createThread(
+      try store.createPost(
         cards: [.init(kind: .text, text: "hello participants")],
         deliveryPolicy: .notifyParticipants
       ).first
@@ -183,9 +183,9 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func createThread_notifyParticipants_rearmsSingletonPulse() throws {
+  func createPost_notifyParticipants_rearmsSingletonPulse() throws {
     let store = try makeStore()
-    _ = try store.createThread(
+    _ = try store.createPost(
       cards: [.init(kind: .text, text: "first")],
       deliveryPolicy: .notifyParticipants
     )
@@ -201,7 +201,7 @@ struct VaultContentStoreTests {
     pendingPulse.stagedAt = Date()
     try context.save()
 
-    _ = try store.createThread(
+    _ = try store.createPost(
       cards: [.init(kind: .text, text: "second")],
       deliveryPolicy: .notifyParticipants
     )
@@ -226,7 +226,7 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func createThread_notifyParticipants_twoOpenContainersReuseThePulse() throws {
+  func createPost_notifyParticipants_twoOpenContainersReuseThePulse() throws {
     let vaultID = VaultID()
     let layout = makeTemporaryLayout()
     let firstStore = try VaultContentStore.open(vaultID: vaultID, layout: layout)
@@ -243,11 +243,11 @@ struct VaultContentStoreTests {
         FetchDescriptor<VaultNotificationPulse>()
       ) == 0
     )
-    _ = try firstStore.createThread(
+    _ = try firstStore.createPost(
       cards: [.init(kind: .text, text: "from app")],
       deliveryPolicy: .notifyParticipants
     )
-    _ = try secondStore.createThread(
+    _ = try secondStore.createPost(
       cards: [.init(kind: .text, text: "from extension")],
       deliveryPolicy: .notifyParticipants
     )
@@ -276,11 +276,11 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func createThread_todoStoresBodyAndDefaultsToIncomplete() throws {
+  func createPost_todoStoresBodyAndDefaultsToIncomplete() throws {
     let store = try makeStore()
 
     let root = try #require(
-      try store.createThread(cards: [
+      try store.createPost(cards: [
         .init(kind: .todo, text: "Book the train")
       ]).first
     )
@@ -297,10 +297,10 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func createThread_multipleDrafts_buildsRootWithOrderedChildren() throws {
+  func createPost_multipleDrafts_buildsRootWithOrderedChildren() throws {
     let store = try makeStore()
 
-    let edges = try store.createThread(cards: [
+    let edges = try store.createPost(cards: [
       .init(kind: .text, text: "first"),
       .init(kind: .text, text: "second"),
       .init(kind: .text, text: "third"),
@@ -331,7 +331,7 @@ struct VaultContentStoreTests {
   func appendCard_buildsOrderedChildrenAndSupportsEveryDepth() throws {
     let store = try makeStore()
     let root = try #require(
-      try store.createThread(cards: [.init(kind: .text, text: "root")]).first
+      try store.createPost(cards: [.init(kind: .text, text: "root")]).first
     )
 
     let firstChild = try store.appendCard(
@@ -396,7 +396,7 @@ struct VaultContentStoreTests {
   func appendCard_mediaDraft_writesAttachmentAndResource() throws {
     let store = try makeStore()
     let root = try #require(
-      try store.createThread(cards: [.init(kind: .text, text: "root")]).first
+      try store.createPost(cards: [.init(kind: .text, text: "root")]).first
     )
     let bytes = Data([0xFF, 0x01, 0x02, 0x03])
 
@@ -420,7 +420,7 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func createThread_audioDraftPersistsWaveformBesideAudioResource() throws {
+  func createPost_audioDraftPersistsWaveformBesideAudioResource() throws {
     let store = try makeStore()
     let sourceURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("waveform-audio-\(UUID().uuidString)")
@@ -430,7 +430,7 @@ struct VaultContentStoreTests {
     try audioBytes.write(to: sourceURL)
     defer { try? FileManager.default.removeItem(at: sourceURL) }
 
-    try store.createThread(cards: [
+    try store.createPost(cards: [
       .init(
         kind: .audio,
         mediaResources: [
@@ -464,9 +464,9 @@ struct VaultContentStoreTests {
   @Test
   func latestRootCard_ignoresNewerContinuations() throws {
     let store = try makeStore()
-    _ = try store.createThread(cards: [.init(kind: .text, text: "older root")])
+    _ = try store.createPost(cards: [.init(kind: .text, text: "older root")])
     let newestRoot = try #require(
-      try store.createThread(cards: [.init(kind: .text, text: "newest root")]).first
+      try store.createPost(cards: [.init(kind: .text, text: "newest root")]).first
     )
     let olderRoot = try #require(
       try store.container.mainContext.fetch(FetchDescriptor<CardEdge>())
@@ -487,11 +487,11 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func createThread_mediaDraft_writesFileAndAttachmentRow() throws {
+  func createPost_mediaDraft_writesFileAndAttachmentRow() throws {
     let store = try makeStore()
     let bytes = Data([0xFF, 0x01, 0x02, 0x03])
 
-    try store.createThread(cards: [
+    try store.createPost(cards: [
       .init(kind: .photo, mediaData: bytes, thumbnail: Data([0x00]))
     ])
 
@@ -522,7 +522,7 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func createThread_livePhotoDraft_writesStillAndPairedVideoResources() throws {
+  func createPost_livePhotoDraft_writesStillAndPairedVideoResources() throws {
     let store = try makeStore()
     let stillBytes = Data([0x01, 0x02, 0x03])
     let pairedVideoURL = FileManager.default.temporaryDirectory
@@ -531,7 +531,7 @@ struct VaultContentStoreTests {
     let pairedVideoBytes = Data([0x10, 0x11, 0x12, 0x13])
     try pairedVideoBytes.write(to: pairedVideoURL)
 
-    try store.createThread(cards: [
+    try store.createPost(cards: [
       .init(
         kind: .livePhoto,
         mediaResources: [
@@ -585,7 +585,7 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func createThread_fileStagingFailure_rollsBackAndCanRetry() throws {
+  func createPost_fileStagingFailure_rollsBackAndCanRetry() throws {
     let store = try makeStore()
     let stillURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("staging-still-\(UUID().uuidString)")
@@ -607,7 +607,7 @@ struct VaultContentStoreTests {
 
     var didFail = false
     do {
-      try store.createThread(cards: [draft])
+      try store.createPost(cards: [draft])
     } catch {
       didFail = true
     }
@@ -632,7 +632,7 @@ struct VaultContentStoreTests {
     #expect(try context.fetchCount(FetchDescriptor<PendingMutation>()) == 0)
 
     try pairedVideoBytes.write(to: pairedVideoURL)
-    try store.createThread(cards: [draft])
+    try store.createPost(cards: [draft])
 
     #expect(FileManager.default.fileExists(atPath: stillURL.path) == false)
     #expect(FileManager.default.fileExists(atPath: pairedVideoURL.path) == false)
@@ -644,7 +644,7 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func createThread_copyResource_preservesSourceAfterCommit() throws {
+  func createPost_copyResource_preservesSourceAfterCommit() throws {
     let store = try makeStore()
     let sourceURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("copy-source-\(UUID().uuidString)")
@@ -653,7 +653,7 @@ struct VaultContentStoreTests {
     try bytes.write(to: sourceURL)
     defer { try? FileManager.default.removeItem(at: sourceURL) }
 
-    try store.createThread(cards: [
+    try store.createPost(cards: [
       .init(
         kind: .video,
         mediaResources: [
@@ -680,7 +680,7 @@ struct VaultContentStoreTests {
     let store = try makeStore()
     let originalBytes = Data([0x51, 0x52, 0x53])
     let root = try #require(
-      try store.createThread(cards: [
+      try store.createPost(cards: [
         .init(kind: .photo, mediaData: originalBytes)
       ]).first
     )
@@ -736,10 +736,10 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func createThread_linkDraft_storesURLWithoutAttachment() throws {
+  func createPost_linkDraft_storesURLWithoutAttachment() throws {
     let store = try makeStore()
 
-    try store.createThread(cards: [
+    try store.createPost(cards: [
       .init(kind: .link, text: "https://example.com/article")
     ])
 
@@ -763,7 +763,7 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func createThread_fileDraft_storesDisplayNameAndOriginalFile() throws {
+  func createPost_fileDraft_storesDisplayNameAndOriginalFile() throws {
     let store = try makeStore()
     let sourceURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("trip-itinerary-\(UUID().uuidString)")
@@ -772,7 +772,7 @@ struct VaultContentStoreTests {
     try bytes.write(to: sourceURL)
     defer { try? FileManager.default.removeItem(at: sourceURL) }
 
-    try store.createThread(cards: [
+    try store.createPost(cards: [
       .init(
         kind: .file,
         text: "Trip Itinerary.pdf",
@@ -812,11 +812,11 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func createThread_missingFilePayload_rejectsEntirePostBeforeWriting() throws {
+  func createPost_missingFilePayload_rejectsEntirePostBeforeWriting() throws {
     let store = try makeStore()
 
     do {
-      try store.createThread(cards: [
+      try store.createPost(cards: [
         .init(kind: .text, text: "This must not be saved"),
         .init(kind: .file, text: "Missing.pdf"),
       ])
@@ -848,7 +848,7 @@ struct VaultContentStoreTests {
 
     let photoBytes = Data([0x01, 0x02, 0x03, 0x04])
     let thumbnailBytes = Data([0x10, 0x11])
-    try store.createThread(cards: [
+    try store.createPost(cards: [
       .init(kind: .text, text: "hello"),
       .init(kind: .link, text: "https://example.com/article"),
       .init(kind: .photo, mediaData: photoBytes, thumbnail: thumbnailBytes),
@@ -890,7 +890,7 @@ struct VaultContentStoreTests {
       mutationCount.withLock { $0 += 1 }
     }
     let root = try #require(
-      try store.createThread(cards: [
+      try store.createPost(cards: [
         .init(kind: .todo, text: "Pick up flowers")
       ]).first
     )
@@ -939,7 +939,7 @@ struct VaultContentStoreTests {
   func updateCard_todoBodyPreservesCompletionTimestamp() throws {
     let store = try makeStore()
     let root = try #require(
-      try store.createThread(cards: [
+      try store.createPost(cards: [
         .init(kind: .todo, text: "Draft")
       ]).first
     )
@@ -970,7 +970,7 @@ struct VaultContentStoreTests {
   func setTodoCompletion_rejectsNonTodoCard() throws {
     let store = try makeStore()
     let root = try #require(
-      try store.createThread(cards: [.init(kind: .text, text: "Note")]).first
+      try store.createPost(cards: [.init(kind: .text, text: "Note")]).first
     )
 
     #expect(throws: VaultContentStore.Error.self) {
@@ -981,7 +981,7 @@ struct VaultContentStoreTests {
   @Test
   func updateCardBody_reArmsExistingOutboxRowWithoutDuplicating() throws {
     let store = try makeStore()
-    let root = try #require(try store.createThread(cards: [.init(kind: .text, text: "v1")]).first)
+    let root = try #require(try store.createPost(cards: [.init(kind: .text, text: "v1")]).first)
 
     try store.updateCardBody(cardID: root.cardID, body: "v2")
 
@@ -1000,7 +1000,7 @@ struct VaultContentStoreTests {
   func updateCard_replacesMediaAttachmentAndRemovesOldFile() throws {
     let store = try makeStore()
     let root = try #require(
-      try store.createThread(cards: [
+      try store.createPost(cards: [
         .init(kind: .photo, mediaData: Data([0x01, 0x02]), thumbnail: Data([0x10]))
       ]).first
     )
@@ -1060,7 +1060,7 @@ struct VaultContentStoreTests {
   func updateCard_textReplacementRemovesMediaAttachment() throws {
     let store = try makeStore()
     let root = try #require(
-      try store.createThread(cards: [
+      try store.createPost(cards: [
         .init(kind: .photo, mediaData: Data([0x01, 0x02]))
       ]).first
     )
@@ -1093,7 +1093,7 @@ struct VaultContentStoreTests {
   func deleteCardEdge_neverSynced_retainsRowsAndDropsUnneededOutbox() throws {
     let store = try makeStore()
     let root = try #require(
-      try store.createThread(cards: [
+      try store.createPost(cards: [
         .init(kind: .text, text: "a"),
         .init(kind: .text, text: "b"),
       ]).first
@@ -1115,7 +1115,7 @@ struct VaultContentStoreTests {
   @Test
   func deleteCardEdge_syncedRows_enqueuesDeleteTombstones() throws {
     let store = try makeStore()
-    let root = try #require(try store.createThread(cards: [.init(kind: .text, text: "a")]).first)
+    let root = try #require(try store.createPost(cards: [.init(kind: .text, text: "a")]).first)
 
     // Simulate a completed upload: server metadata exists, outbox is drained.
     let context = store.container.mainContext
@@ -1144,7 +1144,7 @@ struct VaultContentStoreTests {
   @Test
   func deleteCardEdge_retainsSubtreeAndMediaFiles() throws {
     let store = try makeStore()
-    let edges = try store.createThread(cards: [
+    let edges = try store.createPost(cards: [
       .init(kind: .text, text: "root"),
       .init(kind: .photo, mediaData: Data([0x01, 0x02])),
     ])
@@ -1188,7 +1188,7 @@ struct VaultContentStoreTests {
     let mutationCount = Mutex(0)
     let store = try makeStore(onLocalMutation: { mutationCount.withLock { $0 += 1 } })
 
-    let root = try #require(try store.createThread(cards: [.init(kind: .text, text: "a")]).first)
+    let root = try #require(try store.createPost(cards: [.init(kind: .text, text: "a")]).first)
     #expect(mutationCount.withLock { $0 } == 1)
 
     let child = try store.appendCard(.init(kind: .text, text: "child"), to: root.id)

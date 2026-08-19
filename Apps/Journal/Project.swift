@@ -149,7 +149,8 @@ func journalFramework(
   name: String,
   product: Product = .staticFramework,
   resources: ResourceFileElements? = nil,
-  dependencies: [TargetDependency] = []
+  dependencies: [TargetDependency] = [],
+  additionalSettings: SettingsDictionary = [:]
 ) -> Target {
   .target(
     name: name,
@@ -162,7 +163,7 @@ func journalFramework(
     buildableFolders: [BuildableFolder(stringLiteral: "Sources/\(name)")],
     dependencies: dependencies,
     settings: .settings(
-      base: .frameworkTarget,
+      base: .frameworkTarget.merging(additionalSettings),
       configurations: journalConfigurations
     )
   )
@@ -441,11 +442,7 @@ let project = Project(
         "com.apple.security.application-groups": ["group.app.muukii.journal"],
       ]),
       dependencies: [
-        .sdk(name: "AVFoundation", type: .framework),
-        .sdk(name: "UniformTypeIdentifiers", type: .framework),
-        .target(name: "JournalIntents"),
-        .target(name: "JournalVault"),
-        .target(name: "MediaProcessing"),
+        .target(name: "JournalShareUI"),
       ],
       settings: .settings(
         base: .base.merging([
@@ -453,6 +450,36 @@ let project = Project(
         ]),
         configurations: journalBundleConfigurations
       )
+    ),
+
+    // Review UI and import pipeline for the Share extension. This lives outside
+    // the `.appex` because Xcode Previews does not support share-service
+    // extension targets, and because a framework can carry a unit-test target.
+    // `JournalShareExtension` keeps only its principal `ShareViewController`.
+    //
+    // Dynamic, not static. Previews itself handles static frameworks fine —
+    // `MuHaptics`, `CaptureAudio`, and `CaptureSuggestions` are static and preview
+    // normally. What those three share is that they depend on nothing local. This
+    // target depends on three sibling frameworks, and while it was static Previews
+    // put only `JournalShareUI` in its JIT link set and loaded no dependency
+    // product, so `JournalVault` / `JournalIntents` / `MediaProcessing` symbols had
+    // nothing to bind against. Their directories were all on `DYLD_FRAMEWORK_PATH`,
+    // but a search path is not a load — something has to name them. As a dynamic
+    // framework this target is a real Mach-O: `MediaProcessing` is linked into it,
+    // and its load commands name the other two, so dyld brings the closure in.
+    journalFramework(
+      name: "JournalShareUI",
+      product: .framework,
+      dependencies: [
+        .sdk(name: "AVFoundation", type: .framework),
+        .sdk(name: "UniformTypeIdentifiers", type: .framework),
+        .target(name: "JournalIntents"),
+        .target(name: "JournalVault"),
+        .target(name: "MediaProcessing"),
+      ],
+      additionalSettings: [
+        "APPLICATION_EXTENSION_API_ONLY": "YES",
+      ]
     ),
 
     .target(
@@ -636,12 +663,24 @@ let project = Project(
       )
     ),
     // Save-time raster derivatives for large media such as photos and videos.
+    //
+    // Static, and linked by both `Tinycurve` and `JournalShareUI`, so its code is
+    // absorbed into each. That is safe here only because the module is stateless
+    // (a `public enum` namespace of `static func`s, no globals, no `@objc`) and
+    // because its types never escape a call site — every caller immediately takes
+    // `.data`. The two copies also never share a process: the app does not link
+    // `JournalShareUI`, and the extension does not load the app binary.
+    // Extension-API-only because the copy inside `JournalShareUI` runs in the
+    // share extension; static absorption would otherwise skip that check.
     journalFramework(
       name: "MediaProcessing",
       dependencies: [
         .sdk(name: "AVFoundation", type: .framework),
         .sdk(name: "ImageIO", type: .framework),
         .sdk(name: "UniformTypeIdentifiers", type: .framework),
+      ],
+      additionalSettings: [
+        "APPLICATION_EXTENSION_API_ONLY": "YES",
       ]
     ),
     // Pure SwiftUI vector canvas (Canvas/Path) with drawing-time haptics.

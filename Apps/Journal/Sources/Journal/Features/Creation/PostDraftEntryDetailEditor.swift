@@ -9,11 +9,11 @@ import SwiftUI
 /// editing experience. Each capture component stays
 /// persistence-agnostic and reports a value, which this app-shell layer converts
 /// into the normalized payload stored on `CardEditDraft`.
-struct ThreadDraftEntryDetailEditor: View {
+struct PostDraftEntryDetailEditor: View {
 
   @Environment(\.dismiss) private var dismiss
 
-  @Bindable var draft: ThreadDraftCard
+  @Bindable var draft: CardEditDraft
   let isSaving: Bool
 
   var body: some View {
@@ -128,14 +128,14 @@ private struct EntryContentKindEditor: View {
     ZStack {
       switch draft.kind {
       case .text:
-        ThreadDraftTextEditorContent(text: $draft.text)
+        PostDraftTextEditorContent(text: $draft.text)
       case .todo:
         TodoDraftEditorContent(
           text: $draft.text,
           isCompleted: draft.completedAt != nil
         )
       case .link:
-        ThreadDraftLinkEditorContent(urlString: $draft.text)
+        PostDraftLinkEditorContent(urlString: $draft.text)
       case .file:
         ContentUnavailableView(
           "File Editing Unavailable",
@@ -143,37 +143,37 @@ private struct EntryContentKindEditor: View {
           description: Text("Files shared to Tinycurve stay attached to their original entry.")
         )
       case .photo:
-        ThreadDraftPhotoDetailEditor(card: draft)
+        PostDraftPhotoDetailEditor(card: draft)
       case .video, .livePhoto:
         EntryContentView(content: draft.entryContent, style: .cell)
           .padding(16)
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       case .audio:
-        ThreadDraftAudioDetailEditor(card: draft)
+        PostDraftAudioDetailEditor(card: draft)
       case .suggestion:
         EntryContentView(content: draft.entryContent, style: .cell)
           .padding(16)
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
       case .doodle:
-        ThreadDraftDoodleDetailEditor(card: draft)
+        PostDraftDoodleDetailEditor(card: draft)
       case .bauhaus:
-        ThreadDraftBauhausDetailEditor(card: draft)
+        PostDraftBauhausDetailEditor(card: draft)
       case .unknown:
-        ThreadDraftTextEditorContent(text: $draft.text)
+        PostDraftTextEditorContent(text: $draft.text)
       @unknown default:
-        ThreadDraftTextEditorContent(text: $draft.text)
+        PostDraftTextEditorContent(text: $draft.text)
       }
     }
   }
 }
 
 /// Camera-backed editor for a photo draft.
-private struct ThreadDraftPhotoDetailEditor: View {
+private struct PostDraftPhotoDetailEditor: View {
 
   @Bindable var card: CardEditDraft
 
   var body: some View {
-    ThreadDraftPhotoCaptureContent(card: card) { [card] photo in
+    PostDraftPhotoCaptureContent(card: card) { [card] photo in
       card.setPhoto(photo)
     }
   }
@@ -193,31 +193,31 @@ private struct TodoDraftEditorContent: View {
         .frame(width: 44, height: 44)
         .accessibilityHidden(true)
 
-      ThreadDraftTextEditorContent(text: $text)
+      PostDraftTextEditorContent(text: $text)
     }
     .padding(.leading, 8)
   }
 }
 
 /// Recorder-backed editor for an ambient audio draft.
-private struct ThreadDraftAudioDetailEditor: View {
+private struct PostDraftAudioDetailEditor: View {
 
   @Bindable var card: CardEditDraft
 
   var body: some View {
-    ThreadDraftAudioRecorderContent(card: card) { [card] recording in
+    PostDraftAudioRecorderContent(card: card) { [card] recording in
       card.setAudio(recording)
     }
   }
 }
 
 /// Vector-canvas editor for a doodle draft.
-private struct ThreadDraftDoodleDetailEditor: View {
+private struct PostDraftDoodleDetailEditor: View {
 
   @Bindable var card: CardEditDraft
 
   var body: some View {
-    ThreadDraftDoodleCanvasContent(card: card) { [card] drawing in
+    PostDraftDoodleCanvasContent(card: card) { [card] drawing in
       guard let drawing else {
         card.clearDoodle()
         return
@@ -229,7 +229,7 @@ private struct ThreadDraftDoodleDetailEditor: View {
 }
 
 /// Grid editor for a Bauhaus artwork draft.
-private struct ThreadDraftBauhausDetailEditor: View {
+private struct PostDraftBauhausDetailEditor: View {
 
   @Bindable var card: CardEditDraft
 

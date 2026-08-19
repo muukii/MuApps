@@ -270,9 +270,10 @@ extension VaultSavedEntry {
         kind: .audio,
         audio: AudioRecording(
           fileURL: editableURL,
-          duration: VaultSavedEntryEditMediaPreparer.audioDuration(
-            from: editableURL
-          ),
+          // Decoding the copy is a fallback for records saved before the
+          // captured length was persisted.
+          duration: attachment?.primaryResource?.duration
+            ?? VaultSavedEntryEditMediaPreparer.audioDuration(from: editableURL),
           waveform: waveform
         ),
         location: location
@@ -624,7 +625,8 @@ extension VaultSavedAttachment {
       fileURL: fileURL,
       thumbnail: thumbnail,
       contentType: primaryResource?.contentType,
-      byteSize: primaryResource?.byteSize
+      byteSize: primaryResource?.byteSize,
+      duration: primaryResource?.duration
     )
   }
 
@@ -639,6 +641,7 @@ extension VaultSavedAttachment {
       contentType: primaryResource?.contentType,
       byteSize: primaryResource?.byteSize,
       waveformLevels: waveformLevels,
+      duration: primaryResource?.duration,
       suggestionMediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID
     )
   }

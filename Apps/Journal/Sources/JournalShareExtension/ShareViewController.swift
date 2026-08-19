@@ -1,3 +1,4 @@
+import JournalShareUI
 import SwiftUI
 import UIKit
 

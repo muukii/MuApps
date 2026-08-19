@@ -6,20 +6,20 @@ import SwiftUI
 ///
 /// The sheet does not create a draft until `AudioCaptureView` returns a completed
 /// recording. That keeps cancellation side-effect free for the Creation surface.
-struct ThreadDraftVoiceRecorderSheet: View {
+struct PostDraftVoiceRecorderSheet: View {
 
   @Environment(\.dismiss) private var dismiss
 
   /// Existing draft to update. `nil` means the caller will decide where the
   /// recording should be inserted after capture completes.
-  let card: ThreadDraftCard?
+  let card: CardEditDraft?
 
   /// Called with the completed recording before the sheet dismisses.
   let onFinish: @MainActor @Sendable (AudioRecording) -> Void
 
   var body: some View {
     NavigationStack {
-      ThreadDraftAudioRecorderContent(card: card) { recording in
+      PostDraftAudioRecorderContent(card: card) { recording in
         onFinish(recording)
         dismiss()
       }
@@ -32,10 +32,10 @@ struct ThreadDraftVoiceRecorderSheet: View {
 /// Recorder content shared by the Creation sheet and the full-screen draft
 /// editor. It shows playback controls when the draft already has audio, and the
 /// live recorder otherwise.
-struct ThreadDraftAudioRecorderContent: View {
+struct PostDraftAudioRecorderContent: View {
 
   /// Existing draft whose recording can be played or replaced.
-  let card: ThreadDraftCard?
+  let card: CardEditDraft?
 
   /// Called whenever the recorder completes a new take.
   let onFinish: @MainActor @Sendable (AudioRecording) -> Void
@@ -44,7 +44,7 @@ struct ThreadDraftAudioRecorderContent: View {
 
   var body: some View {
     if let audio = card?.audio, isRecordingReplacement == false {
-      ThreadDraftAudioExistingContent(
+      PostDraftAudioExistingContent(
         fileURL: audio.fileURL,
         duration: audio.duration,
         onRecordAgain: {
@@ -61,7 +61,7 @@ struct ThreadDraftAudioRecorderContent: View {
 }
 
 /// Displays the recording already attached to an audio draft.
-private struct ThreadDraftAudioExistingContent: View {
+private struct PostDraftAudioExistingContent: View {
 
   let fileURL: URL
   let duration: TimeInterval?

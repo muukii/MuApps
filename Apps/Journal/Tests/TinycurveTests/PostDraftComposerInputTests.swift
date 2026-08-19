@@ -4,9 +4,9 @@ import Testing
 @testable import Tinycurve
 
 /// Characterizes the modality boundary owned by the inline creation composer.
-@Suite("Thread draft composer input")
+@Suite("Post draft composer input")
 @MainActor
-struct ThreadDraftComposerInputTests {
+struct PostDraftComposerInputTests {
 
   @Test(
     "Promotes a complete initial web URL to Link",
@@ -16,7 +16,7 @@ struct ThreadDraftComposerInputTests {
     ]
   )
   func promotesCompleteInitialWebURL(input: String) {
-    let draft = ThreadDraftCard()
+    let draft = CardEditDraft()
 
     draft.composerText = input
 
@@ -27,7 +27,7 @@ struct ThreadDraftComposerInputTests {
 
   @Test("Keeps a URL added after existing text as Text")
   func keepsURLAddedAfterText() {
-    let draft = ThreadDraftCard()
+    let draft = CardEditDraft()
 
     draft.composerText = "Read this: "
     draft.composerText = "Read this: https://example.com/articles/one"
@@ -38,7 +38,7 @@ struct ThreadDraftComposerInputTests {
 
   @Test("Keeps an incrementally typed URL as Text")
   func keepsIncrementallyTypedURLAsText() {
-    let draft = ThreadDraftCard()
+    let draft = CardEditDraft()
     let input = "https://example.com"
 
     for index in input.indices {
@@ -51,7 +51,7 @@ struct ThreadDraftComposerInputTests {
 
   @Test("Existing whitespace counts as text input")
   func keepsURLAfterWhitespaceAsText() {
-    let draft = ThreadDraftCard()
+    let draft = CardEditDraft()
 
     draft.composerText = " "
     draft.composerText = " https://example.com"
@@ -69,7 +69,7 @@ struct ThreadDraftComposerInputTests {
     ]
   )
   func keepsNonWebFirstValueAsText(input: String) {
-    let draft = ThreadDraftCard()
+    let draft = CardEditDraft()
 
     draft.composerText = input
 

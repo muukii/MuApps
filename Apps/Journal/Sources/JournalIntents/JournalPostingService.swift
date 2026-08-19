@@ -7,7 +7,7 @@ import WidgetKit
 /// The service opens the App Group catalog and one process-local
 /// `VaultStoreRegistry`, validates write permission immediately before saving,
 /// then delegates the atomic card/outbox transaction to
-/// `VaultContentStore.createThread(cards:deliveryPolicy:)`. It does not start a CloudKit sync
+/// `VaultContentStore.createPost(cards:deliveryPolicy:)`. It does not start a CloudKit sync
 /// engine inside an extension process; the durable outbox is picked up by the
 /// app's sync lifecycle.
 @MainActor
@@ -57,7 +57,7 @@ public final class JournalPostingService {
 
   /// Saves one composed post into a validated destination vault.
   ///
-  /// All card drafts are committed as one thread and one durable outbox
+  /// All card drafts are committed as one post and one durable outbox
   /// transaction. Widget timelines are reloaded only after that transaction
   /// succeeds. An empty draft array is rejected rather than creating a
   /// structurally invalid post.
@@ -87,7 +87,7 @@ public final class JournalPostingService {
     }
 
     let store = try storage.registry.store(for: vaultID)
-    _ = try store.createThread(
+    _ = try store.createPost(
       cards: cards,
       deliveryPolicy: descriptor.activityDeliveryPolicy
     )

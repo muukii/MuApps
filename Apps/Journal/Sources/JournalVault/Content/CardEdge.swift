@@ -14,7 +14,7 @@ import SwiftData
 /// - every visible card is referenced by exactly one edge
 /// - `parent` may only point at an edge in the same vault
 /// - cycles are forbidden
-/// - a linear thread is a root edge plus children ordered by `sortIndex`
+/// - a linear post is a root edge plus children ordered by `sortIndex`
 @Model
 public final class CardEdge {
 
@@ -24,7 +24,7 @@ public final class CardEdge {
   /// Card placed by this edge once the local graph has been repaired.
   public var card: Card?
 
-  /// Parent edge for child cards in a thread or future spatial tree.
+  /// Parent edge for child cards in a post or future spatial tree.
   public var parent: CardEdge?
 
   /// Child placements under this edge.
@@ -37,11 +37,11 @@ public final class CardEdge {
   /// CloudKit import/export and out-of-order repair key for `parent`.
   var parentEdgeReferenceID: UUID?
 
-  /// Order among siblings under the same parent (authored order for threads).
+  /// Order among siblings under the same parent (authored order for posts).
   public var sortIndex: Int
 
   /// Encoded layout metadata for spatial trees (mind-map positions). Shape is
-  /// intentionally undecided; linear threads leave it `nil`.
+  /// intentionally undecided; linear posts leave it `nil`.
   public var layout: Data?
 
   public var createdAt: Date

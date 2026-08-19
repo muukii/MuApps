@@ -6,13 +6,20 @@ public struct AudioContentSource: Hashable, Sendable {
   public let fileURL: URL?
   /// Quantized `0...255` meter levels ordered across the full recording.
   public let waveformLevels: Data?
+  /// Recorded length in seconds, measured when the audio was captured.
+  ///
+  /// Imported audio and recordings produced by older builds may not carry a
+  /// measured length, so rendering must treat this value as optional.
+  public let duration: TimeInterval?
 
   public init(
     fileURL: URL? = nil,
-    waveformLevels: Data? = nil
+    waveformLevels: Data? = nil,
+    duration: TimeInterval? = nil
   ) {
     self.fileURL = fileURL
     self.waveformLevels = waveformLevels
+    self.duration = duration
   }
 }
 
@@ -36,8 +43,8 @@ struct AudioContentView: View {
       }
     }
 
-    var barWidth: CGFloat { 4 }
-    var barSpacing: CGFloat { 4 }
+    var barWidth: CGFloat { 3 }
+    var barSpacing: CGFloat { 3 }
     var waveformOpacity: Double { 0.62 }
 
     /// Bars that fit `width` at this style's bar geometry, where `n` bars
@@ -73,7 +80,7 @@ struct AudioContentView: View {
       player.toggle(fileURL: fileURL)
     } label: {
       Circle()
-        .foregroundStyle(.quaternary)
+        .foregroundStyle(.quinary)
         .frame(width: 36, height: 36)
         .overlay {
           Image(systemName: isPlaying ? "pause.fill" : "play.fill")
@@ -109,16 +116,20 @@ struct AudioContentView: View {
 
   @ViewBuilder
   var body: some View {
-    HStack {
+    HStack(spacing: 16) {
 
       playbackButton
 
       waveform
         .frame(height: 30)
         .frame(maxWidth: .infinity)
+
+      if let duration = audio.duration {
+        DurationLabel(duration: duration)
+      }
     }
-    .padding(.horizontal, 10)
-    .padding(.vertical, 10)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 12)
   }
 
   private var waveform: some View {
@@ -149,6 +160,40 @@ struct AudioContentView: View {
       fallback: style.fallbackLevels
     )
   }
+}
+
+/// Shows how long the attached recording runs.
+private struct DurationLabel: View {
+
+  let duration: TimeInterval
+
+  var body: some View {
+    Text(Self.formatted(duration))
+      .font(.caption)
+      .fontWeight(.medium)
+      .monospacedDigit()
+      .fixedSize()
+      .foregroundStyle(.tint)
+  }
+
+  private static func formatted(_ duration: TimeInterval) -> String {
+    let total = Int(max(0, duration.rounded()))
+    guard total >= 3600 else {
+      return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    return String(
+      format: "%d:%02d:%02d",
+      total / 3600,
+      (total % 3600) / 60,
+      total % 60
+    )
+  }
+
+}
+
+#Preview {
+  DurationLabel(duration: 100)
 }
 
 /// One fixed-position bar in a presentation-sized waveform summary.
@@ -242,6 +287,15 @@ struct AudioWaveformSample: Identifiable, Equatable {
 }
 
 #Preview("Audio Content") {
+  EntryContentPreviewCanvas {
+    AudioContentView(
+      audio: AudioContentSource(duration: 83),
+      style: .init(.cell)
+    )
+  }
+}
+
+#Preview("Audio Content - No Duration") {
   EntryContentPreviewCanvas {
     AudioContentView(
       audio: AudioContentSource(),

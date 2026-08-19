@@ -154,7 +154,7 @@ struct HomeDropItemTests {
 
   @Test("Does not mutate an authored composer draft")
   func preservesAuthoredComposerDraft() {
-    let authoredDraft = ThreadDraftCard(kind: .text, text: "Still writing")
+    let authoredDraft = CardEditDraft(kind: .text, text: "Still writing")
 
     _ = HomeDropPostingCoordinator.post(
       items: [.importedText("Dropped separately")],

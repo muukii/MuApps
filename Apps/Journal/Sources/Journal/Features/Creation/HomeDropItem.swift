@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 
 /// One external value materialized by the Home composer drop destination.
 ///
-/// The value deliberately skips `ThreadDraftCard`: a drop is an explicit import
+/// The value deliberately skips `CardEditDraft`: a drop is an explicit import
 /// action and must not replace or clear the unpublished card currently owned by
 /// the composer. File-backed cases own an app-temporary copy until one root-card
 /// transaction either commits or fails.

@@ -10,20 +10,20 @@ import AppKit
 ///
 /// The sheet does not create a draft until `PhotoCaptureView` returns an image.
 /// Dismissal without capture is therefore a pure cancellation.
-struct ThreadDraftPhotoCaptureSheet: View {
+struct PostDraftPhotoCaptureSheet: View {
 
   @Environment(\.dismiss) private var dismiss
 
   /// Existing draft to update. `nil` means the caller will decide where the
   /// captured photo should be inserted after capture completes.
-  let card: ThreadDraftCard?
+  let card: CardEditDraft?
 
   /// Called with the captured photo before the sheet dismisses.
   let onCapture: @MainActor @Sendable (CapturedPhoto) -> Void
 
   var body: some View {
     NavigationStack {
-      ThreadDraftPhotoCaptureContent(card: card) { photo in
+      PostDraftPhotoCaptureContent(card: card) { photo in
         onCapture(photo)
         dismiss()
       }
@@ -36,10 +36,10 @@ struct ThreadDraftPhotoCaptureSheet: View {
 /// Photo capture content shared by the Creation sheet and the full-screen draft
 /// editor. It previews an existing captured photo and switches back to the camera
 /// when the user chooses to retake it.
-struct ThreadDraftPhotoCaptureContent: View {
+struct PostDraftPhotoCaptureContent: View {
 
   /// Existing draft whose photo can be previewed or replaced.
-  let card: ThreadDraftCard?
+  let card: CardEditDraft?
 
   /// Called whenever the camera completes a new capture.
   let onCapture: @MainActor @Sendable (CapturedPhoto) -> Void
@@ -48,7 +48,7 @@ struct ThreadDraftPhotoCaptureContent: View {
 
   var body: some View {
     if let photo = card?.photo, isCapturingReplacement == false {
-      ThreadDraftPhotoExistingContent(
+      PostDraftPhotoExistingContent(
         photo: photo,
         onRetake: {
           isCapturingReplacement = true
@@ -65,7 +65,7 @@ struct ThreadDraftPhotoCaptureContent: View {
 }
 
 /// Displays the still already attached to a photo draft.
-private struct ThreadDraftPhotoExistingContent: View {
+private struct PostDraftPhotoExistingContent: View {
 
   let photo: CapturedPhoto
   let onRetake: @MainActor @Sendable () -> Void
@@ -82,7 +82,7 @@ private struct ThreadDraftPhotoExistingContent: View {
           .scaledToFit()
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
-        ThreadDraftPhotoUnavailableContent()
+        PostDraftPhotoUnavailableContent()
       }
 
       VStack {
@@ -99,7 +99,7 @@ private struct ThreadDraftPhotoExistingContent: View {
 }
 
 /// Placeholder for a photo draft whose stored image data can no longer decode.
-private struct ThreadDraftPhotoUnavailableContent: View {
+private struct PostDraftPhotoUnavailableContent: View {
 
   var body: some View {
     VStack(spacing: 12) {

@@ -132,7 +132,7 @@ struct JournalSharePayload: Identifiable, Sendable {
 /// `NSItemProvider` file URLs are valid only during its loading callback. This
 /// type makes that lifetime boundary explicit and gives every imported file a
 /// unique directory that can be removed atomically.
-struct JournalShareTemporaryFile: Sendable {
+public struct JournalShareTemporaryFile: Sendable {
   let fileURL: URL
   let owningDirectoryURL: URL
   let byteSize: Int
@@ -184,7 +184,9 @@ struct JournalShareTemporaryFile: Sendable {
 
   /// Removes abandoned imports from an earlier extension process while leaving
   /// current share sessions alone.
-  nonisolated static func cleanUpStaleImports(olderThan age: TimeInterval = 24 * 60 * 60) {
+  public nonisolated static func cleanUpStaleImports(
+    olderThan age: TimeInterval = 24 * 60 * 60
+  ) {
     let fileManager = FileManager.default
     let temporaryDirectory = fileManager.temporaryDirectory
     let cutoff = Date().addingTimeInterval(-age)

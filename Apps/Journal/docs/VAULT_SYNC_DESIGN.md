@@ -441,7 +441,7 @@ logical action を表す immutable な domain event。1 回の user action が�
 最大 1 件とする。sync retry、conflict retry、import、retention cleanup のような
 infrastructure action は activity を生成しない。
 
-初期実装で確定する kind は `contentAdded` のみ。`createThread(cards:)` による新規投稿と
+初期実装で確定する kind は `contentAdded` のみ。`createPost(cards:)` による新規投稿と
 `appendCard(_:to:)` による Reply は、いずれも「Vault に content を追加した」という
 1 回の logical action として扱う。root / Reply の違いを kind に重複して持たせず、
 `subjectEdgeID` と `rootEdgeID` の topology から判定する。
@@ -819,7 +819,7 @@ Vault
 ```
 
 target model では `CardRelationship` を廃止する。
-thread / continuation / latest item の意味は `CardEdge` で表現する。
+post / continuation / latest item の意味は `CardEdge` で表現する。
 linear sequence では root edge と child edge を `sortIndex` で並べる。
 mind map の branch は `CardEdge.parentEdgeID` と layout metadata で表現する。
 これにより、root だけ `CardGroup` になる不自然さを避けつつ、
@@ -944,7 +944,7 @@ ordering、nesting、layout の変更を通常の edge row mutation として扱
 
 - すべての visible card は必ず 1 つの `CardEdge` から参照される。
 - single-card post は、children を持たない root `CardEdge` として表現する。
-- thread-like post は、root `CardEdge` と child edge の authored order で表現する。
+- multi-card post は、root `CardEdge` と child edge の authored order で表現する。
 - mind-map-like post は、`CardEdge.parentEdgeID` で tree を表現する。
 - `CardEdge.parentEdgeID` は同じ vault 内の edge だけを指せる。
 - cycle は許可しない。
@@ -1165,7 +1165,7 @@ legacy local `JournalModel` module は project から削除済み。Journal は 
 `JournalVaultRuntime.selectVault(_:)` が `VaultInstance` を開き、
 `CreationView` と `SavedListView` はその selected instance だけを使う。
 
-user-facing save は `CreationView` から `VaultInstance.createThread(cards:)` に書く。
+user-facing save は `CreationView` から `VaultInstance.createPost(cards:)` に書く。
 user-facing edit は `SavedListView` から selected `VaultInstance` の
 `VaultContentStore.updateCard(cardID:with:)` に書く。
 Todoの完了／再開は`VaultContentStore.setTodoCompletion(cardID:isCompleted:)`に書き、

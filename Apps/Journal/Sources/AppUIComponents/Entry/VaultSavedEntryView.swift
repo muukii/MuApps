@@ -60,6 +60,8 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
   public let byteSize: Int?
   /// Validated, quantized audio levels ordered from recording start to end.
   public let waveformLevels: Data?
+  /// Measured length of a time-based resource, in seconds.
+  public let duration: TimeInterval?
   public let suggestionMediaFileURLsByResourceID: [UUID: URL]
 
   public init(
@@ -72,6 +74,7 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
     contentType: String? = nil,
     byteSize: Int? = nil,
     waveformLevels: Data? = nil,
+    duration: TimeInterval? = nil,
     suggestionMediaFileURLsByResourceID: [UUID: URL] = [:]
   ) {
     self.kind = kind
@@ -83,6 +86,7 @@ public struct VaultSavedEntryAttachmentModel: Hashable {
     self.contentType = contentType
     self.byteSize = byteSize
     self.waveformLevels = waveformLevels
+    self.duration = duration
     self.suggestionMediaFileURLsByResourceID = suggestionMediaFileURLsByResourceID
   }
 }
@@ -100,6 +104,7 @@ extension VaultSavedEntryAttachmentModel {
       contentType: contentType,
       byteSize: byteSize,
       waveformLevels: waveformLevels,
+      duration: duration,
       suggestionMediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID
     )
   }

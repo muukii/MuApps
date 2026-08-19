@@ -150,8 +150,8 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
 
   /// Number of recent cards inspected to find the visible latest item.
   ///
-  /// A thread save can create multiple cards at nearly the same timestamp.
-  /// Looking at a small recent window lets the widget prefer the authored thread
+  /// A post save can create multiple cards at nearly the same timestamp.
+  /// Looking at a small recent window lets the widget prefer the authored post
   /// tail instead of accidentally showing its parent card.
   /// Requested periodic refresh cadence for relative date labels.
   ///
