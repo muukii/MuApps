@@ -7,6 +7,9 @@ import Foundation
 import JournalVault
 import MuColor
 import SwiftUI
+#if os(iOS)
+  import NextGrowingTextViewSwiftUI
+#endif
 
 /// Visual constants for the creation composer bar.
 enum CreationContainerMetrics {
@@ -165,20 +168,23 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
 
   var body: some View {
     HStack(alignment: .bottom, spacing: 10) {
-      CreationComposerLeadingAction(
-        showsAddMenu: draft.isEmptyComposerDraft,
-        isProcessing: isProcessing,
-        onDiscardDraft: onDiscardDraft
-      ) {
-        menuContent
-      }
 
-      if let composerMode = draft.composerMode {
-        CreationComposerTodoModeButton(
-          mode: composerMode,
+      HStack(spacing: 0) {
+        CreationComposerLeadingAction(
+          showsAddMenu: draft.isEmptyComposerDraft,
           isProcessing: isProcessing,
-          onToggle: onToggleComposerMode
-        )
+          onDiscardDraft: onDiscardDraft
+        ) {
+          menuContent
+        }
+
+        if let composerMode = draft.composerMode {
+          CreationComposerTodoModeButton(
+            mode: composerMode,
+            isProcessing: isProcessing,
+            onToggle: onToggleComposerMode
+          )
+        }
       }
 
       CreationComposerDraftContent(
@@ -438,7 +444,30 @@ private struct CreationComposerDraftContent: View {
   var body: some View {
     switch draft.kind {
     case .text:
-      TextField(placement.prompt, text: $draft.composerText, axis: .vertical)
+      #if os(iOS)
+        GrowingTextEditor(
+          text: $draft.composerText,
+          placeholder: placement.prompt,
+          configuration: GrowingTextEditorConfiguration(
+            minLines: 1,
+            maxLines: 5,
+            horizontalPadding: 0,
+            verticalPadding: 0
+          )
+        )
+        .focused($focusedField, equals: .text)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .disabled(isProcessing)
+        .accessibilityLabel("Entry text")
+        .task(id: focusRequestID) {
+          await focusIfRequested(.text)
+        }
+      #else
+        TextField(
+          placement.prompt,
+          text: $draft.composerText,
+          axis: .vertical
+        )
         .textFieldStyle(.plain)
         .lineLimit(1...5)
         .focused($focusedField, equals: .text)
@@ -448,8 +477,36 @@ private struct CreationComposerDraftContent: View {
         .task(id: focusRequestID) {
           await focusIfRequested(.text)
         }
+      #endif
     case .todo:
-      TextField("Todo", text: $draft.text, axis: .vertical)
+      #if os(iOS)
+        GrowingTextEditor(
+          text: $draft.text,
+          placeholder: "Todo",
+          configuration: GrowingTextEditorConfiguration(
+            minLines: 1,
+            maxLines: 5,
+            horizontalPadding: 0,
+            verticalPadding: 0
+          )
+        )
+        .focused($focusedField, equals: .todo)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .disabled(isProcessing)
+        .accessibilityLabel("Todo text")
+        .task {
+          await Task.yield()
+          focusedField = .todo
+        }
+        .task(id: focusRequestID) {
+          await focusIfRequested(.todo)
+        }
+      #else
+        TextField(
+          "Todo",
+          text: $draft.text,
+          axis: .vertical
+        )
         .textFieldStyle(.plain)
         .lineLimit(1...5)
         .focused($focusedField, equals: .todo)
@@ -463,6 +520,7 @@ private struct CreationComposerDraftContent: View {
         .task(id: focusRequestID) {
           await focusIfRequested(.todo)
         }
+      #endif
     case .link, .file, .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus,
       .unknown:
       preview

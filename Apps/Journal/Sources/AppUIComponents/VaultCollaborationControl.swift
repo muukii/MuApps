@@ -140,7 +140,11 @@ public struct VaultCollaborationControl: VaultCollaborationViewRepresentable {
   }
 
   /// Bridges sharing callbacks and serialized collaboration-header updates.
-  public final class Coordinator: NSObject, VaultCollaborationSharingDelegate {
+  ///
+  /// Explicit isolation keeps the UIKit and AppKit delegate conformances on
+  /// the same UI-actor boundary even when their SDK annotations differ.
+  @MainActor
+  public final class Coordinator: NSObject, @MainActor VaultCollaborationSharingDelegate {
 
     private let vaultID: VaultID
     private var title: String
