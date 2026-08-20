@@ -3138,7 +3138,6 @@
       }
     },
     "Off" : {
-      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {

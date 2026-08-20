@@ -54,6 +54,7 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
   private let isProcessing: Bool
   private let onOpenDraft: @MainActor @Sendable () -> Void
   private let onDiscardDraft: @MainActor @Sendable () -> Void
+  private let onToggleComposerMode: @MainActor @Sendable () -> Void
   private let onPost: @MainActor @Sendable () -> Void
   private let onCancelReply: @MainActor @Sendable () -> Void
   private let onDropItems: @MainActor @Sendable ([HomeDropItem]) -> Void
@@ -72,6 +73,7 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
     isProcessing: Bool,
     onOpenDraft: @escaping @MainActor @Sendable () -> Void,
     onDiscardDraft: @escaping @MainActor @Sendable () -> Void,
+    onToggleComposerMode: @escaping @MainActor @Sendable () -> Void,
     onPost: @escaping @MainActor @Sendable () -> Void,
     onCancelReply: @escaping @MainActor @Sendable () -> Void = {},
     onDropItems: @escaping @MainActor @Sendable ([HomeDropItem]) -> Void,
@@ -89,6 +91,7 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
     self.isProcessing = isProcessing
     self.onOpenDraft = onOpenDraft
     self.onDiscardDraft = onDiscardDraft
+    self.onToggleComposerMode = onToggleComposerMode
     self.onPost = onPost
     self.onCancelReply = onCancelReply
     self.onDropItems = onDropItems
@@ -125,6 +128,7 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
                 isProcessing: isProcessing,
                 onOpenDraft: onOpenDraft,
                 onDiscardDraft: onDiscardDraft,
+                onToggleComposerMode: onToggleComposerMode,
                 onPost: onPost
               ) {
                 menuContent

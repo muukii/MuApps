@@ -124,6 +124,7 @@ struct CreationView: View {
       isProcessing: isSaving || isImportingMediaFromLibrary || isPostingHomeDrop,
       onOpenDraft: presentComposerDraftEditor,
       onDiscardDraft: requestComposerDraftDiscard,
+      onToggleComposerMode: composerState.toggleActiveComposerMode,
       onPost: post,
       onCancelReply: {
         composerState.cancelReply()
@@ -202,7 +203,6 @@ struct CreationView: View {
       CreationAddMenuContent(
         isSuggestionCaptureEnabled:
           JournalFeatureFlags.isJournalingSuggestionsCaptureEnabled,
-        onComposeTodo: presentTodoCapture,
         onComposeLink: presentLinkCapture,
         onCapturePhoto: presentPhotoCapture,
         onChooseMediaFromLibrary: presentLibraryMediaPicker,
@@ -517,6 +517,9 @@ struct CreationView: View {
 
     switch request.mode {
     case .text:
+      // An explicit system Text capture overrides an otherwise empty Todo
+      // placeholder instead of silently posting the requested text as a Todo.
+      composerDraft.setComposerMode(.text)
       presentComposerDraftEditor()
     case .photo:
       presentPhotoCapture()
@@ -542,7 +545,7 @@ struct CreationView: View {
   }
 
   private func requestComposerDraftDiscard() {
-    guard composerDraft.isEmptyTextDraft == false else { return }
+    guard composerDraft.isEmptyComposerDraft == false else { return }
     isDiscardComposerDraftConfirmationPresented = true
   }
 
@@ -561,10 +564,6 @@ struct CreationView: View {
   private func presentLinkCapture() {
     composerDraft.kind = .link
     linkEditorPresentation = LinkEditorPresentation(target: composerDraft)
-  }
-
-  private func presentTodoCapture() {
-    composerDraft.setTodo()
   }
 
   private func restoreEmptyLinkPlaceholderIfNeeded() {
@@ -935,7 +934,6 @@ struct CreationView: View {
   }
 
 }
-
 
 /// Presentation payload for a collaboration management error.
 private struct CollaborationErrorMessage: Identifiable {
@@ -1333,7 +1331,6 @@ extension CMTime {
 private struct CreationAddMenuContent: View {
 
   let isSuggestionCaptureEnabled: Bool
-  let onComposeTodo: @MainActor @Sendable () -> Void
   let onComposeLink: @MainActor @Sendable () -> Void
   let onCapturePhoto: @MainActor @Sendable () -> Void
   let onChooseMediaFromLibrary: @MainActor @Sendable () -> Void
@@ -1343,10 +1340,6 @@ private struct CreationAddMenuContent: View {
   let onChooseSuggestion: @MainActor @Sendable (CapturedSuggestion) -> Void
 
   var body: some View {
-    Button(action: onComposeTodo) {
-      Label("Todo", systemImage: "checkmark.circle")
-    }
-
     Button(action: onComposeLink) {
       Label("Link", systemImage: "link")
     }

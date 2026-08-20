@@ -999,8 +999,12 @@ the gallery's **Lab** section).
   the runtime refreshes.
 
   Creation lives in one Book-style glass input bar inset at the bottom of Home.
-  Its center is a multiline **Write something** text field that grows from one
-  to five lines. Each Vault owns one root draft plus an isolated Reply draft for
+  Its compact Text/Todo surface orders a leading add-or-discard control, a fixed
+  Todo mode button, a multiline input that grows from one to five lines, and the
+  trailing Post control. The Todo button uses the non-filled
+  `checkmark.circle`: Text mode is secondary and Todo mode uses the app Tint.
+  `checkmark.circle.fill` remains reserved for a saved Todo's completed state.
+  Each Vault owns one root draft plus an isolated Reply draft for
   each parent placement selected during the current view lifetime. Choosing
   **Reply** switches to the draft keyed by that Vault and parent edge without
   erasing or retargeting the root draft or another parent's draft. Cancelling
@@ -1018,10 +1022,14 @@ the gallery's **Lab** section).
   root post. Choosing Reply also requests focus for the composer after the
   context menu closes.
 
-  When the untouched text field
+  Toggling Text/Todo mode preserves the authored body, and a newly authored or
+  converted Todo is always incomplete. The mode belongs to the same
+  destination-scoped draft as its body, so changing a Root mode never changes a
+  Reply mode or vice versa. When the untouched Text field
   receives a complete HTTP(S) URL as its first input update, that same draft
   switches to Link and uses the existing Link preview. A URL typed incrementally
-  or added after any existing text remains part of the Text entry.
+  or added after any existing text remains part of the Text entry. A URL entered
+  while Todo mode is active remains Todo.
   The trailing glass up-arrow posts that entry and is enabled only when the
   current content is persistable: text and Todo must contain non-whitespace
   content, a link must resolve to a valid HTTP(S) URL, and capture-backed kinds
@@ -1059,17 +1067,26 @@ the gallery's **Lab** section).
   shows a persistent drop-specific failure and explicitly says the current
   input was not changed.
 
-  While the input is the untouched empty text entry, the leading `+` opens a
-  standard SwiftUI `Menu` containing Todo, Link, Camera, Photos, Bauhaus,
-  Doodle, Voice, and feature-flagged Suggestions. Text needs no menu item because
-  it is entered directly in the bar. Choosing Todo keeps the compact composer,
-  adds an incomplete-circle affordance, and focuses a multiline Todo field. The
-  system owns menu placement, interaction,
-  accessibility, and dismissal. Once the input is no longer the untouched text
-  placeholder — including while it is in Link mode — the `+` becomes an
-  `xmark`; choosing it requires destructive confirmation before the unpublished
-  entry is discarded. Changing vaults also requires confirmation while any root
-  or Reply draft for the current Vault contains an unpublished entry.
+  While the input is an empty Text or Todo placeholder, the leading `+` opens a
+  standard SwiftUI `Menu` containing Link, Camera, Photos, Bauhaus, Doodle,
+  Voice, and feature-flagged Suggestions. Text needs no menu item because it is
+  entered directly in the bar; Todo is switched with its fixed mode button. The
+  system owns menu placement, interaction, accessibility, and dismissal. Once
+  the input contains authored content — or uses Link or another specialized
+  modality — the `+` becomes an `xmark`; choosing it requires destructive
+  confirmation before the unpublished entry is discarded. Discarding authored
+  Todo content clears its body but retains Todo mode. An empty Todo mode does not
+  count as unpublished content for Vault-change or system-capture confirmation.
+  Changing vaults requires confirmation while any root or Reply draft for the
+  current Vault contains an unpublished entry.
+
+  A successful Text or Todo post replaces only the posted destination draft with
+  an empty draft in the same mode. Todo therefore stays active after posting and
+  supports consecutive Todo capture until its mode button is turned off. A
+  failed post or stale asynchronous completion preserves both body and mode.
+  Successful Reply posting keeps that Reply draft's mode but retains the existing
+  navigation behavior of returning the visible composer to its isolated Root
+  draft.
 
   Quick Capture requests always return to Home and create a root card. They use
   the same draft-preservation rule. With every root and Reply draft empty,
@@ -1077,9 +1094,11 @@ the gallery's **Lab** section).
   canvas, or system Suggestions picker directly. If unpublished input exists at
   the current Vault's root or Reply drafts, Journal asks before discarding them;
   cancelling consumes the system request and leaves every draft unchanged.
+  An explicit system Text request switches an empty Todo placeholder to Text
+  before opening its editor, so the requested capture kind remains authoritative.
 
-  Todo, Link, Camera, Photos, Bauhaus, Doodle, Voice, and Suggestions reuse that
-  same single entry rather than appending another draft. Link capture uses URL-keyboard
+  Link, Camera, Photos, Bauhaus, Doodle, Voice, and Suggestions reuse that same
+  single entry rather than appending another draft. Link capture uses URL-keyboard
   input and normalizes values such as `example.com` to HTTPS. Camera writes a
   `CapturedPhoto`; Photos uses the system picker and imports still images,
   videos, or Live Photos while preserving the paired Live Photo resources. A

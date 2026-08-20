@@ -63,8 +63,18 @@ final class CreationComposerState {
   }
 
   var hasAuthoredDrafts: Bool {
-    rootDraft.isEmptyTextDraft == false
-      || replyDrafts.values.contains { $0.isEmptyTextDraft == false }
+    rootDraft.isEmptyComposerDraft == false
+      || replyDrafts.values.contains { $0.isEmptyComposerDraft == false }
+  }
+
+  /// Switches the active compact composer between Text and Todo mode.
+  ///
+  /// The active destination keeps owning its mode alongside its draft. A focus
+  /// request follows the structural TextField change so the keyboard remains in
+  /// the authoring flow when the user toggles either direction.
+  func toggleActiveComposerMode() {
+    guard activeDraft.toggleComposerMode() else { return }
+    focusRequestID = UUID()
   }
 
   /// Returns whether the current destination is safe to persist in the
@@ -147,11 +157,11 @@ final class CreationComposerState {
     switch destination {
     case .root:
       guard rootDraft === expectedDraft else { return false }
-      rootDraft = CardEditDraft()
+      rootDraft = expectedDraft.emptyComposerReplacement()
     case .reply(let target):
       let key = ReplyDraftKey(target)
       guard replyDrafts[key] === expectedDraft else { return false }
-      replyDrafts[key] = CardEditDraft()
+      replyDrafts[key] = expectedDraft.emptyComposerReplacement()
     }
     return true
   }

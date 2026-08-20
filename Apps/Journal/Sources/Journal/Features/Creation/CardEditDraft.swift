@@ -97,6 +97,25 @@ extension CGSize {
   }
 }
 
+/// Inline authoring mode supported by the compact creation composer.
+///
+/// Link and capture-backed card kinds are content modalities with dedicated
+/// preview surfaces, so they intentionally do not participate in this toggle.
+enum CreationComposerMode: Equatable {
+  case text
+  case todo
+
+  /// Card kind persisted when a draft in this mode is posted.
+  fileprivate var cardKind: Card.Kind {
+    switch self {
+    case .text:
+      .text
+    case .todo:
+      .todo
+    }
+  }
+}
+
 /// One editable Journal card draft.
 ///
 /// A reference type so editors bind to a draft directly instead of looking it up
@@ -231,6 +250,21 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   /// saved without location metadata.
   var location: Coordinate?
 
+  /// Inline Text/Todo mode, or `nil` for a specialized content modality.
+  var composerMode: CreationComposerMode? {
+    switch kind {
+    case .text:
+      .text
+    case .todo:
+      .todo
+    case .link, .file, .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus,
+      .unknown:
+      nil
+    @unknown default:
+      nil
+    }
+  }
+
   /// Whether the composer can persist this draft in its current shape.
   var canSave: Bool {
     switch kind {
@@ -298,8 +332,20 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
   /// composer. Creation-level quick captures can reuse it instead of leaving a
   /// blank unsavable text card in front of the newly captured media.
   var isEmptyTextDraft: Bool {
-    kind == .text
-      && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    composerMode == .text && hasEmptyComposerPayload
+  }
+
+  /// Whether this is an unauthored Text or Todo composer placeholder.
+  ///
+  /// An empty Todo is a selected mode, not unpublished content. Treating both
+  /// inline modes alike keeps add, discard, Vault-change, and system-capture
+  /// confirmation behavior independent from the selected mode.
+  var isEmptyComposerDraft: Bool {
+    composerMode != nil && hasEmptyComposerPayload
+  }
+
+  private var hasEmptyComposerPayload: Bool {
+    text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       && completedAt == nil
       && photo == nil
       && video == nil
@@ -432,10 +478,35 @@ final class CardEditDraft: Hashable, Sendable, Identifiable, Codable {
     text = urlString
   }
 
-  /// Switches an empty composer draft to a new, incomplete Todo.
-  func setTodo() {
-    kind = .todo
+  /// Applies one compact authoring mode without rewriting authored text.
+  ///
+  /// A composer Todo is always newly incomplete. Completion timestamps belong
+  /// to saved-entry editing and never cross a creation-mode transition.
+  func setComposerMode(_ mode: CreationComposerMode) {
+    kind = mode.cardKind
     completedAt = nil
+  }
+
+  /// Switches Text and Todo in place, preserving the current body.
+  @discardableResult
+  func toggleComposerMode() -> Bool {
+    switch composerMode {
+    case .text:
+      setComposerMode(.todo)
+    case .todo:
+      setComposerMode(.text)
+    case nil:
+      return false
+    }
+    return true
+  }
+
+  /// Creates the empty draft shown after this draft is posted or discarded.
+  ///
+  /// Text/Todo mode is retained so Todo capture can continue consecutively.
+  /// Specialized modalities return to the ordinary Text placeholder.
+  func emptyComposerReplacement() -> CardEditDraft {
+    CardEditDraft(kind: composerMode?.cardKind ?? .text)
   }
 
   /// Stores a completed audio recording and switches the draft to audio mode.

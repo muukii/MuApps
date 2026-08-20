@@ -39,6 +39,51 @@ struct CreationComposerStateTests {
     #expect(state.activeDraft.text == "Second reply")
   }
 
+  @Test("Root and Reply preserve isolated composer modes")
+  func preservesModesPerDestination() {
+    let state = CreationComposerState()
+    let replyTarget = target(vaultID: VaultID(), parentSuffix: 1)
+
+    state.toggleActiveComposerMode()
+    #expect(state.activeDraft.composerMode == .todo)
+
+    state.selectReplyTarget(replyTarget)
+    #expect(state.activeDraft.composerMode == .text)
+
+    state.toggleActiveComposerMode()
+    #expect(state.activeDraft.composerMode == .todo)
+
+    state.cancelReply(requestFocus: false)
+    #expect(state.activeDraft.composerMode == .todo)
+  }
+
+  @Test("Successful Todo post keeps Todo mode for consecutive capture")
+  func retainsTodoModeAfterPost() {
+    let state = CreationComposerState()
+    let postedDraft = state.activeDraft
+    postedDraft.setComposerMode(.todo)
+    postedDraft.text = "First task"
+
+    #expect(state.completePost(for: .root, ifMatching: postedDraft))
+    #expect(state.activeDraft !== postedDraft)
+    #expect(state.activeDraft.composerMode == .todo)
+    #expect(state.activeDraft.isEmptyComposerDraft)
+    #expect(state.hasAuthoredDrafts == false)
+  }
+
+  @Test("Discard clears Todo content without turning off Todo mode")
+  func retainsTodoModeAfterDiscard() {
+    let state = CreationComposerState()
+    state.activeDraft.setComposerMode(.todo)
+    state.activeDraft.text = "Discard me"
+
+    state.discardActiveDraft()
+
+    #expect(state.activeDraft.composerMode == .todo)
+    #expect(state.activeDraft.isEmptyComposerDraft)
+    #expect(state.hasAuthoredDrafts == false)
+  }
+
   @Test("Unavailable Reply never becomes a root destination")
   func keepsUnavailableReplyExplicit() {
     let state = CreationComposerState()
@@ -83,6 +128,7 @@ struct CreationComposerStateTests {
 
     state.selectReplyTarget(replyTarget)
     let activeDraft = state.activeDraft
+    activeDraft.setComposerMode(.todo)
     activeDraft.text = "Retry me"
 
     #expect(
@@ -93,6 +139,7 @@ struct CreationComposerStateTests {
     )
     #expect(state.replyTarget == replyTarget)
     #expect(state.activeDraft === activeDraft)
+    #expect(state.activeDraft.composerMode == .todo)
     #expect(state.activeDraft.text == "Retry me")
   }
 

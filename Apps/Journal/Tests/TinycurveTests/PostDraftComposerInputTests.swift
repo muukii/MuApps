@@ -76,4 +76,41 @@ struct PostDraftComposerInputTests {
     #expect(draft.kind == .text)
     #expect(draft.text == input)
   }
+
+  @Test("Text and Todo mode changes preserve authored body")
+  func preservesBodyAcrossComposerModes() {
+    let draft = CardEditDraft(text: "Buy coffee")
+
+    draft.setComposerMode(.todo)
+
+    #expect(draft.composerMode == .todo)
+    #expect(draft.text == "Buy coffee")
+    #expect(draft.completedAt == nil)
+
+    draft.setComposerMode(.text)
+
+    #expect(draft.composerMode == .text)
+    #expect(draft.text == "Buy coffee")
+    #expect(draft.completedAt == nil)
+  }
+
+  @Test("Empty Todo mode is a neutral composer placeholder")
+  func treatsEmptyTodoAsComposerPlaceholder() {
+    let draft = CardEditDraft(kind: .todo)
+
+    #expect(draft.isEmptyComposerDraft)
+    #expect(draft.isEmptyTextDraft == false)
+    #expect(draft.canSave == false)
+  }
+
+  @Test("A complete initial URL remains Todo while Todo mode is active")
+  func keepsCompleteInitialURLAsTodo() {
+    let draft = CardEditDraft(kind: .todo)
+
+    draft.composerText = "https://example.com/tasks/one"
+
+    #expect(draft.composerMode == .todo)
+    #expect(draft.text == "https://example.com/tasks/one")
+    #expect(draft.canSave)
+  }
 }

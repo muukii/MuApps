@@ -59,6 +59,7 @@ struct CreationComposerInputBar<MenuContent: View>: View {
   private let isProcessing: Bool
   private let onOpenDraft: @MainActor @Sendable () -> Void
   private let onDiscardDraft: @MainActor @Sendable () -> Void
+  private let onToggleComposerMode: @MainActor @Sendable () -> Void
   private let onPost: @MainActor @Sendable () -> Void
   private let menuContent: MenuContent
 
@@ -71,6 +72,7 @@ struct CreationComposerInputBar<MenuContent: View>: View {
     isProcessing: Bool,
     onOpenDraft: @escaping @MainActor @Sendable () -> Void,
     onDiscardDraft: @escaping @MainActor @Sendable () -> Void,
+    onToggleComposerMode: @escaping @MainActor @Sendable () -> Void,
     onPost: @escaping @MainActor @Sendable () -> Void,
     @ViewBuilder menuContent: () -> MenuContent
   ) {
@@ -82,6 +84,7 @@ struct CreationComposerInputBar<MenuContent: View>: View {
     self.isProcessing = isProcessing
     self.onOpenDraft = onOpenDraft
     self.onDiscardDraft = onDiscardDraft
+    self.onToggleComposerMode = onToggleComposerMode
     self.onPost = onPost
     self.menuContent = menuContent()
   }
@@ -108,6 +111,7 @@ struct CreationComposerInputBar<MenuContent: View>: View {
           isProcessing: isProcessing,
           onOpenDraft: onOpenDraft,
           onDiscardDraft: onDiscardDraft,
+          onToggleComposerMode: onToggleComposerMode,
           onPost: onPost
         ) {
           menuContent
@@ -129,6 +133,7 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
   let isProcessing: Bool
   let onOpenDraft: @MainActor @Sendable () -> Void
   let onDiscardDraft: @MainActor @Sendable () -> Void
+  let onToggleComposerMode: @MainActor @Sendable () -> Void
   let onPost: @MainActor @Sendable () -> Void
   let menuContent: MenuContent
 
@@ -141,6 +146,7 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
     isProcessing: Bool,
     onOpenDraft: @escaping @MainActor @Sendable () -> Void,
     onDiscardDraft: @escaping @MainActor @Sendable () -> Void,
+    onToggleComposerMode: @escaping @MainActor @Sendable () -> Void,
     onPost: @escaping @MainActor @Sendable () -> Void,
     @ViewBuilder menuContent: () -> MenuContent
   ) {
@@ -152,6 +158,7 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
     self.isProcessing = isProcessing
     self.onOpenDraft = onOpenDraft
     self.onDiscardDraft = onDiscardDraft
+    self.onToggleComposerMode = onToggleComposerMode
     self.onPost = onPost
     self.menuContent = menuContent()
   }
@@ -159,11 +166,19 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
   var body: some View {
     HStack(alignment: .bottom, spacing: 10) {
       CreationComposerLeadingAction(
-        showsAddMenu: draft.isEmptyTextDraft,
+        showsAddMenu: draft.isEmptyComposerDraft,
         isProcessing: isProcessing,
         onDiscardDraft: onDiscardDraft
       ) {
         menuContent
+      }
+
+      if let composerMode = draft.composerMode {
+        CreationComposerTodoModeButton(
+          mode: composerMode,
+          isProcessing: isProcessing,
+          onToggle: onToggleComposerMode
+        )
       }
 
       CreationComposerDraftContent(
@@ -378,6 +393,31 @@ private struct CreationComposerLeadingAction<MenuContent: View>: View {
   }
 }
 
+/// Persistent Text/Todo mode switch shown at the front of compact input.
+private struct CreationComposerTodoModeButton: View {
+
+  let mode: CreationComposerMode
+  let isProcessing: Bool
+  let onToggle: @MainActor @Sendable () -> Void
+
+  var body: some View {
+    Button(action: onToggle) {
+      Image(systemName: "checkmark.circle")
+        .font(.system(size: 24, weight: .regular))
+        .foregroundStyle(
+          mode == .todo ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary)
+        )
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .disabled(isProcessing)
+    .accessibilityLabel("Todo")
+    .accessibilityValue(mode == .todo ? Text("On") : Text("Off"))
+    .accessibilityAddTraits(mode == .todo ? .isSelected : [])
+  }
+}
+
 /// Inline text editor or compact preview for the entry being composed.
 private struct CreationComposerDraftContent: View {
 
@@ -409,28 +449,20 @@ private struct CreationComposerDraftContent: View {
           await focusIfRequested(.text)
         }
     case .todo:
-      HStack(spacing: 8) {
-        Image(systemName: "circle")
-          .font(.title3.weight(.semibold))
-          .foregroundStyle(.secondary)
-          .frame(width: 28, height: 44)
-          .accessibilityHidden(true)
-
-        TextField("Todo", text: $draft.text, axis: .vertical)
-          .textFieldStyle(.plain)
-          .lineLimit(1...5)
-          .focused($focusedField, equals: .todo)
-      }
-      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-      .disabled(isProcessing)
-      .accessibilityLabel("Todo text")
-      .task {
-        await Task.yield()
-        focusedField = .todo
-      }
-      .task(id: focusRequestID) {
-        await focusIfRequested(.todo)
-      }
+      TextField("Todo", text: $draft.text, axis: .vertical)
+        .textFieldStyle(.plain)
+        .lineLimit(1...5)
+        .focused($focusedField, equals: .todo)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .disabled(isProcessing)
+        .accessibilityLabel("Todo text")
+        .task {
+          await Task.yield()
+          focusedField = .todo
+        }
+        .task(id: focusRequestID) {
+          await focusIfRequested(.todo)
+        }
     case .link, .file, .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus,
       .unknown:
       preview
@@ -560,7 +592,7 @@ private struct CreationComposerPostButton: View {
     .accessibilityLabel(placement.postAccessibilityLabel)
     .keyboardShortcut(.return, modifiers: .command)
   }
- 
+
 }
 
 #Preview("Creation Composer Content States") {
@@ -598,6 +630,14 @@ private struct CreationComposerInputBarPreviewGallery: View {
           CreationComposerInputBarPreviewRow(
             title: "Text · Multiline",
             draft: CreationComposerInputBarPreviewFixtures.multilineText
+          )
+          CreationComposerInputBarPreviewRow(
+            title: "Todo · Empty Mode",
+            draft: CreationComposerInputBarPreviewFixtures.emptyTodo
+          )
+          CreationComposerInputBarPreviewRow(
+            title: "Todo · Ready",
+            draft: CreationComposerInputBarPreviewFixtures.todo
           )
           CreationComposerInputBarPreviewRow(
             title: "Link · Incomplete",
@@ -742,6 +782,9 @@ private struct CreationComposerInputBarPreviewRow: View {
         isProcessing: isProcessing,
         onOpenDraft: {},
         onDiscardDraft: {},
+        onToggleComposerMode: {
+          draft.toggleComposerMode()
+        },
         onPost: {}
       ) {
         Button(action: {}) {
@@ -775,6 +818,14 @@ private enum CreationComposerInputBarPreviewFixtures {
     CardEditDraft(
       text: "First line\nSecond line\nThird line\nFourth line\nFifth line"
     )
+  }
+
+  static var emptyTodo: CardEditDraft {
+    CardEditDraft(kind: .todo)
+  }
+
+  static var todo: CardEditDraft {
+    CardEditDraft(kind: .todo, text: "Capture another task after posting this one.")
   }
 
   static var incompleteLink: CardEditDraft {
