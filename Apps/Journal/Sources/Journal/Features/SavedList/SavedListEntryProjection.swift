@@ -78,106 +78,6 @@ struct VaultSavedEntry: Identifiable {
   }
 }
 
-/// A cycle-safe tree projection over identified saved-entry values.
-///
-/// The projection is computed from the current live query snapshot and never
-/// persists duplicate child arrays. Each recursive path owns its own visited-id
-/// set, so malformed imported relationships stop at the first repeated edge
-/// without hiding a valid sibling branch.
-struct SavedEntryTreeProjection<Entry: Identifiable>
-where Entry.ID == UUID {
-
-  /// One placement in the projected tree.
-  ///
-  /// `id` delegates to the entry's stable placement identity. For Tinycurve
-  /// this is `CardEdge.edgeID`, not the authored card id.
-  struct Node: TreeNode {
-    let body: Entry
-    let children: [Node]
-
-    var id: UUID { body.id }
-
-    /// Every stable placement identity represented by this subtree.
-    var edgeIDs: Set<UUID> {
-      var result: Set<UUID> = []
-      collectEdgeIDs(into: &result)
-      return result
-    }
-
-    private func collectEdgeIDs(into result: inout Set<UUID>) {
-      guard result.insert(id).inserted else { return }
-      for child in children {
-        child.collectEdgeIDs(into: &result)
-      }
-    }
-  }
-
-  private let entriesByID: [UUID: Entry]
-  private let childrenByParentID: [UUID: [Entry]]
-  private let rootedEntryIDs: Set<UUID>
-
-  init(
-    entries: [Entry],
-    parentID: (Entry) -> UUID?,
-    areChildrenInIncreasingOrder: (Entry, Entry) -> Bool
-  ) {
-    var entriesByID: [UUID: Entry] = [:]
-    for entry in entries where entriesByID[entry.id] == nil {
-      entriesByID[entry.id] = entry
-    }
-
-    let uniqueEntries = Array(entriesByID.values)
-    var childrenByParentID: [UUID: [Entry]] = [:]
-    for entry in uniqueEntries {
-      guard let parentID = parentID(entry), entriesByID[parentID] != nil else {
-        continue
-      }
-      childrenByParentID[parentID, default: []].append(entry)
-    }
-
-    let sortedChildrenByParentID = childrenByParentID.mapValues {
-      $0.sorted(by: areChildrenInIncreasingOrder)
-    }
-
-    var rootedEntryIDs: Set<UUID> = []
-    func collectRootedEntryIDs(startingAt entry: Entry) {
-      guard rootedEntryIDs.insert(entry.id).inserted else { return }
-      for child in sortedChildrenByParentID[entry.id] ?? [] {
-        collectRootedEntryIDs(startingAt: child)
-      }
-    }
-    for entry in uniqueEntries where parentID(entry) == nil {
-      collectRootedEntryIDs(startingAt: entry)
-    }
-
-    self.entriesByID = entriesByID
-    self.childrenByParentID = sortedChildrenByParentID
-    self.rootedEntryIDs = rootedEntryIDs
-  }
-
-  /// Projects one cycle-safe subtree with `edgeID` as its root.
-  func tree(startingAt edgeID: UUID) -> Node? {
-    guard rootedEntryIDs.contains(edgeID), let entry = entriesByID[edgeID]
-    else {
-      return nil
-    }
-    return node(for: entry, visitedEdgeIDs: [])
-  }
-
-  private func node(
-    for entry: Entry,
-    visitedEdgeIDs: Set<UUID>
-  ) -> Node? {
-    var visitedEdgeIDs = visitedEdgeIDs
-    guard visitedEdgeIDs.insert(entry.id).inserted else { return nil }
-
-    let children = (childrenByParentID[entry.id] ?? []).compactMap { child in
-      node(for: child, visitedEdgeIDs: visitedEdgeIDs)
-    }
-    return Node(body: entry, children: children)
-  }
-}
-
 extension VaultSavedEntry {
 
   /// Rehydrates this saved card into the shared editing draft model.
@@ -558,23 +458,24 @@ private enum VaultSavedEntryEditMediaPreparer {
 struct VaultSavedDaySection: Identifiable {
   let id: Date
   let day: Date
-  var entries: [VaultSavedEntry]
+  var roots: [JournalVault.CardEdge]
 
   static func sections(
-    for entries: [VaultSavedEntry],
+    for roots: [JournalVault.CardEdge],
     calendar: Calendar
   ) -> [VaultSavedDaySection] {
     var sectionIndexesByDay: [Date: Int] = [:]
     var sections: [VaultSavedDaySection] = []
 
-    for entry in entries {
-      let day = calendar.startOfDay(for: entry.createdAt)
+    for root in roots {
+      guard let card = root.card else { continue }
+      let day = calendar.startOfDay(for: card.createdAt)
       if let sectionIndex = sectionIndexesByDay[day] {
-        sections[sectionIndex].entries.append(entry)
+        sections[sectionIndex].roots.append(root)
       } else {
         sectionIndexesByDay[day] = sections.count
         sections.append(
-          VaultSavedDaySection(id: day, day: day, entries: [entry])
+          VaultSavedDaySection(id: day, day: day, roots: [root])
         )
       }
     }
@@ -679,40 +580,6 @@ extension VaultSavedAttachment {
         break
       }
     }
-  }
-}
-
-// MARK: - Sorting
-
-extension Array where Element == VaultSavedEntry {
-
-  func sortedForVaultList() -> [VaultSavedEntry] {
-    sorted { lhs, rhs in
-      if lhs.createdAt != rhs.createdAt {
-        return lhs.createdAt > rhs.createdAt
-      }
-      return lhs.edgeID.uuidString < rhs.edgeID.uuidString
-    }
-  }
-
-  func sortedForVaultListSiblings() -> [VaultSavedEntry] {
-    sorted(by: VaultSavedEntry.isOrderedBeforeSibling)
-  }
-}
-
-extension VaultSavedEntry {
-
-  static func isOrderedBeforeSibling(
-    _ lhs: VaultSavedEntry,
-    _ rhs: VaultSavedEntry
-  ) -> Bool {
-    if lhs.sortIndex != rhs.sortIndex {
-      return lhs.sortIndex < rhs.sortIndex
-    }
-    if lhs.createdAt != rhs.createdAt {
-      return lhs.createdAt < rhs.createdAt
-    }
-    return lhs.edgeID.uuidString < rhs.edgeID.uuidString
   }
 }
 

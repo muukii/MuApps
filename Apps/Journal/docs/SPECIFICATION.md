@@ -1168,13 +1168,15 @@ the gallery's **Lab** section).
   edge and appended edge. Home first scrolls to the root anchor so its lazy day
   section and subtree are materialized, then scrolls vertically to the appended
   node once that placement participates in layout. If the current content-type
-  filter excludes the owning root, Home consumes the request when the new edge
-  reaches the live query without scrolling, so a later filter change cannot
-  cause a delayed jump. Success clears only the draft and Reply selection that
-  still match the frozen save destination; a target or draft selected while the
-  write was in flight remains untouched. Root posting follows the same frozen
-  match rule for its draft. Failure retains the Reply target and its draft. The
-  Photo, Video, and Live Photo write paths generate or carry a bounded
+  filter excludes the appended placement, Home consumes the request when the
+  new edge reaches the live query without scrolling, so a later filter change
+  cannot cause a delayed jump. A matching nested placement can still reveal
+  through a nonmatching owning root because that root remains the day-section
+  and materialization anchor. Success clears only the draft and Reply selection
+  that still match the frozen save destination; a target or draft selected while
+  the write was in flight remains untouched. Root posting follows the same
+  frozen match rule for its draft. Failure retains the Reply target and its draft.
+  The Photo, Video, and Live Photo write paths generate or carry a bounded
   thumbnail; Doodle, Bauhaus, and Suggestion retain authored payloads, with
   Suggestion media copied alongside its JSON when available.
 
@@ -1207,18 +1209,22 @@ the gallery's **Lab** section).
 - **`SavedListView`** — a vault-backed entries list over the selected
   `VaultInstance`. It attaches the selected vault's `ModelContainer`, queries
   active (`deletedAt == nil`) `CardEdge` rows with SwiftData, follows the `Card` / `Attachment` /
-  `AttachmentResource` relationships, and builds a cycle-safe tree projection
-  from every resolved active placement. Home selects root placements
+  `AttachmentResource` relationships, and traverses each resolved active tree
+  through live `CardEdge` / `Card` models. Home selects root placements
   (`parentEdgeID == nil`) as grouping anchors. Roots are grouped into
   local-calendar day sections by the root card's own creation date and read as
   one vertical stream; adding a continuation does not move the root to another
-  day or create another Home item. Each root item contains the root and its full
-  active descendant subtree. This initial implementation projects and renders
-  descendants eagerly. Any placement that is not reachable from a valid root —
-  including an unresolved placement, an orphan and its descendants, or a
-  rootless cyclic component — is omitted. Recursive projection also stops at a
-  repeated edge defensively. Tree identity is the placement's stable
-  `CardEdge.edgeID`, never the authored card id.
+  day or create another Home item. Each root item traverses its active
+  descendant subtree on demand. Any placement that is not reachable from a
+  valid root — including an unresolved placement, an orphan and its
+  descendants, or a rootless cyclic component — is omitted. Recursive
+  traversal stops at a repeated edge defensively. Tree identity is the
+  placement's stable `CardEdge.edgeID`, never the authored card id. Changes to
+  the active SwiftData query result use a smooth animation, including local
+  insertion or logical deletion and imported result-set changes. Local logical
+  deletion also performs its synchronous main-context mutation in a smooth
+  SwiftUI transaction because live tree rows observe `CardEdge.deletedAt`
+  before the query publishes its updated result set.
 
   Making Home the sole tree surface and selecting Reply targets are UI-state
   changes only. They add no SwiftData schema, migration, CloudKit record, or sync
@@ -1232,14 +1238,16 @@ the gallery's **Lab** section).
   remains available through All Entries but is not a selectable filter. The
   selection is transient UI state and changes only when the user chooses an
   option, so vault changes, Reply selection, and posting do not reset it. The
-  filter applies only when selecting Home roots and location-map pins. Once a
-  root is selected, descendants remain unfiltered so the post stays intact.
-  If a non-empty vault has no roots of the selected type, Home shows a filtered
-  empty state with **Show All Entries**. Posting a matching root keeps the filter
-  and scrolls that root into view. Posting a root outside the current filter still
-  succeeds and remains hidden; its pending Home scroll is cleared as soon as the
-  root reaches the live query so a later filter change cannot cause a delayed
-  jump.
+  filter applies to every matching placement in each rooted tree and to
+  location-map pins, including nested placements. A nonmatching ancestor is
+  omitted as a card while matching descendants remain visible at their semantic
+  depth. A root/day section remains visible when any reachable placement in the
+  subtree matches. If a non-empty vault has no matching placements, Home shows
+  a filtered empty state with **Show All Entries**. Posting a matching root keeps
+  the filter and scrolls that root into view. Posting a root outside the current
+  filter still succeeds and remains hidden; its pending Home scroll is cleared
+  as soon as the root reaches the live query so a later filter change cannot
+  cause a delayed jump.
 
   Every tree node reuses the same current saved-entry card presentation at every
   depth and fills the finite width proposed by the vertical tree surface.

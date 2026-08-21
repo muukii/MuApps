@@ -86,9 +86,7 @@ private struct VaultSavedListContentView: View {
   let onSelectReplyTarget: @MainActor (SavedListReplyTarget) -> Void
   let onReplyTargetAvailabilityChange: @MainActor (Bool) -> Void
 
-  @Environment(\.calendar) private var calendar
   @Environment(\.appPalette) private var palette
-  @Environment(\.composerOverlayHeight) private var composerOverlayHeight
   @Environment(JournalVaultRuntime.self) private var vaultRuntime
 
   @Query
@@ -104,7 +102,6 @@ private struct VaultSavedListContentView: View {
   @State private var deleteErrorMessage: String?
   @State private var todoCompletionErrorMessage: String?
   @State private var deleteCandidate: VaultSavedEntry?
-  @Namespace private var navigationTransitionNamespace
 
   init(
     vault: VaultInstance,
@@ -127,109 +124,39 @@ private struct VaultSavedListContentView: View {
       sort: [
         SortDescriptor(\JournalVault.CardEdge.createdAt, order: .reverse),
         SortDescriptor(\JournalVault.CardEdge.sortIndex),
-      ]
+      ],
+      animation: .smooth
     )
   }
 
   var body: some View {
-    let entries = entries
-    let allEdgeIDs = Set(entries.map(\.edgeID))
-    let rootEntries = entries.filter { $0.parentEdgeID == nil }
-    let treeProjection = SavedEntryTreeProjection(
-      entries: entries,
-      parentID: { $0.parentEdgeID },
-      areChildrenInIncreasingOrder: VaultSavedEntry.isOrderedBeforeSibling
+    VaultSavedListTreeSurface(
+      vault: vault,
+      edges: edges,
+      selectedContentKind: $selectedContentKind,
+      replyTarget: replyTarget,
+      scrollRequest: $scrollRequest,
+      onSelectReplyTarget: selectReplyTarget,
+      onShare: presentSharePreview,
+      onEdit: presentEditDraft,
+      onRequestDelete: { deleteCandidate = $0 },
+      onToggleTodoCompletion: toggleTodoCompletion,
+      onReplyTargetAvailabilityChange: onReplyTargetAvailabilityChange
     )
-    let visibleRootEntries = Self.visibleRootEntries(
-      from: rootEntries,
-      selectedContentKind: selectedContentKind
-    )
-    let visibleRootEdgeIDs = Set(visibleRootEntries.map(\.edgeID))
-    let isMutationDisabled =
+    .environment(
+      \.savedListMutationDisabled,
       isEditDraftLoading || isSavingEdit || isDeletingEntry
-      || todoCompletionMutationCardIDs.isEmpty == false
-    let visibleSections = VaultSavedDaySection.sections(
-      for: visibleRootEntries.sortedForVaultList(),
-      calendar: calendar
+        || todoCompletionMutationCardIDs.isEmpty == false
     )
-    let visibleTreesByRootID = visibleRootEntries.reduce(
-      into: [UUID: SavedEntryTreeProjection<VaultSavedEntry>.Node]()
-    ) { result, entry in
-      guard let tree = treeProjection.tree(startingAt: entry.edgeID) else {
-        return
-      }
-      result[entry.edgeID] = tree
-    }
-    let projectedEdgeIDsByRootID = visibleTreesByRootID.mapValues(\.edgeIDs)
-    let locationPins = Self.savedLocationPins(for: visibleRootEntries)
-
-    ScrollViewReader { proxy in
-      ScrollView {
-        savedListContent(
-          sections: visibleSections,
-          treesByRootID: visibleTreesByRootID,
-          locationPins: locationPins,
-          isMutationDisabled: isMutationDisabled
-        )
-      }
-      .contentMargins(
-        .bottom,
-        composerOverlayHeight,
-        for: .scrollContent
-      )
-      .scrollEdgeEffectStyle(.soft, for: .vertical)
-      .scrollDismissesKeyboard(.interactively)
-      .scrollBounceBehavior(.always, axes: .vertical)
-      .overlayPreferenceValue(SavedListRenderedEdgeIDsPreferenceKey.self) {
-        renderedEdgeIDs in
-        SavedListScrollCoordinator(
-          request: $scrollRequest,
-          allEdgeIDs: allEdgeIDs,
-          visibleRootEdgeIDs: visibleRootEdgeIDs,
-          projectedEdgeIDsByRootID: projectedEdgeIDsByRootID,
-          renderedEdgeIDs: renderedEdgeIDs,
-          proxy: proxy
-        )
-      }
-    }
     .frameAdaptive()
-    .overlay {
-      if visibleSections.isEmpty {
-        VaultSavedListEmptyState(
-          hasAnyRootEntries: rootEntries.isEmpty == false,
-          selectedContentKind: selectedContentKind,
-          onShowAllEntries: {
-            selectedContentKind = nil
-          }
-        )
-      }
-    }
     .scrollContentBackground(.hidden)
     .background(.background)
-    .background {
-      SavedListReplyTargetAvailabilityReporter(
-        replyTarget: replyTarget,
-        currentVaultID: vault.vaultID,
-        allEdgeIDs: allEdgeIDs,
-        onAvailabilityChange: onReplyTargetAvailabilityChange
-      )
-    }
     .refreshable {
       await vaultRuntime.refresh()
     }
     .toolbar {
       ToolbarItem(placement: .appTrailingAction) {
         VaultSavedListContentFilterMenu(selection: $selectedContentKind)
-      }
-    }
-    .navigationDestination(for: SavedListNavigationRoute.self) { route in
-      switch route {
-      case .locations:
-        VaultSavedLocationsMapView(pins: locationPins)
-          .appZoomNavigationTransition(
-            sourceID: VaultSavedLocationsMapTransition.id,
-            in: navigationTransitionNamespace
-          )
       }
     }
     .sheet(item: $sharePreviewPresentation) { presentation in
@@ -304,133 +231,6 @@ private struct VaultSavedListContentView: View {
       if isPresented == false {
         deleteCandidate = nil
       }
-    }
-  }
-
-  /// Builds the retained Home header and lazy entry stream in one boundary.
-  ///
-  /// The outer stack keeps the Map header alive while it is offscreen. One lazy
-  /// stack still owns every entry row; nesting another `LazyVStack` per day
-  /// would make the outer stack size a container that is itself still
-  /// estimating its children. `Section` provides the day grouping without that
-  /// unstable nested-lazy layout.
-  private func savedListContent(
-    sections: [VaultSavedDaySection],
-    treesByRootID: [UUID: SavedEntryTreeProjection<VaultSavedEntry>.Node],
-    locationPins: [VaultSavedLocationPin],
-    isMutationDisabled: Bool
-  ) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      if locationPins.isEmpty == false {
-        VaultSavedLocationsMapNavigationHeader(
-          pins: locationPins,
-          transitionNamespace: navigationTransitionNamespace
-        )
-        .padding(.horizontal, savedListPadding)
-      }
-
-      LazyVStack(
-        alignment: .leading,
-        spacing: 2,
-        pinnedViews: .sectionHeaders
-      ) {
-        ForEach(sections) { section in
-          Section {
-            ForEach(section.entries) { entry in
-              VStack(alignment: .leading) {
-                if let tree = treesByRootID[entry.edgeID] {
-                  TreeDisplay(
-                    root: tree,
-                    spacing: VaultSavedEntryTreeMetrics.nodeSpacing
-                  ) { entry, context in
-                    VaultSavedEntryTreeCell(
-                      depth: context.indentationDepth,
-                      entry: entry,
-                      isMutationDisabled: isMutationDisabled,
-                      onReply: { replyEntry in
-                        selectReplyTarget(
-                          replyEntry,
-                          ownerRootEdgeID: tree.id
-                        )
-                      },
-                      onShare: presentSharePreview,
-                      onEdit: presentEditDraft,
-                      onRequestDelete: { entry in
-                        deleteCandidate = entry
-                      },
-                      onToggleTodoCompletion: toggleTodoCompletion
-                    )
-                    .preference(
-                      key: SavedListRenderedEdgeIDsPreferenceKey.self,
-                      value: [entry.edgeID]
-                    )
-                  }
-                }
-              }
-            }
-          } header: {
-            StickyContainer { isSticked in
-              VaultSavedDayHeader(
-                isSticked: isSticked,
-                day: section.day
-              )
-              .padding(
-                .vertical,
-                daySectionTopSpacing
-              )
-            }
-          }
-        }
-      }
-    }
-  }
-
-  private var entries: [VaultSavedEntry] {
-    edges.compactMap { edge in
-      guard let card = edge.card else { return nil }
-      return VaultSavedEntry(edge: edge, card: card, store: vault.contentStore)
-    }
-  }
-
-  /// Applies the Home-only content projection without discarding the complete
-  /// query snapshot used for Reply-target availability.
-  private static func visibleRootEntries(
-    from rootEntries: [VaultSavedEntry],
-    selectedContentKind: JournalVault.Card.Kind?
-  ) -> [VaultSavedEntry] {
-    guard let selectedContentKind else {
-      return rootEntries
-    }
-
-    return rootEntries.filter { entry in
-      entry.kind == selectedContentKind
-    }
-  }
-
-  /// Location annotations for every unique saved card in the selected vault.
-  ///
-  /// Location belongs to the authored card rather than its placement edge, so
-  /// the stable card id owns the pin. The dictionary also prevents a transient
-  /// duplicate placement during graph repair from drawing the same card twice.
-  private static func savedLocationPins(
-    for entries: [VaultSavedEntry]
-  ) -> [VaultSavedLocationPin] {
-    var pinsByCardID: [UUID: VaultSavedLocationPin] = [:]
-
-    for entry in entries {
-      guard let coordinate = entry.location else { continue }
-      pinsByCardID[entry.cardID] = VaultSavedLocationPin(
-        id: entry.cardID,
-        coordinate: coordinate,
-        createdAt: entry.createdAt
-      )
-    }
-
-    return pinsByCardID.values.sorted { lhs, rhs in
-      if lhs.createdAt != rhs.createdAt {
-        return lhs.createdAt > rhs.createdAt
-      }
-      return lhs.id.uuidString > rhs.id.uuidString
     }
   }
 
@@ -594,7 +394,12 @@ private struct VaultSavedListContentView: View {
         throw VaultSavedEntryEditDraftError.vaultUnavailable
       }
 
-      try vault.contentStore.deleteCardEdge(edgeID: entry.edgeID)
+      // Live tree rows observe `deletedAt` directly, so they can disappear
+      // before `@Query` publishes its animated result change. Animate the
+      // synchronous main-context mutation itself as well.
+      try withAnimation(.smooth) {
+        try vault.contentStore.deleteCardEdge(edgeID: entry.edgeID)
+      }
       if editPresentation?.cardID == entry.cardID {
         editPresentation = nil
       }
@@ -606,8 +411,194 @@ private struct VaultSavedListContentView: View {
   }
 }
 
+/// Owns Home's live tree traversal boundary.
+///
+/// The parent screen owns presentations and mutations. This surface owns only
+/// the query-backed list structure, so changing an edit or delete presentation
+/// does not require the parent `body` to rebuild a detached content tree.
+private struct VaultSavedListTreeSurface: View {
+
+  let vault: VaultInstance
+  let edges: [JournalVault.CardEdge]
+  @Binding var selectedContentKind: JournalVault.Card.Kind?
+  let replyTarget: SavedListReplyTarget?
+  @Binding var scrollRequest: SavedListScrollRequest?
+  let onSelectReplyTarget: @MainActor (VaultSavedEntry, UUID) -> Void
+  let onShare: @MainActor (VaultSavedEntry) -> Void
+  let onEdit: @MainActor (VaultSavedEntry) -> Void
+  let onRequestDelete: @MainActor (VaultSavedEntry) -> Void
+  let onToggleTodoCompletion: @MainActor (VaultSavedEntry) -> Void
+  let onReplyTargetAvailabilityChange: @MainActor (Bool) -> Void
+
+  @Environment(\.calendar) private var calendar
+  @Environment(\.composerOverlayHeight) private var composerOverlayHeight
+  @Namespace private var navigationTransitionNamespace
+
+  var body: some View {
+    let rootEdges = VaultSavedListTreeTraversal.activeResolvedRoots(from: edges)
+    let visibleRootEdges = VaultSavedListTreeTraversal.visibleRoots(
+      from: rootEdges,
+      selectedContentKind: selectedContentKind
+    )
+    let visibleSections = VaultSavedDaySection.sections(
+      for: visibleRootEdges,
+      calendar: calendar
+    )
+    let allEdgeIDs = VaultSavedListTreeTraversal.activeResolvedEdgeIDs(
+      from: edges
+    )
+    let visibleRootEdgeIDs = Set(visibleRootEdges.map(\.id))
+    let locationPins = Self.savedLocationPins(
+      for: VaultSavedListTreeTraversal.visiblePlacements(
+        in: visibleRootEdges,
+        selectedContentKind: selectedContentKind
+      )
+    )
+
+    ScrollViewReader { proxy in
+      ScrollView {
+        savedListContent(
+          sections: visibleSections,
+          locationPins: locationPins
+        )
+      }
+      .contentMargins(
+        .bottom,
+        composerOverlayHeight,
+        for: .scrollContent
+      )
+      .scrollEdgeEffectStyle(.soft, for: .vertical)
+      .scrollDismissesKeyboard(.interactively)
+      .scrollBounceBehavior(.always, axes: .vertical)
+      .overlayPreferenceValue(SavedListRenderedEdgeIDsPreferenceKey.self) {
+        renderedEdgeIDs in
+        SavedListScrollCoordinator(
+          request: $scrollRequest,
+          allEdgeIDs: allEdgeIDs,
+          rootEdges: rootEdges,
+          visibleRootEdgeIDs: visibleRootEdgeIDs,
+          selectedContentKind: selectedContentKind,
+          renderedEdgeIDs: renderedEdgeIDs,
+          proxy: proxy
+        )
+      }
+    }
+    .overlay {
+      if visibleSections.isEmpty {
+        VaultSavedListEmptyState(
+          hasAnyRootEntries: rootEdges.isEmpty == false,
+          selectedContentKind: selectedContentKind,
+          onShowAllEntries: {
+            selectedContentKind = nil
+          }
+        )
+      }
+    }
+    .background {
+      SavedListReplyTargetAvailabilityReporter(
+        replyTarget: replyTarget,
+        currentVaultID: vault.vaultID,
+        allEdgeIDs: allEdgeIDs,
+        onAvailabilityChange: onReplyTargetAvailabilityChange
+      )
+    }
+    .navigationDestination(for: SavedListNavigationRoute.self) { route in
+      switch route {
+      case .locations:
+        VaultSavedLocationsMapView(pins: locationPins)
+          .appZoomNavigationTransition(
+            sourceID: VaultSavedLocationsMapTransition.id,
+            in: navigationTransitionNamespace
+          )
+      }
+    }
+  }
+
+  /// Builds the map header and one lazy stack whose direct children are the
+  /// live recursive row views. A root adapter keeps its stable id even when the
+  /// root card is filtered out so the two-stage Reply reveal can materialize its
+  /// descendants first.
+  private func savedListContent(
+    sections: [VaultSavedDaySection],
+    locationPins: [VaultSavedLocationPin]
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      if locationPins.isEmpty == false {
+        VaultSavedLocationsMapNavigationHeader(
+          pins: locationPins,
+          transitionNamespace: navigationTransitionNamespace
+        )
+        .padding(.horizontal, savedListPadding)
+      }
+
+      LazyVStack(
+        alignment: .leading,
+        spacing: VaultSavedEntryTreeMetrics.nodeSpacing,
+        pinnedViews: .sectionHeaders
+      ) {
+        ForEach(sections) { section in
+          Section {
+            ForEach(section.roots, id: \.id) { root in
+              VaultSavedEntryTreeRows(
+                edge: root,
+                store: vault.contentStore,
+                depth: 0,
+                selectedContentKind: selectedContentKind,
+                ancestorEdgeIDs: [],
+                ownerRootEdgeID: root.id,
+                onReply: onSelectReplyTarget,
+                onShare: onShare,
+                onEdit: onEdit,
+                onRequestDelete: onRequestDelete,
+                onToggleTodoCompletion: onToggleTodoCompletion
+              )
+              .id(root.id)
+            }
+          } header: {
+            StickyContainer { isSticked in
+              VaultSavedDayHeader(
+                isSticked: isSticked,
+                day: section.day
+              )
+              .padding(.vertical, daySectionTopSpacing)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /// Location annotations for matching placements in visible rooted trees.
+  ///
+  /// Locations belong to authored cards, so duplicate placements collapse by
+  /// card id just as they did in the previous Home implementation.
+  private static func savedLocationPins(
+    for edges: [JournalVault.CardEdge]
+  ) -> [VaultSavedLocationPin] {
+    var pinsByCardID: [UUID: VaultSavedLocationPin] = [:]
+
+    for edge in edges {
+      guard let card = edge.card, let coordinate = card.location else {
+        continue
+      }
+      pinsByCardID[card.id] = VaultSavedLocationPin(
+        id: card.id,
+        coordinate: coordinate,
+        createdAt: card.createdAt
+      )
+    }
+
+    return pinsByCardID.values.sorted { lhs, rhs in
+      if lhs.createdAt != rhs.createdAt {
+        return lhs.createdAt > rhs.createdAt
+      }
+      return lhs.id.uuidString > rhs.id.uuidString
+    }
+  }
+}
+
 /// Collects the active Home rows currently materialized by the lazy stack.
-private struct SavedListRenderedEdgeIDsPreferenceKey: PreferenceKey {
+struct SavedListRenderedEdgeIDsPreferenceKey: PreferenceKey {
   static var defaultValue: Set<UUID> { [] }
 
   static func reduce(
@@ -638,14 +629,15 @@ private struct StickyContainer<Content: View>: View {
   }
 }
 
-/// Resolves one post-success reveal against Home's query, projection, and lazy
+/// Resolves one post-success reveal against Home's query, live tree, and lazy
 /// layout state.
 private struct SavedListScrollCoordinator: View {
 
   @Binding var request: SavedListScrollRequest?
   let allEdgeIDs: Set<UUID>
+  let rootEdges: [JournalVault.CardEdge]
   let visibleRootEdgeIDs: Set<UUID>
-  let projectedEdgeIDsByRootID: [UUID: Set<UUID>]
+  let selectedContentKind: JournalVault.Card.Kind?
   let renderedEdgeIDs: Set<UUID>
   let proxy: ScrollViewProxy
 
@@ -665,10 +657,22 @@ private struct SavedListScrollCoordinator: View {
   /// action. Intermediate rendered-id sets that resolve identically therefore
   /// do not restart the task within one layout frame.
   private var resolution: SavedListScrollResolution? {
-    request?.resolution(
+    guard let request else { return nil }
+    let targetIsVisibleInOwnerRoot =
+      rootEdges.first {
+        $0.id == request.ownerRootEdgeID
+      }.map { root in
+        VaultSavedListTreeTraversal.containsVisiblePlacement(
+          edgeID: request.targetEdgeID,
+          in: root,
+          selectedContentKind: selectedContentKind
+        )
+      } ?? false
+
+    return request.resolution(
       allEdgeIDs: allEdgeIDs,
       visibleRootEdgeIDs: visibleRootEdgeIDs,
-      projectedEdgeIDsByRootID: projectedEdgeIDsByRootID,
+      targetIsVisibleInOwnerRoot: targetIsVisibleInOwnerRoot,
       renderedEdgeIDs: renderedEdgeIDs
     )
   }
@@ -787,7 +791,7 @@ private struct VaultSavedListContentFilterMenu: View {
   private var filterableKinds: [JournalVault.Card.Kind] {
     JournalVault.Card.Kind.allCases.filter(\.isAvailableInSavedListFilter)
   }
-  
+
   private var isSelectionEnabled: Bool {
     selection != nil
   }

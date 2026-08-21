@@ -30,20 +30,21 @@ nonisolated struct SavedListScrollRequest: Equatable, Sendable {
   /// Newly created root or Reply child that should become visible.
   let targetEdgeID: UUID
 
-  /// Resolves the next deterministic step from query, projection, and layout
-  /// availability without performing a SwiftUI side effect itself.
+  /// Resolves the next deterministic step from query, live-tree reachability,
+  /// and layout availability without performing a SwiftUI side effect itself.
   func resolution(
     allEdgeIDs: Set<UUID>,
     visibleRootEdgeIDs: Set<UUID>,
-    projectedEdgeIDsByRootID: [UUID: Set<UUID>],
+    targetIsVisibleInOwnerRoot: Bool,
     renderedEdgeIDs: Set<UUID>
   ) -> SavedListScrollResolution {
     guard allEdgeIDs.contains(targetEdgeID) else {
       return .waitForQuery
     }
-    guard visibleRootEdgeIDs.contains(ownerRootEdgeID),
-      projectedEdgeIDsByRootID[ownerRootEdgeID]?.contains(targetEdgeID) == true
-    else {
+    guard visibleRootEdgeIDs.contains(ownerRootEdgeID) else {
+      return .consumeWithoutScrolling
+    }
+    guard targetIsVisibleInOwnerRoot else {
       return .consumeWithoutScrolling
     }
     guard renderedEdgeIDs.contains(targetEdgeID) else {

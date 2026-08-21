@@ -16,7 +16,7 @@ struct SavedListScrollRequestTests {
       request.resolution(
         allEdgeIDs: [ownerRootID],
         visibleRootEdgeIDs: [ownerRootID],
-        projectedEdgeIDsByRootID: [ownerRootID: [ownerRootID]],
+        targetIsVisibleInOwnerRoot: false,
         renderedEdgeIDs: [ownerRootID]
       ) == .waitForQuery
     )
@@ -32,7 +32,7 @@ struct SavedListScrollRequestTests {
       request.resolution(
         allEdgeIDs: [ownerRootID, targetID],
         visibleRootEdgeIDs: [],
-        projectedEdgeIDsByRootID: [:],
+        targetIsVisibleInOwnerRoot: false,
         renderedEdgeIDs: []
       ) == .consumeWithoutScrolling
     )
@@ -48,7 +48,7 @@ struct SavedListScrollRequestTests {
       request.resolution(
         allEdgeIDs: [ownerRootID, targetID],
         visibleRootEdgeIDs: [ownerRootID],
-        projectedEdgeIDsByRootID: [ownerRootID: [ownerRootID]],
+        targetIsVisibleInOwnerRoot: false,
         renderedEdgeIDs: [ownerRootID]
       ) == .consumeWithoutScrolling
     )
@@ -64,7 +64,7 @@ struct SavedListScrollRequestTests {
       request.resolution(
         allEdgeIDs: [ownerRootID, targetID],
         visibleRootEdgeIDs: [ownerRootID],
-        projectedEdgeIDsByRootID: [ownerRootID: [ownerRootID, targetID]],
+        targetIsVisibleInOwnerRoot: true,
         renderedEdgeIDs: []
       ) == .materializeOwnerRoot(ownerRootID)
     )
@@ -80,19 +80,13 @@ struct SavedListScrollRequestTests {
     let initialResolution = request.resolution(
       allEdgeIDs: [ownerRootID, targetID, unrelatedID],
       visibleRootEdgeIDs: [ownerRootID, unrelatedID],
-      projectedEdgeIDsByRootID: [
-        ownerRootID: [ownerRootID, targetID],
-        unrelatedID: [unrelatedID],
-      ],
+      targetIsVisibleInOwnerRoot: true,
       renderedEdgeIDs: []
     )
     let updatedResolution = request.resolution(
       allEdgeIDs: [ownerRootID, targetID, unrelatedID],
       visibleRootEdgeIDs: [ownerRootID, unrelatedID],
-      projectedEdgeIDsByRootID: [
-        ownerRootID: [ownerRootID, targetID],
-        unrelatedID: [unrelatedID],
-      ],
+      targetIsVisibleInOwnerRoot: true,
       renderedEdgeIDs: [unrelatedID]
     )
 
@@ -109,7 +103,7 @@ struct SavedListScrollRequestTests {
       request.resolution(
         allEdgeIDs: [rootID],
         visibleRootEdgeIDs: [rootID],
-        projectedEdgeIDsByRootID: [rootID: [rootID]],
+        targetIsVisibleInOwnerRoot: true,
         renderedEdgeIDs: [rootID]
       ) == .revealRoot(rootID)
     )
@@ -125,9 +119,41 @@ struct SavedListScrollRequestTests {
       request.resolution(
         allEdgeIDs: [ownerRootID, targetID],
         visibleRootEdgeIDs: [ownerRootID],
-        projectedEdgeIDsByRootID: [ownerRootID: [ownerRootID, targetID]],
+        targetIsVisibleInOwnerRoot: true,
         renderedEdgeIDs: [ownerRootID, targetID]
       ) == .revealReply(targetID)
+    )
+  }
+
+  @Test("Materializes a filtered root before revealing a matching nested Reply")
+  func materializesRootForMatchingNestedReply() {
+    let ownerRootID = id(1)
+    let targetID = id(3)
+    let request = request(ownerRootID: ownerRootID, targetID: targetID)
+
+    #expect(
+      request.resolution(
+        allEdgeIDs: [ownerRootID, targetID],
+        visibleRootEdgeIDs: [ownerRootID],
+        targetIsVisibleInOwnerRoot: true,
+        renderedEdgeIDs: []
+      ) == .materializeOwnerRoot(ownerRootID)
+    )
+  }
+
+  @Test("Consumes a nested Reply excluded by the selected kind")
+  func consumesFilteredNestedReply() {
+    let ownerRootID = id(1)
+    let targetID = id(3)
+    let request = request(ownerRootID: ownerRootID, targetID: targetID)
+
+    #expect(
+      request.resolution(
+        allEdgeIDs: [ownerRootID, targetID],
+        visibleRootEdgeIDs: [ownerRootID],
+        targetIsVisibleInOwnerRoot: false,
+        renderedEdgeIDs: [ownerRootID]
+      ) == .consumeWithoutScrolling
     )
   }
 
@@ -145,10 +171,7 @@ struct SavedListScrollRequestTests {
       request.resolution(
         allEdgeIDs: [originalOwnerRootID, currentOwnerRootID, targetID],
         visibleRootEdgeIDs: [originalOwnerRootID, currentOwnerRootID],
-        projectedEdgeIDsByRootID: [
-          originalOwnerRootID: [originalOwnerRootID],
-          currentOwnerRootID: [currentOwnerRootID, targetID],
-        ],
+        targetIsVisibleInOwnerRoot: false,
         renderedEdgeIDs: [originalOwnerRootID, currentOwnerRootID, targetID]
       ) == .consumeWithoutScrolling
     )

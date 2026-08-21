@@ -3,10 +3,109 @@ import JournalVault
 import MuColor
 import SwiftUI
 
+private struct SavedListMutationDisabledKey: EnvironmentKey {
+  static let defaultValue = false
+}
+
+extension EnvironmentValues {
+
+  /// Whether Home row mutations are temporarily disabled by another action.
+  var savedListMutationDisabled: Bool {
+    get { self[SavedListMutationDisabledKey.self] }
+    set { self[SavedListMutationDisabledKey.self] = newValue }
+  }
+}
+
 /// Shared spacing for trees rendered on Home.
 struct VaultSavedEntryTreeMetrics {
   static let descendantMarkerGutter: CGFloat = 16
   static let nodeSpacing: CGFloat = 2
+}
+
+/// Recursively renders one live `CardEdge` placement and its active children.
+///
+/// The view intentionally emits the matching row and child `ForEach` as
+/// siblings instead of wrapping each node in a nested `VStack`. A filtered
+/// ancestor therefore contributes no card while its descendants retain their
+/// semantic depth and participate in the surrounding Home `LazyVStack`.
+struct VaultSavedEntryTreeRows: View {
+
+  let edge: JournalVault.CardEdge
+  let store: VaultContentStore
+  let depth: Int
+  let selectedContentKind: JournalVault.Card.Kind?
+  let ancestorEdgeIDs: Set<UUID>
+  let ownerRootEdgeID: UUID
+  let onReply: @MainActor (VaultSavedEntry, UUID) -> Void
+  let onShare: @MainActor (VaultSavedEntry) -> Void
+  let onEdit: @MainActor (VaultSavedEntry) -> Void
+  let onRequestDelete: @MainActor (VaultSavedEntry) -> Void
+  let onToggleTodoCompletion: @MainActor (VaultSavedEntry) -> Void
+
+  @Environment(\.savedListMutationDisabled)
+  private var isMutationDisabled
+
+  var body: some View {
+    if let card = edge.card,
+      edge.deletedAt == nil,
+      selectedContentKind == nil || card.kind == selectedContentKind
+    {
+      let entry = VaultSavedEntry(edge: edge, card: card, store: store)
+      row(for: entry)
+    }
+
+    ForEach(children, id: \.id) { child in
+      VaultSavedEntryTreeRows(
+        edge: child,
+        store: store,
+        depth: depth + 1,
+        selectedContentKind: selectedContentKind,
+        ancestorEdgeIDs: ancestorEdgeIDs.union([edge.id]),
+        ownerRootEdgeID: ownerRootEdgeID,
+        onReply: onReply,
+        onShare: onShare,
+        onEdit: onEdit,
+        onRequestDelete: onRequestDelete,
+        onToggleTodoCompletion: onToggleTodoCompletion
+      )
+    }
+  }
+
+  /// Active, resolved children in authored order with a path-local cycle guard.
+  private var children: [JournalVault.CardEdge] {
+    VaultSavedListTreeTraversal.orderedActiveChildren(
+      of: edge,
+      pathEdgeIDs: ancestorEdgeIDs.union([edge.id])
+    )
+  }
+
+  @ViewBuilder
+  private func row(for entry: VaultSavedEntry) -> some View {
+    let cell = VaultSavedEntryTreeCell(
+      depth: depth,
+      entry: entry,
+      isMutationDisabled: isMutationDisabled,
+      onReply: { onReply($0, ownerRootEdgeID) },
+      onShare: onShare,
+      onEdit: onEdit,
+      onRequestDelete: onRequestDelete,
+      onToggleTodoCompletion: onToggleTodoCompletion
+    )
+
+    if depth == 0 {
+      cell.preference(
+        key: SavedListRenderedEdgeIDsPreferenceKey.self,
+        value: [edge.id]
+      )
+    } else {
+      cell
+        .id(edge.id)
+        .preference(
+          key: SavedListRenderedEdgeIDsPreferenceKey.self,
+          value: [edge.id]
+        )
+    }
+  }
 }
 
 /// Modal editor for an existing vault card.
