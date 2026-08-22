@@ -46,7 +46,6 @@ struct VaultCloudKitSchemaTests {
         VaultRecordMapper.AttachmentKey.kind,
         VaultRecordMapper.AttachmentKey.byteSize,
         VaultRecordMapper.AttachmentKey.primaryResourceID,
-        VaultRecordMapper.AttachmentKey.thumbnail,
         VaultRecordMapper.AttachmentKey.createdAt,
       ],
       .attachmentResource: [

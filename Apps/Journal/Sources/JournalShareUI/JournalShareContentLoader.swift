@@ -1,6 +1,5 @@
 import CoreTransferable
 import Foundation
-import MediaProcessing
 import UniformTypeIdentifiers
 
 /// Result of importing all item providers supplied by the host app.
@@ -92,15 +91,10 @@ struct JournalShareContentLoader {
   private func loadImage(from provider: NSItemProvider) async throws -> JournalSharePayload {
     let transferred = try await provider.journalLoadTransferable(ShareTransferredImage.self)
     let contentType = preferredContentType(in: provider, conformingTo: .image) ?? .image
-    let thumbnail = try? await Task.detached(priority: .utility) {
-      let data = try Data(contentsOf: transferred.file.fileURL)
-      return try MediaThumbnailGenerator.imageThumbnail(from: data).data
-    }.value
     return JournalSharePayload(
       content: .photo(
         file: transferred.file,
-        contentTypeIdentifier: contentType.identifier,
-        thumbnail: thumbnail
+        contentTypeIdentifier: contentType.identifier
       )
     )
   }
@@ -110,14 +104,10 @@ struct JournalShareContentLoader {
     let contentType = preferredContentType(in: provider, conformingTo: .movie)
       ?? UTType(filenameExtension: transferred.file.fileURL.pathExtension)
       ?? .movie
-    let thumbnail = try? await Task.detached(priority: .utility) {
-      try MediaThumbnailGenerator.videoThumbnail(from: transferred.file.fileURL).data
-    }.value
     return JournalSharePayload(
       content: .video(
         file: transferred.file,
-        contentTypeIdentifier: contentType.identifier,
-        thumbnail: thumbnail
+        contentTypeIdentifier: contentType.identifier
       )
     )
   }

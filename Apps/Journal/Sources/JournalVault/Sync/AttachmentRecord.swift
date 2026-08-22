@@ -21,9 +21,6 @@ final class AttachmentRecord {
   @CKField("primaryResourceID", .string, required: true)
   var primaryResourceIDRawValue: String
 
-  @CKField("thumbnail", .data)
-  var thumbnail: Data?
-
   @CKField("createdAt", .date, required: true)
   var createdAt: Date
 }

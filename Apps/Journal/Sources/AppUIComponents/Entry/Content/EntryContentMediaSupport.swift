@@ -49,8 +49,7 @@ struct ContentImageLoadID: Hashable {
   let style: EntryContentStyle
   let fileURL: URL?
   let fileRevision: Int
-  let primaryData: ContentImageDataFingerprint?
-  let fallbackData: ContentImageDataFingerprint?
+  let data: ContentImageDataFingerprint?
 }
 
 struct ContentFileLoadID: Hashable {
@@ -223,7 +222,7 @@ struct InlineImageDataContentView: View {
 /// Stable authored-media geometry shared by loading and rendered states.
 ///
 /// The frame derives its height from the proposed width before an asynchronous
-/// poster, still, drawing, or player is ready. It describes media geometry only;
+/// image, drawing, or player is ready. It describes media geometry only;
 /// it does not know whether the content is shown in Home or exported by Share.
 struct ContentMediaFrame<Content: View>: View {
 
@@ -266,9 +265,74 @@ extension CGSize {
 
 extension UIImage {
 
-  /// Best-effort display ratio for decoded thumbnails and original images.
+  /// Best-effort display ratio for a decoded image.
   var contentAspectRatio: CGFloat {
     size.contentAspectRatio ?? 1
+  }
+}
+
+/// Creates bounded, orientation-correct rasters for interactive media previews.
+///
+/// The original encoded bytes remain the source of truth for editing and
+/// export. Preview views instead receive a decoded raster whose longest edge is
+/// capped so image-heavy scrolling has a predictable memory cost on iOS and
+/// macOS.
+enum ContentMediaDisplayImageDecoder {
+
+  /// Fixed longest-edge limit for an image shown by an interactive preview.
+  ///
+  /// This intentionally does not depend on current view geometry. A fixed
+  /// value also prevents a resize from repeatedly decoding nearby raster sizes.
+  static let maximumPixelLength = 1_024
+
+  nonisolated static func image(from data: Data) -> CGImage? {
+    let sourceOptions: [CFString: Any] = [
+      kCGImageSourceShouldCache: false
+    ]
+    guard
+      let source = CGImageSourceCreateWithData(
+        data as CFData,
+        sourceOptions as CFDictionary
+      )
+    else {
+      return nil
+    }
+
+    return image(from: source)
+  }
+
+  nonisolated static func image(at fileURL: URL) -> CGImage? {
+    let sourceOptions: [CFString: Any] = [
+      kCGImageSourceShouldCache: false
+    ]
+    guard
+      let source = CGImageSourceCreateWithURL(
+        fileURL as CFURL,
+        sourceOptions as CFDictionary
+      )
+    else {
+      return nil
+    }
+
+    return image(from: source)
+  }
+
+  private nonisolated static func image(
+    from source: CGImageSource
+  ) -> CGImage? {
+    let downsampleOptions: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceThumbnailMaxPixelSize: maximumPixelLength,
+      // Materialize the bounded raster in this background task instead of
+      // leaving ImageIO work for SwiftUI's draw pass on the main thread.
+      kCGImageSourceShouldCacheImmediately: true,
+    ]
+    return CGImageSourceCreateThumbnailAtIndex(
+      source,
+      0,
+      downsampleOptions as CFDictionary
+    )
   }
 }
 
@@ -277,40 +341,38 @@ enum ContentMediaFileReader {
 
   @concurrent
   nonisolated static func image(from data: Data?) async -> UIImage? {
-    guard let data else {
+    guard let data, Task.isCancelled == false else {
       return nil
     }
 
-    guard let image = UIImage(data: data) else {
+    guard let image = ContentMediaDisplayImageDecoder.image(from: data) else {
       return nil
     }
 
-    #if canImport(UIKit)
-      if let preparedImage = await image.byPreparingForDisplay() {
-        return preparedImage
-      }
-    #endif
-
-    return image
-
+    return nativeImage(from: image)
   }
 
   @concurrent
   nonisolated static func image(at fileURL: URL) async -> UIImage? {
-    guard FileManager.default.fileExists(atPath: fileURL.path),
-      let data = try? Data(contentsOf: fileURL),
-      let image = UIImage(data: data)
+    guard Task.isCancelled == false,
+      FileManager.default.fileExists(atPath: fileURL.path),
+      let image = ContentMediaDisplayImageDecoder.image(at: fileURL)
     else {
       return nil
     }
 
-    #if canImport(UIKit)
-      if let preparedImage = await image.byPreparingForDisplay() {
-        return preparedImage
-      }
-    #endif
+    return nativeImage(from: image)
+  }
 
-    return image
+  private nonisolated static func nativeImage(from image: CGImage) -> UIImage {
+    #if canImport(UIKit)
+      return UIImage(cgImage: image)
+    #else
+      return UIImage(
+        cgImage: image,
+        size: CGSize(width: image.width, height: image.height)
+      )
+    #endif
   }
 
   @concurrent

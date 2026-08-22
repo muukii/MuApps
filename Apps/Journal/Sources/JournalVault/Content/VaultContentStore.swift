@@ -160,13 +160,6 @@ extension VaultContentStore {
     /// prefer this explicit shape so each file keeps its role and metadata.
     public var mediaResources: [AttachmentResourceDraft]
 
-    /// Optional save-time raster derivative carried inside the CloudKit record.
-    ///
-    /// Use this for large raster media such as photos or future video poster
-    /// frames. Vector/authored media should leave it empty and render from their
-    /// media file instead.
-    public var thumbnail: Data?
-
     /// Location to attach, if the user opted in and a fix was available.
     public var location: Coordinate?
 
@@ -177,7 +170,6 @@ extension VaultContentStore {
       mediaData: Data? = nil,
       mediaFileURL: URL? = nil,
       mediaResources: [AttachmentResourceDraft] = [],
-      thumbnail: Data? = nil,
       location: Coordinate? = nil
     ) {
       self.kind = kind
@@ -186,7 +178,6 @@ extension VaultContentStore {
       self.mediaData = mediaData
       self.mediaFileURL = mediaFileURL
       self.mediaResources = mediaResources
-      self.thumbnail = thumbnail
       self.location = location
     }
   }
@@ -971,8 +962,7 @@ extension VaultContentStore {
       cardID: card.id,
       kind: attachmentKind,
       byteSize: Self.byteSize(for: resourceDrafts[0]),
-      primaryResourceID: primaryResourceID,
-      thumbnail: draft.thumbnail
+      primaryResourceID: primaryResourceID
     )
     attachment.connect(to: card)
 

@@ -8,12 +8,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WidgetKit
 
-#if canImport(UIKit)
-  import UIKit
-#elseif canImport(AppKit)
-  import AppKit
-#endif
-
 // MARK: - Widget
 
 /// Shows the latest entry from one configured Tinycurve vault on Home Screen, Lock
@@ -121,17 +115,16 @@ struct NoteSnapshot: Sendable {
 /// The widget-renderable content extracted from a vault `Card`.
 ///
 /// Text and link cards carry their display string. Suggestion cards carry the
-/// selected suggestion snapshot. Photo cards carry the save-time raster
-/// thumbnail, while Doodle and Bauhaus cards carry authored values decoded from
-/// the vault media file.
+/// selected suggestion snapshot. Doodle and Bauhaus cards carry authored
+/// values decoded from the vault media file; raster media uses modality labels.
 enum NoteContent: Sendable {
   case text(String)
   case todo(String, isCompleted: Bool)
   case link(String)
   case file(WidgetFileContent)
-  case photo(Data?)
-  case video(Data?)
-  case livePhoto(Data?)
+  case photo
+  case video
+  case livePhoto
   case audio
   case suggestion(SuggestionCardPayload?)
   case doodle(DoodleDrawing?)
@@ -207,8 +200,7 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
   ///
   /// Returns `nil` when the vault has no roots or when its store can't be
   /// opened; the view shows an empty state in both cases.
-  private func loadLatestNote(in vaultID: VaultID) async throws -> NoteSnapshot?
-  {
+  private func loadLatestNote(in vaultID: VaultID) async throws -> NoteSnapshot? {
     let cardSnapshot: WidgetLatestCardSnapshot? = try await MainActor.run {
       let layout = try VaultStoreLayout.appGroup()
       // A widget is a short-lived, read-only process. A transient open failure
@@ -261,7 +253,6 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
     guard let resource = attachment.primaryResource else {
       return WidgetMediaAttachmentSnapshot(
         fileURL: nil,
-        thumbnailData: attachment.thumbnail,
         contentType: nil,
         byteSize: nil
       )
@@ -272,7 +263,6 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
       FileManager.default.fileExists(atPath: fileURL.path) ? fileURL : nil
     return WidgetMediaAttachmentSnapshot(
       fileURL: availableFileURL,
-      thumbnailData: attachment.thumbnail,
       contentType: resource.contentType,
       byteSize: resource.byteSize
     )
@@ -281,7 +271,6 @@ struct LatestNoteProvider: AppIntentTimelineProvider {
 
 private struct WidgetMediaAttachmentSnapshot: Sendable {
   let fileURL: URL?
-  let thumbnailData: Data?
   let contentType: String?
   let byteSize: Int?
 }
@@ -319,11 +308,11 @@ private struct WidgetLatestCardSnapshot: Sendable {
         )
       )
     case .photo:
-      return .photo(mediaAttachment?.thumbnailData)
+      return .photo
     case .video:
-      return .video(mediaAttachment?.thumbnailData)
+      return .video
     case .livePhoto:
-      return .livePhoto(mediaAttachment?.thumbnailData)
+      return .livePhoto
     case .audio:
       return .audio
     case .suggestion:
@@ -619,22 +608,12 @@ private struct NoteContentView: View {
       }
     case .file(let file):
       WidgetFileView(file: file)
-    case .photo(let imageData):
-      WidgetPhotoView(imageData: imageData)
-    case .video(let imageData):
-      WidgetPhotoView(
-        imageData: imageData,
-        fallbackTitle: "Video",
-        fallbackSystemImage: "video",
-        accessibilityLabel: "Video"
-      )
-    case .livePhoto(let imageData):
-      WidgetPhotoView(
-        imageData: imageData,
-        fallbackTitle: "Live Photo",
-        fallbackSystemImage: "livephoto",
-        accessibilityLabel: "Live Photo"
-      )
+    case .photo:
+      WidgetMediaLabel(title: "Photo", systemImage: "photo")
+    case .video:
+      WidgetMediaLabel(title: "Video", systemImage: "video")
+    case .livePhoto:
+      WidgetMediaLabel(title: "Live Photo", systemImage: "livephoto")
     case .audio:
       WidgetMediaLabel(title: "Audio", systemImage: "waveform")
     case .suggestion(let suggestion):
@@ -693,44 +672,6 @@ private struct WidgetTodoView: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .accessibilityElement(children: .combine)
     .accessibilityValue(isCompleted ? Text("Completed") : Text("Incomplete"))
-  }
-}
-
-private struct WidgetPhotoView: View {
-
-  let imageData: Data?
-  var fallbackTitle: LocalizedStringResource = "Photo"
-  var fallbackSystemImage: String = "photo"
-  var accessibilityLabel: LocalizedStringResource = "Photo"
-
-  var body: some View {
-    #if canImport(UIKit)
-      if let uiImage = imageData.flatMap(UIImage.init(data:)) {
-        WidgetRenderedMediaFrame {
-          Image(uiImage: uiImage)
-            .resizable()
-            .scaledToFill()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-        }
-        .accessibilityLabel(Text(accessibilityLabel))
-      } else {
-        WidgetMediaLabel(title: fallbackTitle, systemImage: fallbackSystemImage)
-      }
-    #elseif canImport(AppKit)
-      if let nsImage = imageData.flatMap(NSImage.init(data:)) {
-        WidgetRenderedMediaFrame {
-          Image(nsImage: nsImage)
-            .resizable()
-            .scaledToFill()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-        }
-        .accessibilityLabel(Text(accessibilityLabel))
-      } else {
-        WidgetMediaLabel(title: fallbackTitle, systemImage: fallbackSystemImage)
-      }
-    #endif
   }
 }
 

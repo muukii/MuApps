@@ -14,8 +14,8 @@ struct JournalSharePayload: Identifiable, Sendable {
   enum Content: Sendable {
     case text(String)
     case link(URL)
-    case photo(file: JournalShareTemporaryFile, contentTypeIdentifier: String, thumbnail: Data?)
-    case video(file: JournalShareTemporaryFile, contentTypeIdentifier: String, thumbnail: Data?)
+    case photo(file: JournalShareTemporaryFile, contentTypeIdentifier: String)
+    case video(file: JournalShareTemporaryFile, contentTypeIdentifier: String)
     case file(file: JournalShareTemporaryFile, displayName: String, contentTypeIdentifier: String?)
   }
 
@@ -31,7 +31,7 @@ struct JournalSharePayload: Identifiable, Sendable {
       return url.host(percentEncoded: false) ?? url.absoluteString
     case .photo:
       return String(localized: "Photo")
-    case .video(let file, _, _):
+    case .video(let file, _):
       return file.fileURL.lastPathComponent
     case .file(_, let displayName, _):
       return displayName
@@ -66,7 +66,7 @@ struct JournalSharePayload: Identifiable, Sendable {
     case .link(let url):
       return .init(kind: .link, text: url.absoluteString)
 
-    case .photo(let file, let contentTypeIdentifier, let thumbnail):
+    case .photo(let file, let contentTypeIdentifier):
       return .init(
         kind: .photo,
         mediaResources: [
@@ -77,11 +77,10 @@ struct JournalSharePayload: Identifiable, Sendable {
             byteSize: file.byteSize,
             contentType: contentTypeIdentifier
           )
-        ],
-        thumbnail: thumbnail
+        ]
       )
 
-    case .video(let file, let contentTypeIdentifier, let thumbnail):
+    case .video(let file, let contentTypeIdentifier):
       return .init(
         kind: .video,
         mediaResources: [
@@ -92,8 +91,7 @@ struct JournalSharePayload: Identifiable, Sendable {
             byteSize: file.byteSize,
             contentType: contentTypeIdentifier
           )
-        ],
-        thumbnail: thumbnail
+        ]
       )
 
     case .file(let file, let displayName, let contentTypeIdentifier):
@@ -116,7 +114,7 @@ struct JournalSharePayload: Identifiable, Sendable {
   /// Removes file-backed temporary copies owned by this payload.
   nonisolated func cleanUpTemporaryFiles() {
     switch content {
-    case .photo(let file, _, _), .video(let file, _, _), .file(let file, _, _):
+    case .photo(let file, _), .video(let file, _), .file(let file, _, _):
       file.cleanUp()
     case .text, .link:
       break

@@ -6,9 +6,8 @@ import JournalVault
 
 /// Feature-local source values needed to create a share snapshot.
 ///
-/// `SavedListView` builds this from its live vault entry projection so the
-/// sharing layer does not need access to private saved-list types or live
-/// SwiftData models.
+/// `SavedListView` builds this directly from the selected live `Card` at the
+/// share action boundary, so the sharing layer never retains SwiftData models.
 struct EntryShareSource: Sendable, Equatable {
   let id: UUID
   let kind: JournalVault.Card.Kind
@@ -21,7 +20,6 @@ struct EntryShareSource: Sendable, Equatable {
 struct EntryShareAttachmentSource: Sendable, Equatable {
   let kind: JournalVault.Attachment.Kind
   let fileURL: URL
-  let thumbnail: Data?
   let contentType: String?
   let byteSize: Int?
   /// Measured length of a time-based resource, in seconds.
@@ -31,8 +29,8 @@ struct EntryShareAttachmentSource: Sendable, Equatable {
 /// A detached, share-ready copy of one saved vault entry.
 ///
 /// Sharing should not hold a live SwiftData model while rendering images or
-/// videos. This snapshot reads the saved entry once, resolves its primary
-/// attachment, and carries only value data into the export layer.
+/// videos. This snapshot receives the card's already-resolved operation values
+/// once and carries only detached data into the export layer.
 struct EntryShareSnapshot: Identifiable, Sendable, Equatable {
 
   /// Stable entry identity, reused for temporary export file names.
@@ -56,9 +54,8 @@ struct EntryShareSnapshot: Identifiable, Sendable, Equatable {
   /// Builds a snapshot from saved vault-entry values.
   ///
   /// Media files are read from the selected vault's media directory when
-  /// present. Missing files degrade to mirrored thumbnails or placeholders
-  /// instead of failing, because sharing should still work for partially
-  /// available CloudKit rows.
+  /// present. Missing files degrade to placeholders instead of failing,
+  /// because sharing should still work for partially available CloudKit rows.
   init(source: EntryShareSource) {
     let body = source.body.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -103,11 +100,13 @@ struct EntryShareSnapshot: Identifiable, Sendable, Equatable {
     case .photo, .livePhoto:
       return .photo(
         PhotoContentSource(
-          imageData: fileData(for: attachment) ?? attachment?.thumbnail
+          imageData: fileData(for: attachment)
         )
       )
     case .video:
-      return .photo(PhotoContentSource(imageData: attachment?.thumbnail))
+      return .video(
+        VideoContentSource(fileURL: fileURL(for: attachment))
+      )
     case .audio:
       return .audio(
         AudioContentSource(
@@ -122,8 +121,7 @@ struct EntryShareSnapshot: Identifiable, Sendable, Equatable {
       }
       return .doodle(
         DoodleContentSource(
-          drawing: drawing,
-          thumbnailData: attachment?.thumbnail
+          drawing: drawing
         )
       )
     case .bauhaus:
@@ -133,8 +131,7 @@ struct EntryShareSnapshot: Identifiable, Sendable, Equatable {
       }
       return .bauhaus(
         BauhausContentSource(
-          document: document,
-          thumbnailData: attachment?.thumbnail
+          document: document
         )
       )
     case .unknown:

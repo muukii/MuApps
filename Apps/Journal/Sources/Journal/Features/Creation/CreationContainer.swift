@@ -40,10 +40,11 @@ enum CreationComposerPlacement {
 /// Presentation container for the Journal creation surface.
 ///
 /// The container owns the bottom input bar and its standard SwiftUI `Menu`.
-/// The caller continues to own draft mutation, capture style, and saving.
+/// The composer session owns draft mutation; the caller owns capture style and
+/// persistence side effects received through the frozen submission.
 struct CreationContainer<Content: View, MenuContent: View>: View {
 
-  private let draft: CardEditDraft
+  private let composerState: CreationComposerSession
   private let isPresented: Bool
   private let placement: CreationComposerPlacement
   private let replyTarget: SavedListReplyTarget?
@@ -54,15 +55,14 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
   private let isProcessing: Bool
   private let onOpenDraft: @MainActor @Sendable () -> Void
   private let onDiscardDraft: @MainActor @Sendable () -> Void
-  private let onToggleComposerMode: @MainActor @Sendable () -> Void
-  private let onPost: @MainActor @Sendable () -> Void
+  private let onSubmit: @MainActor @Sendable (CreationComposerSubmission) -> Void
   private let onCancelReply: @MainActor @Sendable () -> Void
   private let onDropItems: @MainActor @Sendable ([HomeDropItem]) -> Void
   private let content: Content
   private let menuContent: MenuContent
 
   init(
-    draft: CardEditDraft,
+    composerState: CreationComposerSession,
     isPresented: Bool = true,
     placement: CreationComposerPlacement = .root,
     replyTarget: SavedListReplyTarget? = nil,
@@ -73,14 +73,13 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
     isProcessing: Bool,
     onOpenDraft: @escaping @MainActor @Sendable () -> Void,
     onDiscardDraft: @escaping @MainActor @Sendable () -> Void,
-    onToggleComposerMode: @escaping @MainActor @Sendable () -> Void,
-    onPost: @escaping @MainActor @Sendable () -> Void,
+    onSubmit: @escaping @MainActor @Sendable (CreationComposerSubmission) -> Void,
     onCancelReply: @escaping @MainActor @Sendable () -> Void = {},
     onDropItems: @escaping @MainActor @Sendable ([HomeDropItem]) -> Void,
     @ViewBuilder content: () -> Content,
     @ViewBuilder menuContent: () -> MenuContent
   ) {
-    self.draft = draft
+    self.composerState = composerState
     self.isPresented = isPresented
     self.placement = placement
     self.replyTarget = replyTarget
@@ -91,8 +90,7 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
     self.isProcessing = isProcessing
     self.onOpenDraft = onOpenDraft
     self.onDiscardDraft = onDiscardDraft
-    self.onToggleComposerMode = onToggleComposerMode
-    self.onPost = onPost
+    self.onSubmit = onSubmit
     self.onCancelReply = onCancelReply
     self.onDropItems = onDropItems
     self.content = content()
@@ -120,7 +118,7 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
               }
 
               CreationComposerInputBar(
-                draft: draft,
+                composerState: composerState,
                 placement: placement,
                 isPostDestinationAvailable: isPostDestinationAvailable,
                 focusRequestID: focusRequestID,
@@ -128,8 +126,7 @@ struct CreationContainer<Content: View, MenuContent: View>: View {
                 isProcessing: isProcessing,
                 onOpenDraft: onOpenDraft,
                 onDiscardDraft: onDiscardDraft,
-                onToggleComposerMode: onToggleComposerMode,
-                onPost: onPost
+                onSubmit: onSubmit
               ) {
                 menuContent
               }

@@ -40,8 +40,8 @@ behavior).
 - `Sources/JournalWidget/` — **WidgetKit extension** (`.appExtension`): `JournalWidgetBundle`
   (`@main`) + `LatestNoteWidget`, which lets each widget instance choose a vault
   through WidgetKit configuration, reads the selected `JournalVault` store, and
-  shows the authored latest item. Home Screen widgets use save-time raster
-  thumbnails for photos, render Doodle/Bauhaus authored JSON through SwiftUI
+  shows the authored latest item. Home Screen widgets use modality labels for
+  photo/video/Live Photo, render Doodle/Bauhaus authored JSON through SwiftUI
   renderers, and keep tight accessory families on labels/symbols.
 - `Sources/JournalShareExtension/` — **Share extension** (`.appExtension`):
   `ShareViewController` only. It is the declared `NSExtensionPrincipalClass` and
@@ -53,10 +53,10 @@ behavior).
   `.appex` cannot host a unit test target. The dynamic part is specifically about
   this target's dependency graph, not a general rule — static frameworks preview
   fine here (`MuHaptics`, `CaptureAudio`, `CaptureSuggestions` all do), because
-  they depend on nothing local. This one depends on three sibling frameworks, and
+  they depend on nothing local. This one depends on sibling frameworks, and
   while it was static Previews JIT-linked `JournalShareUI` alone and loaded no
-  dependency product, leaving `JournalVault` / `JournalIntents` /
-  `MediaProcessing` symbols unbound. As a dynamic framework it is a real Mach-O
+  dependency product, leaving `JournalVault` / `JournalIntents` symbols unbound.
+  As a dynamic framework it is a real Mach-O
   whose load commands name its dependencies, so dyld resolves the closure.
   Rule of thumb for this project: **a framework with local framework dependencies
   that needs Previews must be dynamic.** Built extension-API-only and embedded in
@@ -65,8 +65,6 @@ behavior).
 - `Sources/Capture*/` — capture frameworks (one isolated static framework each):
   `CaptureText`, `CapturePhoto`, `CaptureDoodle`, `CaptureBauhaus`,
   `CaptureAudio`, `CaptureSuggestions`.
-- `Sources/MediaProcessing/` — save-time media derivatives such as Image I/O
-  photo thumbnails and future video / Live Photo poster handling.
 - `Sources/MuColor/`, `Sources/MuHaptics/` — support frameworks for themes/palette
   and Core Haptics labs.
 - `Tests/JournalUITests/` — UI tests.
@@ -78,8 +76,9 @@ behavior).
   value type through a `@MainActor @Sendable` callback (`CapturedText`,
   `CapturedPhoto`, `DoodleDrawing`, `BauhausGridDocument`, `AudioRecording`,
   `CapturedSuggestion`) and must know nothing about `Card`, SwiftData, or
-  iCloud. Don't couple them to the app shell; media thumbnails belong in
-  `MediaProcessing` at the save boundary.
+  iCloud. Don't couple them to the app shell. Original attachment resources are
+  the only persisted media source; bounded display decoding belongs at the
+  presentation boundary and does not create a synced derivative.
 - **Legacy migration is CloudKit-owned, not local SQLite-owned.** The app shell
   must not recreate the old local SwiftData model layer as a startup migration
   source. A product migration must query legacy CloudKit records / CKAssets and

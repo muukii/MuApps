@@ -43,7 +43,6 @@ enum VaultRecordMapper {
     static let kind = "kind"
     static let byteSize = "byteSize"
     static let primaryResourceID = "primaryResourceID"
-    static let thumbnail = "thumbnail"
     static let createdAt = "createdAt"
   }
 
@@ -114,7 +113,6 @@ enum VaultRecordMapper {
     attachmentRecord.kindRawValue = attachment.kindRawValue
     attachmentRecord.byteSize = attachment.byteSize
     attachmentRecord.primaryResourceIDRawValue = attachment.primaryResourceID.uuidString
-    attachmentRecord.thumbnail = attachment.thumbnail
     attachmentRecord.createdAt = attachment.createdAt
   }
 
@@ -244,7 +242,6 @@ enum VaultRecordMapper {
     {
       attachment.setPrimaryResourceReferenceID(primaryResourceID)
     }
-    attachment.thumbnail = attachmentRecord.thumbnail
     if record[AttachmentKey.createdAt] != nil {
       attachment.createdAt = attachmentRecord.createdAt
     }

@@ -14,32 +14,9 @@ import SwiftUI
   import AppKit
 #endif
 
-// MARK: - Live Entry Projection
+// MARK: - Live Card Values
 
-/// Live saved-entry handle used by the Home tree and saved-entry actions.
-///
-/// The handle carries SwiftData model references. Display, share, and edit
-/// values are derived at the edge of each operation, so CloudKit imports update
-/// the UI through SwiftData observation instead of a hand-built reload snapshot.
-struct VaultSavedEntry: Identifiable {
-
-  let edge: JournalVault.CardEdge
-  let card: JournalVault.Card
-  let store: VaultContentStore
-
-  var id: UUID { edgeID }
-
-  var edgeID: UUID { edge.id }
-  var cardID: UUID { card.id }
-  var parentEdgeID: UUID? { edge.parentEdgeID }
-  var sortIndex: Int { edge.sortIndex }
-  var kind: JournalVault.Card.Kind { card.kind }
-  var body: String { card.body }
-  var completedAt: Date? { card.completedAt }
-  var isCompleted: Bool { card.isCompleted }
-  var createdAt: Date { card.createdAt }
-  var updatedAt: Date { card.updatedAt }
-  var location: JournalVault.Coordinate? { card.location }
+extension JournalVault.Card {
 
   /// Detached one-line text used to identify this placement after its context
   /// menu closes.
@@ -64,8 +41,14 @@ struct VaultSavedEntry: Identifiable {
     return String(localized: kind.vaultListDisplayTitle)
   }
 
-  private var attachment: VaultSavedAttachment? {
-    card.attachments
+  /// Resolves the first attachment whose primary resource row is available.
+  ///
+  /// CloudKit may materialize the attachment row before its primary resource.
+  /// In that state the card remains renderable with its content placeholder.
+  fileprivate func resolvedSavedAttachment(
+    in store: VaultContentStore
+  ) -> ResolvedVaultAttachment? {
+    attachments
       .sorted { lhs, rhs in
         if lhs.createdAt != rhs.createdAt {
           return lhs.createdAt < rhs.createdAt
@@ -73,19 +56,21 @@ struct VaultSavedEntry: Identifiable {
         return lhs.id.uuidString < rhs.id.uuidString
       }
       .lazy
-      .compactMap { VaultSavedAttachment(attachment: $0, store: store) }
+      .compactMap { ResolvedVaultAttachment(attachment: $0, store: store) }
       .first
   }
 }
 
-extension VaultSavedEntry {
+extension JournalVault.Card {
 
   /// Rehydrates this saved card into the shared editing draft model.
   ///
   /// Media cards require the full vault media file. Raster previews are
   /// intentionally not used to create a lossy edit draft.
   @MainActor
-  func editDraft() async throws -> CardEditDraft {
+  func editDraft(store: VaultContentStore) async throws -> CardEditDraft {
+    let attachment = resolvedSavedAttachment(in: store)
+
     switch kind {
     case .text:
       return CardEditDraft(kind: .text, text: body, location: location)
@@ -103,7 +88,10 @@ extension VaultSavedEntry {
       // composer does not yet expose a lossless file-replacement editor.
       throw VaultSavedEntryEditDraftError.unsupportedKind
     case .photo:
-      let data = try await mediaData(matching: .photo)
+      let data = try await mediaData(
+        matching: .photo,
+        attachment: attachment
+      )
       guard let image = UIImage(data: data) else {
         throw VaultSavedEntryEditDraftError.mediaDecodeFailed
       }
@@ -113,7 +101,10 @@ extension VaultSavedEntry {
         location: location
       )
     case .video:
-      let fileURL = try mediaFileURL(matching: .video)
+      let fileURL = try mediaFileURL(
+        matching: .video,
+        attachment: attachment
+      )
       let editableURL = try VaultSavedEntryEditMediaPreparer.mediaCopy(
         from: fileURL,
         fallbackPathExtension: "mov"
@@ -123,7 +114,6 @@ extension VaultSavedEntry {
         kind: .video,
         video: CapturedVideo(
           fileURL: editableURL,
-          thumbnailData: attachment?.thumbnail,
           pixelSize: resource?.pixelSize ?? .zero,
           duration: resource?.duration ?? 0,
           contentTypeIdentifier: resource?.contentType,
@@ -132,21 +122,32 @@ extension VaultSavedEntry {
         location: location
       )
     case .livePhoto:
-      let stillData = try await mediaData(matching: .stillImage)
-      let pairedVideoFileURL = try mediaFileURL(matching: .pairedVideo)
+      let stillData = try await mediaData(
+        matching: .stillImage,
+        attachment: attachment
+      )
+      let pairedVideoFileURL = try mediaFileURL(
+        matching: .pairedVideo,
+        attachment: attachment
+      )
       let editablePairedVideoURL =
         try VaultSavedEntryEditMediaPreparer.mediaCopy(
           from: pairedVideoFileURL,
           fallbackPathExtension: "mov"
         )
-      let stillResource = try mediaResource(matching: .stillImage)
-      let pairedVideoResource = try mediaResource(matching: .pairedVideo)
+      let stillResource = try mediaResource(
+        matching: .stillImage,
+        attachment: attachment
+      )
+      let pairedVideoResource = try mediaResource(
+        matching: .pairedVideo,
+        attachment: attachment
+      )
       return CardEditDraft(
         kind: .livePhoto,
         livePhoto: CapturedLivePhoto(
           stillImageData: stillData,
           pairedVideoFileURL: editablePairedVideoURL,
-          thumbnailData: attachment?.thumbnail,
           pixelSize: stillResource.pixelSize ?? .zero,
           duration: pairedVideoResource.duration ?? 0,
           stillImageContentTypeIdentifier: stillResource.contentType,
@@ -158,12 +159,13 @@ extension VaultSavedEntry {
       )
     case .audio:
       let fileURL = try mediaFileURL(
-        matching: JournalVault.Attachment.Kind.audio
+        matching: JournalVault.Attachment.Kind.audio,
+        attachment: attachment
       )
       let editableURL = try VaultSavedEntryEditMediaPreparer.audioCopy(
         from: fileURL
       )
-      let waveform = attachment?.primaryResource?.waveformData.flatMap {
+      let waveform = attachment?.primaryResource.waveformData.flatMap {
         AudioWaveform.decode(from: $0)
       }
       return CardEditDraft(
@@ -172,14 +174,17 @@ extension VaultSavedEntry {
           fileURL: editableURL,
           // Decoding the copy is a fallback for records saved before the
           // captured length was persisted.
-          duration: attachment?.primaryResource?.duration
+          duration: attachment?.primaryResource.duration
             ?? VaultSavedEntryEditMediaPreparer.audioDuration(from: editableURL),
           waveform: waveform
         ),
         location: location
       )
     case .suggestion:
-      let data = try await mediaData(matching: .suggestion)
+      let data = try await mediaData(
+        matching: .suggestion,
+        attachment: attachment
+      )
       guard let suggestion = SuggestionCardPayload.decode(from: data) else {
         throw VaultSavedEntryEditDraftError.mediaDecodeFailed
       }
@@ -187,11 +192,17 @@ extension VaultSavedEntry {
         kind: .suggestion,
         suggestion: suggestion,
         suggestionMediaFileURLsByResourceID:
-          suggestionMediaFileURLsByResourceID(for: suggestion),
+          suggestionMediaFileURLsByResourceID(
+            for: suggestion,
+            attachment: attachment
+          ),
         location: location
       )
     case .doodle:
-      let data = try await mediaData(matching: .doodle)
+      let data = try await mediaData(
+        matching: .doodle,
+        attachment: attachment
+      )
       guard
         let drawing = try? JSONDecoder().decode(DoodleDrawing.self, from: data)
       else {
@@ -199,7 +210,10 @@ extension VaultSavedEntry {
       }
       return CardEditDraft(kind: .doodle, doodle: drawing, location: location)
     case .bauhaus:
-      let data = try await mediaData(matching: .bauhaus)
+      let data = try await mediaData(
+        matching: .bauhaus,
+        attachment: attachment
+      )
       guard
         let document = try? JSONDecoder().decode(
           BauhausGridDocument.self,
@@ -220,9 +234,10 @@ extension VaultSavedEntry {
     }
   }
 
-  private func mediaFileURL(matching kind: JournalVault.Attachment.Kind) throws
-    -> URL
-  {
+  private func mediaFileURL(
+    matching kind: JournalVault.Attachment.Kind,
+    attachment: ResolvedVaultAttachment?
+  ) throws -> URL {
     guard attachment?.kind == kind,
       let fileURL = attachment?.fileURL,
       FileManager.default.fileExists(atPath: fileURL.path)
@@ -232,10 +247,14 @@ extension VaultSavedEntry {
     return fileURL
   }
 
-  private func mediaFileURL(matching role: JournalVault.AttachmentResource.Role)
-    throws -> URL
-  {
-    let resource = try mediaResource(matching: role)
+  private func mediaFileURL(
+    matching role: JournalVault.AttachmentResource.Role,
+    attachment: ResolvedVaultAttachment?
+  ) throws -> URL {
+    let resource = try mediaResource(
+      matching: role,
+      attachment: attachment
+    )
     guard FileManager.default.fileExists(atPath: resource.fileURL.path) else {
       throw VaultSavedEntryEditDraftError.mediaUnavailable
     }
@@ -243,10 +262,9 @@ extension VaultSavedEntry {
   }
 
   private func mediaResource(
-    matching role: JournalVault.AttachmentResource.Role
-  ) throws
-    -> VaultSavedAttachmentResource
-  {
+    matching role: JournalVault.AttachmentResource.Role,
+    attachment: ResolvedVaultAttachment?
+  ) throws -> ResolvedVaultAttachmentResource {
     guard let resource = attachment?.resources.first(where: { $0.role == role })
     else {
       throw VaultSavedEntryEditDraftError.mediaUnavailable
@@ -254,10 +272,14 @@ extension VaultSavedEntry {
     return resource
   }
 
-  private func mediaData(matching kind: JournalVault.Attachment.Kind)
-    async throws -> Data
-  {
-    let fileURL = try mediaFileURL(matching: kind)
+  private func mediaData(
+    matching kind: JournalVault.Attachment.Kind,
+    attachment: ResolvedVaultAttachment?
+  ) async throws -> Data {
+    let fileURL = try mediaFileURL(
+      matching: kind,
+      attachment: attachment
+    )
     guard let data = await VaultSavedEntryMediaFileReader.data(from: fileURL)
     else {
       throw VaultSavedEntryEditDraftError.mediaUnavailable
@@ -265,10 +287,14 @@ extension VaultSavedEntry {
     return data
   }
 
-  private func mediaData(matching role: JournalVault.AttachmentResource.Role)
-    async throws -> Data
-  {
-    let fileURL = try mediaFileURL(matching: role)
+  private func mediaData(
+    matching role: JournalVault.AttachmentResource.Role,
+    attachment: ResolvedVaultAttachment?
+  ) async throws -> Data {
+    let fileURL = try mediaFileURL(
+      matching: role,
+      attachment: attachment
+    )
     guard let data = await VaultSavedEntryMediaFileReader.data(from: fileURL)
     else {
       throw VaultSavedEntryEditDraftError.mediaUnavailable
@@ -277,7 +303,8 @@ extension VaultSavedEntry {
   }
 
   private func suggestionMediaFileURLsByResourceID(
-    for suggestion: SuggestionCardPayload
+    for suggestion: SuggestionCardPayload,
+    attachment: ResolvedVaultAttachment?
   ) -> [UUID: URL] {
     guard let attachment else { return [:] }
 
@@ -298,16 +325,17 @@ extension VaultSavedEntry {
   }
 }
 
-private struct VaultSavedAttachment {
+/// File-system-resolved attachment values used while deriving operation values.
+///
+/// This is private implementation state, not a presentation or persistence
+/// model. Its only job is to normalize resource order and local file URLs once.
+private struct ResolvedVaultAttachment {
 
-  let id: UUID
   let kind: JournalVault.Attachment.Kind
-  let byteSize: Int
-  let primaryResourceID: UUID
   let fileURL: URL
   let fileRevision: Int
-  let thumbnail: Data?
-  let resources: [VaultSavedAttachmentResource]
+  let primaryResource: ResolvedVaultAttachmentResource
+  let resources: [ResolvedVaultAttachmentResource]
 
   init?(attachment: JournalVault.Attachment, store: VaultContentStore) {
     let resources = attachment.resources
@@ -317,7 +345,7 @@ private struct VaultSavedAttachment {
         }
         return lhs.id.uuidString < rhs.id.uuidString
       }
-      .map { VaultSavedAttachmentResource(resource: $0, store: store) }
+      .map { ResolvedVaultAttachmentResource(resource: $0, store: store) }
 
     guard
       let primaryResource = resources.first(where: {
@@ -327,29 +355,22 @@ private struct VaultSavedAttachment {
       return nil
     }
 
-    self.id = attachment.id
     self.kind = attachment.kind
-    self.byteSize = attachment.byteSize
-    self.primaryResourceID = attachment.primaryResourceID
     self.fileURL = primaryResource.fileURL
     self.fileRevision = resources.reduce(0) { $0 &+ $1.localFileRevision }
-    self.thumbnail = attachment.thumbnail
+    self.primaryResource = primaryResource
     self.resources = resources
-  }
-
-  var primaryResource: VaultSavedAttachmentResource? {
-    resources.first { $0.id == primaryResourceID }
   }
 }
 
-private struct VaultSavedAttachmentResource {
+/// File-system-resolved values for one concrete attachment resource.
+private struct ResolvedVaultAttachmentResource {
 
   let id: UUID
   let role: JournalVault.AttachmentResource.Role
   let byteSize: Int
   let contentType: String?
-  let pixelWidth: Int?
-  let pixelHeight: Int?
+  let pixelSize: CGSize?
   let duration: Double?
   let waveformData: Data?
   let fileURL: URL
@@ -360,20 +381,17 @@ private struct VaultSavedAttachmentResource {
     self.role = resource.role
     self.byteSize = resource.byteSize
     self.contentType = resource.contentType
-    self.pixelWidth = resource.pixelWidth
-    self.pixelHeight = resource.pixelHeight
+    if let pixelWidth = resource.pixelWidth,
+      let pixelHeight = resource.pixelHeight
+    {
+      self.pixelSize = CGSize(width: pixelWidth, height: pixelHeight)
+    } else {
+      self.pixelSize = nil
+    }
     self.duration = resource.duration
     self.waveformData = resource.waveformData
     self.fileURL = store.fileURL(for: resource)
     self.localFileRevision = resource.localFileRevision
-  }
-
-  var pixelSize: CGSize? {
-    guard let pixelWidth, let pixelHeight else {
-      return nil
-    }
-
-    return CGSize(width: pixelWidth, height: pixelHeight)
   }
 }
 
@@ -484,76 +502,151 @@ struct VaultSavedDaySection: Identifiable {
   }
 }
 
-extension VaultSavedEntry {
+extension EntryContent {
 
-  /// Detached values handed to the share/export feature.
+  /// Creates renderable authored content directly from a live vault card.
+  ///
+  /// The card remains the observed SwiftData source of truth. `store` is used
+  /// only to resolve each attachment resource's local file URL at render time.
+  init(card: JournalVault.Card, store: VaultContentStore) {
+    let attachment = card.resolvedSavedAttachment(in: store)
+
+    switch card.kind {
+    case .text:
+      self = .text(card.body)
+    case .todo:
+      self = .todo(
+        TodoContentSource(text: card.body, completedAt: card.completedAt)
+      )
+    case .link:
+      self = .link(card.body)
+    case .file:
+      let fileAttachment = attachment?.kind == .file ? attachment : nil
+      self = .file(
+        FileContentSource(
+          displayName: card.body,
+          fileURL: fileAttachment?.fileURL,
+          contentType: fileAttachment?.primaryResource.contentType,
+          byteSize: fileAttachment?.primaryResource.byteSize
+        )
+      )
+    case .photo:
+      let photoAttachment = attachment?.kind == .photo ? attachment : nil
+      self = .photo(
+        PhotoContentSource(
+          fileURL: photoAttachment?.fileURL,
+          fileRevision: photoAttachment?.fileRevision ?? 0,
+          pixelSize: photoAttachment?.primaryResource.pixelSize
+        )
+      )
+    case .video:
+      let videoAttachment = attachment?.kind == .video ? attachment : nil
+      self = .video(
+        VideoContentSource(
+          fileURL: videoAttachment?.fileURL,
+          fileRevision: videoAttachment?.fileRevision ?? 0,
+          pixelSize: videoAttachment?.primaryResource.pixelSize
+        )
+      )
+    case .livePhoto:
+      let livePhotoAttachment =
+        attachment?.kind == .livePhoto ? attachment : nil
+      self = .livePhoto(
+        LivePhotoContentSource(
+          fileURL: livePhotoAttachment?.fileURL,
+          pairedVideoFileURL: livePhotoAttachment?.pairedVideoFileURL,
+          fileRevision: livePhotoAttachment?.fileRevision ?? 0,
+          pixelSize: livePhotoAttachment?.primaryResource.pixelSize
+        )
+      )
+    case .audio:
+      let audioAttachment = attachment?.kind == .audio ? attachment : nil
+      self = .audio(
+        AudioContentSource(
+          fileURL: audioAttachment?.fileURL,
+          waveformLevels: audioAttachment?.waveformLevels,
+          duration: audioAttachment?.primaryResource.duration
+        )
+      )
+    case .suggestion:
+      let suggestionAttachment =
+        attachment?.kind == .suggestion ? attachment : nil
+      self = .suggestion(
+        SuggestionContentSource(
+          fileURL: suggestionAttachment?.fileURL,
+          fileRevision: suggestionAttachment?.fileRevision ?? 0,
+          mediaFileURLsByResourceID:
+            suggestionAttachment?.suggestionMediaFileURLsByResourceID ?? [:]
+        )
+      )
+    case .doodle:
+      let doodleAttachment = attachment?.kind == .doodle ? attachment : nil
+      self = .doodle(
+        DoodleContentSource(
+          fileURL: doodleAttachment?.fileURL,
+          fileRevision: doodleAttachment?.fileRevision ?? 0,
+          pixelSize: doodleAttachment?.primaryResource.pixelSize
+        )
+      )
+    case .bauhaus:
+      let bauhausAttachment = attachment?.kind == .bauhaus ? attachment : nil
+      self = .bauhaus(
+        BauhausContentSource(
+          fileURL: bauhausAttachment?.fileURL,
+          fileRevision: bauhausAttachment?.fileRevision ?? 0
+        )
+      )
+    case .unknown:
+      self = .unknown
+    @unknown default:
+      self = .unknown
+    }
+  }
+}
+
+extension JournalVault.Card {
+
+  /// Creates the detached values handed to the share/export feature.
   ///
   /// The share sheet renders temporary files from this value copy, so it never
   /// holds a live SwiftData model or reaches back into the selected vault.
-  var shareSource: EntryShareSource {
+  func shareSource(
+    edgeID: UUID,
+    store: VaultContentStore
+  ) -> EntryShareSource {
     EntryShareSource(
       id: edgeID,
       kind: kind,
       body: body,
       completedAt: completedAt,
-      attachment: attachment?.shareSource
-    )
-  }
-
-  /// Display projection handed to `AppUIComponents`.
-  ///
-  /// The saved-list feature owns live vault models and mutation callbacks; the
-  /// UI component module receives only the stable values it needs to render a card.
-  var entryModel: VaultSavedEntryModel {
-    VaultSavedEntryModel(
-      id: edgeID,
-      kind: kind,
-      body: body,
-      completedAt: completedAt,
-      createdAt: createdAt,
-      updatedAt: updatedAt,
-      location: location,
-      attachment: attachment?.entryModel
+      attachment: resolvedSavedAttachment(in: store)?.shareSource
     )
   }
 }
 
-extension VaultSavedAttachment {
+extension ResolvedVaultAttachment {
 
   fileprivate var shareSource: EntryShareAttachmentSource {
     EntryShareAttachmentSource(
       kind: kind,
       fileURL: fileURL,
-      thumbnail: thumbnail,
-      contentType: primaryResource?.contentType,
-      byteSize: primaryResource?.byteSize,
-      duration: primaryResource?.duration
+      contentType: primaryResource.contentType,
+      byteSize: primaryResource.byteSize,
+      duration: primaryResource.duration
     )
   }
 
-  fileprivate var entryModel: VaultSavedEntryAttachmentModel {
-    VaultSavedEntryAttachmentModel(
-      kind: kind,
-      fileURL: fileURL,
-      pairedVideoFileURL: resources.first { $0.role == .pairedVideo }?.fileURL,
-      fileRevision: fileRevision,
-      thumbnail: thumbnail,
-      pixelSize: primaryResource?.pixelSize,
-      contentType: primaryResource?.contentType,
-      byteSize: primaryResource?.byteSize,
-      waveformLevels: waveformLevels,
-      duration: primaryResource?.duration,
-      suggestionMediaFileURLsByResourceID: suggestionMediaFileURLsByResourceID
-    )
+  fileprivate var pairedVideoFileURL: URL? {
+    resources.first { $0.role == .pairedVideo }?.fileURL
   }
 
   /// Validated meter levels for rendering an audio attachment.
   ///
   /// Decoding at this projection boundary keeps persistence-version handling
   /// out of the reusable UI component module.
-  private var waveformLevels: Data? {
+  fileprivate var waveformLevels: Data? {
     guard kind == .audio,
-      let data = primaryResource?.waveformData,
+      let data = primaryResource.waveformData,
       let waveform = AudioWaveform.decode(from: data)
     else {
       return nil
@@ -562,7 +655,7 @@ extension VaultSavedAttachment {
     return waveform.levels
   }
 
-  private var suggestionMediaFileURLsByResourceID: [UUID: URL] {
+  fileprivate var suggestionMediaFileURLsByResourceID: [UUID: URL] {
     resources.reduce(into: [UUID: URL]()) { result, resource in
       switch resource.role {
       case .suggestionImage, .suggestionVideo:
@@ -579,6 +672,73 @@ extension VaultSavedAttachment {
       @unknown default:
         break
       }
+    }
+  }
+}
+
+extension JournalVault.Card.Kind {
+
+  /// Localized title used when Home describes a content kind without its body.
+  var vaultListDisplayTitle: LocalizedStringResource {
+    switch self {
+    case .text:
+      "Text"
+    case .todo:
+      "Todo"
+    case .link:
+      "Link"
+    case .file:
+      "File"
+    case .photo:
+      "Photo"
+    case .video:
+      "Video"
+    case .livePhoto:
+      "Live Photo"
+    case .audio:
+      "Audio"
+    case .suggestion:
+      "Suggestion"
+    case .doodle:
+      "Doodle"
+    case .bauhaus:
+      "Bauhaus"
+    case .unknown:
+      "Entry"
+    @unknown default:
+      "Entry"
+    }
+  }
+
+  /// SF Symbol used by Home's content-kind filters and fallback labels.
+  var vaultListSymbolName: String {
+    switch self {
+    case .text:
+      "text.alignleft"
+    case .todo:
+      "checkmark.circle"
+    case .link:
+      "link"
+    case .file:
+      "doc"
+    case .photo:
+      "photo"
+    case .video:
+      "video"
+    case .livePhoto:
+      "livephoto"
+    case .audio:
+      "waveform"
+    case .suggestion:
+      "sparkles"
+    case .doodle:
+      "scribble"
+    case .bauhaus:
+      "square.grid.3x3"
+    case .unknown:
+      "questionmark.square.dashed"
+    @unknown default:
+      "questionmark.square.dashed"
     }
   }
 }

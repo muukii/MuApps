@@ -5,9 +5,22 @@ import JournalVault
 ///
 /// The value prevents a later Reply selection during an asynchronous save from
 /// retargeting authored content to a different tree placement.
-enum CreationPostDestination: Equatable {
+enum CreationPostDestination: Equatable, Sendable {
   case root
   case reply(SavedListReplyTarget)
+}
+
+/// Frozen input handed from the composer owner to the persistence consumer.
+///
+/// The snapshot and destination are captured synchronously before persistence
+/// can suspend. `sourceDraftID` is retained only as a stable identity token so
+/// a later successful completion can reset the draft that actually initiated
+/// the write without retaining a mutable draft as the persistence contract.
+struct CreationComposerSubmission: Sendable {
+
+  let snapshot: CardEditDraftSnapshot
+  let destination: CreationPostDestination
+  let sourceDraftID: UUID
 }
 
 enum CreationPostError: Error {
@@ -23,10 +36,14 @@ enum CreationPostError: Error {
 /// the SwiftUI hierarchy.
 @MainActor
 @Observable
-final class CreationComposerState {
+final class CreationComposerSession {
 
   private var rootDraft = CardEditDraft()
   private var replyDrafts: [ReplyDraftKey: CardEditDraft] = [:]
+
+  init(rootDraft: CardEditDraft = CardEditDraft()) {
+    self.rootDraft = rootDraft
+  }
 
   /// Explicit parent selected from an entry context menu.
   private(set) var replyTarget: SavedListReplyTarget?
@@ -69,21 +86,55 @@ final class CreationComposerState {
 
   /// Switches the active compact composer between Text and Todo mode.
   ///
-  /// The active destination keeps owning its mode alongside its draft. A focus
-  /// request follows the structural TextField change so the keyboard remains in
-  /// the authoring flow when the user toggles either direction.
+  /// The active destination keeps owning its mode alongside its draft. The
+  /// input bar owns focus because mode changes are a local authoring action.
   func toggleActiveComposerMode() {
-    guard activeDraft.toggleComposerMode() else { return }
-    focusRequestID = UUID()
+    activeDraft.toggleComposerMode()
+  }
+
+  /// Freezes the active draft and destination before the persistence boundary.
+  ///
+  /// The input bar calls this synchronously from its submit action. Returning a
+  /// value object here keeps the parent from re-reading mutable composer state
+  /// after the event has already been accepted by the UI.
+  func makeSubmission() -> CreationComposerSubmission? {
+    let draft = activeDraft
+    guard draft.canSave else { return nil }
+
+    return CreationComposerSubmission(
+      snapshot: draft.savingSnapshot(),
+      destination: activeDestination,
+      sourceDraftID: draft.displayID
+    )
   }
 
   /// Returns whether the current destination is safe to persist in the
   /// selected vault. Root only needs an active vault; Reply additionally needs
   /// its detached vault identity and live placement availability to match.
   func isActiveDestinationAvailable(in selectedVaultID: VaultID?) -> Bool {
+    isDestinationAvailable(activeDestination, in: selectedVaultID)
+  }
+
+  /// Returns whether a previously frozen destination is still safe to persist
+  /// in the selected vault without consulting the mutable active selection.
+  func isDestinationAvailable(
+    _ destination: CreationPostDestination,
+    in selectedVaultID: VaultID?
+  ) -> Bool {
     guard let selectedVaultID else { return false }
-    guard let replyTarget else { return true }
-    return replyTarget.vaultID == selectedVaultID && isReplyTargetAvailable
+    switch destination {
+    case .root:
+      return true
+    case .reply(let replyTarget):
+      return replyTarget.vaultID == selectedVaultID
+        && isReplyTargetAvailable(for: replyTarget)
+    }
+  }
+
+  private func isReplyTargetAvailable(for target: SavedListReplyTarget) -> Bool {
+    guard let replyTarget else { return false }
+    return ReplyDraftKey(replyTarget) == ReplyDraftKey(target)
+      && isReplyTargetAvailable
   }
 
   /// Selects a Reply placement and restores its independent unpublished draft.
@@ -133,15 +184,17 @@ final class CreationComposerState {
   /// save ran. The visible target is cleared only when it still represents the
   /// same parent, so a later selection is never clobbered by older work.
   @discardableResult
-  func completePost(
-    for destination: CreationPostDestination,
-    ifMatching expectedDraft: CardEditDraft
-  ) -> Bool {
-    guard resetDraft(for: destination, ifMatching: expectedDraft) else {
+  func completePost(_ submission: CreationComposerSubmission) -> Bool {
+    guard
+      resetDraft(
+        for: submission.destination,
+        ifMatchingSourceID: submission.sourceDraftID
+      )
+    else {
       return false
     }
 
-    if case .reply(let postedTarget) = destination,
+    if case .reply(let postedTarget) = submission.destination,
       replyTarget.map(ReplyDraftKey.init) == ReplyDraftKey(postedTarget)
     {
       cancelReply()
@@ -152,16 +205,16 @@ final class CreationComposerState {
   @discardableResult
   private func resetDraft(
     for destination: CreationPostDestination,
-    ifMatching expectedDraft: CardEditDraft
+    ifMatchingSourceID sourceDraftID: UUID
   ) -> Bool {
     switch destination {
     case .root:
-      guard rootDraft === expectedDraft else { return false }
-      rootDraft = expectedDraft.emptyComposerReplacement()
+      guard rootDraft.displayID == sourceDraftID else { return false }
+      rootDraft = rootDraft.emptyComposerReplacement()
     case .reply(let target):
       let key = ReplyDraftKey(target)
-      guard replyDrafts[key] === expectedDraft else { return false }
-      replyDrafts[key] = expectedDraft.emptyComposerReplacement()
+      guard let draft = replyDrafts[key], draft.displayID == sourceDraftID else { return false }
+      replyDrafts[key] = draft.emptyComposerReplacement()
     }
     return true
   }
@@ -169,7 +222,7 @@ final class CreationComposerState {
   func discardActiveDraft() {
     let draft = activeDraft
     draft.savingSnapshot().removeTemporaryMediaFiles()
-    resetDraft(for: activeDestination, ifMatching: draft)
+    resetDraft(for: activeDestination, ifMatchingSourceID: draft.displayID)
   }
 
   func discardAllDrafts() {

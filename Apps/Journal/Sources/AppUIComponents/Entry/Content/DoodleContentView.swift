@@ -7,20 +7,17 @@ public struct DoodleContentSource: Equatable, Sendable {
   public let drawing: DoodleDrawing?
   public let fileURL: URL?
   public let fileRevision: Int
-  public let thumbnailData: Data?
   public let displayAspectRatio: CGFloat?
 
   public init(
     drawing: DoodleDrawing? = nil,
     fileURL: URL? = nil,
     fileRevision: Int = 0,
-    thumbnailData: Data? = nil,
     pixelSize: CGSize? = nil
   ) {
     self.drawing = drawing
     self.fileURL = fileURL
     self.fileRevision = fileRevision
-    self.thumbnailData = thumbnailData
     // The authored canvas size doubles as the drawing's display geometry, so a
     // saved doodle can reserve its box before the JSON is read back.
     self.displayAspectRatio =
@@ -29,7 +26,7 @@ public struct DoodleContentSource: Equatable, Sendable {
   }
 }
 
-/// Renders authored doodle JSON or its persisted thumbnail fallback.
+/// Renders authored doodle JSON from a draft value or saved media resource.
 struct DoodleContentView: View {
 
   /// Visual treatment owned by vector doodle content.
@@ -108,17 +105,10 @@ struct DoodleContentView: View {
       case .loading:
         ContentLoadingMedia(isCompact: style.usesCompactLoading)
       case .idle, .unavailable:
-        if doodle.fileURL == nil, doodle.thumbnailData != nil {
-          InlineImageDataContentView(
-            imageData: doodle.thumbnailData,
-            fallbackSystemImage: "scribble"
-          )
-        } else {
-          ContentMediaPlaceholder(
-            systemImage: "scribble",
-            aspectRatio: displayAspectRatio
-          )
-        }
+        ContentMediaPlaceholder(
+          systemImage: "scribble",
+          aspectRatio: displayAspectRatio
+        )
       }
     }
   }

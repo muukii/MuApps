@@ -10,7 +10,6 @@ import CoreLocation
 import CoreTransferable
 import JournalIntents
 import JournalVault
-import MediaProcessing
 import MuColor
 import OSLog
 import Photos
@@ -62,7 +61,7 @@ struct CreationView: View {
   @AppStorage(JournalDefaults.shouldAttachLocationToNewCards)
   private var shouldAttachLocationToNewCards: Bool = true
 
-  @State private var composerState = CreationComposerState()
+  @State private var composerState = CreationComposerSession()
   @State private var composerDraftEditorPresentation: ComposerDraftEditorPresentation?
   @State private var linkEditorPresentation: LinkEditorPresentation?
   @State private var photoCapturePresentation: PhotoCapturePresentation?
@@ -113,7 +112,7 @@ struct CreationView: View {
 
   var body: some View {
     CreationContainer(
-      draft: composerState.activeDraft,
+      composerState: composerState,
       isPresented: navigationPath.isEmpty,
       placement: composerState.placement,
       replyTarget: composerState.replyTarget,
@@ -124,8 +123,7 @@ struct CreationView: View {
       isProcessing: isSaving || isImportingMediaFromLibrary || isPostingHomeDrop,
       onOpenDraft: presentComposerDraftEditor,
       onDiscardDraft: requestComposerDraftDiscard,
-      onToggleComposerMode: composerState.toggleActiveComposerMode,
-      onPost: post,
+      onSubmit: post,
       onCancelReply: {
         composerState.cancelReply()
       },
@@ -405,12 +403,25 @@ struct CreationView: View {
   /// Selected vault that can safely accept the current root or Reply draft.
   ///
   /// The runtime may retain a `VaultInstance` while reopening or after a
-  /// failure. Both the visible post affordance and `post()` use this boundary
-  /// so a retained but inactive instance never accepts a write.
+  /// failure. The visible post affordance uses this boundary so a retained but
+  /// inactive instance never appears writable.
   private var activePostVault: VaultInstance? {
     guard vaultRuntime.selectedVaultState == .active,
       let vault = vaultRuntime.selectedVault,
       composerState.isActiveDestinationAvailable(in: vault.vaultID)
+    else {
+      return nil
+    }
+    return vault
+  }
+
+  /// Resolves the Vault for a frozen submission without consulting the current
+  /// Reply selection. The active selection may change while another post is in
+  /// flight, but persistence must stay bound to the submission's destination.
+  private func postVault(for destination: CreationPostDestination) -> VaultInstance? {
+    guard vaultRuntime.selectedVaultState == .active,
+      let vault = vaultRuntime.selectedVault,
+      composerState.isDestinationAvailable(destination, in: vault.vaultID)
     else {
       return nil
     }
@@ -794,26 +805,24 @@ struct CreationView: View {
     collaborationError = CollaborationErrorMessage(message: error.localizedDescription)
   }
 
-  private func post() {
-    guard composerDraft.canSave, isSaving == false else { return }
-    guard let vault = activePostVault else {
+  private func post(_ submission: CreationComposerSubmission) {
+    guard isSaving == false else { return }
+    guard let vault = postVault(for: submission.destination) else {
       notifications.post(.cardPostFailed)
       return
     }
 
-    // Freeze the selected vault, authored draft, and relationship before any
-    // suspension point. A later vault or Reply selection cannot retarget this
-    // in-flight post, and failure leaves the live draft untouched for retry.
-    let targetDraft = composerDraft
-    let destination = composerState.activeDestination
-    let snapshot = targetDraft.savingSnapshot()
+    // The composer owner has already frozen the draft and destination before
+    // handing this submission across the persistence boundary. Capture only
+    // the selected Vault here; later Reply or Vault changes cannot retarget it.
+    let destination = submission.destination
     isSaving = true
 
     Task { @MainActor in
       defer { isSaving = false }
 
       do {
-        let vaultDraft = try snapshot.vaultDraft()
+        let vaultDraft = try submission.snapshot.vaultDraft()
         let createdEdge: CardEdge
         switch destination {
         case .root:
@@ -832,8 +841,8 @@ struct CreationView: View {
             targetEdgeID: createdEdge.id
           )
         }
-        composerState.completePost(for: destination, ifMatching: targetDraft)
-        dismissPresentations(ownedBy: targetDraft)
+        composerState.completePost(submission)
+        dismissPresentations(ownedBy: submission.sourceDraftID)
         notifications.post(.cardPosted)
         await vaultRuntime.refresh()
         if case .root = destination {
@@ -848,23 +857,23 @@ struct CreationView: View {
   /// Dismisses only editors that still belong to the draft that was posted.
   /// A user may select another Reply while persistence is running; a successful
   /// older post must not close an editor that now belongs to the newer target.
-  private func dismissPresentations(ownedBy draft: CardEditDraft) {
-    if composerDraftEditorPresentation?.target === draft {
+  private func dismissPresentations(ownedBy sourceDraftID: UUID) {
+    if composerDraftEditorPresentation?.target.displayID == sourceDraftID {
       composerDraftEditorPresentation = nil
     }
-    if linkEditorPresentation?.target === draft {
+    if linkEditorPresentation?.target.displayID == sourceDraftID {
       linkEditorPresentation = nil
     }
-    if photoCapturePresentation?.target === draft {
+    if photoCapturePresentation?.target.displayID == sourceDraftID {
       photoCapturePresentation = nil
     }
-    if voiceRecorderPresentation?.target === draft {
+    if voiceRecorderPresentation?.target.displayID == sourceDraftID {
       voiceRecorderPresentation = nil
     }
-    if quickDoodleCanvasPresentation?.target === draft {
+    if quickDoodleCanvasPresentation?.target.displayID == sourceDraftID {
       quickDoodleCanvasPresentation = nil
     }
-    if quickBauhausGridPresentation?.target === draft {
+    if quickBauhausGridPresentation?.target.displayID == sourceDraftID {
       quickBauhausGridPresentation = nil
     }
   }
@@ -1086,11 +1095,9 @@ private enum PhotoLibraryImport {
       preferredTypes: [.video, .fullSizeVideo]
     )
     let fileURL = try await export(resource)
-    let thumbnail = try? MediaThumbnailGenerator.videoThumbnail(from: fileURL).data
 
     return CapturedVideo(
       fileURL: fileURL,
-      thumbnailData: thumbnail,
       pixelSize: asset.pixelSize,
       duration: asset.duration,
       contentTypeIdentifier: resource.contentType.identifier,
@@ -1104,11 +1111,9 @@ private enum PhotoLibraryImport {
     }
 
     let metadata = try? await videoMetadata(from: movie.fileURL)
-    let thumbnail = try? MediaThumbnailGenerator.videoThumbnail(from: movie.fileURL).data
 
     return CapturedVideo(
       fileURL: movie.fileURL,
-      thumbnailData: thumbnail,
       pixelSize: metadata?.pixelSize ?? .zero,
       duration: metadata?.duration ?? 0,
       contentTypeIdentifier: videoContentTypeIdentifier(for: item, fileURL: movie.fileURL),
@@ -1132,12 +1137,10 @@ private enum PhotoLibraryImport {
     try? FileManager.default.removeItem(at: stillFileURL)
 
     let pairedVideoFileURL = try await export(pairedVideoResource)
-    let thumbnail = try? MediaThumbnailGenerator.imageThumbnail(from: stillData).data
 
     return CapturedLivePhoto(
       stillImageData: stillData,
       pairedVideoFileURL: pairedVideoFileURL,
-      thumbnailData: thumbnail,
       pixelSize: asset.pixelSize,
       duration: asset.duration,
       stillImageContentTypeIdentifier: stillResource.contentType.identifier,

@@ -531,7 +531,7 @@ actor は custom display-name field として複製しない。CloudKit 上で�
 として扱う。participant name の解決や、解決できない場合の表示 copy は presentation
 policy として別に決める。
 
-Activity record に full Card body、thumbnail、`CKAsset` は複製しない。history surface は
+Activity record に full Card body や `CKAsset` は複製しない。history surface は
 subject record を解決し、解決できない場合は kind と時刻だけの fallback を表示できる
 shape にする。Activity は security audit log、全変更の完全な archive、unread delivery
 保証のいずれでもない。
@@ -878,7 +878,6 @@ Attachment
   cardID
   kind
   primaryResourceID
-  thumbnail?
   metadata
 
 AttachmentResource
@@ -1005,8 +1004,8 @@ Widget はまず `VaultCatalogStore` を読む。
 full card content が必要な場合は vault ID から該当する `VaultContentStore` を開ける。
 2026-07 時点の widget first pass は `WidgetConfigurationIntent` で vault を選ばせ、
 選択された `VaultContentStore` から latest visible card snapshot を直接作る。
-この snapshot は photo では attachment thumbnail bytes を表示源にして、
-Widget timeline で original-size image file を読まない。
+この snapshot は photo / video / Live Photo ではmodality labelを持ち、Widget
+timelineでoriginal-size image fileを読まない。
 text/link は本文、doodle / Bauhaus は authored JSON を decode した value を
 Widget の SwiftUI view が描画する。
 Todo は本文とoptional `completedAt`から作るread-only snapshotを描画し、

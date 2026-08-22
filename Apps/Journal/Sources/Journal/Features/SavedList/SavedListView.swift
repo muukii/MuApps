@@ -10,6 +10,15 @@ enum SavedListNavigationRoute: Hashable {
   case locations
 }
 
+/// Stable identifiers retained while the destructive confirmation is visible.
+///
+/// The dialog deliberately does not keep SwiftData models alive after the row's
+/// context menu closes. The selected vault resolves the mutation from these IDs.
+private struct VaultSavedEntryDeleteCandidate {
+  let edgeID: UUID
+  let cardID: UUID
+}
+
 /// Vault-backed entries list.
 ///
 /// This screen intentionally reads only the selected `VaultInstance`. It does
@@ -101,7 +110,7 @@ private struct VaultSavedListContentView: View {
   @State private var editErrorMessage: String?
   @State private var deleteErrorMessage: String?
   @State private var todoCompletionErrorMessage: String?
-  @State private var deleteCandidate: VaultSavedEntry?
+  @State private var deleteCandidate: VaultSavedEntryDeleteCandidate?
 
   init(
     vault: VaultInstance,
@@ -139,7 +148,12 @@ private struct VaultSavedListContentView: View {
       onSelectReplyTarget: selectReplyTarget,
       onShare: presentSharePreview,
       onEdit: presentEditDraft,
-      onRequestDelete: { deleteCandidate = $0 },
+      onRequestDelete: { edge, card in
+        deleteCandidate = VaultSavedEntryDeleteCandidate(
+          edgeID: edge.id,
+          cardID: card.id
+        )
+      },
       onToggleTodoCompletion: toggleTodoCompletion,
       onReplyTargetAvailabilityChange: onReplyTargetAvailabilityChange
     )
@@ -237,15 +251,16 @@ private struct VaultSavedListContentView: View {
   /// Detaches the placement selected by a context-menu Reply action from the
   /// live SwiftData models before lifting it to composer state.
   private func selectReplyTarget(
-    _ entry: VaultSavedEntry,
+    edge: JournalVault.CardEdge,
+    card: JournalVault.Card,
     ownerRootEdgeID: UUID
   ) {
     onSelectReplyTarget(
       SavedListReplyTarget(
         vaultID: vault.vaultID,
-        parentEdgeID: entry.edgeID,
+        parentEdgeID: edge.id,
         ownerRootEdgeID: ownerRootEdgeID,
-        displaySummary: entry.replyDisplaySummary
+        displaySummary: card.replyDisplaySummary
       )
     )
   }
@@ -280,7 +295,7 @@ private struct VaultSavedListContentView: View {
     }
   }
 
-  private func presentEditDraft(for entry: VaultSavedEntry) {
+  private func presentEditDraft(for card: JournalVault.Card) {
     guard isEditDraftLoading == false, isSavingEdit == false,
       isDeletingEntry == false
     else {
@@ -288,14 +303,16 @@ private struct VaultSavedListContentView: View {
     }
 
     isEditDraftLoading = true
+    let cardID = card.id
+    let contentStore = vault.contentStore
 
     Task { @MainActor in
       defer { isEditDraftLoading = false }
 
       do {
         editPresentation = VaultSavedEntryEditPresentation(
-          cardID: entry.cardID,
-          draft: try await entry.editDraft()
+          cardID: cardID,
+          draft: try await card.editDraft(store: contentStore)
         )
       } catch {
         editErrorMessage = error.localizedDescription
@@ -303,9 +320,17 @@ private struct VaultSavedListContentView: View {
     }
   }
 
-  private func presentSharePreview(for entry: VaultSavedEntry) {
+  private func presentSharePreview(
+    edge: JournalVault.CardEdge,
+    card: JournalVault.Card
+  ) {
     sharePreviewPresentation = EntrySharePreviewPresentation(
-      snapshot: EntryShareSnapshot(source: entry.shareSource),
+      snapshot: EntryShareSnapshot(
+        source: card.shareSource(
+          edgeID: edge.id,
+          store: vault.contentStore
+        )
+      ),
       palette: palette
     )
   }
@@ -344,18 +369,19 @@ private struct VaultSavedListContentView: View {
   /// Completes or reopens a Todo through the selected vault's transactional
   /// mutation boundary. SwiftData drives the visible row update; the explicit
   /// widget reload keeps the read-only latest-entry projection aligned.
-  private func toggleTodoCompletion(_ entry: VaultSavedEntry) {
-    guard entry.kind == .todo,
-      todoCompletionMutationCardIDs.contains(entry.cardID) == false
+  private func toggleTodoCompletion(_ card: JournalVault.Card) {
+    let cardID = card.id
+    guard card.kind == .todo,
+      todoCompletionMutationCardIDs.contains(cardID) == false
     else {
       return
     }
 
-    let shouldComplete = entry.isCompleted == false
-    todoCompletionMutationCardIDs.insert(entry.cardID)
+    let shouldComplete = card.isCompleted == false
+    todoCompletionMutationCardIDs.insert(cardID)
 
     Task { @MainActor in
-      defer { todoCompletionMutationCardIDs.remove(entry.cardID) }
+      defer { todoCompletionMutationCardIDs.remove(cardID) }
 
       do {
         guard let vault = vaultRuntime.selectedVault else {
@@ -363,7 +389,7 @@ private struct VaultSavedListContentView: View {
         }
 
         let didChange = try vault.contentStore.setTodoCompletion(
-          cardID: entry.cardID,
+          cardID: cardID,
           isCompleted: shouldComplete
         )
         guard didChange else { return }
@@ -379,7 +405,7 @@ private struct VaultSavedListContentView: View {
   }
 
   @MainActor
-  private func deleteEntry(_ entry: VaultSavedEntry) async {
+  private func deleteEntry(_ candidate: VaultSavedEntryDeleteCandidate) async {
     guard isDeletingEntry == false, isEditDraftLoading == false,
       isSavingEdit == false
     else {
@@ -398,9 +424,9 @@ private struct VaultSavedListContentView: View {
       // before `@Query` publishes its animated result change. Animate the
       // synchronous main-context mutation itself as well.
       try withAnimation(.smooth) {
-        try vault.contentStore.deleteCardEdge(edgeID: entry.edgeID)
+        try vault.contentStore.deleteCardEdge(edgeID: candidate.edgeID)
       }
-      if editPresentation?.cardID == entry.cardID {
+      if editPresentation?.cardID == candidate.cardID {
         editPresentation = nil
       }
       await vaultRuntime.refresh()
@@ -423,11 +449,11 @@ private struct VaultSavedListTreeSurface: View {
   @Binding var selectedContentKind: JournalVault.Card.Kind?
   let replyTarget: SavedListReplyTarget?
   @Binding var scrollRequest: SavedListScrollRequest?
-  let onSelectReplyTarget: @MainActor (VaultSavedEntry, UUID) -> Void
-  let onShare: @MainActor (VaultSavedEntry) -> Void
-  let onEdit: @MainActor (VaultSavedEntry) -> Void
-  let onRequestDelete: @MainActor (VaultSavedEntry) -> Void
-  let onToggleTodoCompletion: @MainActor (VaultSavedEntry) -> Void
+  let onSelectReplyTarget: @MainActor (JournalVault.CardEdge, JournalVault.Card, UUID) -> Void
+  let onShare: @MainActor (JournalVault.CardEdge, JournalVault.Card) -> Void
+  let onEdit: @MainActor (JournalVault.Card) -> Void
+  let onRequestDelete: @MainActor (JournalVault.CardEdge, JournalVault.Card) -> Void
+  let onToggleTodoCompletion: @MainActor (JournalVault.Card) -> Void
   let onReplyTargetAvailabilityChange: @MainActor (Bool) -> Void
 
   @Environment(\.calendar) private var calendar

@@ -899,10 +899,6 @@ struct JournalCloudStorageEstimate: Equatable {
     vaults.reduce(0) { $0 + $1.estimate.cardBodyBytes }
   }
 
-  var thumbnailBytes: Int {
-    vaults.reduce(0) { $0 + $1.estimate.thumbnailBytes }
-  }
-
   var waveformBytes: Int {
     vaults.reduce(0) { $0 + $1.estimate.waveformBytes }
   }

@@ -39,9 +39,6 @@ public struct VaultCloudStorageEstimate: Equatable, Sendable {
   /// Bytes stored in CKAsset-backed attachment files.
   public var mediaBytes: Int
 
-  /// Bytes stored inline as save-time thumbnail fields.
-  public var thumbnailBytes: Int
-
   /// Bytes stored inline as versioned recorded-audio waveform payloads.
   public var waveformBytes: Int
 
@@ -58,7 +55,6 @@ public struct VaultCloudStorageEstimate: Equatable, Sendable {
     notificationPulseCount: Int = 0,
     cardBodyBytes: Int = 0,
     mediaBytes: Int = 0,
-    thumbnailBytes: Int = 0,
     waveformBytes: Int = 0,
     mediaBreakdowns: [MediaBreakdown] = []
   ) {
@@ -71,7 +67,6 @@ public struct VaultCloudStorageEstimate: Equatable, Sendable {
     self.notificationPulseCount = notificationPulseCount
     self.cardBodyBytes = cardBodyBytes
     self.mediaBytes = mediaBytes
-    self.thumbnailBytes = thumbnailBytes
     self.waveformBytes = waveformBytes
     self.mediaBreakdowns = mediaBreakdowns
   }
@@ -89,7 +84,7 @@ public struct VaultCloudStorageEstimate: Equatable, Sendable {
 
   /// Inline bytes stored directly on CloudKit records.
   public var inlinePayloadBytes: Int {
-    cardBodyBytes + thumbnailBytes + waveformBytes
+    cardBodyBytes + waveformBytes
   }
 
   /// Authored payload bytes Journal can estimate locally.
@@ -156,10 +151,6 @@ extension VaultContentStore {
       partialResult + card.body.utf8.count
     }
 
-    let thumbnailBytes = attachments.reduce(0) { partialResult, attachment in
-      partialResult + (attachment.thumbnail?.count ?? 0)
-    }
-
     let waveformBytes = resources.reduce(0) { partialResult, resource in
       partialResult + (resource.waveformData?.count ?? 0)
     }
@@ -195,7 +186,6 @@ extension VaultContentStore {
       notificationPulseCount: notificationPulseCount,
       cardBodyBytes: cardBodyBytes,
       mediaBytes: mediaBreakdowns.reduce(0) { $0 + $1.byteSize },
-      thumbnailBytes: thumbnailBytes,
       waveformBytes: waveformBytes,
       mediaBreakdowns: mediaBreakdowns
     )

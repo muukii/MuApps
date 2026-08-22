@@ -6,7 +6,6 @@ import CapturePhoto
 import CoreGraphics
 import Foundation
 import JournalVault
-import MediaProcessing
 import Observation
 import UniformTypeIdentifiers
 
@@ -14,7 +13,6 @@ import UniformTypeIdentifiers
 /// copy in the selected vault's media directory.
 struct CapturedVideo: Sendable, Equatable, Codable {
   var fileURL: URL
-  var thumbnailData: Data?
   var pixelSize: CGSize
   var duration: TimeInterval
   var contentTypeIdentifier: String?
@@ -22,14 +20,12 @@ struct CapturedVideo: Sendable, Equatable, Codable {
 
   init(
     fileURL: URL,
-    thumbnailData: Data? = nil,
     pixelSize: CGSize = .zero,
     duration: TimeInterval = 0,
     contentTypeIdentifier: String? = nil,
     byteSize: Int? = nil
   ) {
     self.fileURL = fileURL
-    self.thumbnailData = thumbnailData
     self.pixelSize = pixelSize
     self.duration = duration
     self.contentTypeIdentifier = contentTypeIdentifier
@@ -51,7 +47,6 @@ extension CapturedVideo {
 struct CapturedLivePhoto: Sendable, Equatable, Codable {
   var stillImageData: Data
   var pairedVideoFileURL: URL
-  var thumbnailData: Data?
   var pixelSize: CGSize
   var duration: TimeInterval
   var stillImageContentTypeIdentifier: String?
@@ -62,7 +57,6 @@ struct CapturedLivePhoto: Sendable, Equatable, Codable {
   init(
     stillImageData: Data,
     pairedVideoFileURL: URL,
-    thumbnailData: Data? = nil,
     pixelSize: CGSize = .zero,
     duration: TimeInterval = 0,
     stillImageContentTypeIdentifier: String? = nil,
@@ -72,7 +66,6 @@ struct CapturedLivePhoto: Sendable, Equatable, Codable {
   ) {
     self.stillImageData = stillImageData
     self.pairedVideoFileURL = pairedVideoFileURL
-    self.thumbnailData = thumbnailData
     self.pixelSize = pixelSize
     self.duration = duration
     self.stillImageContentTypeIdentifier = stillImageContentTypeIdentifier
@@ -625,7 +618,6 @@ struct CardEditDraftSnapshot: Sendable, Codable {
       throw CardEditDraftSnapshotError.unsupportedKind
     case .photo:
       guard let photo else { throw CardEditDraftSnapshotError.missingMediaPayload }
-      let thumbnail = try? MediaThumbnailGenerator.imageThumbnail(from: photo.imageData).data
       // Keep display dimensions on the original resource so list placeholders
       // and CloudKit peers know the photo geometry before decoding its JPEG.
       return VaultContentStore.CardDraft(
@@ -640,14 +632,10 @@ struct CardEditDraftSnapshot: Sendable, Codable {
             pixelHeight: photo.pixelSize.nonZeroPixelHeight
           )
         ],
-        thumbnail: thumbnail,
         location: location
       )
     case .video:
       guard let video else { throw CardEditDraftSnapshotError.missingMediaPayload }
-      let thumbnail =
-        video.thumbnailData
-        ?? (try? MediaThumbnailGenerator.videoThumbnail(from: video.fileURL).data)
       return VaultContentStore.CardDraft(
         kind: .video,
         mediaResources: [
@@ -661,14 +649,10 @@ struct CardEditDraftSnapshot: Sendable, Codable {
             duration: video.duration
           )
         ],
-        thumbnail: thumbnail,
         location: location
       )
     case .livePhoto:
       guard let livePhoto else { throw CardEditDraftSnapshotError.missingMediaPayload }
-      let thumbnail =
-        livePhoto.thumbnailData
-        ?? (try? MediaThumbnailGenerator.imageThumbnail(from: livePhoto.stillImageData).data)
       return VaultContentStore.CardDraft(
         kind: .livePhoto,
         mediaResources: [
@@ -690,7 +674,6 @@ struct CardEditDraftSnapshot: Sendable, Codable {
             duration: livePhoto.duration
           ),
         ],
-        thumbnail: thumbnail,
         location: location
       )
     case .audio:

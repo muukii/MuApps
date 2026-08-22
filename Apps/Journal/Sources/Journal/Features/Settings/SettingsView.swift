@@ -606,13 +606,6 @@ private struct CloudStorageEstimateBreakdownSection: View {
       )
 
       StorageBreakdownRow(
-        title: "Thumbnails",
-        systemImage: "photo.on.rectangle",
-        detail: nil,
-        byteSize: estimate.thumbnailBytes
-      )
-
-      StorageBreakdownRow(
         title: "Audio Waveforms",
         systemImage: "waveform",
         detail: nil,
@@ -744,12 +737,6 @@ private struct VaultCloudStorageEstimateDetailView: View {
           systemImage: "paperclip",
           detail: nil,
           byteSize: vaultEstimate.estimate.mediaBytes
-        )
-        StorageBreakdownRow(
-          title: "Thumbnails",
-          systemImage: "photo.on.rectangle",
-          detail: nil,
-          byteSize: vaultEstimate.estimate.thumbnailBytes
         )
         StorageBreakdownRow(
           title: "Audio Waveforms",

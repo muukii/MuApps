@@ -157,10 +157,11 @@ struct VaultRecordMapperTests {
       cardID: UUID(),
       kind: .doodle,
       byteSize: 128,
-      primaryResourceID: UUID(),
-      thumbnail: Data([0x0A, 0x0B])
+      primaryResourceID: UUID()
     )
     let record = makeRecord(type: .attachment, recordName: attachment.id.uuidString)
+    let legacyThumbnail = Data([0x0A, 0x0B])
+    record["thumbnail"] = legacyThumbnail
     VaultRecordMapper.applyFields(of: attachment, to: record)
 
     let imported = JournalVault.Attachment(
@@ -174,7 +175,9 @@ struct VaultRecordMapperTests {
     #expect(imported.kind == .doodle)
     #expect(imported.byteSize == 128)
     #expect(imported.primaryResourceID == attachment.primaryResourceID)
-    #expect(imported.thumbnail == Data([0x0A, 0x0B]))
+    // Existing server fields are left untouched without remaining in the
+    // current client transport contract.
+    #expect(record["thumbnail"] as? Data == legacyThumbnail)
   }
 
   @Test
@@ -187,7 +190,6 @@ struct VaultRecordMapperTests {
       kind: .audio,
       byteSize: 256,
       primaryResourceID: primaryResourceID,
-      thumbnail: Data([0x0D]),
       createdAt: createdAt
     )
     let record = makeRecord(type: .attachment, recordName: attachment.id.uuidString)
@@ -198,7 +200,6 @@ struct VaultRecordMapperTests {
     #expect(attachment.kind == .audio)
     #expect(attachment.byteSize == 0)
     #expect(attachment.primaryResourceID == primaryResourceID)
-    #expect(attachment.thumbnail == nil)
     #expect(attachment.createdAt == createdAt)
   }
 

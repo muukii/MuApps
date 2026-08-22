@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 /// `AVCapturePhotoOutput` expresses rotation and mirroring through Image I/O
 /// orientation metadata. Keeping that metadata with the `CGImage` avoids a
 /// full-resolution redraw while still producing bytes that `UIImage`, `NSImage`,
-/// and the app's thumbnail generator can present upright.
+/// and downstream bounded display decoding can present upright.
 enum CapturedPhotoJPEGEncoder {
 
   /// Creates the persisted photo payload for one captured camera raster.

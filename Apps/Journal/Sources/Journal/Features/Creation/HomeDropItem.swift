@@ -2,7 +2,6 @@ import AppUIComponents
 import CoreTransferable
 import Foundation
 import JournalVault
-import MediaProcessing
 import UniformTypeIdentifiers
 
 /// One external value materialized by the Home composer drop destination.
@@ -17,8 +16,8 @@ struct HomeDropItem: Sendable {
   enum Content: Sendable {
     case text(String)
     case link(String)
-    case photo(file: HomeDropFile, thumbnail: Data?)
-    case video(file: HomeDropFile, thumbnail: Data?)
+    case photo(file: HomeDropFile)
+    case video(file: HomeDropFile)
     case audio(file: HomeDropFile)
     case file(HomeDropFile)
     case failure(FailureReason)
@@ -43,7 +42,7 @@ struct HomeDropItem: Sendable {
     case .link(let storageString):
       return .init(kind: .link, text: storageString)
 
-    case .photo(let file, let thumbnail):
+    case .photo(let file):
       return .init(
         kind: .photo,
         mediaResources: [
@@ -54,11 +53,10 @@ struct HomeDropItem: Sendable {
             byteSize: file.temporaryFile.byteSize,
             contentType: file.contentTypeIdentifier
           )
-        ],
-        thumbnail: thumbnail
+        ]
       )
 
-    case .video(let file, let thumbnail):
+    case .video(let file):
       return .init(
         kind: .video,
         mediaResources: [
@@ -69,8 +67,7 @@ struct HomeDropItem: Sendable {
             byteSize: file.temporaryFile.byteSize,
             contentType: file.contentTypeIdentifier
           )
-        ],
-        thumbnail: thumbnail
+        ]
       )
 
     case .audio(let file):
@@ -111,7 +108,7 @@ struct HomeDropItem: Sendable {
   /// after a failed transaction no longer needs retry material.
   nonisolated func cleanUpTemporaryFiles() {
     switch content {
-    case .photo(let file, _), .video(let file, _), .audio(let file), .file(let file):
+    case .photo(let file), .video(let file), .audio(let file), .file(let file):
       file.temporaryFile.cleanUp()
     case .text, .link, .failure:
       break
@@ -173,14 +170,9 @@ struct HomeDropItem: Sendable {
 
       switch requiredKind ?? ImportedFileKind(contentType: contentType) {
       case .photo:
-        let thumbnail = try? Data(contentsOf: temporaryFile.fileURL)
-          .journalImageThumbnailData()
-        return HomeDropItem(content: .photo(file: file, thumbnail: thumbnail))
+        return HomeDropItem(content: .photo(file: file))
       case .video:
-        let thumbnail = try? MediaThumbnailGenerator.videoThumbnail(
-          from: temporaryFile.fileURL
-        ).data
-        return HomeDropItem(content: .video(file: file, thumbnail: thumbnail))
+        return HomeDropItem(content: .video(file: file))
       case .audio:
         return HomeDropItem(content: .audio(file: file))
       case .file:
@@ -418,13 +410,5 @@ enum HomeDropPostingCoordinator {
       postedEdgeIDs: postedEdgeIDs,
       failedItemIndices: failedItemIndices
     )
-  }
-}
-
-extension Data {
-
-  /// Generates the standard Journal thumbnail while keeping transfer setup terse.
-  fileprivate nonisolated func journalImageThumbnailData() throws -> Data {
-    try MediaThumbnailGenerator.imageThumbnail(from: self).data
   }
 }

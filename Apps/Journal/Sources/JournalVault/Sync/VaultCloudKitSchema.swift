@@ -188,11 +188,6 @@ public enum VaultCloudKitSchema {
         missing: .rejectRecord,
         notes: ["Required to materialize a newly imported attachment row."]
       ),
-      optionalField(
-        VaultRecordMapper.AttachmentKey.thumbnail,
-        .data,
-        missing: .clearValue
-      ),
       dateField(VaultRecordMapper.AttachmentKey.createdAt),
     ],
     relationships: [

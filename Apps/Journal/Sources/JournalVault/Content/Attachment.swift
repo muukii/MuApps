@@ -45,13 +45,6 @@ public final class Attachment {
   /// attachment's logical identity.
   var primaryResourceReferenceID: UUID
 
-  /// Optional save-time raster derivative for large raster media.
-  ///
-  /// Photo cards and future video poster frames may use this as a compact
-  /// display payload. Authored/vector media such as Doodle and Bauhaus should
-  /// keep rendering from their media file instead of storing a lossy image here.
-  public var thumbnail: Data?
-
   public var createdAt: Date
 
   /// Concrete file resources that make up this logical attachment.
@@ -64,7 +57,6 @@ public final class Attachment {
     kind: Kind = .photo,
     byteSize: Int = 0,
     primaryResourceID: UUID,
-    thumbnail: Data? = nil,
     createdAt: Date = Date()
   ) {
     self.id = id
@@ -72,7 +64,6 @@ public final class Attachment {
     self.kindRawValue = kind.rawValue
     self.byteSize = byteSize
     self.primaryResourceReferenceID = primaryResourceID
-    self.thumbnail = thumbnail
     self.createdAt = createdAt
   }
 }

@@ -36,11 +36,11 @@ struct VaultSavedEntryTreeRows: View {
   let selectedContentKind: JournalVault.Card.Kind?
   let ancestorEdgeIDs: Set<UUID>
   let ownerRootEdgeID: UUID
-  let onReply: @MainActor (VaultSavedEntry, UUID) -> Void
-  let onShare: @MainActor (VaultSavedEntry) -> Void
-  let onEdit: @MainActor (VaultSavedEntry) -> Void
-  let onRequestDelete: @MainActor (VaultSavedEntry) -> Void
-  let onToggleTodoCompletion: @MainActor (VaultSavedEntry) -> Void
+  let onReply: @MainActor (JournalVault.CardEdge, JournalVault.Card, UUID) -> Void
+  let onShare: @MainActor (JournalVault.CardEdge, JournalVault.Card) -> Void
+  let onEdit: @MainActor (JournalVault.Card) -> Void
+  let onRequestDelete: @MainActor (JournalVault.CardEdge, JournalVault.Card) -> Void
+  let onToggleTodoCompletion: @MainActor (JournalVault.Card) -> Void
 
   @Environment(\.savedListMutationDisabled)
   private var isMutationDisabled
@@ -50,8 +50,7 @@ struct VaultSavedEntryTreeRows: View {
       edge.deletedAt == nil,
       selectedContentKind == nil || card.kind == selectedContentKind
     {
-      let entry = VaultSavedEntry(edge: edge, card: card, store: store)
-      row(for: entry)
+      row(for: card)
     }
 
     ForEach(children, id: \.id) { child in
@@ -80,16 +79,18 @@ struct VaultSavedEntryTreeRows: View {
   }
 
   @ViewBuilder
-  private func row(for entry: VaultSavedEntry) -> some View {
+  private func row(for card: JournalVault.Card) -> some View {
     let cell = VaultSavedEntryTreeCell(
       depth: depth,
-      entry: entry,
+      content: EntryContent(card: card, store: store),
+      kind: card.kind,
+      createdAt: card.createdAt,
       isMutationDisabled: isMutationDisabled,
-      onReply: { onReply($0, ownerRootEdgeID) },
-      onShare: onShare,
-      onEdit: onEdit,
-      onRequestDelete: onRequestDelete,
-      onToggleTodoCompletion: onToggleTodoCompletion
+      onReply: { onReply(edge, card, ownerRootEdgeID) },
+      onShare: { onShare(edge, card) },
+      onEdit: { onEdit(card) },
+      onRequestDelete: { onRequestDelete(edge, card) },
+      onToggleTodoCompletion: { onToggleTodoCompletion(card) }
     )
 
     if depth == 0 {
@@ -143,66 +144,52 @@ struct VaultSavedEntryEditSheet: View {
 
 struct VaultSavedEntryRow: View {
 
-  let entry: VaultSavedEntry
+  let content: EntryContent
+  let kind: JournalVault.Card.Kind
   let isMutationDisabled: Bool
-  let onReply: @MainActor (VaultSavedEntry) -> Void
-  let onShare: @MainActor (VaultSavedEntry) -> Void
-  let onEdit: @MainActor (VaultSavedEntry) -> Void
-  let onRequestDelete: @MainActor (VaultSavedEntry) -> Void
-  let onToggleTodoCompletion: @MainActor (VaultSavedEntry) -> Void
-
-  init(
-    entry: VaultSavedEntry,
-    isMutationDisabled: Bool,
-    onReply: @escaping @MainActor (VaultSavedEntry) -> Void,
-    onShare: @escaping @MainActor (VaultSavedEntry) -> Void,
-    onEdit: @escaping @MainActor (VaultSavedEntry) -> Void,
-    onRequestDelete: @escaping @MainActor (VaultSavedEntry) -> Void,
-    onToggleTodoCompletion: @escaping @MainActor (VaultSavedEntry) -> Void
-  ) {
-    self.entry = entry
-    self.isMutationDisabled = isMutationDisabled
-    self.onReply = onReply
-    self.onShare = onShare
-    self.onEdit = onEdit
-    self.onRequestDelete = onRequestDelete
-    self.onToggleTodoCompletion = onToggleTodoCompletion
-  }
+  let onReply: @MainActor () -> Void
+  let onShare: @MainActor () -> Void
+  let onEdit: @MainActor () -> Void
+  let onRequestDelete: @MainActor () -> Void
+  let onToggleTodoCompletion: @MainActor () -> Void
 
   var body: some View {
-    VaultSavedRootGroup(
-      entry: entry.entryModel,
+    EntryContentView(
+      content: content,
+      style: .cell,
       interaction: .interactive(isEnabled: isMutationDisabled == false) {
         action in
         switch action {
         case .toggleTodoCompletion:
-          onToggleTodoCompletion(entry)
+          onToggleTodoCompletion()
         }
       }
     )
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .foregroundStyle(.appOnSecondaryContainer)
     .contentShape(.rect)
     .contextMenu {
       Button {
-        onReply(entry)
+        onReply()
       } label: {
         Label("Reply", systemImage: "arrowshape.turn.up.left")
       }
 
       Button {
-        onShare(entry)
+        onShare()
       } label: {
         Label("Share", systemImage: "square.and.arrow.up")
       }
 
       Button {
-        onEdit(entry)
+        onEdit()
       } label: {
         Label("Edit", systemImage: "square.and.pencil")
       }
-      .disabled(isMutationDisabled || entry.kind == .file)
+      .disabled(isMutationDisabled || kind == .file)
 
       Button(role: .destructive) {
-        onRequestDelete(entry)
+        onRequestDelete()
       } label: {
         Label("Delete", systemImage: "trash")
       }
@@ -215,7 +202,7 @@ struct VaultSavedEntryRow: View {
           "Accessibility action that selects this entry as a Reply parent."
       )
     ) {
-      onReply(entry)
+      onReply()
     }
   }
 
@@ -228,45 +215,31 @@ struct VaultSavedEntryRow: View {
 struct VaultSavedEntryTreeCell: View {
 
   let depth: Int
-  let entry: VaultSavedEntry
+  let content: EntryContent
+  let kind: JournalVault.Card.Kind
+  let createdAt: Date
   let isMutationDisabled: Bool
-  let onReply: @MainActor (VaultSavedEntry) -> Void
-  let onShare: @MainActor (VaultSavedEntry) -> Void
-  let onEdit: @MainActor (VaultSavedEntry) -> Void
-  let onRequestDelete: @MainActor (VaultSavedEntry) -> Void
-  let onToggleTodoCompletion: @MainActor (VaultSavedEntry) -> Void
+  let onReply: @MainActor () -> Void
+  let onShare: @MainActor () -> Void
+  let onEdit: @MainActor () -> Void
+  let onRequestDelete: @MainActor () -> Void
+  let onToggleTodoCompletion: @MainActor () -> Void
 
   var body: some View {
     HStack {
 
-      if depth > 0 {
-
-        Text(depth.description)
-          .font(.system(size: 12))
-          .fontWeight(.semibold)
-          .fontDesign(.rounded)
-          .padding(5)
-          .background(
-            RoundedRectangle(cornerRadius: 6)
-              .foregroundStyle(.quinary)
-          )
-          .foregroundStyle(.tint)
-          .frame(width: 26, alignment: .center)
-          .padding(.leading, -10)
-
-      }
-
       SwipeCell {
         VStack {
-          //          if depth > 0 {
-          //            DepthIndicator(depth: depth)
-          //              .frame(
-          //                maxWidth: .infinity,
-          //                alignment: .init(horizontal: .leading, vertical: .center)
-          //              )
-          //          }
+          if depth > 0 {
+            DepthIndicator(depth: depth)
+              .frame(
+                maxWidth: .infinity,
+                alignment: .init(horizontal: .leading, vertical: .center)
+              )
+          }
           VaultSavedEntryRow(
-            entry: entry,
+            content: content,
+            kind: kind,
             isMutationDisabled: isMutationDisabled,
             onReply: onReply,
             onShare: onShare,
@@ -278,9 +251,9 @@ struct VaultSavedEntryTreeCell: View {
         .background(.appSecondaryContainer)
         .clipShape(.rect(cornerRadius: 24))
       } info: {
-        VaultSavedEntryCreatedAtInfo(createdAt: entry.createdAt)
+        VaultSavedEntryCreatedAtInfo(createdAt: createdAt)
       } onTrigger: {
-        onReply(entry)
+        onReply()
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -313,28 +286,6 @@ private struct VaultSavedEntryCreatedAtInfo: View {
   }
 }
 
-/// Saved-edge presentation shared by every depth of a Home tree.
-///
-/// The surface belongs to one placement rather than to the authored card. Tree
-/// indentation stays outside this type so the card's current media and content
-/// behavior is identical at every depth.
-struct VaultSavedRootGroup: View {
-
-  let entry: VaultSavedEntryModel
-  let interaction: EntryContentView.Interaction
-
-  var body: some View {
-    EntryContentView(
-      content: entry.content,
-      style: .cell,
-      interaction: interaction
-    )
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .foregroundStyle(.appOnSecondaryContainer)
-    .contentShape(.rect)
-  }
-}
-
 struct VaultSavedDayHeader: View {
 
   let isSticked: Bool
@@ -350,7 +301,7 @@ struct VaultSavedDayHeader: View {
       .padding(.vertical, 12)
       .animation(.smooth) {
         $0.glassEffect(isSticked ? .regular : .identity)
-      } 
+      }
       .padding(.horizontal, 16)
   }
 }

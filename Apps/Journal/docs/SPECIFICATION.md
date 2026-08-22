@@ -92,7 +92,6 @@ Tinycurve (app, app.muukii.journal)
 ├── MuHaptics          — Core Haptics pattern editor, tap sequencer & engine (Lab)
 ├── CaptureText        — text note capture
 ├── CapturePhoto       — camera capture (AVFoundation)
-├── MediaProcessing    — save-time media derivatives (Image I/O thumbnails)
 ├── ImageCropper       — development-only profile-image pan/zoom and square JPEG export
 ├── CaptureDoodle      — SwiftUI vector ink canvas (depends on CoreHaptics)
 ├── CaptureBauhaus     — 5 x 5 Bauhaus-style grid composer
@@ -182,9 +181,9 @@ logically deleted entries are never eligible for the Latest Note widget,
 including when a child was authored more recently than every root. It shows
 kind-aware content: text uses `Card.body` (falling back to `Untitled`), Todo
 uses `Card.body` plus the read-only state derived from `completedAt`, links use
-their stored URL string, photos use the save-time raster thumbnail stored on
-their attachment, files show their original name and type/size metadata, and
-doodle / Bauhaus content decodes its authored JSON attachment and renders
+their stored URL string, photo / video / Live Photo use modality labels, files
+show their original name and type/size metadata, and doodle / Bauhaus content
+decodes its authored JSON attachment and renders
 `DoodleDrawingView` / `BauhausGridArtworkView`. Audio entries still show a typed
 modality label because there is not yet a visual authored renderer for audio.
 The Home Screen families show the selected vault title, latest-root body,
@@ -405,7 +404,6 @@ compound media item such as a Live Photo.
 | `kindRawValue` | `String` | `.file`, `.photo`, `.video`, `.livePhoto`, `.audio`, `.suggestion`, `.doodle`, `.bauhaus`, or unknown raw value. |
 | `byteSize` | `Int` | Denormalized primary-resource byte size kept for summaries. |
 | `primaryResourceID` | `UUID` | Primary resource used by normal rendering. |
-| `thumbnail` | `Data?` | Optional save-time raster derivative for photo, video poster, and Live Photo still surfaces. Doodle/Bauhaus leave it empty and render from authored media. |
 | `createdAt` | `Date` | |
 
 ### `AttachmentResource` — one CKAsset-backed media file
@@ -466,16 +464,25 @@ the vault media file has not arrived locally yet, the UI shows a modality
 placeholder until SwiftData observes the resource's local file revision change
 and reloads the content projection.
 
-Large raster media is the exception. Photo summary surfaces and Widget Home
-Screen photo previews use the save-time `Attachment.thumbnail` created by
-`MediaProcessing`, so scrolling lists and Widget timelines do not decode
-original-size image files. Home tree and editing flows still read the full media
-file when they need the original captured payload. Future video content should use
-the same boundary for poster frames.
+Photo and Live Photo Home cells treat the local original attachment resource as
+their only persisted image source. Interactive display uses Image I/O off the
+main actor to materialize an orientation-correct raster capped at a fixed 1024
+pixel longest edge; the original bytes remain unchanged for editing and export.
+Video carries no saved poster: it keeps the persisted geometry placeholder until
+the local movie is playable and the inline player is ready. A missing local
+CKAsset therefore remains a modality placeholder until the resource revision
+changes. Widgets do not load original raster media into their timeline snapshot
+and use Photo / Video / Live Photo modality labels instead.
 
-Raster images are generated only at explicit raster boundaries: media
-thumbnails/posters, share/export images, video frames, APIs that require an
-image payload, or narrow dev/debug previews.
+No save-time raster derivative is persisted or synced. Raster generation is
+limited to explicit presentation/export boundaries, APIs that require an image
+payload, and narrow dev/debug previews.
+
+CloudKit containers that were deployed by an older client may still retain an
+optional `thumbnail` field on `Attachment` records. The current schema manifest
+and mapper neither describe, read, clear, nor write that legacy field; removing
+the deployed server field is a separate destructive operation and is not part of
+the client migration.
 
 ### `Coordinate` — a geographic point
 
@@ -529,14 +536,13 @@ exist on Mac.
   iOS, `NSImage` on macOS).
 - `CameraController` owns the `AVCaptureSession`, camera input, and still-photo
   output; `CameraPreviewView` mounts an `AVCaptureVideoPreviewLayer` in SwiftUI.
-- Saving a photo entry passes the JPEG bytes through `MediaProcessing`, which
-  uses Image I/O to create an orientation-corrected thumbnail with a bounded
-  maximum pixel length. The full JPEG remains the editable vault media file.
+- Saving a photo entry writes the full JPEG as the original attachment resource.
+  Home later performs bounded display decoding without storing another copy.
 - Photos library import accepts still images, Live Photos, and videos. Live
   Photos become `.livePhoto` entries with one logical attachment: the still image
   is the primary `.stillImage` resource and the motion component is a
-  `.pairedVideo` resource. Videos become `.video` entries with an `.originalVideo`
-  primary resource and a save-time poster thumbnail.
+  `.pairedVideo` resource. Videos become `.video` entries with an
+  `.originalVideo` primary resource and no persisted poster image.
 
 ### CaptureDoodle → `DoodleDrawing`
 
@@ -1176,9 +1182,9 @@ the gallery's **Lab** section).
   that still match the frozen save destination; a target or draft selected while
   the write was in flight remains untouched. Root posting follows the same
   frozen match rule for its draft. Failure retains the Reply target and its draft.
-  The Photo, Video, and Live Photo write paths generate or carry a bounded
-  thumbnail; Doodle, Bauhaus, and Suggestion retain authored payloads, with
-  Suggestion media copied alongside its JSON when available.
+  Photo, Video, and Live Photo write only their original attachment resources;
+  Doodle, Bauhaus, and Suggestion retain authored payloads, with Suggestion
+  media copied alongside its JSON when available.
 
   Successful posting shows a transient **Posted to Journal** notification with
   success haptics. If posting fails, the unpublished entry stays in the input bar
@@ -1272,7 +1278,7 @@ the gallery's **Lab** section).
   invalidate intrinsic layout only when the metadata object actually changes.
   Media placeholders reserve the same aspect-ratio geometry as their loaded
   content, so a row keeps one height from its first layout pass through its
-  poster, still image, and inline player. Home trees present
+  placeholder, still image, and inline player. Home trees present
   authored content without a common shape, rounded clipping, stroke, or fixed
   height. Text uses its natural height. In Home, Text detects HTTP(S) URL ranges
   at display time and exposes them as underlined native links without changing
@@ -1332,8 +1338,8 @@ the gallery's **Lab** section).
   context menu.
   Editing rehydrates the saved entry into
   `EntryDraftEditor`, requires the full media file for media content, and saves
-  back through `VaultContentStore.updateCard(cardID:with:)`; thumbnails are not
-  used as lossy edit sources. Saved entries can also be deleted from any visible
+  back through `VaultContentStore.updateCard(cardID:with:)`; there is no lossy
+  persisted edit fallback. Saved entries can also be deleted from any visible
   tree node's context menu. Deletion is confirmed
   first, then writes through `VaultContentStore.deleteCardEdge(edgeID:)`. The
   selected edge subtree leaves normal queries immediately, while its live
@@ -1385,7 +1391,7 @@ the gallery's **Lab** section).
   excluded): owned vaults are grouped as data that counts
   toward the user's iCloud quota, participant vaults are grouped as shared data
   charged to the originating owner, and breakdowns show text/link body bytes,
-  media file bytes, thumbnail bytes, record counts, and media kind totals. It is
+  media file bytes, audio-waveform bytes, record counts, and media kind totals. It is
   labeled as an estimate because CloudKit does not expose exact iCloud usage or
   server overhead to the app. **Add Widgets** opens a Settings detail screen with
   an illustrated header and

@@ -9,23 +9,19 @@ public struct PhotoContentSource: Equatable, Sendable {
   public let imageData: Data?
   public let fileURL: URL?
   public let fileRevision: Int
-  public let thumbnailData: Data?
   public let displayAspectRatio: CGFloat?
 
   public init(
     imageData: Data? = nil,
     fileURL: URL? = nil,
     fileRevision: Int = 0,
-    thumbnailData: Data? = nil,
     pixelSize: CGSize? = nil
   ) {
     self.imageData = imageData
     self.fileURL = fileURL
     self.fileRevision = fileRevision
-    self.thumbnailData = thumbnailData
     self.displayAspectRatio =
       pixelSize?.contentAspectRatio
-      ?? EncodedImageDimensions.displayAspectRatio(from: thumbnailData)
       ?? EncodedImageDimensions.displayAspectRatio(from: imageData)
       ?? EncodedImageDimensions.displayAspectRatio(at: fileURL)
   }
@@ -57,8 +53,7 @@ struct PhotoContentView: View {
   let photo: PhotoContentSource
   let style: Style
   @State private var decodedImageDataImage: UIImage?
-  @State private var decodedThumbnailImage: UIImage?
-  @State private var loadedFullSizeImage: UIImage?
+  @State private var loadedFileImage: UIImage?
 
   @ViewBuilder
   var body: some View {
@@ -88,7 +83,7 @@ struct PhotoContentView: View {
     case .cell:
       break
     }
-    return photo.imageData ?? photo.thumbnailData
+    return photo.imageData
   }
 
   @ViewBuilder
@@ -113,7 +108,7 @@ struct PhotoContentView: View {
     case .composer:
       return decodedImageDataImage
     case .cell:
-      return loadedFullSizeImage ?? decodedThumbnailImage
+      return loadedFileImage
     }
   }
 
@@ -122,8 +117,7 @@ struct PhotoContentView: View {
       style: style.preset,
       fileURL: photo.fileURL,
       fileRevision: photo.fileRevision,
-      primaryData: ContentImageDataFingerprint(photo.imageData),
-      fallbackData: ContentImageDataFingerprint(photo.thumbnailData)
+      data: ContentImageDataFingerprint(photo.imageData)
     )
   }
 
@@ -143,8 +137,7 @@ struct PhotoContentView: View {
   @MainActor
   private func refreshImages() async {
     decodedImageDataImage = nil
-    decodedThumbnailImage = nil
-    loadedFullSizeImage = nil
+    loadedFileImage = nil
 
     switch style.preset {
     case .composer:
@@ -156,25 +149,16 @@ struct PhotoContentView: View {
       decodedImageDataImage = image
 
     case .cell:
-      let thumbnailImage = await ContentMediaFileReader.image(
-        from: photo.thumbnailData
-      )
-      guard Task.isCancelled == false else {
-        return
-      }
-
-      decodedThumbnailImage = thumbnailImage
-
       guard let fileURL = photo.fileURL else {
         return
       }
 
-      let fullSizeImage = await ContentMediaFileReader.image(at: fileURL)
+      let fileImage = await ContentMediaFileReader.image(at: fileURL)
       guard Task.isCancelled == false else {
         return
       }
 
-      loadedFullSizeImage = fullSizeImage
+      loadedFileImage = fileImage
     }
   }
 }

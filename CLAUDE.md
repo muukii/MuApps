@@ -91,6 +91,47 @@ from both the workspace and CI.
 
 Shared external SPM dependencies: add to `Tuist/Package.swift` and reference via `.external(name: ...)` in the app's `Project.swift`. Shared manifest helpers (settings, constants): extend `Tuist/ProjectDescriptionHelpers/Project+Templates.swift`.
 
+### External packages with global state must be declared dynamic
+
+Tuist builds external SPM packages as **static** products by default. A static
+product linked by two targets is absorbed into *each* of them. When those two
+targets share a process — an app and a dynamic framework it embeds — the process
+ends up with two independent copies. This produces **no linker error and no dyld
+error**: a duplicate-symbol error only occurs when one binary links the same
+archive twice, and under the two-level namespace each image silently binds to its
+own copy.
+
+That is harmless for a stateless leaf, and fatal for anything holding global or
+thread-local state. `StateGraph` is the clearest example: it has
+`NodeStore.shared`, and its `ThreadLocal` values are keyed by **string** into
+`Thread.current.threadDictionary`. Two copies therefore collide on the same key
+while each fails the `as? Value` cast against the other's type — so tracking
+registrations silently vanish instead of failing loudly.
+
+The escape hatch is `PackageSettings.productTypes` in `Tuist/Package.swift`,
+which overrides the package's own declaration:
+
+```swift
+let packageSettings = PackageSettings(
+  productTypes: [
+    "StateGraph": .framework,
+  ],
+  ...
+)
+```
+
+Verified behaviour: the generated target becomes
+`com.apple.product-type.framework` (its `.macro` target correctly stays a
+compiler-plugin `tool`), and `NodeStore` / `ThreadLocal` then live only in
+`StateGraph.framework`. Symbols still left in the app binary are the app's *own*
+generic instantiations and witness tables whose mangled names merely mention the
+package — not a second copy.
+
+**Rule:** before using an external package from more than one linked target, check
+whether it holds global or thread-local state. If it does, add it to
+`productTypes` as `.framework` at the same time. Leaf packages that are pure
+value/function libraries can stay static.
+
 ## Development Notes
 
 - Uses SwiftUI as the UI framework

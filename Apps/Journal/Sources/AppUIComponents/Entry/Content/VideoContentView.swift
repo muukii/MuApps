@@ -1,36 +1,24 @@
 import AVFoundation
 import SwiftUI
 
-#if canImport(UIKit)
-  import UIKit
-#endif
-
 /// Video preview source for either an unsaved draft or a saved card.
 public struct VideoContentSource: Equatable, Sendable {
   public let fileURL: URL?
   public let fileRevision: Int
-  public let thumbnailData: Data?
   public let displayAspectRatio: CGFloat?
 
   public init(
     fileURL: URL? = nil,
     fileRevision: Int = 0,
-    thumbnailData: Data? = nil,
     pixelSize: CGSize? = nil
   ) {
     self.fileURL = fileURL
     self.fileRevision = fileRevision
-    self.thumbnailData = thumbnailData
-    // Poster frames are generated with the track's preferred transform applied,
-    // so their header dimensions describe the displayed video for older
-    // resources that were persisted without explicit pixel dimensions.
-    self.displayAspectRatio =
-      pixelSize?.contentAspectRatio
-      ?? EncodedImageDimensions.displayAspectRatio(from: thumbnailData)
+    self.displayAspectRatio = pixelSize?.contentAspectRatio
   }
 }
 
-/// Renders looping video content with a stable poster-frame boundary.
+/// Renders looping video content with stable placeholder geometry.
 struct VideoContentView: View {
 
   /// Visual and playback treatment owned by video content.
@@ -39,10 +27,6 @@ struct VideoContentView: View {
 
     init(_ preset: EntryContentStyle) {
       self.preset = preset
-    }
-
-    var contentMode: ContentMode {
-      .fill
     }
 
     /// Geometry used until any dimensions are known for this video.
@@ -58,7 +42,6 @@ struct VideoContentView: View {
 
   let video: VideoContentSource
   let style: Style
-  @State private var thumbnailImage: UIImage?
   @State private var playableFileURL: URL?
   @State private var readyFileURL: URL?
 
@@ -66,7 +49,12 @@ struct VideoContentView: View {
     ContentMediaFrame(aspectRatio: displayAspectRatio) {
       content
     }
-    .task(id: imageLoadID) {
+    .task(
+      id: ContentFileLoadID(
+        fileURL: video.fileURL,
+        fileRevision: video.fileRevision
+      )
+    ) {
       await refreshMedia()
     }
   }
@@ -75,8 +63,6 @@ struct VideoContentView: View {
   private var content: some View {
     if let fileURL = playableFileURL {
       playableVideo(fileURL)
-    } else if let thumbnailImage {
-      posterOnly(thumbnailImage)
     } else {
       ContentMediaPlaceholder(
         systemImage: "video",
@@ -85,20 +71,17 @@ struct VideoContentView: View {
     }
   }
 
-  /// Keeps the placeholder, poster, and player states on one placement geometry.
+  /// Keeps the placeholder and player states on one placement geometry.
   ///
-  /// Persisted pixel dimensions describe the video before its poster decodes and
-  /// long before `AVPlayerLayer` reports a presentation size, so the Cell can
-  /// reserve its final box on the first layout pass.
+  /// Persisted pixel dimensions describe the video before `AVPlayerLayer`
+  /// reports a presentation size, so the Cell can reserve its final box on the
+  /// first layout pass.
   private var displayAspectRatio: CGFloat {
     switch style.preset {
     case .composer:
-      return thumbnailImage?.contentAspectRatio ?? style.placeholderAspectRatio
+      return style.placeholderAspectRatio
     case .cell:
-      return
-        video.displayAspectRatio
-        ?? thumbnailImage?.contentAspectRatio
-        ?? style.placeholderAspectRatio
+      return video.displayAspectRatio ?? style.placeholderAspectRatio
     }
   }
 
@@ -116,47 +99,25 @@ struct VideoContentView: View {
           }
         }
       )
+      .opacity(readyFileURL == fileURL ? 1 : 0)
 
-      if let thumbnailImage {
-        Image(uiImage: thumbnailImage)
-          .resizable()
-          .aspectRatio(contentMode: style.contentMode)
-          .opacity(readyFileURL == fileURL ? 0 : 1)
+      if readyFileURL != fileURL {
+        ContentMediaPlaceholder(
+          systemImage: "video",
+          aspectRatio: displayAspectRatio
+        )
       }
     }
-    // The poster cross-fade must crop exactly like the layer's
-    // `resizeAspectFill` so it cannot spill outside the reserved box when the
-    // persisted dimensions and the decoded poster disagree.
     .clipped()
     .overlay(alignment: .bottomTrailing) {
       ContentMediaBadge(systemImage: "speaker.slash.fill")
     }
   }
 
-  private func posterOnly(_ image: UIImage) -> some View {
-
-    Image(uiImage: image)
-      .resizable()
-      .aspectRatio(displayAspectRatio, contentMode: style.contentMode)
-      .overlay(alignment: .bottomTrailing) {
-        ContentMediaBadge(systemImage: "play.fill")
-      }
-  }
-
   @MainActor
   private func refreshMedia() async {
-    thumbnailImage = nil
     playableFileURL = nil
     readyFileURL = nil
-
-    let image = await ContentMediaFileReader.image(
-      from: video.thumbnailData
-    )
-    guard Task.isCancelled == false else {
-      return
-    }
-
-    thumbnailImage = image
 
     guard let fileURL = video.fileURL else {
       return
@@ -171,17 +132,6 @@ struct VideoContentView: View {
 
     playableFileURL = isPlayable ? fileURL : nil
   }
-
-  private var imageLoadID: ContentImageLoadID {
-    ContentImageLoadID(
-      style: style.preset,
-      fileURL: video.fileURL,
-      fileRevision: video.fileRevision,
-      primaryData: ContentImageDataFingerprint(video.thumbnailData),
-      fallbackData: nil
-    )
-  }
-
 }
 
 #Preview("Video Content — 9:16") {

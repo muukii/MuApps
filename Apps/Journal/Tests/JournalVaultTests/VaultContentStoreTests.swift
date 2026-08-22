@@ -401,7 +401,7 @@ struct VaultContentStoreTests {
     let bytes = Data([0xFF, 0x01, 0x02, 0x03])
 
     let child = try store.appendCard(
-      .init(kind: .photo, mediaData: bytes, thumbnail: Data([0x00])),
+      .init(kind: .photo, mediaData: bytes),
       to: root.id
     )
 
@@ -492,7 +492,7 @@ struct VaultContentStoreTests {
     let bytes = Data([0xFF, 0x01, 0x02, 0x03])
 
     try store.createPost(cards: [
-      .init(kind: .photo, mediaData: bytes, thumbnail: Data([0x00]))
+      .init(kind: .photo, mediaData: bytes)
     ])
 
     let context = store.container.mainContext
@@ -501,7 +501,6 @@ struct VaultContentStoreTests {
     )
     #expect(attachment.kind == .photo)
     #expect(attachment.byteSize == bytes.count)
-    #expect(attachment.thumbnail == Data([0x00]))
 
     let resource = try #require(
       try context.fetch(FetchDescriptor<JournalVault.AttachmentResource>()).first
@@ -550,8 +549,7 @@ struct VaultContentStoreTests {
             pixelHeight: 3024,
             duration: 1.4
           ),
-        ],
-        thumbnail: Data([0xA0])
+        ]
       )
     ])
 
@@ -567,7 +565,6 @@ struct VaultContentStoreTests {
     #expect(attachment.kind == .livePhoto)
     #expect(attachment.byteSize == stillBytes.count)
     #expect(attachment.primaryResourceID == still.id)
-    #expect(attachment.thumbnail == Data([0xA0]))
     #expect(resources.count == 2)
     #expect(still.contentType == "public.heic")
     #expect(still.pixelWidth == 4032)
@@ -842,16 +839,15 @@ struct VaultContentStoreTests {
   }
 
   @Test
-  func cloudStorageEstimate_countsRowsBodyMediaAndThumbnails() throws {
+  func cloudStorageEstimate_countsRowsBodyAndMedia() throws {
     let store = try makeStore()
     try store.seedVaultInfo(title: "Personal")
 
     let photoBytes = Data([0x01, 0x02, 0x03, 0x04])
-    let thumbnailBytes = Data([0x10, 0x11])
     try store.createPost(cards: [
       .init(kind: .text, text: "hello"),
       .init(kind: .link, text: "https://example.com/article"),
-      .init(kind: .photo, mediaData: photoBytes, thumbnail: thumbnailBytes),
+      .init(kind: .photo, mediaData: photoBytes),
     ])
 
     let estimate = try store.cloudStorageEstimate()
@@ -869,10 +865,9 @@ struct VaultContentStoreTests {
         == "hello".utf8.count + "https://example.com/article".utf8.count
     )
     #expect(estimate.mediaBytes == photoBytes.count)
-    #expect(estimate.thumbnailBytes == thumbnailBytes.count)
     #expect(
       estimate.inlinePayloadBytes
-        == estimate.cardBodyBytes + thumbnailBytes.count + estimate.waveformBytes
+        == estimate.cardBodyBytes + estimate.waveformBytes
     )
     #expect(estimate.estimatedPayloadBytes == estimate.inlinePayloadBytes + photoBytes.count)
 
@@ -1001,7 +996,7 @@ struct VaultContentStoreTests {
     let store = try makeStore()
     let root = try #require(
       try store.createPost(cards: [
-        .init(kind: .photo, mediaData: Data([0x01, 0x02]), thumbnail: Data([0x10]))
+        .init(kind: .photo, mediaData: Data([0x01, 0x02]))
       ]).first
     )
 
@@ -1021,8 +1016,7 @@ struct VaultContentStoreTests {
       cardID: root.cardID,
       with: .init(
         kind: .doodle,
-        mediaData: Data([0x03, 0x04, 0x05]),
-        thumbnail: Data([0x20])
+        mediaData: Data([0x03, 0x04, 0x05])
       )
     )
 
@@ -1044,7 +1038,6 @@ struct VaultContentStoreTests {
     #expect(attachment.byteSize == 3)
     #expect(resource.role == .authoredJSON)
     #expect(resource.byteSize == 3)
-    #expect(attachment.thumbnail == Data([0x20]))
     #expect(try Data(contentsOf: store.fileURL(for: resource)) == Data([0x03, 0x04, 0x05]))
     #expect(FileManager.default.fileExists(atPath: oldFileURL.path) == false)
 

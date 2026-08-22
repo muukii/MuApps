@@ -1,5 +1,5 @@
 {
-  "originHash" : "de6d3b1946f2780fd4d4892f763ca9f995451700d16c43cf5a4537f989912058",
+  "originHash" : "cf2aeff572b3f17034a4641dcf01298cae2d44fb896fcac4d994bbd59cd78fc7",
   "pins" : [
     {
       "identity" : "alamofire",
@@ -87,8 +87,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/FluidGroup/NextGrowingTextView",
       "state" : {
-        "revision" : "63f2139c440ee7e731852eb1af0553522771f78f",
-        "version" : "3.0.0"
+        "revision" : "95bbe28f3a6cef6fc0de4f2e5e1be77f8626c324"
       }
     },
     {

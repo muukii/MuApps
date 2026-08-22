@@ -6,10 +6,8 @@ import CapturePhoto
 import Foundation
 import JournalVault
 import MuColor
+import NextGrowingTextViewSwiftUI
 import SwiftUI
-#if os(iOS)
-  import NextGrowingTextViewSwiftUI
-#endif
 
 /// Visual constants for the creation composer bar.
 enum CreationContainerMetrics {
@@ -28,8 +26,14 @@ enum CreationContainerMetrics {
 
 }
 
-/// Visual dimensions used only by expanded input-bar previews.
+/// Visual dimensions used by compact and expanded composer surfaces.
 private enum CreationComposerInputBarMetrics {
+
+  /// Persistent vertical space around the compact row.
+  ///
+  /// Together with the 44-point controls, this preserves the 58-point
+  /// single-line bar while keeping the controls stationary as the editor grows.
+  static let compactVerticalPadding: CGFloat = 7
 
   /// Square visual length used by expanded authored-content previews.
   static let expandedSquarePreviewDimension: CGFloat = 220
@@ -51,10 +55,17 @@ private enum CreationComposerInputBarMetrics {
 
 }
 
+/// Inline field that should receive focus after a composer mode or Reply
+/// placement change.
+private enum CreationComposerInputField: Hashable {
+  case text
+  case todo
+}
+
 /// Bottom composer bar that owns the visible state of one unpublished entry.
 struct CreationComposerInputBar<MenuContent: View>: View {
 
-  @Bindable private var draft: CardEditDraft
+  @Bindable private var composerState: CreationComposerSession
   private let placement: CreationComposerPlacement
   private let isPostDestinationAvailable: Bool
   private let focusRequestID: UUID?
@@ -62,12 +73,11 @@ struct CreationComposerInputBar<MenuContent: View>: View {
   private let isProcessing: Bool
   private let onOpenDraft: @MainActor @Sendable () -> Void
   private let onDiscardDraft: @MainActor @Sendable () -> Void
-  private let onToggleComposerMode: @MainActor @Sendable () -> Void
-  private let onPost: @MainActor @Sendable () -> Void
+  private let onSubmit: @MainActor @Sendable (CreationComposerSubmission) -> Void
   private let menuContent: MenuContent
 
   init(
-    draft: CardEditDraft,
+    composerState: CreationComposerSession,
     placement: CreationComposerPlacement = .root,
     isPostDestinationAvailable: Bool = true,
     focusRequestID: UUID? = nil,
@@ -75,11 +85,10 @@ struct CreationComposerInputBar<MenuContent: View>: View {
     isProcessing: Bool,
     onOpenDraft: @escaping @MainActor @Sendable () -> Void,
     onDiscardDraft: @escaping @MainActor @Sendable () -> Void,
-    onToggleComposerMode: @escaping @MainActor @Sendable () -> Void,
-    onPost: @escaping @MainActor @Sendable () -> Void,
+    onSubmit: @escaping @MainActor @Sendable (CreationComposerSubmission) -> Void,
     @ViewBuilder menuContent: () -> MenuContent
   ) {
-    self.draft = draft
+    self.composerState = composerState
     self.placement = placement
     self.isPostDestinationAvailable = isPostDestinationAvailable
     self.focusRequestID = focusRequestID
@@ -87,26 +96,25 @@ struct CreationComposerInputBar<MenuContent: View>: View {
     self.isProcessing = isProcessing
     self.onOpenDraft = onOpenDraft
     self.onDiscardDraft = onDiscardDraft
-    self.onToggleComposerMode = onToggleComposerMode
-    self.onPost = onPost
+    self.onSubmit = onSubmit
     self.menuContent = menuContent()
   }
 
   var body: some View {
     ZStack {
-      if draft.usesExpandedComposerPreview {
+      if composerState.activeDraft.usesExpandedComposerPreview {
         CreationComposerExpandedPreviewInputBar(
-          draft: draft,
+          draft: composerState.activeDraft,
           placement: placement,
           isPostDestinationAvailable: isPostDestinationAvailable,
           isProcessing: isProcessing,
           onOpenDraft: onOpenDraft,
           onDiscardDraft: onDiscardDraft,
-          onPost: onPost
+          onSubmit: submit
         )
       } else {
         CreationComposerCompactInputBar(
-          draft: draft,
+          composerState: composerState,
           placement: placement,
           isPostDestinationAvailable: isPostDestinationAvailable,
           focusRequestID: focusRequestID,
@@ -114,8 +122,7 @@ struct CreationComposerInputBar<MenuContent: View>: View {
           isProcessing: isProcessing,
           onOpenDraft: onOpenDraft,
           onDiscardDraft: onDiscardDraft,
-          onToggleComposerMode: onToggleComposerMode,
-          onPost: onPost
+          onSubmit: submit
         ) {
           menuContent
         }
@@ -123,12 +130,17 @@ struct CreationComposerInputBar<MenuContent: View>: View {
     }
     .contentShape(Rectangle())
   }
+
+  private func submit() {
+    guard let submission = composerState.makeSubmission() else { return }
+    onSubmit(submission)
+  }
 }
 
-/// One-line composer used by text and compact non-media content types.
+/// Compact composer used by text and non-media content types.
 private struct CreationComposerCompactInputBar<MenuContent: View>: View {
 
-  @Bindable var draft: CardEditDraft
+  @Bindable var composerState: CreationComposerSession
   let placement: CreationComposerPlacement
   let isPostDestinationAvailable: Bool
   let focusRequestID: UUID?
@@ -136,12 +148,13 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
   let isProcessing: Bool
   let onOpenDraft: @MainActor @Sendable () -> Void
   let onDiscardDraft: @MainActor @Sendable () -> Void
-  let onToggleComposerMode: @MainActor @Sendable () -> Void
-  let onPost: @MainActor @Sendable () -> Void
+  let onSubmit: @MainActor @Sendable () -> Void
   let menuContent: MenuContent
 
+  @FocusState private var focusedField: CreationComposerInputField?
+
   init(
-    draft: CardEditDraft,
+    composerState: CreationComposerSession,
     placement: CreationComposerPlacement,
     isPostDestinationAvailable: Bool,
     focusRequestID: UUID?,
@@ -149,11 +162,10 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
     isProcessing: Bool,
     onOpenDraft: @escaping @MainActor @Sendable () -> Void,
     onDiscardDraft: @escaping @MainActor @Sendable () -> Void,
-    onToggleComposerMode: @escaping @MainActor @Sendable () -> Void,
-    onPost: @escaping @MainActor @Sendable () -> Void,
+    onSubmit: @escaping @MainActor @Sendable () -> Void,
     @ViewBuilder menuContent: () -> MenuContent
   ) {
-    self.draft = draft
+    self.composerState = composerState
     self.placement = placement
     self.isPostDestinationAvailable = isPostDestinationAvailable
     self.focusRequestID = focusRequestID
@@ -161,15 +173,16 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
     self.isProcessing = isProcessing
     self.onOpenDraft = onOpenDraft
     self.onDiscardDraft = onDiscardDraft
-    self.onToggleComposerMode = onToggleComposerMode
-    self.onPost = onPost
+    self.onSubmit = onSubmit
     self.menuContent = menuContent()
   }
 
   var body: some View {
+    let draft = composerState.activeDraft
+
     HStack(alignment: .bottom, spacing: 10) {
 
-      HStack(spacing: 0) {
+      HStack(spacing: 4) {
         CreationComposerLeadingAction(
           showsAddMenu: draft.isEmptyComposerDraft,
           isProcessing: isProcessing,
@@ -180,15 +193,21 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
 
         if let composerMode = draft.composerMode {
           CreationComposerTodoModeButton(
-            mode: composerMode,
-            isProcessing: isProcessing,
-            onToggle: onToggleComposerMode
+            isSelected: composerMode == .todo,
+            onToggle: {
+              composerState.toggleActiveComposerMode()
+              focusedField = composerState.activeDraft.composerMode == .todo ? .todo : .text
+            }
           )
+          .disabled(isProcessing)
         }
       }
+      .padding(.bottom, 6)
+      .padding(.leading, 6)
 
       CreationComposerDraftContent(
         draft: draft,
+        focusedField: $focusedField,
         placement: placement,
         focusRequestID: focusRequestID,
         onConsumeFocusRequest: onConsumeFocusRequest,
@@ -200,12 +219,12 @@ private struct CreationComposerCompactInputBar<MenuContent: View>: View {
         canPost: draft.canSave && isPostDestinationAvailable,
         placement: placement,
         isProcessing: isProcessing,
-        onPost: onPost
+        onSubmit: onSubmit
       )
     }
     .padding(.leading, 6)
     .padding(.trailing, 6)
-    .frame(minHeight: 58)
+    .padding(.vertical, CreationComposerInputBarMetrics.compactVerticalPadding)
     .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 29, style: .continuous))
   }
 }
@@ -221,7 +240,7 @@ private struct CreationComposerExpandedPreviewInputBar: View {
   let isProcessing: Bool
   let onOpenDraft: @MainActor @Sendable () -> Void
   let onDiscardDraft: @MainActor @Sendable () -> Void
-  let onPost: @MainActor @Sendable () -> Void
+  let onSubmit: @MainActor @Sendable () -> Void
 
   var body: some View {
     HStack(alignment: .bottom, spacing: 10) {
@@ -263,7 +282,7 @@ private struct CreationComposerExpandedPreviewInputBar: View {
         canPost: draft.canSave && isPostDestinationAvailable,
         placement: placement,
         isProcessing: isProcessing,
-        onPost: onPost
+        onSubmit: onSubmit
       )
     }
     .padding(6)
@@ -373,28 +392,34 @@ private struct CreationComposerLeadingAction<MenuContent: View>: View {
   }
 
   var body: some View {
-    if showsAddMenu {
-      Menu {
-        menuContent
-      } label: {
-        Image(systemName: "plus")
-          .font(.system(size: 24, weight: .regular))
-          .frame(width: 44, height: 44)
-          .contentShape(Rectangle())
+    ZStack {
+      if showsAddMenu {
+        Menu {
+          menuContent
+        } label: {
+          Image(systemName: "plus")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 18, height: 18)
+            .frame(width: 32, height: 32)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isProcessing)
+        .accessibilityLabel("Add Content")
+      } else {
+        Button(action: onDiscardDraft) {
+          Image(systemName: "xmark")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 15, height: 15)
+            .frame(width: 32, height: 32)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isProcessing)
+        .accessibilityLabel("Discard Entry")
       }
-      .buttonStyle(.plain)
-      .disabled(isProcessing)
-      .accessibilityLabel("Add Content")
-    } else {
-      Button(action: onDiscardDraft) {
-        Image(systemName: "xmark")
-          .font(.system(size: 17, weight: .semibold))
-          .frame(width: 44, height: 44)
-          .contentShape(Rectangle())
-      }
-      .buttonStyle(.plain)
-      .disabled(isProcessing)
-      .accessibilityLabel("Discard Entry")
     }
   }
 }
@@ -402,8 +427,7 @@ private struct CreationComposerLeadingAction<MenuContent: View>: View {
 /// Persistent Text/Todo mode switch shown at the front of compact input.
 private struct CreationComposerTodoModeButton: View {
 
-  let mode: CreationComposerMode
-  let isProcessing: Bool
+  let isSelected: Bool
   let onToggle: @MainActor @Sendable () -> Void
 
   var body: some View {
@@ -411,16 +435,15 @@ private struct CreationComposerTodoModeButton: View {
       Image(systemName: "checkmark.circle")
         .font(.system(size: 24, weight: .regular))
         .foregroundStyle(
-          mode == .todo ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary)
+          isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary)
         )
-        .frame(width: 44, height: 44)
+        .frame(width: 32, height: 32)
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .disabled(isProcessing)
     .accessibilityLabel("Todo")
-    .accessibilityValue(mode == .todo ? Text("On") : Text("Off"))
-    .accessibilityAddTraits(mode == .todo ? .isSelected : [])
+    .accessibilityValue(isSelected ? Text("On") : Text("Off"))
+    .accessibilityAddTraits(isSelected ? .isSelected : [])
   }
 }
 
@@ -428,99 +451,55 @@ private struct CreationComposerTodoModeButton: View {
 private struct CreationComposerDraftContent: View {
 
   @Bindable var draft: CardEditDraft
-  @FocusState private var focusedField: Field?
+  @FocusState.Binding var focusedField: CreationComposerInputField?
   let placement: CreationComposerPlacement
   let focusRequestID: UUID?
   let onConsumeFocusRequest: @MainActor @Sendable (UUID) -> Bool
   let isProcessing: Bool
   let onOpenDraft: @MainActor @Sendable () -> Void
 
-  /// Inline editor that should receive one explicit Reply focus request.
-  private enum Field: Hashable {
-    case text
-    case todo
-  }
-
   var body: some View {
     switch draft.kind {
     case .text:
-      #if os(iOS)
-        GrowingTextEditor(
-          text: $draft.composerText,
-          placeholder: placement.prompt,
-          configuration: GrowingTextEditorConfiguration(
-            minLines: 1,
-            maxLines: 5,
-            horizontalPadding: 0,
-            verticalPadding: 0
-          )
+      GrowingTextEditor(
+        text: $draft.composerText,
+        placeholder: placement.prompt,
+        configuration: GrowingTextEditorConfiguration(
+          minLines: 1,
+          maxLines: 5,
+          horizontalPadding: 0,
+          verticalPadding: 0
         )
-        .focused($focusedField, equals: .text)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .disabled(isProcessing)
-        .accessibilityLabel("Entry text")
-        .task(id: focusRequestID) {
-          await focusIfRequested(.text)
-        }
-      #else
-        TextField(
-          placement.prompt,
-          text: $draft.composerText,
-          axis: .vertical
-        )
-        .textFieldStyle(.plain)
-        .lineLimit(1...5)
-        .focused($focusedField, equals: .text)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .disabled(isProcessing)
-        .accessibilityLabel("Entry text")
-        .task(id: focusRequestID) {
-          await focusIfRequested(.text)
-        }
-      #endif
+      )
+      .focused($focusedField, equals: .text)
+      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+      .disabled(isProcessing)
+      .accessibilityLabel("Entry text")
+      .task(id: focusRequestID) {
+        await focusIfRequested(.text)
+      }
     case .todo:
-      #if os(iOS)
-        GrowingTextEditor(
-          text: $draft.text,
-          placeholder: "Todo",
-          configuration: GrowingTextEditorConfiguration(
-            minLines: 1,
-            maxLines: 5,
-            horizontalPadding: 0,
-            verticalPadding: 0
-          )
+      GrowingTextEditor(
+        text: $draft.text,
+        placeholder: "Todo",
+        configuration: GrowingTextEditorConfiguration(
+          minLines: 1,
+          maxLines: 5,
+          horizontalPadding: 0,
+          verticalPadding: 0
         )
-        .focused($focusedField, equals: .todo)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .disabled(isProcessing)
-        .accessibilityLabel("Todo text")
-        .task {
-          await Task.yield()
-          focusedField = .todo
-        }
-        .task(id: focusRequestID) {
-          await focusIfRequested(.todo)
-        }
-      #else
-        TextField(
-          "Todo",
-          text: $draft.text,
-          axis: .vertical
-        )
-        .textFieldStyle(.plain)
-        .lineLimit(1...5)
-        .focused($focusedField, equals: .todo)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .disabled(isProcessing)
-        .accessibilityLabel("Todo text")
-        .task {
-          await Task.yield()
-          focusedField = .todo
-        }
-        .task(id: focusRequestID) {
-          await focusIfRequested(.todo)
-        }
-      #endif
+      )
+      .focused($focusedField, equals: .todo)
+      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+      .disabled(isProcessing)
+      .accessibilityLabel("Todo text")
+      .task {
+        await Task.yield()
+        focusedField = .todo
+      }
+      .task(id: focusRequestID) {
+        await focusIfRequested(.todo)
+      }
     case .link, .file, .photo, .video, .livePhoto, .audio, .suggestion, .doodle, .bauhaus,
       .unknown:
       preview
@@ -549,7 +528,7 @@ private struct CreationComposerDraftContent: View {
 
   /// Accepts a request before suspension so structural reinsertion cannot run
   /// it twice, then yields once for the originating context menu to dismiss.
-  private func focusIfRequested(_ field: Field) async {
+  private func focusIfRequested(_ field: CreationComposerInputField) async {
     guard let focusRequestID,
       onConsumeFocusRequest(focusRequestID)
     else {
@@ -624,10 +603,10 @@ private struct CreationComposerPostButton: View {
   let canPost: Bool
   let placement: CreationComposerPlacement
   let isProcessing: Bool
-  let onPost: @MainActor @Sendable () -> Void
+  let onSubmit: @MainActor @Sendable () -> Void
 
   var body: some View {
-    Button(action: onPost) {
+    Button(action: onSubmit) {
       ZStack {
         Circle()
           .fill(.tint)
@@ -816,7 +795,7 @@ private struct CreationComposerInputBarPreviewRow: View {
 
   private let title: String
   private let isProcessing: Bool
-  @State private var draft: CardEditDraft
+  @State private var composerState: CreationComposerSession
 
   init(
     title: String,
@@ -825,7 +804,7 @@ private struct CreationComposerInputBarPreviewRow: View {
   ) {
     self.title = title
     self.isProcessing = isProcessing
-    _draft = State(initialValue: draft)
+    _composerState = State(initialValue: CreationComposerSession(rootDraft: draft))
   }
 
   var body: some View {
@@ -836,14 +815,11 @@ private struct CreationComposerInputBarPreviewRow: View {
         .padding(.horizontal, 6)
 
       CreationComposerInputBar(
-        draft: draft,
+        composerState: composerState,
         isProcessing: isProcessing,
         onOpenDraft: {},
         onDiscardDraft: {},
-        onToggleComposerMode: {
-          draft.toggleComposerMode()
-        },
-        onPost: {}
+        onSubmit: { _ in }
       ) {
         Button(action: {}) {
           Label {
@@ -914,7 +890,6 @@ private enum CreationComposerInputBarPreviewFixtures {
     draft.setVideo(
       CapturedVideo(
         fileURL: missingVideoURL,
-        thumbnailData: previewImageData,
         pixelSize: previewImageSize,
         duration: 12
       )
@@ -928,7 +903,6 @@ private enum CreationComposerInputBarPreviewFixtures {
       CapturedLivePhoto(
         stillImageData: previewImageData,
         pairedVideoFileURL: missingVideoURL,
-        thumbnailData: previewImageData,
         pixelSize: previewImageSize,
         duration: 2
       )

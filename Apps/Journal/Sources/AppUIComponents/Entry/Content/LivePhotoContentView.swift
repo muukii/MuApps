@@ -11,7 +11,6 @@ public struct LivePhotoContentSource: Equatable, Sendable {
   public let fileURL: URL?
   public let pairedVideoFileURL: URL?
   public let fileRevision: Int
-  public let thumbnailData: Data?
   public let displayAspectRatio: CGFloat?
 
   public init(
@@ -19,17 +18,14 @@ public struct LivePhotoContentSource: Equatable, Sendable {
     fileURL: URL? = nil,
     pairedVideoFileURL: URL? = nil,
     fileRevision: Int = 0,
-    thumbnailData: Data? = nil,
     pixelSize: CGSize? = nil
   ) {
     self.stillImageData = stillImageData
     self.fileURL = fileURL
     self.pairedVideoFileURL = pairedVideoFileURL
     self.fileRevision = fileRevision
-    self.thumbnailData = thumbnailData
     self.displayAspectRatio =
       pixelSize?.contentAspectRatio
-      ?? EncodedImageDimensions.displayAspectRatio(from: thumbnailData)
       ?? EncodedImageDimensions.displayAspectRatio(from: stillImageData)
   }
 }
@@ -78,8 +74,7 @@ struct LivePhotoContentView: View {
   let livePhoto: LivePhotoContentSource
   let style: Style
   @State private var decodedStillImage: UIImage?
-  @State private var decodedThumbnailImage: UIImage?
-  @State private var loadedFullSizeImage: UIImage?
+  @State private var loadedFileImage: UIImage?
   @State private var isPairedVideoReady = false
   @GestureState private var isLivePhotoPlaybackActive = false
 
@@ -149,9 +144,9 @@ struct LivePhotoContentView: View {
   private var image: UIImage? {
     switch style.preset {
     case .composer:
-      return decodedStillImage ?? decodedThumbnailImage
+      return decodedStillImage
     case .cell:
-      return loadedFullSizeImage ?? decodedThumbnailImage
+      return loadedFileImage
     }
   }
 
@@ -160,8 +155,7 @@ struct LivePhotoContentView: View {
       style: style.preset,
       fileURL: livePhoto.fileURL,
       fileRevision: livePhoto.fileRevision,
-      primaryData: ContentImageDataFingerprint(livePhoto.stillImageData),
-      fallbackData: ContentImageDataFingerprint(livePhoto.thumbnailData)
+      data: ContentImageDataFingerprint(livePhoto.stillImageData)
     )
   }
 
@@ -172,9 +166,8 @@ struct LivePhotoContentView: View {
   /// layout pass instead of resizing once bytes arrive.
   private var displayAspectRatio: CGFloat {
     let decodedAspectRatio =
-      decodedThumbnailImage?.contentAspectRatio
-      ?? decodedStillImage?.contentAspectRatio
-      ?? loadedFullSizeImage?.contentAspectRatio
+      decodedStillImage?.contentAspectRatio
+      ?? loadedFileImage?.contentAspectRatio
     switch style.preset {
     case .composer:
       return style.placeholderAspectRatio
@@ -189,8 +182,7 @@ struct LivePhotoContentView: View {
   @MainActor
   private func refreshImages() async {
     decodedStillImage = nil
-    decodedThumbnailImage = nil
-    loadedFullSizeImage = nil
+    loadedFileImage = nil
 
     switch style.preset {
     case .composer:
@@ -203,39 +195,17 @@ struct LivePhotoContentView: View {
 
       decodedStillImage = stillImage
 
-      guard stillImage == nil else {
-        return
-      }
-
-      let thumbnailImage = await ContentMediaFileReader.image(
-        from: livePhoto.thumbnailData
-      )
-      guard Task.isCancelled == false else {
-        return
-      }
-
-      decodedThumbnailImage = thumbnailImage
-
     case .cell:
-      let thumbnailImage = await ContentMediaFileReader.image(
-        from: livePhoto.thumbnailData
-      )
-      guard Task.isCancelled == false else {
-        return
-      }
-
-      decodedThumbnailImage = thumbnailImage
-
       guard let fileURL = livePhoto.fileURL else {
         return
       }
 
-      let fullSizeImage = await ContentMediaFileReader.image(at: fileURL)
+      let fileImage = await ContentMediaFileReader.image(at: fileURL)
       guard Task.isCancelled == false else {
         return
       }
 
-      loadedFullSizeImage = fullSizeImage
+      loadedFileImage = fileImage
     }
   }
 }

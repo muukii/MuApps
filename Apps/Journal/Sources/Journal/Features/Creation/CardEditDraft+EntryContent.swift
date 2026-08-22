@@ -4,7 +4,6 @@ import CaptureBauhaus
 import CaptureDoodle
 import CapturePhoto
 import JournalVault
-import MediaProcessing
 
 extension CardEditDraft {
 
@@ -37,7 +36,6 @@ extension CardEditDraft {
       return .video(
         VideoContentSource(
           fileURL: video?.fileURL,
-          thumbnailData: video?.thumbnailData,
           pixelSize: video?.pixelSize
         )
       )
@@ -46,7 +44,6 @@ extension CardEditDraft {
         LivePhotoContentSource(
           stillImageData: livePhoto?.stillImageData,
           pairedVideoFileURL: livePhoto?.pairedVideoFileURL,
-          thumbnailData: livePhoto?.thumbnailData,
           pixelSize: livePhoto?.pixelSize
         )
       )

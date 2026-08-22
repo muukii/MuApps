@@ -6,22 +6,19 @@ public struct BauhausContentSource: Equatable, Sendable {
   public let document: BauhausGridDocument?
   public let fileURL: URL?
   public let fileRevision: Int
-  public let thumbnailData: Data?
 
   public init(
     document: BauhausGridDocument? = nil,
     fileURL: URL? = nil,
-    fileRevision: Int = 0,
-    thumbnailData: Data? = nil
+    fileRevision: Int = 0
   ) {
     self.document = document
     self.fileURL = fileURL
     self.fileRevision = fileRevision
-    self.thumbnailData = thumbnailData
   }
 }
 
-/// Renders an authored Bauhaus grid or its persisted thumbnail fallback.
+/// Renders an authored Bauhaus grid from a draft value or saved media resource.
 struct BauhausContentView: View {
 
   /// Visual treatment owned by Bauhaus artwork content.
@@ -73,17 +70,10 @@ struct BauhausContentView: View {
       case .loading:
         ContentLoadingMedia(isCompact: style.usesCompactLoading)
       case .idle, .unavailable:
-        if bauhaus.fileURL == nil, bauhaus.thumbnailData != nil {
-          InlineImageDataContentView(
-            imageData: bauhaus.thumbnailData,
-            fallbackSystemImage: "square.grid.3x3.square"
-          )
-        } else {
-          ContentMediaPlaceholder(
-            systemImage: "square.grid.3x3",
-            aspectRatio: style.placeholderAspectRatio
-          )
-        }
+        ContentMediaPlaceholder(
+          systemImage: "square.grid.3x3",
+          aspectRatio: style.placeholderAspectRatio
+        )
       }
     }
   }
